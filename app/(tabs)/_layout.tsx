@@ -38,13 +38,31 @@ export default function TabLayout() {
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
       }}
     >
+      {/* Post — far left */}
+      <Tabs.Screen
+        name="post/index"
+        options={{
+          title: 'Post',
+          tabBarLabel: 'Post',
+          tabBarIcon: ({ color }) => <Ionicons name="add-circle-outline" size={24} color={color} />,
+        }}
+      />
       {/* Scene — discovery */}
       <Tabs.Screen
         name="explore/index"
         options={{
           title: 'Scene',
           tabBarLabel: 'Scene',
-          tabBarIcon: ({ color }) => <Ionicons name="sparkles-outline" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="compass-outline" size={24} color={color} />,
+        }}
+      />
+      {/* Plans — center */}
+      <Tabs.Screen
+        name="plans/index"
+        options={{
+          title: 'Plans',
+          tabBarLabel: 'Plans',
+          tabBarIcon: ({ color }) => <Ionicons name="map-outline" size={24} color={color} />,
         }}
       />
       {/* Chats */}
@@ -56,25 +74,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Ionicons name="chatbubble-outline" size={24} color={color} />,
         }}
       />
-      {/* Plans — center/home */}
-      <Tabs.Screen
-        name="plans/index"
-        options={{
-          title: 'Plans',
-          tabBarLabel: 'Plans',
-          tabBarIcon: ({ color }) => <Ionicons name="map-outline" size={24} color={color} />,
-        }}
-      />
-      {/* Post */}
-      <Tabs.Screen
-        name="post/index"
-        options={{
-          title: 'Post',
-          tabBarLabel: 'Post',
-          tabBarIcon: ({ color }) => <Ionicons name="add-circle-outline" size={24} color={color} />,
-        }}
-      />
-      {/* Friends */}
+      {/* Friends — far right */}
       <Tabs.Screen
         name="friends/index"
         options={{
