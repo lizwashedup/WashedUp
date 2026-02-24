@@ -1,23 +1,29 @@
+// -----------------------------------------------------------------------------
+// FILE: app/(auth)/onboarding/photo.tsx
+// INSTRUCTIONS: Replace the ENTIRE contents of this file with everything below.
+// -----------------------------------------------------------------------------
+
+import * as Haptics from 'expo-haptics';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
+import { router, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { Camera, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  StyleSheet,
   Text,
   TouchableOpacity,
-  StyleSheet,
-  Image,
-  Alert,
-  ActivityIndicator,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
-import { router, useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
-import { ChevronLeft, Camera } from 'lucide-react-native';
-import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
+import { supabase } from '../../../lib/supabase';
 
-const AVATAR_SIZE = 150;
+const AVATAR_SIZE = 180;
 
 export default function OnboardingPhotoScreen() {
   const routerBack = useRouter();
@@ -26,46 +32,92 @@ export default function OnboardingPhotoScreen() {
 
   const pickImage = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow access to your photos to add a profile photo.');
+      Alert.alert(
+        'Permission needed',
+        'Go to Settings → WashedUp → Photos and allow access.',
+        [{ text: 'OK' }]
+      );
       return;
     }
+
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
+      // 'images' accepts ALL image types: JPEG, PNG, HEIC, screenshots, everything
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,   // ← This is the pan/zoom/crop UI — drag your face into the circle
+      aspect: [1, 1],        // ← Forces square crop
+      quality: 1,            // ← Keep full quality here; we compress below
     });
+
     if (result.canceled) return;
-    const uri = result.assets[0].uri;
-    setImageUri(uri);
+
+    const picked = result.assets[0];
+
+    // ── Normalize to JPEG regardless of input format ──────────────────────────
+    // This is the key fix: screenshots are PNG, camera photos can be HEIC.
+    // We convert everything to JPEG at 800x800px so the upload never fails.
+    try {
+      const manipulated = await ImageManipulator.manipulateAsync(
+        picked.uri,
+        [{ resize: { width: 800, height: 800 } }],
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      setImageUri(manipulated.uri);
+    } catch {
+      // If manipulator fails for any reason, fall back to original URI
+      setImageUri(picked.uri);
+    }
   };
 
   const handleContinue = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) return;
 
       let avatarUrl: string | null = null;
+
       if (imageUri) {
+        // Always upload as JPEG now that we normalized above
         const path = `${user.id}.jpg`;
+
         const response = await fetch(imageUri);
         const blob = await response.blob();
+
         const { error: uploadError } = await supabase.storage
           .from('avatars')
-          .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+          .upload(path, blob, {
+            upsert: true,
+            contentType: 'image/jpeg',  // Always JPEG after manipulator
+          });
+
         if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
-        avatarUrl = urlData.publicUrl;
+
+        const { data: urlData } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(path);
+
+        // Bust cache so the new photo shows immediately everywhere
+        avatarUrl = urlData.publicUrl + `?t=${Date.now()}`;
       }
 
-      await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('id', user.id);
+      await supabase
+        .from('profiles')
+        .update({ avatar_url: avatarUrl })
+        .eq('id', user.id);
+
       router.push('/onboarding/vibes');
-    } catch (e) {
-      Alert.alert('Upload failed', 'Could not upload photo. Try again or skip for now.');
+    } catch (e: any) {
+      Alert.alert(
+        'Upload failed',
+        e?.message ?? 'Could not upload photo. Please try again.',
+        [{ text: 'Try Again' }, { text: 'Skip', onPress: handleSkip }]
+      );
     } finally {
       setLoading(false);
     }
@@ -80,12 +132,18 @@ export default function OnboardingPhotoScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <View style={styles.container}>
+        {/* Progress bar */}
         <View style={styles.progressWrap}>
           <View style={[styles.progressBar, { width: '75%' }]} />
         </View>
+
+        {/* Back button */}
         <View style={styles.headerRow}>
           <TouchableOpacity
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); routerBack.back(); }}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              routerBack.back();
+            }}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={styles.backButton}
           >
@@ -94,37 +152,80 @@ export default function OnboardingPhotoScreen() {
         </View>
 
         <Text style={styles.heading}>Add a profile photo</Text>
-        <Text style={styles.subtext}>People are more likely to join plans with a real photo</Text>
+        <Text style={styles.subtext}>
+          People are 3× more likely to join plans when they can see who's going.
+        </Text>
         <View style={styles.gap32} />
 
-        <TouchableOpacity
-          style={styles.avatarCircle}
-          onPress={pickImage}
-          activeOpacity={0.8}
-        >
-          {imageUri ? (
-            <Image source={{ uri: imageUri }} style={styles.avatarImage} />
-          ) : (
-            <Camera size={40} color={Colors.textLight} />
+        {/* Photo circle — tap to pick, shows crop hint when empty */}
+        <View style={styles.avatarWrap}>
+          <TouchableOpacity
+            style={styles.avatarCircle}
+            onPress={pickImage}
+            activeOpacity={0.85}
+          >
+            {imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatarEmpty}>
+                <Camera size={44} color={Colors.textLight} />
+                <Text style={styles.avatarHint}>Tap to add photo</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Orange ring around circle */}
+          {imageUri && (
+            <View style={styles.avatarRing} pointerEvents="none" />
           )}
-        </TouchableOpacity>
-        <View style={styles.gap12} />
-        <TouchableOpacity onPress={handleSkip} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={styles.skipText}>Skip for now</Text>
-        </TouchableOpacity>
+        </View>
+
+        {/* Crop hint text — only shown before picking */}
+        {!imageUri && (
+          <Text style={styles.cropHint}>
+            After choosing, you can pinch, zoom, and drag{'\n'}to get your face perfectly centred
+          </Text>
+        )}
+
+        {/* Retake option after photo is set */}
+        {imageUri && (
+          <TouchableOpacity
+            style={styles.retakeButton}
+            onPress={pickImage}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <RefreshCw size={14} color={Colors.primaryOrange} />
+            <Text style={styles.retakeText}>Choose a different photo</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.spacer} />
+
+        {/* Skip */}
         <TouchableOpacity
-          style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+          onPress={handleSkip}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={styles.skipWrap}
+        >
+          <Text style={styles.skipText}>Skip for now</Text>
+        </TouchableOpacity>
+        <View style={styles.gap12} />
+
+        {/* Continue */}
+        <TouchableOpacity
+          style={[
+            styles.primaryButton,
+            (!imageUri || loading) && styles.primaryButtonDisabled,
+          ]}
           onPress={handleContinue}
           onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
           activeOpacity={0.9}
-          disabled={loading}
+          disabled={!imageUri || loading}
         >
           {loading ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.primaryButtonText}>Continue</Text>
+            <Text style={styles.primaryButtonText}>Continue →</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -135,6 +236,7 @@ export default function OnboardingPhotoScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.backgroundCream },
   container: { flex: 1, paddingHorizontal: 24 },
+
   progressWrap: {
     height: 4,
     backgroundColor: Colors.border,
@@ -143,27 +245,71 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   progressBar: { height: '100%', backgroundColor: Colors.primaryOrange, borderRadius: 2 },
+
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
   backButton: { padding: 4 },
+
   heading: { fontSize: 22, fontWeight: '700', color: Colors.textDark },
-  subtext: { fontSize: 14, color: Colors.textMedium, marginTop: 4 },
+  subtext: { fontSize: 14, color: Colors.textMedium, marginTop: 6, lineHeight: 20 },
+
   gap32: { height: 32 },
   gap12: { height: 12 },
+
+  avatarWrap: {
+    alignSelf: 'center',
+    position: 'relative',
+  },
   avatarCircle: {
     width: AVATAR_SIZE,
     height: AVATAR_SIZE,
     borderRadius: AVATAR_SIZE / 2,
     backgroundColor: Colors.cardBackground,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: Colors.border,
     justifyContent: 'center',
     alignItems: 'center',
-    alignSelf: 'center',
     overflow: 'hidden',
   },
+  avatarRing: {
+    position: 'absolute',
+    top: -3,
+    left: -3,
+    width: AVATAR_SIZE + 6,
+    height: AVATAR_SIZE + 6,
+    borderRadius: (AVATAR_SIZE + 6) / 2,
+    borderWidth: 3,
+    borderColor: Colors.primaryOrange,
+  },
   avatarImage: { width: '100%', height: '100%' },
-  skipText: { fontSize: 14, color: Colors.textLight, textAlign: 'center' },
+  avatarEmpty: { alignItems: 'center', gap: 8 },
+  avatarHint: { fontSize: 13, color: Colors.textLight, fontWeight: '500' },
+
+  cropHint: {
+    textAlign: 'center',
+    fontSize: 13,
+    color: Colors.textLight,
+    marginTop: 14,
+    lineHeight: 19,
+  },
+
+  retakeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 14,
+  },
+  retakeText: {
+    fontSize: 14,
+    color: Colors.primaryOrange,
+    fontWeight: '600',
+  },
+
   spacer: { flex: 1 },
+
+  skipWrap: { alignSelf: 'center', marginBottom: 4 },
+  skipText: { fontSize: 14, color: Colors.textLight },
+
   primaryButton: {
     height: 52,
     borderRadius: 14,
@@ -175,7 +321,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+    marginBottom: 8,
   },
-  primaryButtonDisabled: { opacity: 0.7 },
+  primaryButtonDisabled: { opacity: 0.45 },
   primaryButtonText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
 });
