@@ -90,7 +90,7 @@ export default function OnboardingPhotoScreen() {
         const blob = await response.blob();
 
         const { error: uploadError } = await supabase.storage
-          .from('profile-photos-cursor')
+          .from('profile-photos')
           .upload(path, blob, {
             upsert: true,
             contentType: 'image/jpeg',  // Always JPEG after manipulator
@@ -99,7 +99,7 @@ export default function OnboardingPhotoScreen() {
         if (uploadError) throw uploadError;
 
         const { data: urlData } = supabase.storage
-          .from('profile-photos-cursor')
+          .from('profile-photos')
           .getPublicUrl(path);
 
         // Bust cache so the new photo shows immediately everywhere
