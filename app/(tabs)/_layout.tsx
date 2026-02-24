@@ -33,21 +33,14 @@ export default function TabLayout() {
           backgroundColor: '#FFFFFF',
           borderTopColor: Colors.border,
           borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 4,
+          height: 84,
+          paddingBottom: 28,
+          paddingTop: 8,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
       }}
     >
-      {/* Plans first — this is the home screen */}
-      <Tabs.Screen
-        name="plans"
-        options={{
-          tabBarLabel: 'Plans',
-          tabBarIcon: ({ color }) => <Compass size={24} color={color} />,
-        }}
-      />
+      {/* Scene — discovery */}
       <Tabs.Screen
         name="explore"
         options={{
@@ -55,13 +48,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Sparkles size={24} color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="post"
-        options={{
-          tabBarLabel: 'Post',
-          tabBarIcon: ({ color }) => <PlusCircle size={24} color={color} />,
-        }}
-      />
+      {/* Chats */}
       <Tabs.Screen
         name="chats"
         options={{
@@ -69,6 +56,23 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <MessageCircle size={24} color={color} />,
         }}
       />
+      {/* Plans — center/home */}
+      <Tabs.Screen
+        name="plans"
+        options={{
+          tabBarLabel: 'Plans',
+          tabBarIcon: ({ color }) => <Compass size={24} color={color} />,
+        }}
+      />
+      {/* Post */}
+      <Tabs.Screen
+        name="post"
+        options={{
+          tabBarLabel: 'Post',
+          tabBarIcon: ({ color }) => <PlusCircle size={24} color={color} />,
+        }}
+      />
+      {/* Friends */}
       <Tabs.Screen
         name="friends"
         options={{
@@ -76,6 +80,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Users size={24} color={color} />,
         }}
       />
+      {/* Hidden screens — not tabs */}
       <Tabs.Screen name="profile" options={{ href: null }} />
     </Tabs>
   );
