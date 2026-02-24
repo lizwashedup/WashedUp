@@ -127,12 +127,21 @@ export default function OnboardingBasicsScreen() {
   const daysInMonth = new Date(tempYear, tempMonth + 1, 0).getDate();
   const safeDay = Math.min(tempDay, daysInMonth);
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <View style={styles.container}>
-        <View style={styles.progressWrap}>
-          <View style={[styles.progressBar, { width: '25%' }]} />
+        <View style={styles.topRow}>
+          <View style={styles.progressWrap}>
+            <View style={[styles.progressBar, { width: '25%' }]} />
+          </View>
+          <TouchableOpacity onPress={handleSignOut} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+            <Text style={styles.signOutLink}>Sign out</Text>
+          </TouchableOpacity>
         </View>
         <Text style={styles.stepText}>Step 1 of 4</Text>
 
@@ -231,12 +240,23 @@ export default function OnboardingBasicsScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.backgroundCream },
   container: { flex: 1, paddingHorizontal: 24 },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   progressWrap: {
+    flex: 1,
     height: 4,
     backgroundColor: Colors.border,
     borderRadius: 2,
     overflow: 'hidden',
-    marginBottom: 8,
+    marginRight: 12,
+  },
+  signOutLink: {
+    fontSize: 14,
+    color: Colors.textLight,
   },
   progressBar: {
     height: '100%',

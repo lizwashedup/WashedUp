@@ -91,12 +91,12 @@ function RootLayoutNav() {
         .eq('id', userId)
         .single();
       if (e || !data) {
-        setOnboardingComplete(false);
-      } else {
-        setOnboardingComplete(data.onboarding_status === 'complete');
+        await supabase.auth.signOut();
+        return;
       }
+      setOnboardingComplete(data.onboarding_status === 'complete');
     } catch {
-      setOnboardingComplete(false);
+      await supabase.auth.signOut();
     } finally {
       setLoading(false);
     }

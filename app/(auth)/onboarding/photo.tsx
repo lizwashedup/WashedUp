@@ -84,7 +84,7 @@ export default function OnboardingPhotoScreen() {
 
       if (imageUri) {
         // Always upload as JPEG now that we normalized above
-        const path = `${user.id}.jpg`;
+        const path = `${user.id}/${user.id}.jpg`;
 
         const response = await fetch(imageUri);
         const blob = await response.blob();
