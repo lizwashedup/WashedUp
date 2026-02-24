@@ -21,7 +21,6 @@ function HeaderProfileButton() {
 export default function TabLayout() {
   return (
     <Tabs
-      initialRouteName="plans"
       screenOptions={{
         headerShown: true,
         headerTitle: '',
@@ -41,11 +40,12 @@ export default function TabLayout() {
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
       }}
     >
+      {/* Plans first — this is the home screen */}
       <Tabs.Screen
-        name="post"
+        name="plans"
         options={{
-          tabBarLabel: 'Post',
-          tabBarIcon: ({ color }) => <PlusCircle size={24} color={color} />,
+          tabBarLabel: 'Plans',
+          tabBarIcon: ({ color }) => <Compass size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -56,10 +56,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="plans"
+        name="post"
         options={{
-          tabBarLabel: 'Plans',
-          tabBarIcon: ({ color }) => <Compass size={24} color={color} />,
+          tabBarLabel: 'Post',
+          tabBarIcon: ({ color }) => <PlusCircle size={24} color={color} />,
         }}
       />
       <Tabs.Screen
