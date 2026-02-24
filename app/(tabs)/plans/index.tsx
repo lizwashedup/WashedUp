@@ -36,6 +36,7 @@ interface Plan {
   image_url: string | null;
   category: string | null;
   gender_preference: string | null;
+  age_range: string | null;
   max_invites: number | null;
   min_invites: number | null;
   primary_vibe: string | null;
@@ -48,6 +49,34 @@ interface Plan {
 }
 
 type SubTab = 'plans' | 'my-plans' | 'wishlist';
+
+// ─── Profile & Filter Helpers ─────────────────────────────────────────────────
+
+interface UserProfile {
+  gender_type: string | null;
+  birthday: string | null;
+}
+
+function calculateAge(birthday: string | null): number | null {
+  if (!birthday) return null;
+  const dob = new Date(birthday);
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return age;
+}
+
+function matchesAgeRange(planAgeRange: string | null, userAge: number | null): boolean {
+  if (!planAgeRange || planAgeRange === 'All Ages') return true;
+  if (userAge === null) return true;
+  if (planAgeRange === '21+') return userAge >= 21;
+  if (planAgeRange === '20s') return userAge >= 20 && userAge < 30;
+  if (planAgeRange === '30s') return userAge >= 30 && userAge < 40;
+  if (planAgeRange === '40s') return userAge >= 40 && userAge < 50;
+  if (planAgeRange === '50+') return userAge >= 50;
+  return true;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -78,15 +107,24 @@ function isThisWeekend(dateString: string): boolean {
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
 async function fetchPlans(): Promise<Plan[]> {
-  // Try RPC first
-  const { data: rpcData, error: rpcError } = await supabase.rpc('get_filtered_feed');
-
-  if (!rpcError && rpcData && rpcData.length > 0) {
-    return rpcData as Plan[];
+  // Fetch current user's profile for server-side gender filter + client-side age filter
+  let userProfile: UserProfile | null = null;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('gender_type, birthday')
+        .eq('id', user.id)
+        .single();
+      userProfile = profile;
+    }
+  } catch {
+    // Proceed without profile — will show mixed plans only
   }
 
-  // Fallback: direct query
-  const { data, error } = await supabase
+  // Build query with server-side gender filter
+  let query = supabase
     .from('events')
     .select(`
       id,
@@ -96,6 +134,7 @@ async function fetchPlans(): Promise<Plan[]> {
       image_url,
       category,
       gender_preference,
+      age_range,
       max_invites,
       min_invites,
       primary_vibe,
@@ -105,15 +144,32 @@ async function fetchPlans(): Promise<Plan[]> {
     .eq('status', 'active')
     .gte('start_time', new Date().toISOString())
     .order('start_time', { ascending: true })
-    .limit(50);
+    .limit(100);
 
+  // Server-side gender filter — users never receive plans they shouldn't see
+  if (userProfile?.gender_type === 'woman') {
+    query = query.or('gender_preference.eq.mixed,gender_preference.is.null,gender_preference.eq.women_only');
+  } else if (userProfile?.gender_type === 'man') {
+    query = query.or('gender_preference.eq.mixed,gender_preference.is.null,gender_preference.eq.men_only');
+  } else {
+    // Unknown gender: mixed and null only
+    query = query.or('gender_preference.eq.mixed,gender_preference.is.null');
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
 
-  return (data ?? []).map((item: any) => ({
+  let plans: Plan[] = (data ?? []).map((item: any) => ({
     ...item,
     member_count: item.event_members?.[0]?.count ?? 0,
     host: Array.isArray(item.host) ? item.host[0] ?? null : item.host ?? null,
   }));
+
+  // Client-side age filter (requires calculating age from birthday)
+  const userAge = calculateAge(userProfile?.birthday ?? null);
+  plans = plans.filter((p) => matchesAgeRange(p.age_range, userAge));
+
+  return plans;
 }
 
 async function fetchMyPlans(userId: string): Promise<Plan[]> {
