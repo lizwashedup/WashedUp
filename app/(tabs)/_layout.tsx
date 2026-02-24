@@ -1,8 +1,6 @@
 import { Tabs, useRouter } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
-import {
-  Compass, Sparkles, PlusCircle, MessageCircle, Users, User,
-} from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
 
 function HeaderProfileButton() {
@@ -13,7 +11,7 @@ function HeaderProfileButton() {
       style={{ padding: 8, marginRight: 12 }}
       hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
     >
-      <User size={24} color={Colors.textDark} />
+      <Ionicons name="person-outline" size={24} color={Colors.textDark} />
     </TouchableOpacity>
   );
 }
@@ -44,40 +42,45 @@ export default function TabLayout() {
       <Tabs.Screen
         name="explore"
         options={{
+          title: 'Scene',
           tabBarLabel: 'Scene',
-          tabBarIcon: ({ color }) => <Sparkles size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="sparkles-outline" size={24} color={color} />,
         }}
       />
       {/* Chats */}
       <Tabs.Screen
         name="chats"
         options={{
+          title: 'Chats',
           tabBarLabel: 'Chats',
-          tabBarIcon: ({ color }) => <MessageCircle size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="chatbubble-outline" size={24} color={color} />,
         }}
       />
       {/* Plans — center/home */}
       <Tabs.Screen
         name="plans"
         options={{
+          title: 'Plans',
           tabBarLabel: 'Plans',
-          tabBarIcon: ({ color }) => <Compass size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="map-outline" size={24} color={color} />,
         }}
       />
       {/* Post */}
       <Tabs.Screen
         name="post"
         options={{
+          title: 'Post',
           tabBarLabel: 'Post',
-          tabBarIcon: ({ color }) => <PlusCircle size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="add-circle-outline" size={24} color={color} />,
         }}
       />
       {/* Friends */}
       <Tabs.Screen
         name="friends"
         options={{
+          title: 'Friends',
           tabBarLabel: 'Friends',
-          tabBarIcon: ({ color }) => <Users size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="people-outline" size={24} color={color} />,
         }}
       />
       {/* Hidden screens — not tabs */}
