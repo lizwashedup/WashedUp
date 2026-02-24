@@ -40,7 +40,7 @@ export default function TabLayout() {
     >
       {/* Scene — discovery */}
       <Tabs.Screen
-        name="explore"
+        name="explore/index"
         options={{
           title: 'Scene',
           tabBarLabel: 'Scene',
@@ -49,7 +49,7 @@ export default function TabLayout() {
       />
       {/* Chats */}
       <Tabs.Screen
-        name="chats"
+        name="chats/index"
         options={{
           title: 'Chats',
           tabBarLabel: 'Chats',
@@ -58,7 +58,7 @@ export default function TabLayout() {
       />
       {/* Plans — center/home */}
       <Tabs.Screen
-        name="plans"
+        name="plans/index"
         options={{
           title: 'Plans',
           tabBarLabel: 'Plans',
@@ -67,7 +67,7 @@ export default function TabLayout() {
       />
       {/* Post */}
       <Tabs.Screen
-        name="post"
+        name="post/index"
         options={{
           title: 'Post',
           tabBarLabel: 'Post',
@@ -76,15 +76,13 @@ export default function TabLayout() {
       />
       {/* Friends */}
       <Tabs.Screen
-        name="friends"
+        name="friends/index"
         options={{
           title: 'Friends',
           tabBarLabel: 'Friends',
           tabBarIcon: ({ color }) => <Ionicons name="people-outline" size={24} color={color} />,
         }}
       />
-      {/* Hidden screens — not tabs */}
-      <Tabs.Screen name="profile" options={{ href: null }} />
     </Tabs>
   );
 }
