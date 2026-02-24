@@ -1,19 +1,32 @@
-const tintColorLight = '#2f95dc';
-const tintColorDark = '#fff';
+/**
+ * WashedUp brand colors (.cursorrules)
+ */
+const brand = {
+  primaryOrange: '#C4652A',
+  backgroundCream: '#FFF8F0',
+  textDark: '#1A1A1A',
+  textMedium: '#666666',
+  textLight: '#999999',
+  cardBackground: '#FFFFFF',
+  border: '#E5E5E5',
+  successGreen: '#4CAF50',
+  errorRed: '#E53935',
+} as const;
 
 export default {
+  ...brand,
   light: {
-    text: '#000',
-    background: '#fff',
-    tint: tintColorLight,
-    tabIconDefault: '#ccc',
-    tabIconSelected: tintColorLight,
+    text: brand.textDark,
+    background: brand.backgroundCream,
+    tint: brand.primaryOrange,
+    tabIconDefault: brand.textLight,
+    tabIconSelected: brand.primaryOrange,
   },
   dark: {
-    text: '#fff',
-    background: '#000',
-    tint: tintColorDark,
-    tabIconDefault: '#ccc',
-    tabIconSelected: tintColorDark,
+    text: brand.textDark,
+    background: brand.backgroundCream,
+    tint: brand.primaryOrange,
+    tabIconDefault: brand.textLight,
+    tabIconSelected: brand.primaryOrange,
   },
-};
+} as const;

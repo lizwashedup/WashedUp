@@ -1,0 +1,90 @@
+# WashedUp — Cursor AI Rules
+
+## Identity
+You are building WashedUp — a social app for finding people to do things with in real life. The app is built with Expo and connects to an existing Supabase backend that already has users, plans, and data. DO NOT create new database tables or modify existing ones unless explicitly told to.
+
+## Tech Stack
+- Expo SDK 52+ (Managed Workflow)
+- Expo Router (file-based navigation)
+- TypeScript (strict mode)
+- Supabase JS v2 for all backend operations
+- NativeWind v4 for styling (Tailwind CSS syntax)
+- React Query (TanStack Query v5) for data fetching
+- Lucide React Native for icons
+- expo-image for all images
+- react-native-safe-area-context for safe areas
+
+## Project Structure
+app/                    # All screens live here
+  (auth)/               # Login, signup, onboarding
+    login.tsx
+    signup.tsx
+    onboarding/
+      basics.tsx        # Birthday, gender
+      la-check.tsx      # City verification
+      photo.tsx         # Profile photo
+      complete.tsx      # Done
+  (tabs)/               # Main app (bottom tabs)
+    _layout.tsx         # Bottom tab navigator
+    plans/
+      index.tsx         # Plans feed
+      [id].tsx          # Plan detail
+    explore/
+      index.tsx         # Events/Ideas discovery
+    chats/
+      index.tsx         # Chat list
+      [id].tsx          # Individual chat
+    profile/
+      index.tsx         # User profile
+  _layout.tsx           # Root layout
+components/             # Reusable UI pieces
+hooks/                  # Custom React hooks
+lib/
+  supabase.ts           # Supabase client config
+types/                  # TypeScript types
+constants/
+  colors.ts             # WashedUp brand colors
+
+## Existing Supabase Database Tables (DO NOT MODIFY)
+These tables already exist and have data. Query them, don't recreate them.
+
+- profiles: id mod uuid, first_name, last_name, birthday, gender, avatar_url, bio, city, vibe_tags (text array), onboarding_status, created_at, last_active, sms_opt_in, phone, how_heard
+- events: id, title, description, start_time, location_text, category, gender_preference, min_invites, max_invites, host_id (references profiles), status, primary_vibe, image_url, created_at
+- event_members: id, event_id (references events), user_id (references profiles), status, joined_at
+- messages: id, event_id (references events), user_id (references profiles), content, created_at
+- explore_events: id, title, description, date, time, venue, location, category, image_url, ticket_url, price, source
+- chat_reads: id, event_id, user_id, last_read_at
+- profiles_public: a VIEW (not a table) that exposes safe profile fields
+
+## Existing RPC Functions (use these, don't recreate)
+- get_filtered_feed: returns plans feed filtered for current user
+- get_event_members_reveal: returns members of a specific plan with profile info
+
+## Code Rules
+- Use functional components with hooks only
+- Use NativeWind className for all styling, never inline styles
+- Always handle loading and error states
+- Use SafeAreaView from react-native-safe-area-context
+- Use expo-image instead of React Native Image component
+- Use Expo Router for navigation (router.push, router.replace, Link)
+- Use React Query for all Supabase queries
+
+## WashedUp Brand Colors
+- Primary Orange: #C4652A
+- Background Cream: #FFF8F0
+- Text Dark: #1A1A1A
+- Text Medium: #666666
+- Text Light: #999999
+- Card Background: #FFFFFF
+- Border: #E5E5E5
+- Success Green: #4CAF50
+- Error Red: #E53935
+
+## Design Principles
+1. Clean, warm, minimal. Think Airbnb meets Instagram.
+2. Activity first, not profile first.
+3. Big photos on plan cards. Rounded corners (14px).
+4. Bottom tab navigation with 5 tabs: Plans, Explore, + Post, Chats, Profile.
+5. The + Post tab should be visually distinct (larger, orange circle).
+6. Warm orange accents on cream/white backgrounds.
+7. No clutter. Generous whitespace.

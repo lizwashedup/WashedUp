@@ -1,59 +1,46 @@
-import React from 'react';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs } from 'expo-router';
-import { Pressable } from 'react-native';
+import { Tabs, useRouter } from 'expo-router';
+import { TouchableOpacity, View } from 'react-native';
+import { Compass, Sparkles, PlusCircle, MessageCircle, Users, User } from 'lucide-react-native';
 
-import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+export const unstable_settings = {
+  initialRouteName: 'plans',
+};
 
-// You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
-function TabBarIcon(props: {
-  name: React.ComponentProps<typeof FontAwesome>['name'];
-  color: string;
-}) {
-  return <FontAwesome size={28} style={{ marginBottom: -3 }} {...props} />;
+function HeaderProfileButton() {
+  const router = useRouter();
+  return (
+    <TouchableOpacity
+      onPress={() => router.push('/profile')}
+      style={{ padding: 8, marginRight: 8 }}
+      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+    >
+      <User size={24} color="#1A1A1A" />
+    </TouchableOpacity>
+  );
 }
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        // Disable the static render of the header on web
-        // to prevent a hydration error in React Navigation v6.
-        headerShown: useClientOnlyValue(false, true),
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Tab One',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
-          headerRight: () => (
-            <Link href="/modal" asChild>
-              <Pressable>
-                {({ pressed }) => (
-                  <FontAwesome
-                    name="info-circle"
-                    size={25}
-                    color={Colors[colorScheme ?? 'light'].text}
-                    style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
-                  />
-                )}
-              </Pressable>
-            </Link>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="two"
-        options={{
-          title: 'Tab Two',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
-        }}
-      />
+        headerShown: true,
+        headerRight: () => <HeaderProfileButton />,
+        headerTitle: '',
+        headerShadowVisible: false,
+        headerStyle: { backgroundColor: '#FFF8F0' },
+        headerLeft: () => <View style={{ width: 40 }} />,
+        tabBarActiveTintColor: '#C4652A',
+        tabBarInactiveTintColor: '#999999',
+        tabBarLabelPosition: 'below-icon',
+        tabBarStyle: { backgroundColor: '#FFFFFF' },
+      }}
+    >
+      <Tabs.Screen name="post" options={{ title: 'Post', tabBarLabel: 'Post', tabBarIcon: ({ color }) => <PlusCircle size={24} color={color} /> }} />
+      <Tabs.Screen name="explore" options={{ title: 'Scene', tabBarLabel: 'Scene', tabBarIcon: ({ color }) => <Sparkles size={24} color={color} /> }} />
+      <Tabs.Screen name="plans" options={{ title: 'Plans', tabBarLabel: 'Plans', tabBarIcon: ({ color }) => <Compass size={24} color={color} /> }} />
+      <Tabs.Screen name="chats" options={{ title: 'Chats', tabBarLabel: 'Chats', tabBarIcon: ({ color }) => <MessageCircle size={24} color={color} /> }} />
+      <Tabs.Screen name="friends" options={{ title: 'Friends', tabBarLabel: 'Friends', tabBarIcon: ({ color }) => <Users size={24} color={color} /> }} />
+      <Tabs.Screen name="profile" options={{ href: null }} />
     </Tabs>
   );
 }
