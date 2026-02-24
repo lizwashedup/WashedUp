@@ -107,7 +107,7 @@ export const PlanCard = React.memo<PlanCardProps>(({
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/(tabs)/plans/${plan.id}`);
+    router.push(`/plan/${plan.id}`);
   }, [plan.id, router]);
 
   const handleWishlist = useCallback((e: any) => {

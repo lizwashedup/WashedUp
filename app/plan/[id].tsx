@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// FILE: app/(tabs)/plans/[id].tsx
+// FILE: app/plan/[id].tsx
 // INSTRUCTIONS: Replace the ENTIRE contents of this file with everything below.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -33,7 +33,7 @@ import {
   ChevronRight,
   UserPlus,
 } from 'lucide-react-native';
-import { supabase } from '../../../lib/supabase';
+import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
