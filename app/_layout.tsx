@@ -10,7 +10,6 @@ import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Session } from '@supabase/supabase-js';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
@@ -59,8 +58,6 @@ export default function RootLayout() {
 
 function RootLayoutNav() {
   const router = useRouter();
-  const [session, setSession] = useState<Session | null>(null);
-  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Register for push notifications on every launch — saves token to profiles table
@@ -78,61 +75,46 @@ function RootLayoutNav() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      if (s?.user) {
-        fetchOnboardingStatus(s.user.id);
-      } else {
-        setOnboardingComplete(false);
-        setLoading(false);
-      }
-    });
+    // onAuthStateChange fires INITIAL_SESSION on mount — use that as the single source of truth
+    // so we don't double-fetch (avoids the getSession + onAuthStateChange race)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Only react to initial load and explicit sign-in/out events
+      if (event !== 'INITIAL_SESSION' && event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      if (s?.user) {
-        fetchOnboardingStatus(s.user.id);
-      } else {
-        setOnboardingComplete(false);
+      if (!session?.user) {
+        // Navigate BEFORE setLoading so the destination is queued when the Stack mounts
+        router.replace('/login');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const { data, error: e } = await supabase
+          .from('profiles')
+          .select('onboarding_status')
+          .eq('id', session.user.id)
+          .single();
+
+        if (e || !data) {
+          await supabase.auth.signOut();
+          router.replace('/login');
+          setLoading(false);
+          return;
+        }
+
+        const dest = data.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
+        // Queue the navigation before the Stack mounts — eliminates the auth screen flash
+        router.replace(dest as any);
+      } catch {
+        await supabase.auth.signOut();
+        router.replace('/login');
+      } finally {
         setLoading(false);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
-
-  async function fetchOnboardingStatus(userId: string) {
-    try {
-      const { data, error: e } = await supabase
-        .from('profiles')
-        .select('onboarding_status')
-        .eq('id', userId)
-        .single();
-      if (e || !data) {
-        await supabase.auth.signOut();
-        return;
-      }
-      setOnboardingComplete(data.onboarding_status === 'complete');
-    } catch {
-      await supabase.auth.signOut();
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!loading) {
-      if (!session) {
-        router.replace('/login');
-      } else if (onboardingComplete === true) {
-        router.replace('/plans');
-      } else if (onboardingComplete === false && session) {
-        router.replace('/onboarding/basics');
-      }
-    }
-  }, [session, onboardingComplete, loading]);
 
   if (loading) {
     return (

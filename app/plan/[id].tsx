@@ -52,6 +52,7 @@ interface PlanDetail {
   min_invites: number | null;
   status: string;
   host_id: string;
+  ticket_url: string | null;
   host: {
     id: string;
     first_name: string | null;
@@ -123,7 +124,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       id, title, description, host_message, start_time,
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
-      max_invites, min_invites, status, member_count, creator_user_id
+      max_invites, min_invites, status, member_count, creator_user_id,
+      ticket_url
     `)
     .eq('id', id)
     .single();
@@ -167,6 +169,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     min_invites: row.min_invites ?? null,
     status: row.status,
     host_id: row.creator_user_id ?? null,
+    ticket_url: row.ticket_url ?? null,
     member_count: row.member_count ?? 0,
     host,
   };
@@ -540,6 +543,17 @@ export default function PlanDetailScreen() {
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
       <View style={styles.stickyBar}>
+        {/* Get Tickets button — shown above the main action when ticket_url exists */}
+        {plan.ticket_url && (
+          <TouchableOpacity
+            style={styles.ticketButton}
+            onPress={() => Linking.openURL(plan.ticket_url!)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.ticketButtonText}>Get Tickets →</Text>
+          </TouchableOpacity>
+        )}
+
         {isHost ? (
           <TouchableOpacity
             style={styles.manageButton}
@@ -779,6 +793,18 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#F0E6D3',
   },
+
+  ticketButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#C4652A',
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  ticketButtonText: { color: '#C4652A', fontSize: 16, fontWeight: '700' },
 
   joinButton: {
     backgroundColor: '#C4652A',

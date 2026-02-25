@@ -459,6 +459,15 @@ export default function PlansScreen() {
   const whenActive = whenFilter.length > 0;
   const categoryActive = categoryFilter.length > 0;
 
+  // Plans to show on the map depend on which tab is active
+  const mapPlans = useMemo(() => {
+    if (activeTab === 'myplans') return myPlans;
+    if (activeTab === 'wishlist') return wishlistPlans;
+    return allPlans;
+  }, [activeTab, allPlans, myPlans, wishlistPlans]);
+
+  const mapLoading = activeTab === 'myplans' ? myPlansLoading : activeTab === 'wishlist' ? wishlistLoading : isLoading;
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -484,28 +493,30 @@ export default function PlansScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Filter Dropdowns */}
-      <View style={styles.filterRow}>
-        <TouchableOpacity
-          style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWhenSheetOpen(true); }}
-        >
-          <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
-            {whenLabel}
-          </Text>
-          <ChevronDown size={13} color={whenActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
-        </TouchableOpacity>
+      {/* Filter Dropdowns — only relevant on the Plans tab */}
+      {activeTab === 'plans' && (
+        <View style={styles.filterRow}>
+          <TouchableOpacity
+            style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWhenSheetOpen(true); }}
+          >
+            <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
+              {whenLabel}
+            </Text>
+            <ChevronDown size={13} color={whenActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCategorySheetOpen(true); }}
-        >
-          <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
-            {categoryLabel}
-          </Text>
-          <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCategorySheetOpen(true); }}
+          >
+            <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
+              {categoryLabel}
+            </Text>
+            <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Tab Bar: Plans / My Plans / Wishlist */}
       <View style={styles.tabBar}>
@@ -522,8 +533,34 @@ export default function PlansScreen() {
         ))}
       </View>
 
-      {/* Content */}
-      {activeTab === 'plans' ? (
+      {/* Map view — shared across all tabs, shows the relevant plans for the active tab */}
+      {mapView ? (
+        mapLoading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator size="large" color="#C4652A" />
+          </View>
+        ) : (
+          <MapView
+            style={styles.map}
+            initialRegion={LA_REGION}
+            showsUserLocation
+            showsMyLocationButton={false}
+          >
+            {mapPlans
+              .filter((p) => p.latitude != null && p.longitude != null)
+              .map((plan) => (
+                <Marker
+                  key={plan.id}
+                  coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
+                  title={plan.title}
+                  description={plan.location_text ?? undefined}
+                  pinColor={wishlistedSet.has(plan.id) ? '#E53935' : '#C4652A'}
+                  onCalloutPress={() => router.push(`/plan/${plan.id}`)}
+                />
+              ))}
+          </MapView>
+        )
+      ) : activeTab === 'plans' ? (
         <>
           {isLoading ? (
             <View style={styles.centered}>
@@ -537,26 +574,6 @@ export default function PlansScreen() {
                 <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
             </View>
-          ) : mapView ? (
-            <MapView
-              style={styles.map}
-              initialRegion={LA_REGION}
-              showsUserLocation
-              showsMyLocationButton={false}
-            >
-              {allPlans
-                .filter((p) => p.latitude != null && p.longitude != null)
-                .map((plan) => (
-                  <Marker
-                    key={plan.id}
-                    coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
-                    title={plan.title}
-                    description={plan.location_text ?? undefined}
-                    pinColor="#C4652A"
-                    onCalloutPress={() => router.push(`/plan/${plan.id}`)}
-                  />
-                ))}
-            </MapView>
           ) : (
             <ScrollView
               showsVerticalScrollIndicator={false}

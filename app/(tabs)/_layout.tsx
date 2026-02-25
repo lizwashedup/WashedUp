@@ -74,12 +74,12 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Ionicons name="chatbubble-outline" size={24} color={color} />,
         }}
       />
-      {/* Friends — far right */}
+      {/* Your People — far right */}
       <Tabs.Screen
         name="friends/index"
         options={{
-          title: 'Friends',
-          tabBarLabel: 'Friends',
+          title: 'Your People',
+          tabBarLabel: 'Your People',
           tabBarIcon: ({ color }) => <Ionicons name="people-outline" size={24} color={color} />,
         }}
       />

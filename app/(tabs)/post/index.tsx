@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,8 +17,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
+
+const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -84,11 +87,16 @@ export default function PostScreen() {
   // Form fields
   const [title, setTitle] = useState('');
   const [location, setLocation] = useState('');
+  const [locationLat, setLocationLat] = useState<number | null>(null);
+  const [locationLng, setLocationLng] = useState<number | null>(null);
+  const [ticketUrl, setTicketUrl] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
   const [ageRange, setAgeRange] = useState<AgeRange>('All Ages');
   const [message, setMessage] = useState('');
   const [groupSize, setGroupSize] = useState(6);
+
+  const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
 
   // Date
   const [dateMonth, setDateMonth] = useState(now.getMonth());
@@ -181,6 +189,9 @@ export default function PostScreen() {
           title: title.trim(),
           start_time: startTime.toISOString(),
           location_text: location.trim() || null,
+          location_lat: locationLat,
+          location_lng: locationLng,
+          ticket_url: ticketUrl.trim() || null,
           category: category?.toLowerCase() ?? null,
           gender_preference: genderPref,
           age_range: ageRange,
@@ -208,12 +219,13 @@ export default function PostScreen() {
       Alert.alert('Plan posted!', 'Your plan is live. People can now join.', [
         {
           text: 'View Plans',
-          onPress: () => {
-            // Reset form
-            setTitle(''); setLocation(''); setCategory(null);
+            onPress: () => {
+            setTitle(''); setLocation(''); setLocationLat(null); setLocationLng(null);
+            setTicketUrl(''); setCategory(null);
             setGenderPref('mixed'); setAgeRange('All Ages');
             setMessage(''); setGroupSize(6);
             setDateSelected(false); setTimeSelected(false);
+            placesRef.current?.clear();
             router.replace('/(tabs)/plans');
           },
         },
@@ -243,7 +255,7 @@ export default function PostScreen() {
           style={styles.flex}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
         >
           {/* Header */}
           <View style={styles.header}>
@@ -294,16 +306,56 @@ export default function PostScreen() {
             </View>
           </View>
 
-          {/* ── Location ── */}
-          <View style={styles.field}>
+          {/* ── Location (Google Places) ── */}
+          <View style={[styles.field, styles.placesField]}>
             <Text style={styles.label}>Location</Text>
+            <GooglePlacesAutocomplete
+              ref={placesRef}
+              placeholder="Venue or neighborhood"
+              fetchDetails
+              onPress={(data, details) => {
+                const lat = details?.geometry?.location?.lat ?? null;
+                const lng = details?.geometry?.location?.lng ?? null;
+                const name = data.structured_formatting?.main_text ?? data.description;
+                setLocation(name || data.description);
+                setLocationLat(lat);
+                setLocationLng(lng);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              query={{
+                key: GOOGLE_MAPS_API_KEY,
+                language: 'en',
+                components: 'country:us',
+                location: '34.0522,-118.2437',
+                radius: '50000',
+              }}
+              styles={placesStyles}
+              textInputProps={{
+                placeholderTextColor: Colors.textLight,
+                returnKeyType: 'next',
+              }}
+              enablePoweredByContainer={false}
+              debounce={300}
+              keepResultsAfterBlur={false}
+              nearbyPlacesAPI="GooglePlacesSearch"
+            />
+          </View>
+
+          {/* ── Ticket Link ── */}
+          <View style={styles.field}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Ticket Link</Text>
+              <Text style={styles.labelOptional}>(optional)</Text>
+            </View>
             <TextInput
               style={styles.input}
-              placeholder="Venue or neighborhood"
+              placeholder="e.g. ra.co/events/... or eventbrite.com/..."
               placeholderTextColor={Colors.textLight}
-              value={location}
-              onChangeText={setLocation}
+              value={ticketUrl}
+              onChangeText={setTicketUrl}
               returnKeyType="next"
+              autoCapitalize="none"
+              keyboardType="url"
             />
           </View>
 
@@ -577,6 +629,37 @@ export default function PostScreen() {
   );
 }
 
+// ─── Google Places Styles (matches existing input design) ────────────────────
+
+const placesStyles = {
+  container: { flex: 0 },
+  textInputContainer: { backgroundColor: 'transparent' },
+  textInput: {
+    backgroundColor: Colors.cardBackground,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: Colors.textDark,
+    height: 52,
+    marginBottom: 0,
+  },
+  listView: {
+    backgroundColor: Colors.cardBackground,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    marginTop: 4,
+    overflow: 'hidden' as const,
+  },
+  row: { paddingHorizontal: 16, paddingVertical: 13, backgroundColor: Colors.cardBackground },
+  separator: { height: 1, backgroundColor: Colors.border, marginHorizontal: 16 },
+  description: { color: Colors.textDark, fontSize: 15 },
+  predefinedPlacesDescription: { color: Colors.primaryOrange },
+  poweredContainer: { display: 'none' as const },
+};
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -589,8 +672,10 @@ const styles = StyleSheet.create({
   headerSub: { fontSize: 14, color: Colors.textLight, marginTop: 4 },
 
   field: { marginBottom: 20 },
+  placesField: { zIndex: 10 },
   label: { fontSize: 14, fontWeight: '600', color: Colors.textMedium, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  labelOptional: { fontSize: 13, color: Colors.textLight, fontStyle: 'italic' },
   charCount: { fontSize: 13, color: Colors.textLight },
 
   input: {

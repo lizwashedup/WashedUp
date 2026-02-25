@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -36,10 +36,15 @@ async function fetchSceneEvents(): Promise<SceneEvent[]> {
   const { data, error } = await supabase
     .from('explore_events')
     .select('id, title, description, image_url, event_date, event_time, venue_name, category, ticket_url, price')
-    .eq('status', 'Live')
+    // Handle both 'Live' and 'live' casing in case the DB value differs
+    .or('status.eq.Live,status.eq.live,status.eq.active')
     .order('event_date', { ascending: true });
 
-  if (error) throw error;
+  if (error) {
+    console.log('[Scene] fetchSceneEvents error:', error.message, error.code);
+    throw error;
+  }
+  console.log('[Scene] fetched events count:', data?.length ?? 0);
   return data ?? [];
 }
 
@@ -208,12 +213,23 @@ const TABS = [
 
 export default function SceneScreen() {
   const [activeTab] = useState('events');
+  const [timedOut, setTimedOut] = useState(false);
 
-  const { data: events = [], isLoading } = useQuery({
+  const { data: events = [], isLoading, isError } = useQuery({
     queryKey: ['scene-events'],
     queryFn: fetchSceneEvents,
     staleTime: 5 * 60 * 1000,
+    retry: 1,
   });
+
+  // Show empty state after 5 seconds if still loading — prevents infinite spinner
+  useEffect(() => {
+    if (!isLoading) { setTimedOut(false); return; }
+    const timer = setTimeout(() => setTimedOut(true), 5000);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
+
+  const showEmpty = (!isLoading && events.length === 0) || isError || timedOut;
 
   const featured = events[0] ?? null;
   const rest = events.slice(1);
@@ -273,11 +289,11 @@ export default function SceneScreen() {
         ))}
       </View>
 
-      {isLoading ? (
+      {isLoading && !timedOut ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#C4652A" />
         </View>
-      ) : events.length === 0 ? (
+      ) : showEmpty ? (
         <View style={styles.centered}>
           <Ionicons name="calendar-outline" size={40} color="#C4652A" />
           <Text style={styles.emptyTitle}>Nothing yet</Text>

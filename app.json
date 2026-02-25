@@ -22,6 +22,9 @@
       "bundleIdentifier": "com.washedup.app",
       "config": {
         "googleMapsApiKey": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
