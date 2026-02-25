@@ -7,6 +7,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { Heart, Calendar } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -112,7 +113,7 @@ export const PlanCard = React.memo<PlanCardProps>(({
     <TouchableOpacity
       onPress={handlePress}
       activeOpacity={0.92}
-      style={[styles.card, { width: cardWidth as any }]}
+      style={[styles.card, { width: cardWidth as any }, variant === 'full' && { marginRight: 0 }]}
       accessibilityLabel={`${plan.title} plan`}
       accessibilityRole="button"
     >
@@ -125,9 +126,10 @@ export const PlanCard = React.memo<PlanCardProps>(({
             transition={200}
           />
         ) : (
-          <View style={[styles.imagePlaceholder, { backgroundColor: categoryColor + '26' }]}>
-            <Text style={[styles.placeholderLabel, { color: categoryColor }]}>
-              {formatCategoryLabel(plan.category)}
+          <View style={[styles.imagePlaceholder, { backgroundColor: '#F0E6D3' }]}>
+            <Ionicons name="calendar-outline" size={32} color="#C4652A" />
+            <Text style={styles.placeholderLabel}>
+              {plan.category ?? 'Plan'}
             </Text>
           </View>
         )}
@@ -242,10 +244,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   placeholderLabel: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-    opacity: 0.7,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#C4652A',
+    marginTop: 8,
   },
 
   // Status badges — top left

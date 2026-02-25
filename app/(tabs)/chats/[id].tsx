@@ -23,6 +23,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useChat, ChatMessage } from '../../../hooks/useChat';
+import { ReportModal } from '../../../components/modals/ReportModal';
 
 // ─── Event Header Data ────────────────────────────────────────────────────────
 
@@ -244,6 +245,8 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [photoViewUrl, setPhotoViewUrl] = useState<string | null>(null);
+  const [showReport, setShowReport] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const listRef = useRef<FlatList>(null);
 
   const { messages, loading, currentUserId, sendMessage } = useChat(id);
@@ -263,6 +266,48 @@ export default function ChatScreen() {
   const isPast = event
     ? new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000)
     : false;
+
+  const handleReportMenu = useCallback(async () => {
+    // Fetch ALL members (no limit) for the report menu
+    const { data: memberRows } = await supabase
+      .from('event_members')
+      .select('user_id')
+      .eq('event_id', id)
+      .eq('status', 'joined');
+
+    const userIds = (memberRows ?? []).map((m: any) => m.user_id as string).filter(Boolean);
+    const otherIds = userIds.filter((uid) => uid !== currentUserId);
+
+    if (otherIds.length === 0) {
+      Alert.alert('No other members', 'There are no other members in this plan to report.');
+      return;
+    }
+
+    const { data: profiles } = await supabase
+      .from('profiles_public')
+      .select('id, first_name_display, profile_photo_url')
+      .in('id', otherIds);
+
+    const members = (profiles ?? []).map((p: any) => ({
+      id: p.id as string,
+      name: (p.first_name_display as string | null) ?? 'Unknown',
+    }));
+
+    Alert.alert(
+      'Report a Member',
+      'Select a member to report',
+      [
+        ...members.map((member) => ({
+          text: member.name,
+          onPress: () => {
+            setReportTarget(member);
+            setShowReport(true);
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  }, [id, currentUserId]);
 
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
@@ -341,6 +386,14 @@ export default function ChatScreen() {
               <Text style={chatStyles.headerSub}>{formatEventDate(event.start_time)}</Text>
             )}
           </View>
+
+          <TouchableOpacity
+            onPress={handleReportMenu}
+            style={chatStyles.ellipsisBtn}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color="#9B8B7A" />
+          </TouchableOpacity>
 
           <TouchableOpacity
             onPress={() => router.push(`/plan/${id}` as any)}
@@ -487,6 +540,20 @@ export default function ChatScreen() {
         )}
       </KeyboardAvoidingView>
 
+      {/* Report user modal */}
+      {reportTarget && (
+        <ReportModal
+          visible={showReport}
+          onClose={() => {
+            setShowReport(false);
+            setReportTarget(null);
+          }}
+          reportedUserId={reportTarget.id}
+          reportedUserName={reportTarget.name}
+          eventId={id}
+        />
+      )}
+
       {/* Full-screen photo viewer */}
       <Modal visible={!!photoViewUrl} transparent animationType="fade">
         <Pressable style={chatStyles.photoModal} onPress={() => setPhotoViewUrl(null)}>
@@ -517,6 +584,9 @@ const chatStyles = StyleSheet.create({
   headerCenter: { flex: 1 },
   headerTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
   headerSub: { fontSize: 12, color: '#9B8B7A', marginTop: 1 },
+  ellipsisBtn: {
+    padding: 4,
+  },
   viewPlanBtn: {
     borderWidth: 1.5,
     borderColor: '#C4652A',

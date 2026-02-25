@@ -11,12 +11,12 @@ import {
   Dimensions,
   Modal,
   Pressable,
+  Image as RNImage,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
 import { LayoutList, Map, ChevronDown, Check, ArrowRight } from 'lucide-react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
@@ -27,6 +27,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type TabKey = 'plans' | 'myplans' | 'wishlist';
 type CategoryOption = 'Music' | 'Food' | 'Outdoors' | 'Nightlife' | 'Film' | 'Art' | 'Fitness' | 'Comedy' | 'Wellness' | 'Sports';
 
 interface SectionDef {
@@ -47,10 +48,61 @@ const LA_REGION = {
   longitudeDelta: 0.4,
 };
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Shared fetch helper for "My Plans" and "Wishlist" tabs
+async function fetchEventsByIds(ids: string[]): Promise<Plan[]> {
+  if (ids.length === 0) return [];
+
+  const { data: events } = await supabase
+    .from('events')
+    .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id')
+    .in('id', ids)
+    .order('start_time', { ascending: true });
+
+  if (!events?.length) return [];
+
+  const creatorIds = [...new Set(events.map((e: any) => e.creator_user_id).filter(Boolean))];
+  let profileMap = new Map<string, any>();
+  if (creatorIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles_public')
+      .select('id, first_name_display, profile_photo_url')
+      .in('id', creatorIds);
+    profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
+  }
+
+  return events.map((e: any) => {
+    const hp = profileMap.get(e.creator_user_id) ?? null;
+    return {
+      id: e.id,
+      title: e.title,
+      start_time: e.start_time,
+      location_text: e.location_text ?? null,
+      location_lat: e.location_lat ?? null,
+      location_lng: e.location_lng ?? null,
+      latitude: e.location_lat ?? null,
+      longitude: e.location_lng ?? null,
+      image_url: e.image_url ?? null,
+      category: e.primary_vibe ?? e.category ?? null,
+      gender_rule: e.gender_rule ?? null,
+      max_invites: e.max_invites ?? null,
+      min_invites: e.min_invites ?? null,
+      member_count: e.member_count ?? 0,
+      status: e.status ?? 'forming',
+      host: hp ? {
+        id: hp.id,
+        first_name: hp.first_name_display ?? null,
+        avatar_url: hp.profile_photo_url ?? null,
+      } : null,
+    } as Plan;
+  });
+}
+
 // ─── Section boundary logic ───────────────────────────────────────────────────
 
 function getSectionDefs(now: Date): SectionDef[] {
-  const day = now.getDay(); // 0=Sun … 6=Sat
+  const day = now.getDay();
   const y = now.getFullYear();
   const mo = now.getMonth();
   const d = now.getDate();
@@ -62,25 +114,21 @@ function getSectionDefs(now: Date): SectionDef[] {
   let comingUpFrom: Date;
 
   if (day >= 1 && day <= 4) {
-    // Mon–Thu → "This Week" = tomorrow through Friday
     const tomorrowStart = new Date(y, mo, d + 1, 0, 0, 0);
     const fridayEnd = new Date(y, mo, d + (5 - day), 23, 59, 59, 999);
     middle = { key: 'this-week', title: 'This Week', from: tomorrowStart, to: fridayEnd };
     comingUpFrom = new Date(fridayEnd.getTime() + 1);
   } else if (day === 5) {
-    // Friday → "This Weekend" = Sat + Sun
     const satStart = new Date(y, mo, d + 1, 0, 0, 0);
     const sunEnd = new Date(y, mo, d + 2, 23, 59, 59, 999);
     middle = { key: 'this-weekend', title: 'This Weekend', from: satStart, to: sunEnd };
     comingUpFrom = new Date(sunEnd.getTime() + 1);
   } else if (day === 6) {
-    // Saturday → "This Weekend" = just Sunday
     const sunStart = new Date(y, mo, d + 1, 0, 0, 0);
     const sunEnd = new Date(y, mo, d + 1, 23, 59, 59, 999);
     middle = { key: 'this-weekend', title: 'This Weekend', from: sunStart, to: sunEnd };
     comingUpFrom = new Date(sunEnd.getTime() + 1);
   } else {
-    // Sunday → "Next Week" = Mon–Fri
     const monStart = new Date(y, mo, d + 1, 0, 0, 0);
     const friEnd = new Date(y, mo, d + 5, 23, 59, 59, 999);
     middle = { key: 'next-week', title: 'Next Week', from: monStart, to: friEnd };
@@ -244,12 +292,64 @@ const SectionRow = React.memo(({
 });
 SectionRow.displayName = 'SectionRow';
 
+// ─── Vertical Plan List (My Plans / Wishlist) ─────────────────────────────────
+
+function VerticalPlanList({
+  plans,
+  loading,
+  wishlisted,
+  onWishlist,
+  emptyMessage,
+  emptyCta,
+  onEmptyCta,
+}: {
+  plans: Plan[];
+  loading: boolean;
+  wishlisted: Set<string>;
+  onWishlist: (id: string, current: boolean) => void;
+  emptyMessage: string;
+  emptyCta: string;
+  onEmptyCta: () => void;
+}) {
+  if (loading) {
+    return <View style={styles.centered}><ActivityIndicator size="large" color="#C4652A" /></View>;
+  }
+  if (plans.length === 0) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyText}>{emptyMessage}</Text>
+        <TouchableOpacity style={styles.emptyButton} onPress={onEmptyCta}>
+          <Text style={styles.emptyButtonText}>{emptyCta}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  return (
+    <FlatList
+      data={plans}
+      keyExtractor={(item) => item.id}
+      renderItem={({ item }) => (
+        <PlanCard
+          plan={item}
+          isWishlisted={wishlisted.has(item.id)}
+          onWishlist={onWishlist}
+          variant="full"
+        />
+      )}
+      contentContainerStyle={styles.verticalListContent}
+      ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+      showsVerticalScrollIndicator={false}
+    />
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PlansScreen() {
   const queryClient = useQueryClient();
   const sectionDefs = useMemo(() => getSectionDefs(new Date()), []);
 
+  const [activeTab, setActiveTab] = useState<TabKey>('plans');
   const [mapView, setMapView] = useState(false);
   const [whenSheetOpen, setWhenSheetOpen] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
@@ -260,6 +360,8 @@ export default function PlansScreen() {
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
+
+  // ── Queries ──────────────────────────────────────────────────────────────────
 
   const { data: allPlans = [], isLoading, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['events', 'feed', userId],
@@ -280,6 +382,39 @@ export default function PlansScreen() {
     staleTime: 30_000,
   });
 
+  // "My Plans" — events the user has joined
+  const { data: myPlans = [], isLoading: myPlansLoading } = useQuery<Plan[]>({
+    queryKey: ['my-plans', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      const { data: memberships } = await supabase
+        .from('event_members')
+        .select('event_id')
+        .eq('user_id', userId)
+        .eq('status', 'joined');
+      const ids = (memberships ?? []).map((m: any) => m.event_id as string);
+      return fetchEventsByIds(ids);
+    },
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+
+  // "Wishlist" — fetched from wishlists table joined with events
+  const { data: wishlistPlans = [], isLoading: wishlistLoading } = useQuery<Plan[]>({
+    queryKey: ['wishlist-plans', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      const { data: wl } = await supabase
+        .from('wishlists')
+        .select('event_id')
+        .eq('user_id', userId);
+      const ids = (wl ?? []).map((r: any) => r.event_id as string);
+      return fetchEventsByIds(ids);
+    },
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+
   const wishlistedSet = useMemo(() => new Set(wishlistIds), [wishlistIds]);
 
   const wishlistMutation = useMutation({
@@ -291,7 +426,10 @@ export default function PlansScreen() {
         await supabase.from('wishlists').insert({ user_id: userId, event_id: planId });
       }
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wishlists', userId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
+      queryClient.invalidateQueries({ queryKey: ['wishlist-plans', userId] });
+    },
   });
 
   const handleWishlist = useCallback((planId: string, isCurrentlyWishlisted: boolean) => {
@@ -303,7 +441,6 @@ export default function PlansScreen() {
     [allPlans, sectionDefs, categoryFilter, whenFilter],
   );
 
-  // "When" sheet options mirror the section keys for this day
   const whenOptions = useMemo<SheetOption[]>(
     () => sectionDefs.map((s) => ({ key: s.key, label: s.title })),
     [sectionDefs],
@@ -326,15 +463,14 @@ export default function PlansScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+
+      {/* Header — RNImage for logo avoids expo-image placeholder flash/background bug */}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <Image
+          <RNImage
             source={require('../../../assets/images/logo-wordmark.png')}
             style={styles.logoImage}
-            contentFit="contain"
-            contentPosition="left"
-            tintColor={undefined}
+            resizeMode="contain"
           />
         </View>
         <TouchableOpacity
@@ -371,66 +507,105 @@ export default function PlansScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Content */}
-      {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#C4652A" />
-        </View>
-      ) : isError ? (
-        <View style={styles.centered}>
-          <Text style={styles.errorTitle}>Couldn't load plans</Text>
-          <Text style={styles.errorMessage}>{(error as Error)?.message ?? 'Unknown error'}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
+      {/* Tab Bar: Plans / My Plans / Wishlist */}
+      <View style={styles.tabBar}>
+        {(['plans', 'myplans', 'wishlist'] as const).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.tabActive]}
+            onPress={() => setActiveTab(tab)}
+          >
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+              {tab === 'plans' ? 'Plans' : tab === 'myplans' ? 'My Plans' : 'Wishlist'}
+            </Text>
           </TouchableOpacity>
-        </View>
-      ) : mapView ? (
-        <MapView
-          style={styles.map}
-          initialRegion={LA_REGION}
-          showsUserLocation
-          showsMyLocationButton={false}
-        >
-          {allPlans
-            .filter((p) => p.latitude != null && p.longitude != null)
-            .map((plan) => (
-              <Marker
-                key={plan.id}
-                coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
-                title={plan.title}
-                description={plan.location_text ?? undefined}
-                pinColor="#C4652A"
-                onCalloutPress={() => router.push(`/plan/${plan.id}`)}
-              />
-            ))}
-        </MapView>
-      ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#C4652A" />
-          }
-        >
-          {sections.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No plans match your filters.</Text>
-              <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
-                <Text style={styles.emptyButtonText}>Post a Plan</Text>
+        ))}
+      </View>
+
+      {/* Content */}
+      {activeTab === 'plans' ? (
+        <>
+          {isLoading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color="#C4652A" />
+            </View>
+          ) : isError ? (
+            <View style={styles.centered}>
+              <Text style={styles.errorTitle}>Couldn't load plans</Text>
+              <Text style={styles.errorMessage}>{(error as Error)?.message ?? 'Unknown error'}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
+                <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
             </View>
+          ) : mapView ? (
+            <MapView
+              style={styles.map}
+              initialRegion={LA_REGION}
+              showsUserLocation
+              showsMyLocationButton={false}
+            >
+              {allPlans
+                .filter((p) => p.latitude != null && p.longitude != null)
+                .map((plan) => (
+                  <Marker
+                    key={plan.id}
+                    coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
+                    title={plan.title}
+                    description={plan.location_text ?? undefined}
+                    pinColor="#C4652A"
+                    onCalloutPress={() => router.push(`/plan/${plan.id}`)}
+                  />
+                ))}
+            </MapView>
           ) : (
-            sections.map(({ def, plans }) => (
-              <SectionRow
-                key={def.key}
-                def={def}
-                plans={plans}
-                wishlisted={wishlistedSet}
-                onWishlist={handleWishlist}
-              />
-            ))
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#C4652A" />
+              }
+            >
+              {sections.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No plans match your filters.</Text>
+                  <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
+                    <Text style={styles.emptyButtonText}>Post a Plan</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                sections.map(({ def, plans }) => (
+                  <SectionRow
+                    key={def.key}
+                    def={def}
+                    plans={plans}
+                    wishlisted={wishlistedSet}
+                    onWishlist={handleWishlist}
+                  />
+                ))
+              )}
+              <View style={{ height: 32 }} />
+            </ScrollView>
           )}
-          <View style={{ height: 32 }} />
-        </ScrollView>
+        </>
+      ) : activeTab === 'myplans' ? (
+        <VerticalPlanList
+          plans={myPlans}
+          loading={myPlansLoading}
+          wishlisted={wishlistedSet}
+          onWishlist={handleWishlist}
+          emptyMessage="You haven't joined any plans yet."
+          emptyCta="Browse Plans"
+          onEmptyCta={() => setActiveTab('plans')}
+        />
+      ) : (
+        <VerticalPlanList
+          plans={wishlistPlans}
+          loading={wishlistLoading}
+          wishlisted={wishlistedSet}
+          onWishlist={handleWishlist}
+          emptyMessage="No wishlisted plans yet. Tap the heart on any plan."
+          emptyCta="Browse Plans"
+          onEmptyCta={() => setActiveTab('plans')}
+        />
       )}
 
       {/* When Sheet */}
@@ -472,9 +647,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 12,
+    backgroundColor: '#FFF8F0',
   },
-  logoContainer: { justifyContent: 'center', backgroundColor: 'transparent' },
-  logoImage: { width: 160, height: 40, backgroundColor: 'transparent' },
+  logoContainer: { justifyContent: 'center' },
+  logoImage: { width: 160, height: 40 },
   mapToggleButton: {
     width: 40,
     height: 40,
@@ -491,7 +667,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 20,
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 8,
   },
   dropdownPill: {
     flexDirection: 'row',
@@ -507,6 +683,25 @@ const styles = StyleSheet.create({
   dropdownPillActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
   dropdownText: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
   dropdownTextActive: { color: '#FFFFFF' },
+
+  // Tab bar
+  tabBar: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E6D3',
+    marginBottom: 8,
+  },
+  tab: {
+    paddingVertical: 10,
+    paddingBottom: 8,
+    marginRight: 24,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabActive: { borderBottomColor: '#C4652A' },
+  tabText: { fontSize: 14, fontWeight: '500', color: '#9B8B7A' },
+  tabTextActive: { color: '#1A1A1A', fontWeight: '700' },
 
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   map: { flex: 1 },
@@ -529,6 +724,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   carouselContent: { paddingHorizontal: 20 },
+
+  // Vertical list (My Plans / Wishlist)
+  verticalListContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32 },
 
   emptyState: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 32 },
   emptyText: { fontSize: 16, color: '#666666', textAlign: 'center', marginBottom: 20 },

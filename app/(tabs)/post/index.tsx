@@ -585,7 +585,7 @@ const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
 
   header: { marginBottom: 24 },
-  headerTitle: { fontSize: 26, fontWeight: '800', color: Colors.textDark, letterSpacing: -0.5 },
+  headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 32, color: '#1C1917' },
   headerSub: { fontSize: 14, color: Colors.textLight, marginTop: 4 },
 
   field: { marginBottom: 20 },
