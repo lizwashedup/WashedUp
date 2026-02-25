@@ -32,7 +32,7 @@ interface EventInfo {
   id: string;
   title: string;
   start_time: string;
-  ticket_url: string | null;
+  tickets_url: string | null;
   member_count: number;
   members: Array<{ id: string; first_name: string | null; avatar_url: string | null }>;
 }
@@ -40,7 +40,7 @@ interface EventInfo {
 async function fetchEventInfo(eventId: string): Promise<EventInfo> {
   const { data: event } = await supabase
     .from('events')
-    .select('id, title, start_time, ticket_url, member_count')
+    .select('id, title, start_time, tickets_url, member_count')
     .eq('id', eventId)
     .single();
 
@@ -72,7 +72,7 @@ async function fetchEventInfo(eventId: string): Promise<EventInfo> {
     id: (event as any).id,
     title: (event as any).title,
     start_time: (event as any).start_time,
-    ticket_url: (event as any).ticket_url ?? null,
+    tickets_url: (event as any).tickets_url ?? null,
     member_count: (event as any).member_count ?? 0,
     members,
   };
@@ -425,10 +425,10 @@ export default function ChatScreen() {
         </View>
 
         {/* Ticket banner */}
-        {event?.ticket_url && (
+        {event?.tickets_url && (
           <TouchableOpacity
             style={chatStyles.ticketBanner}
-            onPress={() => Linking.openURL(event.ticket_url!)}
+            onPress={() => Linking.openURL(event.tickets_url!)}
           >
             <View style={chatStyles.ticketLeft}>
               <Ionicons name="ticket-outline" size={16} color="#C4652A" />

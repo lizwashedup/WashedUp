@@ -52,7 +52,7 @@ interface PlanDetail {
   min_invites: number | null;
   status: string;
   host_id: string;
-  ticket_url: string | null;
+  tickets_url: string | null;
   host: {
     id: string;
     first_name: string | null;
@@ -125,7 +125,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, status, member_count, creator_user_id,
-      ticket_url
+      tickets_url
     `)
     .eq('id', id)
     .single();
@@ -169,7 +169,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     min_invites: row.min_invites ?? null,
     status: row.status,
     host_id: row.creator_user_id ?? null,
-    ticket_url: row.ticket_url ?? null,
+    tickets_url: row.tickets_url ?? null,
     member_count: row.member_count ?? 0,
     host,
   };
@@ -543,11 +543,11 @@ export default function PlanDetailScreen() {
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
       <View style={styles.stickyBar}>
-        {/* Get Tickets button — shown above the main action when ticket_url exists */}
-        {plan.ticket_url && (
+        {/* Get Tickets button — shown above the main action when tickets_url exists */}
+        {plan.tickets_url && (
           <TouchableOpacity
             style={styles.ticketButton}
-            onPress={() => Linking.openURL(plan.ticket_url!)}
+            onPress={() => Linking.openURL(plan.tickets_url!)}
             activeOpacity={0.85}
           >
             <Text style={styles.ticketButtonText}>Get Tickets →</Text>

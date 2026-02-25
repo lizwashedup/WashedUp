@@ -28,14 +28,14 @@ interface SceneEvent {
   event_time: string | null;
   venue_name: string | null;
   category: string | null;
-  ticket_url: string | null;
+  tickets_url: string | null;
   price: string | null;
 }
 
 async function fetchSceneEvents(): Promise<SceneEvent[]> {
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, description, image_url, event_date, event_time, venue_name, category, ticket_url, price')
+    .select('id, title, description, image_url, event_date, event_time, venue_name, category, tickets_url, price')
     // Handle both 'Live' and 'live' casing in case the DB value differs
     .or('status.eq.Live,status.eq.live,status.eq.active')
     .order('event_date', { ascending: true });
@@ -98,7 +98,7 @@ function FeaturedCard({ event }: { event: SceneEvent }) {
     <TouchableOpacity
       activeOpacity={0.92}
       style={styles.featuredCard}
-      onPress={() => event.ticket_url && Linking.openURL(event.ticket_url)}
+      onPress={() => event.tickets_url && Linking.openURL(event.tickets_url)}
     >
       {/* Photo or color placeholder */}
       {event.image_url ? (
@@ -141,10 +141,10 @@ function FeaturedCard({ event }: { event: SceneEvent }) {
           </View>
         </View>
 
-        {event.ticket_url && (
+        {event.tickets_url && (
           <TouchableOpacity
             style={styles.featuredCta}
-            onPress={() => Linking.openURL(event.ticket_url!)}
+            onPress={() => Linking.openURL(event.tickets_url!)}
             activeOpacity={0.85}
           >
             <Text style={styles.featuredCtaText}>
@@ -167,7 +167,7 @@ function EventCard({ event }: { event: SceneEvent }) {
     <TouchableOpacity
       activeOpacity={0.88}
       style={styles.eventCard}
-      onPress={() => event.ticket_url && Linking.openURL(event.ticket_url)}
+      onPress={() => event.tickets_url && Linking.openURL(event.tickets_url)}
     >
       {event.image_url ? (
         <Image source={{ uri: event.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />

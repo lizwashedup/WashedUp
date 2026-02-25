@@ -191,7 +191,7 @@ export default function PostScreen() {
           location_text: location.trim() || null,
           location_lat: locationLat,
           location_lng: locationLng,
-          ticket_url: ticketUrl.trim() || null,
+          tickets_url: ticketUrl.trim() || null,
           category: category?.toLowerCase() ?? null,
           gender_preference: genderPref,
           age_range: ageRange,
