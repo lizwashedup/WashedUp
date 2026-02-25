@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import { LayoutList, Map, ChevronDown, Check, ArrowRight } from 'lucide-react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
@@ -327,9 +328,13 @@ export default function PlansScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.logo}>WashedUp</Text>
-          <Text style={styles.tagline}>Find people to go with.</Text>
+        <View style={styles.logoContainer}>
+          <Image
+            source={require('../../../assets/images/logo-wordmark.png')}
+            style={styles.logoImage}
+            contentFit="contain"
+            contentPosition="left"
+          />
         </View>
         <TouchableOpacity
           style={[styles.mapToggleButton, mapView && styles.mapToggleButtonActive]}
@@ -467,8 +472,8 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
-  logo: { fontSize: 24, fontWeight: '800', color: '#C4652A', letterSpacing: -0.5 },
-  tagline: { fontSize: 13, color: '#999999', marginTop: 1 },
+  logoContainer: { justifyContent: 'center' },
+  logoImage: { width: 160, height: 40 },
   mapToggleButton: {
     width: 40,
     height: 40,
