@@ -58,10 +58,9 @@ export default function RootLayout() {
 
 function RootLayoutNav() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-
-  // Register for push notifications on every launch — saves token to profiles table
-  usePushNotifications();
+  const [authResolved, setAuthResolved] = useState(false);
+  const [authedUserId, setAuthedUserId] = useState<string | null>(null);
+  usePushNotifications(authedUserId);
 
   // Notification tap handler — deep-links into the relevant chat when user taps a notification
   useEffect(() => {
@@ -75,61 +74,101 @@ function RootLayoutNav() {
   }, []);
 
   useEffect(() => {
-    // onAuthStateChange fires INITIAL_SESSION on mount — use that as the single source of truth
-    // so we don't double-fetch (avoids the getSession + onAuthStateChange race)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Only react to initial load and explicit sign-in/out events
-      if (event !== 'INITIAL_SESSION' && event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
+    let cancelled = false;
 
-      if (!session?.user) {
-        // Navigate BEFORE setLoading so the destination is queued when the Stack mounts
-        router.replace('/login');
-        setLoading(false);
-        return;
-      }
-
+    async function checkAuth() {
       try {
-        const { data, error: e } = await supabase
-          .from('profiles')
-          .select('onboarding_status')
-          .eq('id', session.user.id)
-          .single();
+        const sessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+        ]);
 
-        if (e || !data) {
-          await supabase.auth.signOut();
+        if (cancelled) return;
+
+        const session = sessionResult && 'data' in sessionResult
+          ? sessionResult.data.session
+          : null;
+
+        if (!session?.user) {
+          setAuthResolved(true);
           router.replace('/login');
-          setLoading(false);
           return;
         }
 
-        const dest = data.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
-        // Queue the navigation before the Stack mounts — eliminates the auth screen flash
+        // Retry profile fetch once on failure — avoids signing out on a network blip
+        let profileData = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const { data, error: e } = await supabase
+            .from('profiles')
+            .select('onboarding_status')
+            .eq('id', session.user.id)
+            .single();
+          if (!e && data) { profileData = data; break; }
+          if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+        }
+
+        if (cancelled) return;
+
+        if (!profileData) {
+          setAuthResolved(true);
+          router.replace('/login');
+          return;
+        }
+
+        setAuthedUserId(session.user.id);
+        const dest = profileData.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
+        setAuthResolved(true);
         router.replace(dest as any);
       } catch {
-        await supabase.auth.signOut();
-        router.replace('/login');
-      } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setAuthResolved(true);
+          router.replace('/login');
+        }
       }
+    }
+
+    checkAuth();
+
+    // Keep listening for sign-in/out after initial load
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
+
+      if (!session?.user) {
+        setAuthedUserId(null);
+        router.replace('/login');
+        return;
+      }
+
+      const { data } = await supabase
+        .from('profiles')
+        .select('onboarding_status')
+        .eq('id', session.user.id)
+        .single();
+
+      setAuthedUserId(session.user.id);
+      const dest = data?.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
+      router.replace(dest as any);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  if (loading) {
-    return (
-      <View className="flex-1 justify-center items-center bg-washedup-cream">
-        <ActivityIndicator size="large" color={Colors.primaryOrange} />
-      </View>
-    );
-  }
-
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="profile" />
-      <Stack.Screen name="plan/[id]" options={{ headerShown: false }} />
-    </Stack>
+    <>
+      {!authResolved && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8F0' }}>
+          <ActivityIndicator size="large" color={Colors.primaryOrange} />
+        </View>
+      )}
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="profile" />
+        <Stack.Screen name="plan/[id]" options={{ headerShown: false }} />
+      </Stack>
+    </>
   );
 }
