@@ -24,6 +24,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useChat, ChatMessage } from '../../../hooks/useChat';
 import { ReportModal } from '../../../components/modals/ReportModal';
+import { useBlock } from '../../../hooks/useBlock';
 
 // ─── Event Header Data ────────────────────────────────────────────────────────
 
@@ -250,6 +251,7 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList>(null);
 
   const { messages, loading, currentUserId, sendMessage } = useChat(id);
+  const { blockUser } = useBlock();
 
   const { data: event } = useQuery({
     queryKey: ['event-info', id],
@@ -293,21 +295,40 @@ export default function ChatScreen() {
       name: (p.first_name_display as string | null) ?? 'Unknown',
     }));
 
+    // First alert: pick a member
     Alert.alert(
-      'Report a Member',
-      'Select a member to report',
+      'Members',
+      'Select a member',
       [
         ...members.map((member) => ({
           text: member.name,
           onPress: () => {
-            setReportTarget(member);
-            setShowReport(true);
+            // Second alert: pick an action for that member
+            Alert.alert(
+              member.name,
+              'What would you like to do?',
+              [
+                {
+                  text: 'Report User',
+                  onPress: () => {
+                    setReportTarget(member);
+                    setShowReport(true);
+                  },
+                },
+                {
+                  text: 'Block User',
+                  style: 'destructive' as const,
+                  onPress: () => blockUser(member.id, member.name, () => router.back()),
+                },
+                { text: 'Cancel', style: 'cancel' as const },
+              ],
+            );
           },
         })),
         { text: 'Cancel', style: 'cancel' as const },
       ],
     );
-  }, [id, currentUserId]);
+  }, [id, currentUserId, blockUser]);
 
   const handleSend = useCallback(async () => {
     const text = inputText.trim();

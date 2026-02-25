@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 export interface ChatMessage {
@@ -44,6 +44,8 @@ export function useChat(eventId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  // Ref so the real-time channel closure always has the latest blocked set
+  const blockedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -62,6 +64,8 @@ export function useChat(eventId: string) {
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
         async (payload) => {
           const newMsg = payload.new as any;
+          // Drop real-time messages from blocked users without a full refetch
+          if (blockedIdsRef.current.has(newMsg.user_id)) return;
           const enriched = await attachSenders([newMsg]);
           setMessages(prev => [...prev, enriched[0]]);
         },
@@ -80,22 +84,31 @@ export function useChat(eventId: string) {
       .eq('event_id', eventId)
       .order('created_at', { ascending: true });
 
-    if (data) {
-      const enriched = await attachSenders(data);
+    // Fetch current user's blocked list and mark chat as read in parallel
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const [{ data: profile }] = await Promise.all([
+        supabase.from('profiles').select('blocked_users').eq('id', user.id).single(),
+        supabase.from('chat_reads').upsert(
+          { event_id: eventId, user_id: user.id, last_read_at: new Date().toISOString() },
+          { onConflict: 'event_id,user_id' },
+        ),
+      ]);
+
+      const blockedIds = new Set<string>(profile?.blocked_users ?? []);
+      blockedIdsRef.current = blockedIds;
+
+      const filtered = (data ?? []).filter((msg: any) => !blockedIds.has(msg.user_id));
+      const enriched = await attachSenders(filtered);
       setMessages(enriched);
+    } else {
+      if (data) {
+        const enriched = await attachSenders(data);
+        setMessages(enriched);
+      }
     }
 
     setLoading(false);
-
-    // Mark as read
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      await supabase.from('chat_reads').upsert({
-        event_id: eventId,
-        user_id: user.id,
-        last_read_at: new Date().toISOString(),
-      }, { onConflict: 'event_id,user_id' });
-    }
   };
 
   const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
