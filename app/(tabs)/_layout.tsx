@@ -83,6 +83,14 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Ionicons name="people-outline" size={24} color={color} />,
         }}
       />
+      {/* Hide dynamic chat route from tab bar */}
+      <Tabs.Screen
+        name="chats/[id]"
+        options={{
+          href: null,
+          headerShown: false,
+        }}
+      />
     </Tabs>
   );
 }

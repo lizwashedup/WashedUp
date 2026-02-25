@@ -334,6 +334,7 @@ export default function PlansScreen() {
             style={styles.logoImage}
             contentFit="contain"
             contentPosition="left"
+            tintColor={undefined}
           />
         </View>
         <TouchableOpacity
@@ -472,8 +473,8 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
-  logoContainer: { justifyContent: 'center' },
-  logoImage: { width: 160, height: 40 },
+  logoContainer: { justifyContent: 'center', backgroundColor: 'transparent' },
+  logoImage: { width: 160, height: 40, backgroundColor: 'transparent' },
   mapToggleButton: {
     width: 40,
     height: 40,

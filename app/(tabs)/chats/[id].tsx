@@ -38,11 +38,11 @@ interface EventInfo {
 async function fetchEventInfo(eventId: string): Promise<EventInfo> {
   const { data: event } = await supabase
     .from('events')
-    .select('id, title, start_time, tickets_url, member_count')
+    .select('id, title, start_time, ticket_url, member_count')
     .eq('id', eventId)
     .single();
 
-  // Get member user IDs
+  // Two-step fetch — avoid FK join on profiles_public view
   const { data: memberRows } = await supabase
     .from('event_members')
     .select('user_id')
@@ -70,7 +70,7 @@ async function fetchEventInfo(eventId: string): Promise<EventInfo> {
     id: (event as any).id,
     title: (event as any).title,
     start_time: (event as any).start_time,
-    ticket_url: (event as any).tickets_url ?? null,
+    ticket_url: (event as any).ticket_url ?? null,
     member_count: (event as any).member_count ?? 0,
     members,
   };

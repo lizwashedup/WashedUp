@@ -34,7 +34,7 @@ export function useChatList() {
       .select(`
         event_id,
         events (
-          id, title, primary_vibe, image_url, start_time, member_count, tickets_url, status
+          id, title, category, image_url, start_time, member_count, ticket_url, status
         )
       `)
       .eq('user_id', user.id)
@@ -85,11 +85,11 @@ export function useChatList() {
         return {
           eventId: event.id,
           title: event.title,
-          category: event.primary_vibe ?? null,
+          category: event.category ?? null,
           image_url: event.image_url ?? null,
           start_time: event.start_time,
           member_count: event.member_count ?? 0,
-          ticket_url: event.tickets_url ?? null,
+          ticket_url: event.ticket_url ?? null,
           last_message: lastMsg
             ? (lastMsg.image_url ? 'Sent a photo' : lastMsg.content)
             : null,
