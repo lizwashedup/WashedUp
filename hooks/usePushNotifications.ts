@@ -1,0 +1,102 @@
+import { useState, useEffect, useRef } from 'react';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+import { supabase } from '../lib/supabase';
+
+// Global handler: controls how notifications are displayed when the app is in the foreground.
+// Set once at module level so it's always active regardless of which component mounts first.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
+export function usePushNotifications() {
+  const [expoPushToken, setExpoPushToken] = useState<string>('');
+  const notificationListener = useRef<Notifications.EventSubscription | null>(null);
+
+  useEffect(() => {
+    registerForPushNotifications().then((token) => {
+      if (token) setExpoPushToken(token);
+    });
+
+    // Foreground notification received handler (logging / future badge count updates)
+    notificationListener.current = Notifications.addNotificationReceivedListener(
+      (notification) => {
+        console.log('[PushNotifications] Received in foreground:', notification.request.content.title);
+      },
+    );
+
+    return () => {
+      notificationListener.current?.remove();
+    };
+  }, []);
+
+  return { expoPushToken };
+}
+
+async function registerForPushNotifications(): Promise<string | null> {
+  if (!Device.isDevice) {
+    // Simulator/emulator — cannot receive push tokens
+    console.log('[PushNotifications] Skipping — requires a physical device.');
+    return null;
+  }
+
+  // Android requires a notification channel before any notification can be shown
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#C4652A',
+    });
+  }
+
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
+
+  if (existingStatus !== 'granted') {
+    const { status } = await Notifications.requestPermissionsAsync();
+    finalStatus = status;
+  }
+
+  if (finalStatus !== 'granted') {
+    console.log('[PushNotifications] Permission denied.');
+    return null;
+  }
+
+  // Resolve projectId from app.json extra.eas — run `eas init` if this is missing
+  const projectId =
+    Constants.expoConfig?.extra?.eas?.projectId ??
+    (Constants as any).easConfig?.projectId;
+
+  if (!projectId || projectId === 'YOUR_PROJECT_ID_RUN_EAS_INIT') {
+    console.warn(
+      '[PushNotifications] No EAS project ID found. Run `eas init` and update app.json extra.eas.projectId.',
+    );
+    return null;
+  }
+
+  try {
+    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
+    const token = tokenData.data;
+
+    // Save token to this user's profile row so the backend can send targeted notifications
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && token) {
+      await supabase
+        .from('profiles')
+        .update({ push_token: token })
+        .eq('id', user.id);
+    }
+
+    return token;
+  } catch (err) {
+    console.warn('[PushNotifications] getExpoPushTokenAsync failed:', err);
+    return null;
+  }
+}

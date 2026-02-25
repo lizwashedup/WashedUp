@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as Notifications from 'expo-notifications';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
@@ -46,6 +47,12 @@ export default function OnboardingVibesScreen() {
           onboarding_status: 'complete',
         })
         .eq('id', user.id);
+
+      // Ask for push permission at the natural completion moment.
+      // Fire-and-forget — onboarding proceeds regardless of the user's answer.
+      // The actual token is registered and saved via usePushNotifications on next launch.
+      Notifications.requestPermissionsAsync().catch(() => {});
+
       router.replace('/(tabs)/plans');
     } finally {
       setLoading(false);

@@ -5,6 +5,7 @@ import { useFonts } from 'expo-font';
 import { DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif-display';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
 import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -13,6 +14,7 @@ import { Session } from '@supabase/supabase-js';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -60,6 +62,20 @@ function RootLayoutNav() {
   const [session, setSession] = useState<Session | null>(null);
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Register for push notifications on every launch — saves token to profiles table
+  usePushNotifications();
+
+  // Notification tap handler — deep-links into the relevant chat when user taps a notification
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as Record<string, any>;
+      if (data?.chatId) {
+        router.push(`/(tabs)/chats/${data.chatId}` as any);
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: s } }) => {

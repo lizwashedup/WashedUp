@@ -13,6 +13,10 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "notification": {
+      "icon": "./assets/images/icon.png",
+      "color": "#C4652A"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.washedup.app",
@@ -47,10 +51,23 @@
           "locationAlwaysAndWhenInUsePermission": "Allow WashedUp to use your location to show plans near you."
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#C4652A",
+          "sounds": []
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "YOUR_PROJECT_ID_RUN_EAS_INIT"
+      }
     }
   }
 }
