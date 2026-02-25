@@ -90,7 +90,7 @@ async function registerForPushNotifications(): Promise<string | null> {
     if (user && token) {
       await supabase
         .from('profiles')
-        .update({ push_token: token })
+        .update({ expo_push_token: token })
         .eq('id', user.id);
     }
 
