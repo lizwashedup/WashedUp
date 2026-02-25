@@ -1,9 +1,4 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// FILE: app/plan/[id].tsx
-// INSTRUCTIONS: Replace the ENTIRE contents of this file with everything below.
-// ─────────────────────────────────────────────────────────────────────────────
-
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,12 +9,16 @@ import {
   Share,
   ActivityIndicator,
   Dimensions,
+  Linking,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
+import MapView, { Marker } from 'react-native-maps';
 import {
   ArrowLeft,
   Calendar,
@@ -28,14 +27,12 @@ import {
   Heart,
   Share2,
   MessageCircle,
-  Clock,
-  Lock,
   ChevronRight,
-  UserPlus,
 } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const HERO_HEIGHT = SCREEN_WIDTH * (9 / 16);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,11 +40,14 @@ interface PlanDetail {
   id: string;
   title: string;
   description: string | null;
+  host_message: string | null;
   start_time: string;
   location_text: string | null;
+  location_lat: number | null;
+  location_lng: number | null;
   image_url: string | null;
-  category: string | null;
-  gender_preference: string | null;
+  primary_vibe: string | null;
+  gender_rule: string | null;
   max_invites: number | null;
   min_invites: number | null;
   status: string;
@@ -72,8 +72,7 @@ interface Member {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatFullDate(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
+  return new Date(dateString).toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -81,25 +80,19 @@ function formatFullDate(dateString: string): string {
 }
 
 function formatTime(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString('en-US', {
+  return new Date(dateString).toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
   });
 }
 
-function formatGender(gender: string | null): string {
-  if (!gender || gender === 'mixed') return 'Everyone Welcome';
-  if (gender === 'women_only') return 'Women Only';
-  if (gender === 'men_only') return 'Men Only';
-  return 'Everyone Welcome';
-}
-
-function getGenderColor(gender: string | null): string {
-  if (gender === 'women_only') return '#BF5C7C';
-  if (gender === 'men_only') return '#5C7CBF';
-  return '#5CBF7C';
+function formatGenderLabel(gender_rule: string | null): string | null {
+  if (!gender_rule || gender_rule === 'mixed') return null;
+  if (gender_rule === 'women_only') return 'Women Only';
+  if (gender_rule === 'men_only') return 'Men Only';
+  if (gender_rule === 'nonbinary_only') return 'Nonbinary Only';
+  return null;
 }
 
 function getCategoryEmoji(category: string | null): string {
@@ -111,57 +104,113 @@ function getCategoryEmoji(category: string | null): string {
   return category ? (map[category.toLowerCase()] ?? '✨') : '✨';
 }
 
+function openDirections(locationText: string) {
+  const encoded = encodeURIComponent(locationText);
+  const url = Platform.OS === 'ios'
+    ? `maps://?q=${encoded}`
+    : `geo:0,0?q=${encoded}`;
+  Linking.openURL(url).catch(() => {
+    Linking.openURL(`https://maps.google.com/?q=${encoded}`);
+  });
+}
+
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
 async function fetchPlanDetail(id: string): Promise<PlanDetail> {
   const { data, error } = await supabase
     .from('events')
     .select(`
-      id, title, description, start_time, location_text,
-      image_url, category, gender_preference, max_invites,
-      min_invites, status, host_id,
-      host:profiles!events_host_id_fkey(id, first_name, avatar_url, bio),
-      event_members(count)
+      id, title, description, host_message, start_time,
+      location_text, location_lat, location_lng,
+      image_url, primary_vibe, gender_rule,
+      max_invites, min_invites, status, member_count, creator_user_id
     `)
     .eq('id', id)
     .single();
 
   if (error) throw error;
 
+  const row = data as any;
+
+  // Fetch host via profiles_public view (bypasses profiles RLS for other users)
+  let host: PlanDetail['host'] = null;
+  if (row.creator_user_id) {
+    const { data: profileRow } = await supabase
+      .from('profiles_public')
+      .select('id, first_name_display, profile_photo_url, bio')
+      .eq('id', row.creator_user_id)
+      .maybeSingle();
+
+    if (profileRow) {
+      host = {
+        id: profileRow.id,
+        first_name: profileRow.first_name_display ?? null,
+        avatar_url: profileRow.profile_photo_url ?? null,
+        bio: profileRow.bio ?? null,
+      };
+    }
+  }
+
   return {
-    ...data,
-    member_count: (data as any).event_members?.[0]?.count ?? 0,
-    host: Array.isArray((data as any).host)
-      ? (data as any).host[0] ?? null
-      : (data as any).host ?? null,
+    id: row.id,
+    title: row.title,
+    description: row.description ?? null,
+    host_message: row.host_message ?? null,
+    start_time: row.start_time,
+    location_text: row.location_text ?? null,
+    location_lat: row.location_lat ?? null,
+    location_lng: row.location_lng ?? null,
+    image_url: row.image_url ?? null,
+    primary_vibe: row.primary_vibe ?? null,
+    gender_rule: row.gender_rule ?? null,
+    max_invites: row.max_invites ?? null,
+    min_invites: row.min_invites ?? null,
+    status: row.status,
+    host_id: row.creator_user_id ?? null,
+    member_count: row.member_count ?? 0,
+    host,
   };
 }
 
 async function fetchMembers(planId: string): Promise<Member[]> {
+  // Preferred path: RPC returns member profiles, requires caller to be a member
   const { data: rpcData, error: rpcError } = await supabase
     .rpc('get_event_members_reveal', { event_id: planId });
 
   if (!rpcError && rpcData) return rpcData as Member[];
 
-  const { data, error } = await supabase
+  // Fallback: get member user_ids, then query profiles_public view (no PII, publicly readable)
+  const { data: memberRows, error: memberError } = await supabase
     .from('event_members')
-    .select(`
-      id, user_id, joined_at,
-      profiles!event_members_user_id_fkey(first_name, avatar_url)
-    `)
+    .select('id, user_id, joined_at')
     .eq('event_id', planId)
     .eq('status', 'joined')
     .order('joined_at', { ascending: true });
 
-  if (error) throw error;
+  if (memberError) throw memberError;
+  if (!memberRows || memberRows.length === 0) return [];
 
-  return (data ?? []).map((m: any) => ({
-    id: m.id,
-    user_id: m.user_id,
-    joined_at: m.joined_at,
-    first_name: Array.isArray(m.profiles) ? m.profiles[0]?.first_name : m.profiles?.first_name,
-    avatar_url: Array.isArray(m.profiles) ? m.profiles[0]?.avatar_url : m.profiles?.avatar_url,
-  }));
+  const userIds = memberRows.map((m: any) => m.user_id);
+
+  const { data: profileRows } = await supabase
+    .from('profiles_public')
+    .select('id, first_name_display, profile_photo_url')
+    .in('id', userIds);
+
+  const profileMap = new Map<string, any>(
+    (profileRows ?? []).map((p: any) => [p.id, p]),
+  );
+
+  return memberRows.map((m: any) => {
+    const profile = profileMap.get(m.user_id);
+    return {
+      id: m.id,
+      user_id: m.user_id,
+      joined_at: m.joined_at,
+      first_name: profile?.first_name_display ?? null,
+      avatar_url: profile?.profile_photo_url ?? null,
+    };
+  });
 }
 
 // ─── Member Avatar ────────────────────────────────────────────────────────────
@@ -169,11 +218,7 @@ async function fetchMembers(planId: string): Promise<Member[]> {
 const MemberAvatar = React.memo(({ member }: { member: Member }) => (
   <View style={styles.memberAvatarWrapper}>
     {member.avatar_url ? (
-      <Image
-        source={{ uri: member.avatar_url }}
-        style={styles.memberAvatar}
-        contentFit="cover"
-      />
+      <Image source={{ uri: member.avatar_url }} style={styles.memberAvatar} contentFit="cover" />
     ) : (
       <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
         <Text style={styles.memberAvatarInitial}>
@@ -181,12 +226,8 @@ const MemberAvatar = React.memo(({ member }: { member: Member }) => (
         </Text>
       </View>
     )}
-    <Text style={styles.memberName} numberOfLines={1}>
-      {member.first_name ?? 'Someone'}
-    </Text>
   </View>
 ));
-
 MemberAvatar.displayName = 'MemberAvatar';
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -197,8 +238,9 @@ export default function PlanDetailScreen() {
   const queryClient = useQueryClient();
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
+  const [mapCoords, setMapCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? null));
   }, []);
 
@@ -214,8 +256,30 @@ export default function PlanDetailScreen() {
     enabled: !!id,
   });
 
-  // Check wishlist
-  React.useEffect(() => {
+  // Resolve map coordinates — use stored coords, or geocode from location_text
+  useEffect(() => {
+    if (!plan) return;
+
+    if (plan.location_lat != null && plan.location_lng != null) {
+      setMapCoords({ latitude: plan.location_lat, longitude: plan.location_lng });
+      return;
+    }
+
+    if (!plan.location_text) return;
+
+    Location.geocodeAsync(plan.location_text)
+      .then((results) => {
+        if (results.length > 0) {
+          setMapCoords({ latitude: results[0].latitude, longitude: results[0].longitude });
+        }
+      })
+      .catch(() => {
+        // geocoding unavailable, map won't show
+      });
+  }, [plan]);
+
+  // Wishlist check
+  useEffect(() => {
     if (!currentUserId || !id) return;
     supabase
       .from('wishlists')
@@ -229,17 +293,27 @@ export default function PlanDetailScreen() {
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isHost = plan?.host_id === currentUserId;
   const maxSpots = plan?.max_invites ?? 8;
-  const isFull = plan ? (plan.member_count >= maxSpots) : false;
-  const spotsLeft = plan ? (maxSpots - plan.member_count) : 0;
+  const isFull = plan ? plan.member_count >= maxSpots : false;
+  const spotsLeft = plan ? maxSpots - plan.member_count : 0;
 
-  // Join
+  // ─── Join ────────────────────────────────────────────────────────────────────
+
   const joinMutation = useMutation({
     mutationFn: async () => {
       if (!currentUserId || !id) throw new Error('Not authenticated');
-      const { error } = await supabase
+
+      const { error: joinError } = await supabase
         .from('event_members')
-        .insert({ event_id: id, user_id: currentUserId, status: 'joined' });
-      if (error) throw error;
+        .insert({ event_id: id, user_id: currentUserId, role: 'guest', status: 'joined' });
+      if (joinError) throw joinError;
+
+      // System message
+      await supabase.from('messages').insert({
+        event_id: id,
+        user_id: currentUserId,
+        content: 'joined the plan',
+        message_type: 'system',
+      });
     },
     onSuccess: () => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -248,35 +322,18 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
     },
     onError: (error: any) => {
-      Alert.alert('Oops', error.message ?? 'Something went wrong. Try again.');
+      Alert.alert('Oops', error.message ?? 'Something went wrong.');
     },
   });
 
-  // Leave
-  const leaveMutation = useMutation({
-    mutationFn: async () => {
-      if (!currentUserId || !id) throw new Error('Not authenticated');
-      const { error } = await supabase
-        .from('event_members')
-        .delete()
-        .eq('event_id', id)
-        .eq('user_id', currentUserId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
-      queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
-      queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
-    },
-  });
+  // ─── Wishlist ────────────────────────────────────────────────────────────────
 
-  // Wishlist toggle
   const toggleWishlist = useCallback(async () => {
     if (!currentUserId || !id) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsWishlisted((prev) => !prev);
-    if (isWishlisted) {
+    const next = !isWishlisted;
+    setIsWishlisted(next);
+    if (!next) {
       await supabase.from('wishlists').delete().eq('user_id', currentUserId).eq('event_id', id);
     } else {
       await supabase.from('wishlists').insert({ user_id: currentUserId, event_id: id });
@@ -284,38 +341,22 @@ export default function PlanDetailScreen() {
     queryClient.invalidateQueries({ queryKey: ['wishlists', currentUserId] });
   }, [currentUserId, id, isWishlisted, queryClient]);
 
-  // Share
+  // ─── Share ───────────────────────────────────────────────────────────────────
+
   const handleShare = useCallback(async () => {
     if (!plan) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await Share.share({
-      message: `Join me for "${plan.title}" on WashedUp!\nwashedup.app/plan/${plan.id}`,
-      url: `https://washedup.app/plan/${plan.id}`,
+      message: `Join me for "${plan.title}" on WashedUp!\nhttps://washedup.app/plan/${plan.id}`,
     });
   }, [plan]);
 
-  const handleJoinLeave = useCallback(() => {
-    if (isHost) return;
-    if (isMember) {
-      Alert.alert(
-        'Leave this plan?',
-        "You can always rejoin if there's still a spot.",
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Leave', style: 'destructive', onPress: () => leaveMutation.mutate() },
-        ]
-      );
-    } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      joinMutation.mutate();
-    }
-  }, [isHost, isMember, joinMutation, leaveMutation]);
-
-  // ─── Loading / Error ────────────────────────────────────────────────────────
+  // ─── Loading / Error ─────────────────────────────────────────────────────────
 
   if (planLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
+        <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#C4652A" />
         </View>
@@ -326,6 +367,7 @@ export default function PlanDetailScreen() {
   if (planError || !plan) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
+        <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.centered}>
           <Text style={styles.errorText}>Couldn't load this plan.</Text>
           <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 12 }}>
@@ -336,7 +378,11 @@ export default function PlanDetailScreen() {
     );
   }
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
+  const genderLabel = formatGenderLabel(plan.gender_rule);
+  const visibleMembers = members.slice(0, 5);
+  const overflowCount = members.length > 5 ? members.length - 5 : 0;
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -344,7 +390,7 @@ export default function PlanDetailScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 0 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
       >
         {/* Hero */}
         <View style={styles.heroContainer}>
@@ -357,121 +403,94 @@ export default function PlanDetailScreen() {
             />
           ) : (
             <View style={styles.heroPlaceholder}>
-              <Text style={styles.heroEmoji}>{getCategoryEmoji(plan.category)}</Text>
+              <Text style={styles.heroEmoji}>{getCategoryEmoji(plan.primary_vibe)}</Text>
             </View>
           )}
 
           <TouchableOpacity
             onPress={() => router.back()}
-            style={styles.backButton}
+            style={styles.heroCircleButton}
             accessibilityLabel="Go back"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ArrowLeft size={20} color="#1A1A1A" strokeWidth={2.5} />
           </TouchableOpacity>
 
-          <View style={styles.heroActions}>
-            <TouchableOpacity
-              onPress={toggleWishlist}
-              style={styles.heroActionButton}
-              accessibilityLabel={isWishlisted ? "Remove from I'd Go" : "Add to I'd Go"}
-            >
-              <Heart
-                size={18}
-                color={isWishlisted ? '#E53935' : '#1A1A1A'}
-                fill={isWishlisted ? '#E53935' : 'transparent'}
-                strokeWidth={2}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleShare}
-              style={styles.heroActionButton}
-              accessibilityLabel="Share this plan"
-            >
-              <Share2 size={18} color="#1A1A1A" strokeWidth={2} />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={handleShare}
+            style={[styles.heroCircleButton, styles.heroShareButton]}
+            accessibilityLabel="Share this plan"
+          >
+            <Share2 size={18} color="#1A1A1A" strokeWidth={2} />
+          </TouchableOpacity>
+
+          {/* Photo overlay tags */}
+          {genderLabel && (
+            <View style={[styles.photoTag, styles.photoTagBottomLeft]}>
+              <Text style={styles.photoTagText}>{genderLabel}</Text>
+            </View>
+          )}
+          {plan.primary_vibe && (
+            <View style={[styles.photoTag, styles.photoTagBottomRight]}>
+              <Text style={styles.photoTagText}>{plan.primary_vibe}</Text>
+            </View>
+          )}
         </View>
 
-        {/* Content */}
-        <View style={styles.content}>
-
-          {/* Badges */}
-          <View style={styles.badgeRow}>
-            {plan.category && (
-              <View style={styles.categoryBadge}>
-                <Text style={styles.categoryBadgeText}>
-                  {getCategoryEmoji(plan.category)} {plan.category}
-                </Text>
-              </View>
-            )}
-            <View style={[
-              styles.genderBadge,
-              { backgroundColor: getGenderColor(plan.gender_preference) + '20' },
-            ]}>
-              <Lock size={11} color={getGenderColor(plan.gender_preference)} strokeWidth={2} />
-              <Text style={[
-                styles.genderBadgeText,
-                { color: getGenderColor(plan.gender_preference) },
-              ]}>
-                {formatGender(plan.gender_preference)}
-              </Text>
-            </View>
-          </View>
-
-          {/* Title */}
+        {/* Content card — overlaps photo */}
+        <View style={styles.contentCard}>
           <Text style={styles.title}>{plan.title}</Text>
 
-          {/* Details card */}
-          <View style={styles.detailsCard}>
-            <View style={styles.detailRow}>
-              <View style={styles.detailIcon}>
-                <Calendar size={16} color="#C4652A" strokeWidth={2} />
-              </View>
-              <View>
-                <Text style={styles.detailPrimary}>{formatFullDate(plan.start_time)}</Text>
-                <Text style={styles.detailSecondary}>{formatTime(plan.start_time)}</Text>
-              </View>
-            </View>
-
-            {plan.location_text && (
-              <View style={[styles.detailRow, styles.detailBorder]}>
-                <View style={styles.detailIcon}>
-                  <MapPin size={16} color="#C4652A" strokeWidth={2} />
-                </View>
-                <Text style={[styles.detailPrimary, { flex: 1 }]}>{plan.location_text}</Text>
-                <ChevronRight size={16} color="#999999" strokeWidth={2} />
-              </View>
-            )}
-
-            <View style={[styles.detailRow, styles.detailBorder]}>
-              <View style={styles.detailIcon}>
-                <Users size={16} color="#C4652A" strokeWidth={2} />
-              </View>
-              <View>
-                <Text style={styles.detailPrimary}>
-                  {plan.member_count} going
-                  {plan.max_invites ? ` · ${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left` : ''}
-                </Text>
-                <Text style={styles.detailSecondary}>
-                  Group of {plan.min_invites ?? 3}–{maxSpots}
-                </Text>
-              </View>
-            </View>
+          {/* Date */}
+          <View style={styles.detailRow}>
+            <Calendar size={16} color="#C4652A" strokeWidth={2} />
+            <Text style={styles.detailText}>
+              {formatFullDate(plan.start_time)} · {formatTime(plan.start_time)}
+            </Text>
           </View>
 
-          {/* Description */}
-          {plan.description && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>About this plan</Text>
-              <Text style={styles.description}>{plan.description}</Text>
+          {/* Location */}
+          {plan.location_text && (
+            <TouchableOpacity
+              style={styles.detailRow}
+              onPress={() => openDirections(plan.location_text!)}
+              activeOpacity={0.7}
+            >
+              <MapPin size={16} color="#C4652A" strokeWidth={2} />
+              <Text style={[styles.detailText, { flex: 1 }]}>{plan.location_text}</Text>
+              <Text style={styles.directionsLink}>Get Directions</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Static Map */}
+          {mapCoords && (
+            <View style={styles.mapContainer}>
+              <MapView
+                style={styles.map}
+                region={{
+                  latitude: mapCoords.latitude,
+                  longitude: mapCoords.longitude,
+                  latitudeDelta: 0.01,
+                  longitudeDelta: 0.01,
+                }}
+                zoomEnabled={false}
+                scrollEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                pointerEvents="none"
+              >
+                <Marker
+                  coordinate={mapCoords}
+                  pinColor="#C4652A"
+                />
+              </MapView>
             </View>
           )}
 
           {/* Host */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Hosted by</Text>
-            <View style={styles.hostCard}>
+            <Text style={styles.sectionLabel}>Posted by</Text>
+            <View style={styles.hostRow}>
               {plan.host?.avatar_url ? (
                 <Image
                   source={{ uri: plan.host.avatar_url }}
@@ -487,100 +506,81 @@ export default function PlanDetailScreen() {
               )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.hostName}>{plan.host?.first_name ?? 'Someone'}</Text>
-                {plan.host?.bio && (
-                  <Text style={styles.hostBio} numberOfLines={2}>{plan.host.bio}</Text>
+                {plan.description && (
+                  <Text style={styles.hostMessage} numberOfLines={3}>{plan.description}</Text>
                 )}
               </View>
             </View>
           </View>
 
-          {/* Who's Going */}
+          {/* Who's going */}
           {members.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                Who's going · {members.length}/{maxSpots}
+              <Text style={styles.whoGoingLabel}>
+                <Text style={styles.whoGoingCount}>{plan.member_count} going</Text>
+                {plan.max_invites ? (
+                  <Text style={styles.whoGoingSpotsLeft}> · {spotsLeft} spot{spotsLeft !== 1 ? 's' : ''} left</Text>
+                ) : null}
               </Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingVertical: 4 }}
-              >
-                {members.map((member) => (
+              <View style={styles.memberAvatarRow}>
+                {visibleMembers.map((member) => (
                   <MemberAvatar key={member.id} member={member} />
                 ))}
-                {Array.from({ length: Math.max(0, maxSpots - members.length) }).map((_, i) => (
-                  <View key={`empty-${i}`} style={styles.memberAvatarWrapper}>
-                    <View style={styles.emptySpot}>
-                      <UserPlus size={18} color="#CCCCCC" strokeWidth={1.5} />
-                    </View>
-                    <Text style={[styles.memberName, { color: '#CCCCCC' }]}>Open</Text>
+                {overflowCount > 0 && (
+                  <View style={[styles.memberAvatar, styles.memberAvatarOverflow]}>
+                    <Text style={styles.memberAvatarOverflowText}>+{overflowCount}</Text>
                   </View>
-                ))}
-              </ScrollView>
+                )}
+              </View>
             </View>
           )}
-
-          {/* Chat button — members only */}
-          {(isMember || isHost) && (
-            <TouchableOpacity
-              style={styles.chatCard}
-              onPress={() => router.push(`/(tabs)/chats/${plan.id}`)}
-              accessibilityLabel="Open group chat"
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <MessageCircle size={20} color="#C4652A" strokeWidth={2} />
-                <Text style={styles.chatCardText}>Group Chat</Text>
-              </View>
-              <ChevronRight size={18} color="#C4652A" strokeWidth={2} />
-            </TouchableOpacity>
-          )}
-
-          <View style={{ height: 110 }} />
         </View>
       </ScrollView>
 
-      {/* Sticky CTA */}
-      {!isHost && (
-        <View style={styles.stickyBar}>
-          {isFull && !isMember ? (
-            <View style={styles.fullButton}>
-              <Clock size={18} color="#999999" strokeWidth={2} />
-              <Text style={styles.fullButtonText}>This plan is full</Text>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={[
-                styles.joinButton,
-                isMember && styles.leaveButton,
-                (joinMutation.isPending || leaveMutation.isPending) && { opacity: 0.6 },
-              ]}
-              onPress={handleJoinLeave}
-              disabled={joinMutation.isPending || leaveMutation.isPending}
-              accessibilityLabel={isMember ? 'Leave plan' : 'Join plan'}
-            >
-              {(joinMutation.isPending || leaveMutation.isPending) ? (
-                <ActivityIndicator size="small" color={isMember ? '#999999' : '#FFFFFF'} />
-              ) : (
-                <Text style={[styles.joinButtonText, isMember && styles.leaveButtonText]}>
-                  {isMember
-                    ? 'Leave Plan'
-                    : `Join · ${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left`}
-                </Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+      {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
-      {isHost && (
-        <View style={styles.stickyBar}>
-          <View style={styles.hostBadge}>
-            <Text style={styles.hostBadgeText}>
-              ✓ Your Plan · {plan.member_count} joined
-            </Text>
+      <View style={styles.stickyBar}>
+        {isHost ? (
+          <TouchableOpacity
+            style={styles.manageButton}
+            onPress={() => router.push(`/plan/${plan.id}/manage` as any)}
+          >
+            <Text style={styles.manageButtonText}>Manage Plan</Text>
+          </TouchableOpacity>
+        ) : isMember ? (
+          <View style={styles.memberActions}>
+            <View style={styles.youreGoingBadge}>
+              <Text style={styles.youreGoingText}>You're going</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.openChatButton}
+              onPress={() => router.push(`/(tabs)/chats/${plan.id}` as any)}
+            >
+              <MessageCircle size={18} color="#FFFFFF" strokeWidth={2} />
+              <Text style={styles.openChatText}>Open Chat</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-      )}
+        ) : isFull ? (
+          <TouchableOpacity style={styles.waitlistButton}>
+            <Text style={styles.waitlistButtonText}>Join Waitlist</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.joinButton, joinMutation.isPending && { opacity: 0.6 }]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              joinMutation.mutate();
+            }}
+            disabled={joinMutation.isPending}
+          >
+            {joinMutation.isPending ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.joinButtonText}>Join Plan</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -595,7 +595,7 @@ const styles = StyleSheet.create({
 
   heroContainer: {
     width: SCREEN_WIDTH,
-    height: SCREEN_WIDTH * 0.65,
+    height: HERO_HEIGHT,
     position: 'relative',
   },
   heroImage: { width: '100%', height: '100%' },
@@ -607,7 +607,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroEmoji: { fontSize: 64 },
-  backButton: {
+  heroCircleButton: {
     position: 'absolute',
     top: 16,
     left: 16,
@@ -619,130 +619,138 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.15,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
-  heroActions: {
-    position: 'absolute',
-    top: 16,
+  heroShareButton: {
+    left: undefined,
     right: 16,
-    flexDirection: 'row',
-    gap: 8,
   },
-  heroActionButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  photoTag: {
+    position: 'absolute',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
     elevation: 2,
   },
-
-  content: { padding: 20 },
-
-  badgeRow: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
-  categoryBadge: {
-    backgroundColor: '#F0E6D3',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  categoryBadgeText: {
-    fontSize: 13,
-    color: '#C4652A',
+  photoTagBottomLeft: { bottom: 14, left: 14 },
+  photoTagBottomRight: { bottom: 14, right: 14 },
+  photoTagText: {
+    fontSize: 12,
     fontWeight: '600',
+    color: '#C4652A',
     textTransform: 'capitalize',
   },
-  genderBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
+
+  contentCard: {
+    marginTop: -20,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    paddingTop: 28,
+    flex: 1,
   },
-  genderBadgeText: { fontSize: 13, fontWeight: '600' },
 
   title: {
     fontSize: 26,
     fontWeight: '800',
     color: '#1A1A1A',
     lineHeight: 32,
-    marginBottom: 20,
     letterSpacing: -0.3,
+    marginBottom: 18,
   },
 
-  detailsCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 4,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-  },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    gap: 10,
+    marginBottom: 14,
+  },
+  detailText: {
+    fontSize: 15,
+    color: '#1A1A1A',
+    fontWeight: '500',
+  },
+  directionsLink: {
+    fontSize: 14,
+    color: '#C4652A',
+    fontWeight: '600',
+  },
+
+  mapContainer: {
+    height: 160,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 24,
+    marginTop: 4,
+  },
+  map: {
+    flex: 1,
+  },
+
+  section: {
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  sectionLabel: {
+    fontSize: 13,
+    color: '#999999',
+    fontWeight: '500',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  hostRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 12,
   },
-  detailBorder: { borderTopWidth: 1, borderTopColor: '#F5F5F5' },
-  detailIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: '#FFF0E8',
-    alignItems: 'center',
-    justifyContent: 'center',
+  hostAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
-  detailPrimary: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-  detailSecondary: { fontSize: 13, color: '#999999', marginTop: 2 },
-
-  section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A1A', marginBottom: 12 },
-  description: { fontSize: 15, color: '#444444', lineHeight: 24 },
-
-  hostCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  hostAvatar: { width: 52, height: 52, borderRadius: 26 },
   hostAvatarPlaceholder: {
     backgroundColor: '#F0E6D3',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hostAvatarInitial: { fontSize: 20, fontWeight: '700', color: '#C4652A' },
-  hostName: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
-  hostBio: { fontSize: 13, color: '#666666', marginTop: 3, lineHeight: 18 },
+  hostAvatarInitial: { fontSize: 16, fontWeight: '700', color: '#C4652A' },
+  hostName: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
+  hostMessage: { fontSize: 14, color: '#666666', lineHeight: 20 },
 
-  memberAvatarWrapper: {
+  whoGoingLabel: {
+    marginBottom: 12,
+  },
+  whoGoingCount: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#C4652A',
+  },
+  whoGoingSpotsLeft: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#999999',
+  },
+  memberAvatarRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    width: 64,
-    marginRight: 4,
+    gap: -8,
+  },
+  memberAvatarWrapper: {
+    marginRight: -8,
   },
   memberAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 2,
     borderColor: '#FFFFFF',
   },
@@ -751,30 +759,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  memberAvatarInitial: { fontSize: 16, fontWeight: '700', color: '#C4652A' },
-  memberName: { fontSize: 11, color: '#666666', marginTop: 5, textAlign: 'center' },
-  emptySpot: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F5F5F5',
+  memberAvatarInitial: { fontSize: 14, fontWeight: '700', color: '#C4652A' },
+  memberAvatarOverflow: {
+    backgroundColor: '#F0E6D3',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#E5E5E5',
-    borderStyle: 'dashed',
   },
-
-  chatCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFF0E8',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 8,
-  },
-  chatCardText: { fontSize: 15, fontWeight: '700', color: '#C4652A' },
+  memberAvatarOverflowText: { fontSize: 12, fontWeight: '700', color: '#C4652A' },
 
   stickyBar: {
     position: 'absolute',
@@ -782,12 +773,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     paddingHorizontal: 20,
-    paddingBottom: 28,
+    paddingBottom: 32,
     paddingTop: 12,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#F0E6D3',
   },
+
   joinButton: {
     backgroundColor: '#C4652A',
     borderRadius: 14,
@@ -801,29 +793,51 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   joinButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
-  leaveButton: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#E5E5E5',
-    shadowOpacity: 0,
-    elevation: 0,
+
+  memberActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
-  leaveButtonText: { color: '#999999' },
-  fullButton: {
+  youreGoingBadge: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  youreGoingText: { fontSize: 16, fontWeight: '600', color: '#666666' },
+  openChatButton: {
+    flex: 1,
+    backgroundColor: '#C4652A',
+    borderRadius: 14,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#F5F5F5',
+    shadowColor: '#C4652A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  openChatText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+
+  waitlistButton: {
     borderRadius: 14,
     paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#C4652A',
   },
-  fullButtonText: { color: '#999999', fontSize: 16, fontWeight: '600' },
-  hostBadge: {
-    backgroundColor: '#F0E6D3',
+  waitlistButtonText: { fontSize: 17, fontWeight: '700', color: '#C4652A' },
+
+  manageButton: {
+    backgroundColor: '#1A1A1A',
     borderRadius: 14,
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
   },
-  hostBadgeText: { fontSize: 15, fontWeight: '700', color: '#C4652A' },
+  manageButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
 });

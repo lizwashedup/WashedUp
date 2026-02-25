@@ -1,0 +1,42 @@
+---
+description: WashedUp Supabase schema — correct column names, RPCs, and gotchas
+alwaysApply: true
+---
+
+# WashedUp Backend Schema
+
+Project: `uwjhbfxragjyvylciwrb` · URL: `https://uwjhbfxragjyvylciwrb.supabase.co`
+Full reference: `docs/SCHEMA.md`
+
+## Critical Column Names (common mistakes)
+
+| ❌ Wrong | ✅ Correct |
+|---|---|
+| `gender_preference` | `gender_rule` |
+| `gender_type` (on profiles) | `gender` |
+| `latitude` / `longitude` | `location_lat` / `location_lng` |
+| `age_range` | `target_age_min` / `target_age_max` |
+| `category` | `primary_vibe` |
+| `first_name` | `first_name_display` |
+| `avatar_url` | `profile_photo_url` |
+| `host_id` | `creator_user_id` |
+| `event_members(count)` | `member_count` column directly on events |
+| `profiles!events_host_id_fkey` | `profiles!events_creator_user_id_fkey` |
+
+## Key Rules
+- `member_count` on events is maintained by DB trigger — never manually update
+- Use `profiles_public` VIEW (not `profiles` table) when displaying other users' info
+- Live event statuses: `forming`, `active`, `full` — never just `active`
+- `gender_rule` enum: `women_only`, `men_only`, `mixed`, `nonbinary_only`
+- `gender` on profiles enum: `woman`, `man`, `non_binary`
+- Join insert requires: `{ event_id, user_id, role: 'guest', status: 'joined' }`
+
+## RPCs to Use
+- `get_filtered_feed(p_user_id)` — use for plans feed (handles gender + age + blocked users)
+- `get_event_members_reveal(p_event_id)` — use for member list in plan detail
+- `can_join_event_gender(p_user_id, p_event_id)` — gender eligibility check
+
+## Auth
+- Supabase client is at `lib/supabase.ts`
+- Profile auto-created on signup via `handle_new_user` trigger
+- `onboarding_status`: `pending` → `complete` after name/gender/birthday/photo filled

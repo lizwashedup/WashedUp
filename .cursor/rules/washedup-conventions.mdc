@@ -1,0 +1,46 @@
+---
+description: WashedUp app — design tokens, stack, and coding conventions
+alwaysApply: true
+---
+
+# WashedUp App Conventions
+
+## What This App Is
+Social activity app for finding people to do things with in Los Angeles. Not a dating app. Small groups of 3–8 people. Activity-first.
+
+## Stack
+- React Native + Expo Router (file-based routing)
+- Supabase (auth + database) via `lib/supabase.ts`
+- TanStack Query for data fetching (`useQuery`, `useMutation`)
+- `expo-image` for images (not React Native's `Image`)
+- `react-native-maps` + `expo-location` for maps/geocoding
+- `lucide-react-native` for icons
+- `expo-haptics` for haptic feedback
+
+## Design Tokens
+```
+primary:    #C4652A  (orange — buttons, accents, brand)
+background: #FFF8F0
+card:       #FFFFFF
+border:     #F0E6D3
+textDark:   #1A1A1A
+textMedium: #666666
+textLight:  #999999
+```
+
+## Key File Locations
+- Plans feed: `app/(tabs)/plans/index.tsx`
+- Plan detail: `app/plan/[id].tsx`
+- Plan card component: `components/plans/PlanCard.tsx`
+- Data fetching: `lib/fetchPlans.ts`
+- Supabase client: `lib/supabase.ts`
+- Section detail screen: `app/plans-section.tsx`
+- Schema reference: `docs/SCHEMA.md`
+
+## Conventions
+- `SafeAreaView` with correct `edges` on every screen
+- `ActivityIndicator` color always `#C4652A`
+- Ghost protocol (gender/age filtering) lives in `lib/fetchPlans.ts` — do not duplicate or modify
+- No emojis in UI text
+- Card border radius: 16px; button border radius: 14px
+- Plan cards use `primary_vibe` aliased as `category` in the UI

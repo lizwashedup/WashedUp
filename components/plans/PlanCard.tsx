@@ -1,9 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// FILE: components/plans/PlanCard.tsx
-// INSTRUCTIONS: Create this folder if it doesn't exist, then create this file
-// and paste everything below into it.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import React, { useCallback } from 'react';
 import {
   View,
@@ -13,13 +7,11 @@ import {
   Dimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Heart, MapPin, Calendar, Users } from 'lucide-react-native';
+import { Heart, Calendar } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// Card width for carousel (full width minus padding for peek effect)
 const CARD_WIDTH = SCREEN_WIDTH - 48;
 
 interface PlanCardProps {
@@ -30,20 +22,20 @@ interface PlanCardProps {
     location_text: string | null;
     image_url: string | null;
     category: string | null;
-    gender_preference: string | null;
+    gender_rule: string | null;
     max_invites: number | null;
     min_invites: number | null;
-    primary_vibe: string | null;
+    member_count: number;
+    status: string;
     host: {
       id: string;
       first_name: string | null;
       avatar_url: string | null;
     } | null;
-    member_count: number;
   };
   isWishlisted?: boolean;
   onWishlist?: (planId: string, currentState: boolean) => void;
-  variant?: 'carousel' | 'full'; // carousel = fixed width for horizontal scroll, full = full width for vertical list
+  variant?: 'carousel' | 'full';
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -65,10 +57,14 @@ function getCategoryColor(category: string | null): string {
   return CATEGORY_COLORS[category.toLowerCase()] ?? CATEGORY_COLORS.default;
 }
 
+function formatCategoryLabel(category: string | null): string {
+  if (!category) return 'Plan';
+  return category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+}
+
 function formatDate(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
-
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrowStart = new Date(todayStart.getTime() + 86400000);
   const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -79,22 +75,11 @@ function formatDate(dateString: string): string {
     hour12: true,
   });
 
-  if (dateStart.getTime() === todayStart.getTime()) {
-    return `Tonight · ${timeStr}`;
-  }
-  if (dateStart.getTime() === tomorrowStart.getTime()) {
-    return `Tomorrow · ${timeStr}`;
-  }
+  if (dateStart.getTime() === todayStart.getTime()) return `Tonight · ${timeStr}`;
+  if (dateStart.getTime() === tomorrowStart.getTime()) return `Tomorrow · ${timeStr}`;
 
   const dayStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   return `${dayStr} · ${timeStr}`;
-}
-
-function formatGender(gender: string | null): string | null {
-  if (!gender || gender === 'mixed') return null;
-  if (gender === 'women_only') return 'Women Only';
-  if (gender === 'men_only') return 'Men Only';
-  return null;
 }
 
 export const PlanCard = React.memo<PlanCardProps>(({
@@ -117,7 +102,9 @@ export const PlanCard = React.memo<PlanCardProps>(({
   }, [plan.id, isWishlisted, onWishlist]);
 
   const spotsLeft = plan.max_invites ? plan.max_invites - plan.member_count : null;
-  const genderLabel = formatGender(plan.gender_preference);
+  const isFull = plan.status === 'full' || (spotsLeft !== null && spotsLeft <= 0);
+  const oneSpotLeft = !isFull && spotsLeft === 1;
+
   const categoryColor = getCategoryColor(plan.category);
   const cardWidth = variant === 'carousel' ? CARD_WIDTH : '100%';
 
@@ -129,7 +116,6 @@ export const PlanCard = React.memo<PlanCardProps>(({
       accessibilityLabel={`${plan.title} plan`}
       accessibilityRole="button"
     >
-      {/* Cover Image */}
       <View style={styles.imageContainer}>
         {plan.image_url ? (
           <Image
@@ -139,104 +125,87 @@ export const PlanCard = React.memo<PlanCardProps>(({
             transition={200}
           />
         ) : (
-          <View style={[styles.imagePlaceholder, { backgroundColor: categoryColor + '20' }]}>
-            <Text style={[styles.placeholderEmoji]}>
-              {getCategoryEmoji(plan.category)}
+          <View style={[styles.imagePlaceholder, { backgroundColor: categoryColor + '26' }]}>
+            <Text style={[styles.placeholderLabel, { color: categoryColor }]}>
+              {formatCategoryLabel(plan.category)}
             </Text>
           </View>
         )}
 
-        {/* Wishlist Heart */}
+        {/* Top-left: status badge — Full (orange) or 1 spot left (amber), nothing otherwise */}
+        {isFull ? (
+          <View style={[styles.statusBadge, styles.statusBadgeFull]}>
+            <Text style={styles.statusBadgeText}>
+              {plan.member_count > 0 ? `${plan.member_count} going · Full` : 'Full'}
+            </Text>
+          </View>
+        ) : oneSpotLeft ? (
+          <View style={[styles.statusBadge, styles.statusBadgeOneLeft]}>
+            <Text style={styles.statusBadgeText}>1 spot left</Text>
+          </View>
+        ) : null}
+
+        {/* Heart — top right */}
         <TouchableOpacity
           onPress={handleWishlist}
           style={styles.heartButton}
           accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
-          accessibilityHint="Double tap to toggle wishlist"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Heart
-            size={20}
-            color={isWishlisted ? '#E53935' : '#FFFFFF'}
+            size={18}
+            color={isWishlisted ? '#E53935' : '#1A1A1A'}
             fill={isWishlisted ? '#E53935' : 'transparent'}
             strokeWidth={2}
           />
         </TouchableOpacity>
 
-        {/* Category Badge */}
+        {/* Host avatar + name — bottom left, horizontal row */}
+        <View style={styles.hostOverlay}>
+          {plan.host?.avatar_url ? (
+            <Image
+              source={{ uri: plan.host.avatar_url }}
+              style={styles.hostAvatar}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
+              <Text style={styles.hostAvatarInitial}>
+                {plan.host?.first_name?.[0]?.toUpperCase() ?? '?'}
+              </Text>
+            </View>
+          )}
+          {plan.host?.first_name && (
+            <Text style={styles.hostName} numberOfLines={1}>
+              {plan.host.first_name}
+            </Text>
+          )}
+        </View>
+
+        {/* Category badge — bottom right */}
         {plan.category && (
-          <View style={[styles.categoryBadge, { backgroundColor: categoryColor }]}>
-            <Text style={styles.categoryText}>{plan.category}</Text>
+          <View style={styles.categoryBadge}>
+            <Text style={styles.categoryBadgeText}>{formatCategoryLabel(plan.category)}</Text>
           </View>
         )}
       </View>
 
-      {/* Card Content */}
       <View style={styles.content}>
-        {/* Title */}
         <Text style={styles.title} numberOfLines={2}>
           {plan.title}
         </Text>
 
-        {/* Date & Location */}
-        <View style={styles.metaRow}>
-          <Calendar size={13} color="#999999" strokeWidth={2} />
-          <Text style={styles.metaText} numberOfLines={1}>
-            {formatDate(plan.start_time)}
-          </Text>
-        </View>
-
         {plan.location_text && (
-          <View style={styles.metaRow}>
-            <MapPin size={13} color="#999999" strokeWidth={2} />
-            <Text style={styles.metaText} numberOfLines={1}>
-              {plan.location_text}
-            </Text>
-          </View>
+          <Text style={styles.neighborhood} numberOfLines={1}>
+            {plan.location_text}
+          </Text>
         )}
 
-        {/* Footer Row */}
-        <View style={styles.footer}>
-          {/* Host info */}
-          <View style={styles.hostRow}>
-            {plan.host?.avatar_url ? (
-              <Image
-                source={{ uri: plan.host.avatar_url }}
-                style={styles.avatar}
-                contentFit="cover"
-              />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarInitial}>
-                  {plan.host?.first_name?.[0]?.toUpperCase() ?? '?'}
-                </Text>
-              </View>
-            )}
-            <Text style={styles.hostName} numberOfLines={1}>
-              {plan.host?.first_name ?? 'Someone'}
-            </Text>
-          </View>
-
-          {/* Right side: spots + gender */}
-          <View style={styles.rightBadges}>
-            {genderLabel && (
-              <View style={styles.genderBadge}>
-                <Text style={styles.genderText}>{genderLabel}</Text>
-              </View>
-            )}
-            <View style={[
-              styles.spotsBadge,
-              spotsLeft === 0 && styles.spotsBadgeFull,
-            ]}>
-              <Users size={11} color={spotsLeft === 0 ? '#999999' : '#C4652A'} strokeWidth={2} />
-              <Text style={[
-                styles.spotsText,
-                spotsLeft === 0 && styles.spotsTextFull,
-              ]}>
-                {plan.member_count}
-                {plan.max_invites ? `/${plan.max_invites}` : ''} going
-              </Text>
-            </View>
-          </View>
+        <View style={styles.dateRow}>
+          <Calendar size={12} color="#999999" strokeWidth={2} />
+          <Text style={styles.dateText} numberOfLines={1}>
+            {formatDate(plan.start_time)}
+          </Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -244,15 +213,6 @@ export const PlanCard = React.memo<PlanCardProps>(({
 });
 
 PlanCard.displayName = 'PlanCard';
-
-function getCategoryEmoji(category: string | null): string {
-  const map: Record<string, string> = {
-    food: '🍜', music: '🎵', nightlife: '🌙', outdoors: '🌿',
-    fitness: '💪', film: '🎬', art: '🎨', comedy: '😂',
-    sports: '⚽', wellness: '🧘',
-  };
-  return category ? (map[category.toLowerCase()] ?? '✨') : '✨';
-}
 
 const styles = StyleSheet.create({
   card: {
@@ -281,37 +241,118 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  placeholderEmoji: {
-    fontSize: 40,
+  placeholderLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    opacity: 0.7,
   },
+
+  // Status badges — top left
+  statusBadge: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  statusBadgeFull: {
+    backgroundColor: '#C4652A',
+  },
+  statusBadgeOneLeft: {
+    backgroundColor: '#F59E0B',
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+
+  // Heart — top right
   heartButton: {
     position: 'absolute',
     top: 10,
     right: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  categoryBadge: {
+
+  // Host overlay — bottom left, horizontal
+  hostOverlay: {
     position: 'absolute',
     bottom: 10,
     left: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  categoryText: {
+  hostAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  hostAvatarPlaceholder: {
+    backgroundColor: '#C4652A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hostAvatarInitial: {
+    fontSize: 13,
+    fontWeight: '700',
     color: '#FFFFFF',
+  },
+  hostName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    maxWidth: 100,
+  },
+
+  // Category badge — bottom right
+  categoryBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  categoryBadgeText: {
     fontSize: 11,
     fontWeight: '600',
-    textTransform: 'capitalize',
+    color: '#C4652A',
   },
+
+  // Content below image
   content: {
-    padding: 14,
-    gap: 6,
+    padding: 12,
+    gap: 5,
   },
   title: {
     fontSize: 16,
@@ -319,82 +360,18 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     lineHeight: 22,
   },
-  metaRow: {
+  neighborhood: {
+    fontSize: 13,
+    color: '#666666',
+  },
+  dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
+    marginTop: 1,
   },
-  metaText: {
+  dateText: {
     fontSize: 13,
-    color: '#666666',
-    flex: 1,
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  hostRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  avatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-  },
-  avatarPlaceholder: {
-    backgroundColor: '#F0E6D3',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#C4652A',
-  },
-  hostName: {
-    fontSize: 13,
-    color: '#666666',
-    flex: 1,
-  },
-  rightBadges: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  genderBadge: {
-    backgroundColor: '#FFF0E8',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  genderText: {
-    fontSize: 11,
-    color: '#C4652A',
-    fontWeight: '600',
-  },
-  spotsBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#FFF0E8',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  spotsBadgeFull: {
-    backgroundColor: '#F5F5F5',
-  },
-  spotsText: {
-    fontSize: 11,
-    color: '#C4652A',
-    fontWeight: '600',
-  },
-  spotsTextFull: {
     color: '#999999',
   },
 });

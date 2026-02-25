@@ -1,9 +1,4 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// FILE: app/(tabs)/plans/index.tsx
-// INSTRUCTIONS: Replace the ENTIRE contents of this file with everything below.
-// ─────────────────────────────────────────────────────────────────────────────
-
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,284 +8,219 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
-  Animated,
   Dimensions,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Plus } from 'lucide-react-native';
+import { LayoutList, Map, ChevronDown, Check, ArrowRight } from 'lucide-react-native';
+import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
+import { fetchPlans, Plan } from '../../../lib/fetchPlans';
 import { PlanCard } from '../../../components/plans/PlanCard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Plan {
-  id: string;
+type CategoryOption = 'Music' | 'Food' | 'Outdoors' | 'Nightlife' | 'Film' | 'Art' | 'Fitness' | 'Comedy' | 'Wellness' | 'Sports';
+
+interface SectionDef {
+  key: string;
   title: string;
-  start_time: string;
-  location_text: string | null;
-  image_url: string | null;
-  category: string | null;
-  gender_preference: string | null;
-  age_range: string | null;
-  max_invites: number | null;
-  min_invites: number | null;
-  primary_vibe: string | null;
-  host: {
-    id: string;
-    first_name: string | null;
-    avatar_url: string | null;
-  } | null;
-  member_count: number;
+  from: Date;
+  to: Date;
 }
 
-type SubTab = 'plans' | 'my-plans' | 'wishlist';
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-// ─── Profile & Filter Helpers ─────────────────────────────────────────────────
+const CATEGORY_OPTIONS: CategoryOption[] = ['Music', 'Food', 'Outdoors', 'Nightlife', 'Film', 'Art', 'Fitness', 'Comedy', 'Wellness', 'Sports'];
 
-interface UserProfile {
-  gender_type: string | null;
-  birthday: string | null;
-}
+const LA_REGION = {
+  latitude: 34.0522,
+  longitude: -118.2437,
+  latitudeDelta: 0.4,
+  longitudeDelta: 0.4,
+};
 
-function calculateAge(birthday: string | null): number | null {
-  if (!birthday) return null;
-  const dob = new Date(birthday);
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const m = today.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
-  return age;
-}
+// ─── Section boundary logic ───────────────────────────────────────────────────
 
-function matchesAgeRange(planAgeRange: string | null, userAge: number | null): boolean {
-  if (!planAgeRange || planAgeRange === 'All Ages') return true;
-  if (userAge === null) return true;
-  if (planAgeRange === '21+') return userAge >= 21;
-  if (planAgeRange === '20s') return userAge >= 20 && userAge < 30;
-  if (planAgeRange === '30s') return userAge >= 30 && userAge < 40;
-  if (planAgeRange === '40s') return userAge >= 40 && userAge < 50;
-  if (planAgeRange === '50+') return userAge >= 50;
-  return true;
-}
+function getSectionDefs(now: Date): SectionDef[] {
+  const day = now.getDay(); // 0=Sun … 6=Sat
+  const y = now.getFullYear();
+  const mo = now.getMonth();
+  const d = now.getDate();
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+  const todayEnd = new Date(y, mo, d, 23, 59, 59, 999);
+  const tonight: SectionDef = { key: 'tonight', title: 'Tonight', from: now, to: todayEnd };
 
-function isTonight(dateString: string): boolean {
-  const date = new Date(dateString);
-  const now = new Date();
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-  return date >= now && date <= todayEnd;
-}
+  let middle: SectionDef;
+  let comingUpFrom: Date;
 
-function isThisWeekend(dateString: string): boolean {
-  const date = new Date(dateString);
-  const now = new Date();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(0, 0, 0, 0);
-
-  // Find next Sunday
-  const dayOfWeek = now.getDay();
-  const daysUntilSunday = dayOfWeek === 0 ? 7 : 7 - dayOfWeek;
-  const sunday = new Date(now);
-  sunday.setDate(sunday.getDate() + daysUntilSunday);
-  sunday.setHours(23, 59, 59, 999);
-
-  return date >= tomorrow && date <= sunday;
-}
-
-// ─── Data Fetching ────────────────────────────────────────────────────────────
-
-async function fetchPlans(): Promise<Plan[]> {
-  // Fetch current user's profile for server-side gender filter + client-side age filter
-  let userProfile: UserProfile | null = null;
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('gender_type, birthday')
-        .eq('id', user.id)
-        .single();
-      userProfile = profile;
-    }
-  } catch {
-    // Proceed without profile — will show mixed plans only
-  }
-
-  // Build query with server-side gender filter
-  let query = supabase
-    .from('events')
-    .select(`
-      id,
-      title,
-      start_time,
-      location_text,
-      image_url,
-      category,
-      gender_preference,
-      age_range,
-      max_invites,
-      min_invites,
-      primary_vibe,
-      host:profiles!events_host_id_fkey(id, first_name, avatar_url),
-      event_members(count)
-    `)
-    .eq('status', 'active')
-    .gte('start_time', new Date().toISOString())
-    .order('start_time', { ascending: true })
-    .limit(100);
-
-  // Server-side gender filter — users never receive plans they shouldn't see
-  if (userProfile?.gender_type === 'woman') {
-    query = query.or('gender_preference.eq.mixed,gender_preference.is.null,gender_preference.eq.women_only');
-  } else if (userProfile?.gender_type === 'man') {
-    query = query.or('gender_preference.eq.mixed,gender_preference.is.null,gender_preference.eq.men_only');
+  if (day >= 1 && day <= 4) {
+    // Mon–Thu → "This Week" = tomorrow through Friday
+    const tomorrowStart = new Date(y, mo, d + 1, 0, 0, 0);
+    const fridayEnd = new Date(y, mo, d + (5 - day), 23, 59, 59, 999);
+    middle = { key: 'this-week', title: 'This Week', from: tomorrowStart, to: fridayEnd };
+    comingUpFrom = new Date(fridayEnd.getTime() + 1);
+  } else if (day === 5) {
+    // Friday → "This Weekend" = Sat + Sun
+    const satStart = new Date(y, mo, d + 1, 0, 0, 0);
+    const sunEnd = new Date(y, mo, d + 2, 23, 59, 59, 999);
+    middle = { key: 'this-weekend', title: 'This Weekend', from: satStart, to: sunEnd };
+    comingUpFrom = new Date(sunEnd.getTime() + 1);
+  } else if (day === 6) {
+    // Saturday → "This Weekend" = just Sunday
+    const sunStart = new Date(y, mo, d + 1, 0, 0, 0);
+    const sunEnd = new Date(y, mo, d + 1, 23, 59, 59, 999);
+    middle = { key: 'this-weekend', title: 'This Weekend', from: sunStart, to: sunEnd };
+    comingUpFrom = new Date(sunEnd.getTime() + 1);
   } else {
-    // Unknown gender: mixed and null only
-    query = query.or('gender_preference.eq.mixed,gender_preference.is.null');
+    // Sunday → "Next Week" = Mon–Fri
+    const monStart = new Date(y, mo, d + 1, 0, 0, 0);
+    const friEnd = new Date(y, mo, d + 5, 23, 59, 59, 999);
+    middle = { key: 'next-week', title: 'Next Week', from: monStart, to: friEnd };
+    comingUpFrom = new Date(friEnd.getTime() + 1);
   }
 
-  const { data, error } = await query;
-  if (error) throw error;
+  const comingUp: SectionDef = {
+    key: 'coming-up',
+    title: 'Coming Up',
+    from: comingUpFrom,
+    to: new Date(y + 2, 0, 1),
+  };
 
-  let plans: Plan[] = (data ?? []).map((item: any) => ({
-    ...item,
-    member_count: item.event_members?.[0]?.count ?? 0,
-    host: Array.isArray(item.host) ? item.host[0] ?? null : item.host ?? null,
-  }));
-
-  // Client-side age filter (requires calculating age from birthday)
-  const userAge = calculateAge(userProfile?.birthday ?? null);
-  plans = plans.filter((p) => matchesAgeRange(p.age_range, userAge));
-
-  return plans;
+  return [tonight, middle, comingUp];
 }
 
-async function fetchMyPlans(userId: string): Promise<Plan[]> {
-  const { data, error } = await supabase
-    .from('event_members')
-    .select(`
-      events(
-        id,
-        title,
-        start_time,
-        location_text,
-        image_url,
-        category,
-        gender_preference,
-        max_invites,
-        min_invites,
-        primary_vibe,
-        host:profiles!events_host_id_fkey(id, first_name, avatar_url)
-      )
-    `)
-    .eq('user_id', userId)
-    .eq('status', 'joined')
-    .order('joined_at', { ascending: false });
+function filterIntoSections(
+  plans: Plan[],
+  sectionDefs: SectionDef[],
+  categoryFilter: CategoryOption[],
+  whenKeys: string[],
+): { def: SectionDef; plans: Plan[] }[] {
+  const catFiltered = categoryFilter.length === 0
+    ? plans
+    : plans.filter((p) => categoryFilter.some((c) => c.toLowerCase() === p.category?.toLowerCase()));
 
-  if (error) throw error;
-
-  const plans: Plan[] = [];
-  for (const row of data ?? []) {
-    const event = (row as any).events;
-    if (!event) continue;
-    // Get member count for this event
-    const { count } = await supabase
-      .from('event_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('event_id', event.id)
-      .eq('status', 'joined');
-
-    plans.push({
-      ...event,
-      member_count: count ?? 0,
-      host: Array.isArray(event.host) ? event.host[0] ?? null : event.host ?? null,
-    });
-  }
-  return plans;
+  return sectionDefs
+    .filter((def) => whenKeys.length === 0 || whenKeys.includes(def.key))
+    .map((def) => ({
+      def,
+      plans: catFiltered.filter((p) => {
+        const t = new Date(p.start_time);
+        return t >= def.from && t <= def.to;
+      }),
+    }))
+    .filter((s) => s.plans.length > 0);
 }
 
-async function fetchWishlist(userId: string): Promise<Plan[]> {
-  const { data, error } = await supabase
-    .from('wishlists')
-    .select(`
-      events(
-        id,
-        title,
-        start_time,
-        location_text,
-        image_url,
-        category,
-        gender_preference,
-        max_invites,
-        min_invites,
-        primary_vibe,
-        host:profiles!events_host_id_fkey(id, first_name, avatar_url)
-      )
-    `)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+// ─── Bottom Sheet ─────────────────────────────────────────────────────────────
 
-  if (error) {
-    // wishlists table might not exist yet
-    if (error.code === '42P01') return [];
-    throw error;
-  }
-
-  const plans: Plan[] = [];
-  for (const row of data ?? []) {
-    const event = (row as any).events;
-    if (!event) continue;
-    const { count } = await supabase
-      .from('event_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('event_id', event.id)
-      .eq('status', 'joined');
-
-    plans.push({
-      ...event,
-      member_count: count ?? 0,
-      host: Array.isArray(event.host) ? event.host[0] ?? null : event.host ?? null,
-    });
-  }
-  return plans;
+interface SheetOption {
+  key: string;
+  label: string;
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-interface CarouselSectionProps {
-  title: string;
-  plans: Plan[];
-  wishlisted: Set<string>;
-  onWishlist: (id: string, current: boolean) => void;
-  onSeeAll?: () => void;
-}
-
-const CarouselSection = React.memo<CarouselSectionProps>(({
+function BottomSheet({
+  visible,
   title,
+  options,
+  selected,
+  onToggle,
+  onClose,
+  onClear,
+}: {
+  visible: boolean;
+  title: string;
+  options: SheetOption[];
+  selected: string[];
+  onToggle: (key: string) => void;
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.overlay} onPress={onClose}>
+        <Pressable style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{title}</Text>
+            <TouchableOpacity onPress={onClear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.sheetClear}>Clear all</Text>
+            </TouchableOpacity>
+          </View>
+
+          {options.map((opt) => {
+            const active = selected.includes(opt.key);
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={styles.sheetRow}
+                onPress={() => { Haptics.selectionAsync(); onToggle(opt.key); }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sheetRowText, active && styles.sheetRowTextActive]}>
+                  {opt.label}
+                </Text>
+                <View style={[styles.sheetCheck, active && styles.sheetCheckActive]}>
+                  {active && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+
+          <TouchableOpacity style={styles.sheetDone} onPress={onClose}>
+            <Text style={styles.sheetDoneText}>Done</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ─── Section Row ──────────────────────────────────────────────────────────────
+
+const SectionRow = React.memo(({
+  def,
   plans,
   wishlisted,
   onWishlist,
-  onSeeAll,
+}: {
+  def: SectionDef;
+  plans: Plan[];
+  wishlisted: Set<string>;
+  onWishlist: (id: string, current: boolean) => void;
 }) => {
-  if (plans.length === 0) return null;
+  const handleSeeAll = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push({
+      pathname: '/plans-section',
+      params: {
+        title: def.title,
+        from: def.from.toISOString(),
+        to: def.to.toISOString(),
+      },
+    } as any);
+  }, [def]);
 
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {onSeeAll && plans.length > 2 && (
-          <TouchableOpacity onPress={onSeeAll} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.seeAllText}>See all</Text>
-          </TouchableOpacity>
-        )}
+        <Text style={styles.sectionTitle}>{def.title}</Text>
+        <TouchableOpacity
+          style={styles.seeAllButton}
+          onPress={handleSeeAll}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <ArrowRight size={18} color="#1A1A1A" strokeWidth={2} />
+        </TouchableOpacity>
       </View>
+
       <FlatList
         horizontal
         data={plans}
@@ -311,76 +241,46 @@ const CarouselSection = React.memo<CarouselSectionProps>(({
     </View>
   );
 });
+SectionRow.displayName = 'SectionRow';
 
-CarouselSection.displayName = 'CarouselSection';
-
-const EmptyState = ({ message, cta, onCta }: { message: string; cta?: string; onCta?: () => void }) => (
-  <View style={styles.emptyState}>
-    <Text style={styles.emptyEmoji}>🏄‍♀️</Text>
-    <Text style={styles.emptyTitle}>{message}</Text>
-    {cta && onCta && (
-      <TouchableOpacity style={styles.emptyButton} onPress={onCta}>
-        <Text style={styles.emptyButtonText}>{cta}</Text>
-      </TouchableOpacity>
-    )}
-  </View>
-);
-
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PlansScreen() {
-  const [activeTab, setActiveTab] = useState<SubTab>('plans');
   const queryClient = useQueryClient();
+  const sectionDefs = useMemo(() => getSectionDefs(new Date()), []);
 
-  // Get current user
+  const [mapView, setMapView] = useState(false);
+  const [whenSheetOpen, setWhenSheetOpen] = useState(false);
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false);
+  const [whenFilter, setWhenFilter] = useState<string[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<CategoryOption[]>([]);
+
   const [userId, setUserId] = React.useState<string | null>(null);
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
 
-  // Fetch all plans
-  const {
-    data: allPlans = [],
-    isLoading: plansLoading,
-    refetch: refetchPlans,
-    isRefetching: plansRefetching,
-  } = useQuery({
-    queryKey: ['events', 'feed'],
-    queryFn: fetchPlans,
+  const { data: allPlans = [], isLoading, isError, error, refetch, isRefetching } = useQuery({
+    queryKey: ['events', 'feed', userId],
+    queryFn: () => fetchPlans(userId!),
+    enabled: !!userId,
     staleTime: 60_000,
+    retry: 1,
   });
 
-  // Fetch my plans
-  const {
-    data: myPlans = [],
-    isLoading: myPlansLoading,
-    refetch: refetchMyPlans,
-  } = useQuery({
-    queryKey: ['events', 'my-plans', userId],
-    queryFn: () => fetchMyPlans(userId!),
-    enabled: !!userId && activeTab === 'my-plans',
-    staleTime: 30_000,
-  });
-
-  // Fetch wishlist
-  const {
-    data: wishlistPlans = [],
-    isLoading: wishlistLoading,
-    refetch: refetchWishlist,
-  } = useQuery({
+  const { data: wishlistIds = [] } = useQuery<string[]>({
     queryKey: ['wishlists', userId],
-    queryFn: () => fetchWishlist(userId!),
-    enabled: !!userId && activeTab === 'wishlist',
+    queryFn: async () => {
+      if (!userId) return [];
+      const { data } = await supabase.from('wishlists').select('event_id').eq('user_id', userId);
+      return (data ?? []).map((r: any) => r.event_id as string);
+    },
+    enabled: !!userId,
     staleTime: 30_000,
   });
 
-  // Wishlist state (derived from wishlist plans for quick UI updates)
-  const wishlistedIds = React.useMemo(
-    () => new Set(wishlistPlans.map((p) => p.id)),
-    [wishlistPlans]
-  );
+  const wishlistedSet = useMemo(() => new Set(wishlistIds), [wishlistIds]);
 
-  // Toggle wishlist mutation
   const wishlistMutation = useMutation({
     mutationFn: async ({ planId, isCurrentlyWishlisted }: { planId: string; isCurrentlyWishlisted: boolean }) => {
       if (!userId) return;
@@ -390,52 +290,38 @@ export default function PlansScreen() {
         await supabase.from('wishlists').insert({ user_id: userId, event_id: planId });
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wishlists', userId] }),
   });
 
   const handleWishlist = useCallback((planId: string, isCurrentlyWishlisted: boolean) => {
     wishlistMutation.mutate({ planId, isCurrentlyWishlisted });
   }, [wishlistMutation]);
 
-  // Tab switching
-  const handleTabPress = useCallback((tab: SubTab) => {
-    Haptics.selectionAsync();
-    setActiveTab(tab);
-  }, []);
-
-  // Refresh
-  const handleRefresh = useCallback(async () => {
-    if (activeTab === 'plans') await refetchPlans();
-    if (activeTab === 'my-plans') await refetchMyPlans();
-    if (activeTab === 'wishlist') await refetchWishlist();
-  }, [activeTab, refetchPlans, refetchMyPlans, refetchWishlist]);
-
-  // Categorize plans into carousels
-  const tonightPlans = React.useMemo(
-    () => allPlans.filter((p) => isTonight(p.start_time)),
-    [allPlans]
-  );
-  const weekendPlans = React.useMemo(
-    () => allPlans.filter((p) => isThisWeekend(p.start_time)),
-    [allPlans]
-  );
-  const userVibes = React.useRef<string[]>([]);
-  const basedOnYouPlans = React.useMemo(
-    () => allPlans.filter((p) => !isTonight(p.start_time) && !isThisWeekend(p.start_time)),
-    [allPlans]
+  const sections = useMemo(
+    () => filterIntoSections(allPlans, sectionDefs, categoryFilter, whenFilter),
+    [allPlans, sectionDefs, categoryFilter, whenFilter],
   );
 
-  const isLoading =
-    (activeTab === 'plans' && plansLoading) ||
-    (activeTab === 'my-plans' && myPlansLoading) ||
-    (activeTab === 'wishlist' && wishlistLoading);
+  // "When" sheet options mirror the section keys for this day
+  const whenOptions = useMemo<SheetOption[]>(
+    () => sectionDefs.map((s) => ({ key: s.key, label: s.title })),
+    [sectionDefs],
+  );
 
-  const isRefreshing =
-    (activeTab === 'plans' && plansRefetching);
+  const whenLabel = whenFilter.length === 0
+    ? 'When'
+    : whenFilter.length === 1
+      ? sectionDefs.find((s) => s.key === whenFilter[0])?.title ?? 'When'
+      : `When · ${whenFilter.length}`;
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
+  const categoryLabel = categoryFilter.length === 0
+    ? 'Category'
+    : categoryFilter.length === 1 ? categoryFilter[0] : `Category · ${categoryFilter.length}`;
+
+  const whenActive = whenFilter.length > 0;
+  const categoryActive = categoryFilter.length > 0;
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -446,148 +332,125 @@ export default function PlansScreen() {
           <Text style={styles.tagline}>Find people to go with.</Text>
         </View>
         <TouchableOpacity
-          style={styles.postButton}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            router.push('/(tabs)/post');
-          }}
-          accessibilityLabel="Post a new plan"
+          style={[styles.mapToggleButton, mapView && styles.mapToggleButtonActive]}
+          onPress={() => { Haptics.selectionAsync(); setMapView((v) => !v); }}
+          accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
         >
-          <Plus size={20} color="#FFFFFF" strokeWidth={2.5} />
+          {mapView
+            ? <LayoutList size={20} color="#FFFFFF" strokeWidth={2} />
+            : <Map size={20} color="#1A1A1A" strokeWidth={2} />}
         </TouchableOpacity>
       </View>
 
-      {/* Sub-tabs */}
-      <View style={styles.tabBar}>
-        {(['plans', 'my-plans', 'wishlist'] as SubTab[]).map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => handleTabPress(tab)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeTab === tab }}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab === 'plans' ? 'Plans' : tab === 'my-plans' ? 'My Plans' : 'Wishlist'}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      {/* Filter Dropdowns */}
+      <View style={styles.filterRow}>
+        <TouchableOpacity
+          style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWhenSheetOpen(true); }}
+        >
+          <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
+            {whenLabel}
+          </Text>
+          <ChevronDown size={13} color={whenActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCategorySheetOpen(true); }}
+        >
+          <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
+            {categoryLabel}
+          </Text>
+          <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+        </TouchableOpacity>
       </View>
 
       {/* Content */}
       {isLoading ? (
-        <View style={styles.loadingContainer}>
+        <View style={styles.centered}>
           <ActivityIndicator size="large" color="#C4652A" />
         </View>
+      ) : isError ? (
+        <View style={styles.centered}>
+          <Text style={styles.errorTitle}>Couldn't load plans</Text>
+          <Text style={styles.errorMessage}>{(error as Error)?.message ?? 'Unknown error'}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : mapView ? (
+        <MapView
+          style={styles.map}
+          initialRegion={LA_REGION}
+          showsUserLocation
+          showsMyLocationButton={false}
+        >
+          {allPlans
+            .filter((p) => p.latitude != null && p.longitude != null)
+            .map((plan) => (
+              <Marker
+                key={plan.id}
+                coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
+                title={plan.title}
+                description={plan.location_text ?? undefined}
+                pinColor="#C4652A"
+                onCalloutPress={() => router.push(`/plan/${plan.id}`)}
+              />
+            ))}
+        </MapView>
       ) : (
         <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              tintColor="#C4652A"
-            />
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#C4652A" />
           }
         >
-          {/* ── Plans Tab ── */}
-          {activeTab === 'plans' && (
-            <>
-              {allPlans.length === 0 ? (
-                <EmptyState
-                  message="No plans yet. Be the first to post something tonight."
-                  cta="Post a Plan"
-                  onCta={() => router.push('/(tabs)/post')}
-                />
-              ) : (
-                <>
-                  <CarouselSection
-                    title="Tonight 🌙"
-                    plans={tonightPlans}
-                    wishlisted={wishlistedIds}
-                    onWishlist={handleWishlist}
-                  />
-                  <CarouselSection
-                    title="This Weekend 🎉"
-                    plans={weekendPlans}
-                    wishlisted={wishlistedIds}
-                    onWishlist={handleWishlist}
-                  />
-                  <CarouselSection
-                    title="Coming Up ✨"
-                    plans={basedOnYouPlans}
-                    wishlisted={wishlistedIds}
-                    onWishlist={handleWishlist}
-                  />
-                  {/* If nothing fits the carousels, show all plans */}
-                  {tonightPlans.length === 0 && weekendPlans.length === 0 && basedOnYouPlans.length === 0 && (
-                    <CarouselSection
-                      title="All Plans"
-                      plans={allPlans}
-                      wishlisted={wishlistedIds}
-                      onWishlist={handleWishlist}
-                    />
-                  )}
-                </>
-              )}
-            </>
+          {sections.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>No plans match your filters.</Text>
+              <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
+                <Text style={styles.emptyButtonText}>Post a Plan</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            sections.map(({ def, plans }) => (
+              <SectionRow
+                key={def.key}
+                def={def}
+                plans={plans}
+                wishlisted={wishlistedSet}
+                onWishlist={handleWishlist}
+              />
+            ))
           )}
-
-          {/* ── My Plans Tab ── */}
-          {activeTab === 'my-plans' && (
-            <>
-              {myPlans.length === 0 ? (
-                <EmptyState
-                  message="You haven't joined any plans yet."
-                  cta="Browse Plans"
-                  onCta={() => handleTabPress('plans')}
-                />
-              ) : (
-                <View style={styles.verticalList}>
-                  {myPlans.map((plan) => (
-                    <PlanCard
-                      key={plan.id}
-                      plan={plan}
-                      isWishlisted={wishlistedIds.has(plan.id)}
-                      onWishlist={handleWishlist}
-                      variant="full"
-                    />
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-
-          {/* ── Wishlist Tab ── */}
-          {activeTab === 'wishlist' && (
-            <>
-              {wishlistPlans.length === 0 ? (
-                <EmptyState
-                  message="Heart a plan to save it for later."
-                  cta="Browse Plans"
-                  onCta={() => handleTabPress('plans')}
-                />
-              ) : (
-                <View style={styles.verticalList}>
-                  {wishlistPlans.map((plan) => (
-                    <PlanCard
-                      key={plan.id}
-                      plan={plan}
-                      isWishlisted={true}
-                      onWishlist={handleWishlist}
-                      variant="full"
-                    />
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-
           <View style={{ height: 32 }} />
         </ScrollView>
       )}
+
+      {/* When Sheet */}
+      <BottomSheet
+        visible={whenSheetOpen}
+        title="When"
+        options={whenOptions}
+        selected={whenFilter}
+        onToggle={(key) => setWhenFilter((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])}
+        onClose={() => setWhenSheetOpen(false)}
+        onClear={() => setWhenFilter([])}
+      />
+
+      {/* Category Sheet */}
+      <BottomSheet
+        visible={categorySheetOpen}
+        title="Category"
+        options={CATEGORY_OPTIONS.map((c) => ({ key: c, label: c }))}
+        selected={categoryFilter}
+        onToggle={(key) => setCategoryFilter((prev) => {
+          const c = key as CategoryOption;
+          return prev.includes(c) ? prev.filter((k) => k !== c) : [...prev, c];
+        })}
+        onClose={() => setCategorySheetOpen(false)}
+        onClear={() => setCategoryFilter([])}
+      />
     </SafeAreaView>
   );
 }
@@ -595,10 +458,7 @@ export default function PlansScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFF8F0',
-  },
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -607,120 +467,124 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
-  logo: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#C4652A',
-    letterSpacing: -0.5,
-  },
-  tagline: {
-    fontSize: 13,
-    color: '#999999',
-    marginTop: 1,
-  },
-  postButton: {
+  logo: { fontSize: 24, fontWeight: '800', color: '#C4652A', letterSpacing: -0.5 },
+  tagline: { fontSize: 13, color: '#999999', marginTop: 1 },
+  mapToggleButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#C4652A',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#C4652A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  tabBar: {
+  mapToggleButtonActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
+
+  filterRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    marginBottom: 4,
-    gap: 4,
+    gap: 10,
+    marginBottom: 20,
   },
-  tab: {
-    flex: 1,
+  dropdownPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 14,
     paddingVertical: 9,
-    alignItems: 'center',
-    borderRadius: 10,
-    backgroundColor: 'transparent',
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
   },
-  tabActive: {
-    backgroundColor: '#C4652A',
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#999999',
-  },
-  tabTextActive: {
-    color: '#FFFFFF',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingTop: 12,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  section: {
-    marginBottom: 24,
-  },
+  dropdownPillActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
+  dropdownText: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
+  dropdownTextActive: { color: '#FFFFFF' },
+
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  map: { flex: 1 },
+
+  section: { marginBottom: 32 },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    marginBottom: 12,
+    marginBottom: 14,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1A1A1A',
-  },
-  seeAllText: {
-    fontSize: 14,
-    color: '#C4652A',
-    fontWeight: '600',
-  },
-  carouselContent: {
-    paddingHorizontal: 20,
-    paddingRight: 8,
-  },
-  verticalList: {
-    paddingHorizontal: 20,
-    gap: 16,
-  },
-  emptyState: {
-    flex: 1,
+  sectionTitle: { fontSize: 20, fontWeight: '800', color: '#1A1A1A', letterSpacing: -0.3 },
+  seeAllButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 80,
-    paddingHorizontal: 32,
   },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
+  carouselContent: { paddingHorizontal: 20 },
+
+  emptyState: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 32 },
+  emptyText: { fontSize: 16, color: '#666666', textAlign: 'center', marginBottom: 20 },
+  emptyButton: { backgroundColor: '#C4652A', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  emptyButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  errorTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 8, textAlign: 'center' },
+  errorMessage: { fontSize: 13, color: '#999999', textAlign: 'center', marginBottom: 20, paddingHorizontal: 32 },
+  retryButton: { backgroundColor: '#C4652A', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  retryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+
+  // Bottom Sheet
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingBottom: 44,
   },
-  emptyTitle: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-    lineHeight: 24,
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E5E5E5',
+    alignSelf: 'center',
+    marginTop: 12,
     marginBottom: 20,
   },
-  emptyButton: {
-    backgroundColor: '#C4652A',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: '#1A1A1A' },
+  sheetClear: { fontSize: 14, color: '#999999', fontWeight: '500' },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  sheetRowText: { fontSize: 16, color: '#1A1A1A', fontWeight: '500' },
+  sheetRowTextActive: { color: '#C4652A', fontWeight: '700' },
+  sheetCheck: {
+    width: 24,
+    height: 24,
     borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#DDDDDD',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  emptyButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
+  sheetCheckActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
+  sheetDone: {
+    marginTop: 20,
+    backgroundColor: '#C4652A',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
   },
+  sheetDoneText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });

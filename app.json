@@ -14,9 +14,19 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.washedup.app",
+      "config": {
+        "googleMapsApiKey": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
+      }
     },
     "android": {
+      "package": "com.washedup.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
+        }
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -30,7 +40,13 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow WashedUp to use your location to show plans near you."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
