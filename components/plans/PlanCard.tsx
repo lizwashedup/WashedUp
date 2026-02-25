@@ -355,10 +355,10 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    lineHeight: 22,
+    fontFamily: 'DMSerifDisplay_400Regular',
+    fontSize: 22,
+    color: '#1C1917',
+    lineHeight: 28,
   },
   neighborhood: {
     fontSize: 13,

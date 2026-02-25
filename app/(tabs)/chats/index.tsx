@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D3',
   },
-  headerTitle: { fontSize: 28, fontWeight: '800', color: '#1A1A1A', letterSpacing: -0.5 },
+  headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 32, color: '#1C1917' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingBottom: 32 },
 
