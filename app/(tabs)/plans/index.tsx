@@ -430,6 +430,9 @@ export default function PlansScreen() {
       queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
       queryClient.invalidateQueries({ queryKey: ['wishlist-plans', userId] });
     },
+    onError: (error: any) => {
+      console.error('[Wishlist] Mutation error:', error.message, error);
+    },
   });
 
   const handleWishlist = useCallback((planId: string, isCurrentlyWishlisted: boolean) => {

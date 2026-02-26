@@ -323,6 +323,9 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['wishlist-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['wishlists'] });
     },
     onError: (error: any) => {
       Alert.alert('Oops', error.message ?? 'Something went wrong.');
