@@ -10,16 +10,19 @@ import { supabase } from '../lib/supabase';
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
 });
 
-export function usePushNotifications() {
+export function usePushNotifications(userId?: string | null) {
   const [expoPushToken, setExpoPushToken] = useState<string>('');
   const notificationListener = useRef<Notifications.EventSubscription | null>(null);
 
   useEffect(() => {
+    if (!userId) return;
     registerForPushNotifications().then((token) => {
       if (token) setExpoPushToken(token);
     });
