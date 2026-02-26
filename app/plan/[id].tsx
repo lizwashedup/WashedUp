@@ -33,10 +33,29 @@ import {
   MessageCircle,
   ChevronRight,
 } from 'lucide-react-native';
+import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../lib/supabase';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_WIDTH * (9 / 16);
+
+const MANAGE_CATEGORIES = [
+  'Art', 'Business', 'Comedy', 'Film', 'Fitness',
+  'Food', 'Gaming', 'Music', 'Nightlife', 'Outdoors',
+  'Sports', 'Tech', 'Wellness', 'Other',
+] as const;
+
+const MANAGE_GENDER_OPTIONS: { label: string; value: string }[] = [
+  { label: 'Mixed', value: 'mixed' },
+  { label: 'Women Only', value: 'women_only' },
+  { label: 'Men Only', value: 'men_only' },
+  { label: 'Nonbinary Only', value: 'nonbinary_only' },
+];
+
+const MIN_GROUP = 3;
+const MAX_GROUP = 8;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -249,6 +268,19 @@ export default function PlanDetailScreen() {
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
+  const [manageModalVisible, setManageModalVisible] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editHostMessage, setEditHostMessage] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editLocationLat, setEditLocationLat] = useState<number | null>(null);
+  const [editLocationLng, setEditLocationLng] = useState<number | null>(null);
+  const [editTicketUrl, setEditTicketUrl] = useState('');
+  const managePlacesRef = React.useRef<GooglePlacesAutocompleteRef>(null);
+  const [editCategory, setEditCategory] = useState<string | null>(null);
+  const [editGenderRule, setEditGenderRule] = useState('mixed');
+  const [editGroupSize, setEditGroupSize] = useState(6);
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? null));
@@ -416,6 +448,100 @@ export default function PlanDetailScreen() {
           text: 'Leave Plan',
           style: 'destructive',
           onPress: () => leaveMutation.mutate(),
+        },
+      ],
+    );
+  };
+
+  // ─── Manage Plan ─────────────────────────────────────────────────────────────
+
+  const openManageModal = () => {
+    if (!plan) return;
+    setEditTitle(plan.title);
+    setEditDescription(plan.description ?? '');
+    setEditHostMessage(plan.host_message ?? '');
+    setEditLocation(plan.location_text ?? '');
+    setEditLocationLat(plan.location_lat ?? null);
+    setEditLocationLng(plan.location_lng ?? null);
+    setEditTicketUrl(plan.tickets_url ?? '');
+    setTimeout(() => {
+      managePlacesRef.current?.setAddressText(plan.location_text ?? '');
+    }, 100);
+    setEditCategory(plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null);
+    setEditGenderRule(plan.gender_rule ?? 'mixed');
+    setEditGroupSize(plan.max_invites ?? 6);
+    setManageModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!plan || !currentUserId || editSaving) return;
+    setEditSaving(true);
+    try {
+      const { error } = await supabase
+        .from('events')
+        .update({
+          title: editTitle.trim(),
+          description: editDescription.trim() || null,
+          host_message: editHostMessage.trim() || null,
+          location_text: editLocation.trim() || null,
+          location_lat: editLocationLat,
+          location_lng: editLocationLng,
+          tickets_url: editTicketUrl.trim() || null,
+          primary_vibe: editCategory?.toLowerCase() ?? null,
+          gender_rule: editGenderRule,
+          max_invites: editGroupSize,
+        })
+        .eq('id', plan.id)
+        .eq('creator_user_id', currentUserId);
+
+      if (error) throw error;
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setManageModalVisible(false);
+      queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
+      queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Could not save changes.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleCancelPlan = () => {
+    Alert.alert(
+      'Cancel this plan?',
+      'This will cancel the plan for everyone. Members will be notified in the group chat.',
+      [
+        { text: 'Keep Plan', style: 'cancel' },
+        {
+          text: 'Cancel Plan',
+          style: 'destructive',
+          onPress: async () => {
+            if (!plan || !currentUserId) return;
+            try {
+              await supabase
+                .from('events')
+                .update({ status: 'cancelled' })
+                .eq('id', plan.id)
+                .eq('creator_user_id', currentUserId);
+
+              await supabase.from('messages').insert({
+                event_id: plan.id,
+                user_id: currentUserId,
+                content: 'cancelled this plan',
+                message_type: 'system',
+              });
+
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              setManageModalVisible(false);
+              queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+              queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+              router.back();
+            } catch (e: any) {
+              Alert.alert('Error', e.message ?? 'Could not cancel plan.');
+            }
+          },
         },
       ],
     );
@@ -647,12 +773,23 @@ export default function PlanDetailScreen() {
         )}
 
         {isHost ? (
-          <TouchableOpacity
-            style={styles.manageButton}
-            onPress={() => router.push(`/plan/${plan.id}/manage` as any)}
-          >
-            <Text style={styles.manageButtonText}>Manage Plan</Text>
-          </TouchableOpacity>
+          <View>
+            <View style={styles.memberActions}>
+              <TouchableOpacity
+                style={styles.manageButton}
+                onPress={openManageModal}
+              >
+                <Text style={styles.manageButtonText}>Manage Plan</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.openChatButton}
+                onPress={() => router.push(`/(tabs)/chats/${plan.id}` as any)}
+              >
+                <MessageCircle size={18} color="#FFFFFF" strokeWidth={2} />
+                <Text style={styles.openChatText}>Open Chat</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         ) : isMember ? (
           <View>
             <View style={styles.memberActions}>
@@ -777,6 +914,206 @@ export default function PlanDetailScreen() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* Manage Plan Modal */}
+      <Modal visible={manageModalVisible} transparent animationType="slide" onRequestClose={() => setManageModalVisible(false)}>
+        <View style={manageStyles.overlay}>
+          <View style={manageStyles.sheet}>
+            <View style={manageStyles.headerRow}>
+              <Text style={manageStyles.title}>Manage Plan</Text>
+              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setManageModalVisible(false); }} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Text style={manageStyles.closeX}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              contentContainerStyle={{ paddingBottom: 24 }}
+            >
+              {/* Title */}
+              <Text style={manageStyles.label}>Title</Text>
+              <TextInput
+                style={manageStyles.input}
+                value={editTitle}
+                onChangeText={setEditTitle}
+                maxLength={80}
+                placeholder="Plan title"
+                placeholderTextColor="#999"
+              />
+
+              {/* Description */}
+              <Text style={manageStyles.label}>Plan description</Text>
+              <TextInput
+                style={[manageStyles.input, manageStyles.textArea]}
+                value={editDescription}
+                onChangeText={setEditDescription}
+                multiline
+                maxLength={500}
+                placeholder="What's the plan? Dress code, what to expect..."
+                placeholderTextColor="#999"
+              />
+
+              {/* Host message */}
+              <Text style={manageStyles.label}>Your message</Text>
+              <TextInput
+                style={[manageStyles.input, manageStyles.hostMessageInput]}
+                value={editHostMessage}
+                onChangeText={setEditHostMessage}
+                multiline
+                maxLength={150}
+                placeholder="A personal note to people joining"
+                placeholderTextColor="#999"
+              />
+
+              {/* Location */}
+              <Text style={manageStyles.label}>Location</Text>
+              <View style={{ zIndex: 10 }}>
+                <GooglePlacesAutocomplete
+                  ref={managePlacesRef}
+                  placeholder="Venue or neighborhood"
+                  fetchDetails
+                  onPress={(data, details) => {
+                    const lat = details?.geometry?.location?.lat ?? null;
+                    const lng = details?.geometry?.location?.lng ?? null;
+                    const name = data.structured_formatting?.main_text ?? data.description;
+                    setEditLocation(name || data.description);
+                    setEditLocationLat(lat);
+                    setEditLocationLng(lng);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  query={{
+                    key: GOOGLE_MAPS_API_KEY,
+                    language: 'en',
+                    components: 'country:us',
+                    location: '34.0522,-118.2437',
+                    radius: '50000',
+                  }}
+                  styles={managePlacesStyles}
+                  textInputProps={{
+                    placeholderTextColor: '#999',
+                  }}
+                  enablePoweredByContainer={false}
+                  debounce={300}
+                  keepResultsAfterBlur={false}
+                  nearbyPlacesAPI="GooglePlacesSearch"
+                />
+              </View>
+
+              {/* Ticket link */}
+              <Text style={manageStyles.label}>Ticket link</Text>
+              <TextInput
+                style={manageStyles.input}
+                value={editTicketUrl}
+                onChangeText={setEditTicketUrl}
+                placeholder="https://..."
+                placeholderTextColor="#999"
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+
+              {/* Category */}
+              <Text style={manageStyles.label}>Category</Text>
+              <View style={manageStyles.pillWrap}>
+                {MANAGE_CATEGORIES.map((cat) => {
+                  const isSelected = editCategory === cat;
+                  return (
+                    <TouchableOpacity
+                      key={cat}
+                      style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setEditCategory(cat);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[manageStyles.pillText, isSelected && manageStyles.pillTextSelected]}>{cat}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Who can join */}
+              <Text style={manageStyles.label}>Who can join</Text>
+              <View style={manageStyles.genderRow}>
+                {MANAGE_GENDER_OPTIONS.map((opt) => {
+                  const isSelected = editGenderRule === opt.value;
+                  return (
+                    <TouchableOpacity
+                      key={opt.value}
+                      style={[manageStyles.genderPill, isSelected && manageStyles.pillSelected]}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setEditGenderRule(opt.value);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[manageStyles.pillText, isSelected && manageStyles.pillTextSelected]}>{opt.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Group size */}
+              <Text style={manageStyles.label}>Group size</Text>
+              <View style={manageStyles.stepperRow}>
+                <TouchableOpacity
+                  style={[manageStyles.stepperBtn, editGroupSize <= MIN_GROUP && manageStyles.stepperBtnDisabled]}
+                  onPress={() => {
+                    if (editGroupSize > MIN_GROUP) {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setEditGroupSize((g) => g - 1);
+                    }
+                  }}
+                  disabled={editGroupSize <= MIN_GROUP}
+                >
+                  <Text style={manageStyles.stepperBtnText}>−</Text>
+                </TouchableOpacity>
+                <View style={manageStyles.stepperValue}>
+                  <Text style={manageStyles.stepperValueText}>{editGroupSize}</Text>
+                  <Text style={manageStyles.stepperValueSub}>people</Text>
+                </View>
+                <TouchableOpacity
+                  style={[manageStyles.stepperBtn, editGroupSize >= MAX_GROUP && manageStyles.stepperBtnDisabled]}
+                  onPress={() => {
+                    if (editGroupSize < MAX_GROUP) {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setEditGroupSize((g) => g + 1);
+                    }
+                  }}
+                  disabled={editGroupSize >= MAX_GROUP}
+                >
+                  <Text style={manageStyles.stepperBtnText}>+</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Save button */}
+              <TouchableOpacity
+                style={[manageStyles.saveBtn, (editSaving || editTitle.trim().length === 0) && manageStyles.saveBtnDisabled]}
+                onPress={handleSaveEdit}
+                disabled={editSaving || editTitle.trim().length === 0}
+                activeOpacity={0.85}
+              >
+                {editSaving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={manageStyles.saveBtnText}>Save Changes</Text>
+                )}
+              </TouchableOpacity>
+
+              {/* Cancel plan */}
+              <TouchableOpacity
+                style={manageStyles.cancelBtn}
+                onPress={handleCancelPlan}
+                activeOpacity={0.7}
+              >
+                <Text style={manageStyles.cancelBtnText}>Cancel This Plan</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1043,12 +1380,15 @@ const styles = StyleSheet.create({
   waitlistButtonText: { fontSize: 17, fontWeight: '700', color: '#C4652A' },
 
   manageButton: {
-    backgroundColor: '#1A1A1A',
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#C4652A',
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 12,
     alignItems: 'center',
   },
-  manageButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  manageButtonText: { color: '#C4652A', fontSize: 15, fontWeight: '700' },
 });
 
 const joinStyles = StyleSheet.create({
@@ -1236,4 +1576,167 @@ const ticketStyles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
+});
+
+const managePlacesStyles = {
+  container: { flex: 0 },
+  textInputContainer: { backgroundColor: 'transparent' },
+  textInput: {
+    backgroundColor: '#FFF8F0',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    color: '#1A1A1A',
+    height: 46,
+    marginBottom: 0,
+  },
+  listView: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    borderRadius: 12,
+    marginTop: 4,
+    overflow: 'hidden' as const,
+  },
+  row: { paddingHorizontal: 14, paddingVertical: 12, backgroundColor: '#FFFFFF' },
+  separator: { height: 1, backgroundColor: '#F0E6D3', marginHorizontal: 14 },
+  description: { color: '#1A1A1A', fontSize: 14 },
+  poweredContainer: { display: 'none' as const },
+};
+
+const manageStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    maxHeight: SCREEN_HEIGHT * 0.85,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1A1A1A',
+  },
+  closeX: {
+    fontSize: 18,
+    color: '#999999',
+    fontWeight: '600',
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#9B8B7A',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: 16,
+  },
+  input: {
+    backgroundColor: '#FFF8F0',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#1A1A1A',
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  hostMessageInput: {
+    minHeight: 50,
+    textAlignVertical: 'top',
+  },
+  pillWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pill: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: '#FFF8F0',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    borderRadius: 20,
+  },
+  pillSelected: {
+    backgroundColor: '#C4652A',
+    borderColor: '#C4652A',
+  },
+  pillText: {
+    fontSize: 14,
+    color: '#1A1A1A',
+    fontWeight: '500',
+  },
+  pillTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  genderRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  genderPill: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#FFF8F0',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  stepperBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#FFF8F0',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperBtnDisabled: { opacity: 0.35 },
+  stepperBtnText: { fontSize: 22, color: '#1A1A1A', fontWeight: '300' },
+  stepperValue: { flex: 1, alignItems: 'center' },
+  stepperValueText: { fontSize: 28, fontWeight: '700', color: '#C4652A' },
+  stepperValueSub: { fontSize: 12, color: '#999999', marginTop: -2 },
+  saveBtn: {
+    backgroundColor: '#C4652A',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  saveBtnDisabled: {
+    opacity: 0.4,
+  },
+  saveBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  cancelBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 8,
+  },
+  cancelBtnText: { color: '#DC2626', fontSize: 14, fontWeight: '600' },
 });
