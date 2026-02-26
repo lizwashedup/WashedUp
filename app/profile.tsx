@@ -14,7 +14,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { Camera } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
 
 // Uses correct column names from profiles table: first_name_display, profile_photo_url
@@ -35,6 +39,12 @@ export default function ProfileScreen() {
   const [deleteStep, setDeleteStep] = useState(1);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  const [showEditFlow, setShowEditFlow] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [editPhotoUri, setEditPhotoUri] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchProfile();
@@ -76,6 +86,88 @@ export default function ProfileScreen() {
     setShowDeleteFlow(false);
     setDeleteStep(1);
     setDeleteConfirmText('');
+  };
+
+  const openEditFlow = () => {
+    setEditName(profile?.first_name ?? '');
+    setEditBio(profile?.bio ?? '');
+    setEditPhotoUri(null);
+    setShowEditFlow(true);
+  };
+
+  const pickEditPhoto = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Go to Settings and allow photo access.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (result.canceled) return;
+    try {
+      const manipulated = await ImageManipulator.manipulateAsync(
+        result.assets[0].uri,
+        [{ resize: { width: 800, height: 800 } }],
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      setEditPhotoUri(manipulated.uri);
+    } catch {
+      setEditPhotoUri(result.assets[0].uri);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Keyboard.dismiss();
+    const trimmedName = editName.trim();
+    if (!trimmedName) {
+      Alert.alert('Name required', 'Please enter a display name.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      let newPhotoUrl = profile?.avatar_url ?? null;
+
+      if (editPhotoUri) {
+        const path = `${user.id}/${user.id}.jpg`;
+        const response = await fetch(editPhotoUri);
+        const blob = await response.blob();
+        const { error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+        newPhotoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          first_name_display: trimmedName,
+          bio: editBio.trim() || null,
+          profile_photo_url: newPhotoUrl,
+        })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      setProfile((prev) =>
+        prev ? { ...prev, first_name: trimmedName, bio: editBio.trim() || null, avatar_url: newPhotoUrl } : prev,
+      );
+      setShowEditFlow(false);
+    } catch (err: any) {
+      Alert.alert('Could not save', err?.message ?? 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Delete Account Flow ─────────────────────────────────────────────────────
@@ -246,6 +338,112 @@ export default function ProfileScreen() {
     );
   }
 
+  // ── Edit Profile Flow ───────────────────────────────────────────────────────
+
+  if (showEditFlow) {
+    const displayPhoto = editPhotoUri ?? profile?.avatar_url;
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.deleteHeader}>
+          <TouchableOpacity
+            onPress={() => setShowEditFlow(false)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+          </TouchableOpacity>
+          <Text style={styles.deleteHeaderTitle}>Edit Profile</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.editContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
+          <TouchableOpacity onPress={pickEditPhoto} activeOpacity={0.8} style={styles.editAvatarWrap}>
+            {displayPhoto ? (
+              <Image source={{ uri: displayPhoto }} style={styles.editAvatar} contentFit="cover" />
+            ) : (
+              <View style={[styles.editAvatar, styles.avatarFallback]}>
+                <Text style={styles.avatarInitial}>
+                  {editName?.[0]?.toUpperCase() ?? '?'}
+                </Text>
+              </View>
+            )}
+            <View style={styles.editAvatarBadge}>
+              <Camera size={14} color="#FFFFFF" strokeWidth={2.5} />
+            </View>
+          </TouchableOpacity>
+          <Text style={styles.editPhotoHint}>Tap to change photo</Text>
+
+          <View style={styles.editFieldGroup}>
+            <Text style={styles.editLabel}>Display Name</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="Your name"
+              placeholderTextColor="#C8BEB5"
+              maxLength={30}
+              autoCorrect={false}
+              returnKeyType="next"
+            />
+          </View>
+
+          <View style={styles.editFieldGroup}>
+            <Text style={styles.editLabel}>Bio</Text>
+            <TextInput
+              style={[styles.editInput, styles.editBioInput]}
+              value={editBio}
+              onChangeText={setEditBio}
+              placeholder="Tell people a little about yourself"
+              placeholderTextColor="#C8BEB5"
+              maxLength={150}
+              multiline
+              textAlignVertical="top"
+              returnKeyType="default"
+            />
+            <Text style={styles.editCharCount}>{editBio.length}/150</Text>
+          </View>
+
+          {profile?.gender && (
+            <View style={styles.editFieldGroup}>
+              <Text style={styles.editLabel}>Gender Identity</Text>
+              <View style={styles.editReadOnly}>
+                <Text style={styles.editReadOnlyText}>
+                  {profile.gender === 'woman' ? 'Woman' : profile.gender === 'man' ? 'Man' : 'Non-binary'}
+                </Text>
+                <Ionicons name="lock-closed-outline" size={14} color="#C8BEB5" />
+              </View>
+              <Text style={styles.editHelp}>Contact hello@washedup.app to update</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.editSaveBtn, saving && { opacity: 0.7 }]}
+            onPress={handleSaveProfile}
+            disabled={saving}
+            activeOpacity={0.85}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.editSaveBtnText}>Save Changes</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.deleteCancelBtn}
+            onPress={() => setShowEditFlow(false)}
+          >
+            <Text style={styles.deleteCancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   // ── Main Profile Screen ─────────────────────────────────────────────────────
 
   return (
@@ -288,6 +486,11 @@ export default function ProfileScreen() {
           {profile?.bio && (
             <Text style={styles.bio}>{profile.bio}</Text>
           )}
+
+          <TouchableOpacity style={styles.editProfileBtn} onPress={openEditFlow} activeOpacity={0.8}>
+            <Ionicons name="create-outline" size={16} color="#C4652A" />
+            <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Settings */}
@@ -499,6 +702,126 @@ const styles = StyleSheet.create({
   },
   deleteFinalBtnDisabled: { backgroundColor: '#F0E6D3' },
   deleteFinalBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+
+  // Edit Profile button on main profile
+  editProfileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#C4652A',
+  },
+  editProfileBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#C4652A',
+  },
+
+  // Edit Profile flow
+  editContent: {
+    padding: 24,
+    alignItems: 'center',
+    gap: 4,
+  },
+  editAvatarWrap: {
+    position: 'relative',
+    marginBottom: 4,
+  },
+  editAvatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: '#C4652A',
+  },
+  editAvatarBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#C4652A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFF8F0',
+  },
+  editPhotoHint: {
+    fontSize: 12,
+    color: '#9B8B7A',
+    marginBottom: 20,
+  },
+  editFieldGroup: {
+    alignSelf: 'stretch',
+    marginBottom: 20,
+  },
+  editLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9B8B7A',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  editInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#F0E6D3',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#1C1917',
+    fontWeight: '400',
+  },
+  editBioInput: {
+    minHeight: 90,
+    paddingTop: 14,
+  },
+  editCharCount: {
+    fontSize: 11,
+    color: '#C8BEB5',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  editReadOnly: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5F0EA',
+    borderWidth: 1.5,
+    borderColor: '#F0E6D3',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  editReadOnlyText: {
+    fontSize: 16,
+    color: '#9B8B7A',
+  },
+  editHelp: {
+    fontSize: 11,
+    color: '#C8BEB5',
+    marginTop: 4,
+  },
+  editSaveBtn: {
+    alignSelf: 'stretch',
+    backgroundColor: '#C4652A',
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  editSaveBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
 
   // Footer
   footer: { textAlign: 'center', fontSize: 12, color: '#C8BEB5', marginTop: 8 },

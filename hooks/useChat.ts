@@ -116,15 +116,22 @@ export function useChat(eventId: string) {
 
   const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      console.warn('[Chat] sendMessage: no authenticated user');
+      return;
+    }
 
-    await supabase.from('messages').insert({
+    const { error } = await supabase.from('messages').insert({
       event_id: eventId,
       user_id: user.id,
       content: content || '',
       message_type: 'user',
       image_url: imageUrl ?? null,
     });
+
+    if (error) {
+      console.error('[Chat] sendMessage failed:', error.message, error.code, error.details);
+    }
   }, [eventId]);
 
   return { messages, loading, currentUserId, sendMessage };

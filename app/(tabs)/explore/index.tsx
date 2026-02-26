@@ -25,26 +25,29 @@ interface SceneEvent {
   description: string | null;
   image_url: string | null;
   event_date: string | null;
-  event_time: string | null;
-  venue_name: string | null;
+  start_time: string | null;
+  venue: string | null;
   category: string | null;
-  tickets_url: string | null;
-  price: string | null;
+  external_url: string | null;
+  ticket_price: string | null;
 }
 
 async function fetchSceneEvents(): Promise<SceneEvent[]> {
-  const { data, error } = await supabase
+  const { data: { user } } = await supabase.auth.getUser();
+  console.log('[Scene] current user:', user?.id ?? 'NOT AUTHENTICATED');
+
+  const { data, error, count } = await supabase
     .from('explore_events')
-    .select('id, title, description, image_url, event_date, event_time, venue_name, category, tickets_url, price')
-    // Handle both 'Live' and 'live' casing in case the DB value differs
-    .or('status.eq.Live,status.eq.live,status.eq.active')
+    .select('id, title, description, image_url, event_date, start_time, venue, category, external_url, ticket_price', { count: 'exact' })
+    .eq('status', 'Live')
     .order('event_date', { ascending: true });
 
-  if (error) {
-    console.log('[Scene] fetchSceneEvents error:', error.message, error.code);
-    throw error;
+  console.log('[Scene] result:', { count, dataLength: data?.length ?? 0, error: error?.message ?? 'none', code: error?.code ?? 'none' });
+
+  if (error) throw error;
+  if (data && data.length > 0) {
+    console.log('[Scene] first row:', JSON.stringify(data[0]));
   }
-  console.log('[Scene] fetched events count:', data?.length ?? 0);
   return data ?? [];
 }
 
@@ -98,7 +101,7 @@ function FeaturedCard({ event }: { event: SceneEvent }) {
     <TouchableOpacity
       activeOpacity={0.92}
       style={styles.featuredCard}
-      onPress={() => event.tickets_url && Linking.openURL(event.tickets_url)}
+      onPress={() => event.external_url && Linking.openURL(event.external_url)}
     >
       {/* Photo or color placeholder */}
       {event.image_url ? (
@@ -127,28 +130,28 @@ function FeaturedCard({ event }: { event: SceneEvent }) {
         <Text style={styles.featuredTitle} numberOfLines={2}>{event.title}</Text>
 
         <View style={styles.featuredMeta}>
-          {event.venue_name && (
+          {event.venue && (
             <View style={styles.metaRow}>
               <Ionicons name="location-outline" size={13} color="rgba(255,255,255,0.8)" />
-              <Text style={styles.featuredMetaText} numberOfLines={1}>{event.venue_name}</Text>
+              <Text style={styles.featuredMetaText} numberOfLines={1}>{event.venue}</Text>
             </View>
           )}
           <View style={styles.metaRow}>
             <Ionicons name="time-outline" size={13} color="rgba(255,255,255,0.8)" />
             <Text style={styles.featuredMetaText}>
-              {formatEventDate(event.event_date, event.event_time)}
+              {formatEventDate(event.event_date, event.start_time)}
             </Text>
           </View>
         </View>
 
-        {event.tickets_url && (
+        {event.external_url && (
           <TouchableOpacity
             style={styles.featuredCta}
-            onPress={() => Linking.openURL(event.tickets_url!)}
+            onPress={() => Linking.openURL(event.external_url!)}
             activeOpacity={0.85}
           >
             <Text style={styles.featuredCtaText}>
-              {event.price ? `Get Tickets · ${event.price}` : 'Get Tickets'}
+              {event.ticket_price ? `Get Tickets · ${event.ticket_price}` : 'Get Tickets'}
             </Text>
             <Ionicons name="arrow-forward" size={14} color="#C4652A" />
           </TouchableOpacity>
@@ -167,7 +170,7 @@ function EventCard({ event }: { event: SceneEvent }) {
     <TouchableOpacity
       activeOpacity={0.88}
       style={styles.eventCard}
-      onPress={() => event.tickets_url && Linking.openURL(event.tickets_url)}
+      onPress={() => event.external_url && Linking.openURL(event.external_url)}
     >
       {event.image_url ? (
         <Image source={{ uri: event.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
@@ -192,11 +195,11 @@ function EventCard({ event }: { event: SceneEvent }) {
 
       <View style={styles.eventContent}>
         <Text style={styles.eventTitle} numberOfLines={2}>{event.title}</Text>
-        {event.venue_name && (
-          <Text style={styles.eventMeta} numberOfLines={1}>{event.venue_name}</Text>
+        {event.venue && (
+          <Text style={styles.eventMeta} numberOfLines={1}>{event.venue}</Text>
         )}
         <Text style={styles.eventDate} numberOfLines={1}>
-          {formatEventDate(event.event_date, event.event_time)}
+          {formatEventDate(event.event_date, event.start_time)}
         </Text>
       </View>
     </TouchableOpacity>
@@ -234,16 +237,23 @@ export default function SceneScreen() {
   const featured = events[0] ?? null;
   const rest = events.slice(1);
 
-  // Weekend window: Friday–Sunday of the current week
   const now = new Date();
   const dayOfWeek = now.getDay();
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
   const daysUntilFriday = (5 - dayOfWeek + 7) % 7;
   const friday = new Date(now);
-  friday.setDate(now.getDate() + daysUntilFriday);
+  friday.setDate(now.getDate() + (daysUntilFriday === 0 && dayOfWeek !== 5 ? 7 : daysUntilFriday));
   friday.setHours(0, 0, 0, 0);
   const sunday = new Date(friday);
   sunday.setDate(friday.getDate() + 2);
   sunday.setHours(23, 59, 59, 999);
+
+  const thisWeek = rest.filter(e => {
+    if (!e.event_date) return false;
+    const d = parseLocalDate(e.event_date);
+    return d <= todayEnd || (d > todayEnd && d < friday);
+  });
 
   const thisWeekend = rest.filter(e => {
     if (!e.event_date) return false;
@@ -254,8 +264,10 @@ export default function SceneScreen() {
   const comingUp = rest.filter(e => {
     if (!e.event_date) return false;
     const d = parseLocalDate(e.event_date);
-    return !(d >= friday && d <= sunday);
+    return d > sunday;
   });
+
+  const noDate = rest.filter(e => !e.event_date);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -312,6 +324,20 @@ export default function SceneScreen() {
             </View>
           )}
 
+          {/* This Week (today through Thursday) */}
+          {thisWeek.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>This Week</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.hScroll}
+              >
+                {thisWeek.map(event => <EventCard key={event.id} event={event} />)}
+              </ScrollView>
+            </View>
+          )}
+
           {/* This Weekend */}
           {thisWeekend.length > 0 && (
             <View style={styles.section}>
@@ -327,7 +353,7 @@ export default function SceneScreen() {
           )}
 
           {/* Coming Up */}
-          {comingUp.length > 0 && (
+          {[...comingUp, ...noDate].length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>Coming Up</Text>
               <ScrollView
@@ -335,7 +361,7 @@ export default function SceneScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.hScroll}
               >
-                {comingUp.map(event => <EventCard key={event.id} event={event} />)}
+                {[...comingUp, ...noDate].map(event => <EventCard key={event.id} event={event} />)}
               </ScrollView>
             </View>
           )}

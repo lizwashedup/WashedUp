@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { LayoutList, Map, ChevronDown, Check, ArrowRight } from 'lucide-react-native';
+import { LayoutList, Map, ChevronDown, Check, ArrowRight, User } from 'lucide-react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
 import { fetchPlans, Plan } from '../../../lib/fetchPlans';
@@ -242,11 +242,13 @@ const SectionRow = React.memo(({
   def,
   plans,
   wishlisted,
+  memberIds,
   onWishlist,
 }: {
   def: SectionDef;
   plans: Plan[];
   wishlisted: Record<string, boolean>;
+  memberIds: Record<string, boolean>;
   onWishlist: (id: string, current: boolean) => void;
 }) => {
   const handleSeeAll = useCallback(() => {
@@ -282,6 +284,7 @@ const SectionRow = React.memo(({
           <PlanCard
             plan={item}
             isWishlisted={!!wishlisted[item.id]}
+            isMember={!!memberIds[item.id]}
             onWishlist={onWishlist}
             variant="carousel"
           />
@@ -302,6 +305,7 @@ function VerticalPlanList({
   plans,
   loading,
   wishlisted,
+  memberIds,
   onWishlist,
   emptyMessage,
   emptyCta,
@@ -310,6 +314,7 @@ function VerticalPlanList({
   plans: Plan[];
   loading: boolean;
   wishlisted: Record<string, boolean>;
+  memberIds: Record<string, boolean>;
   onWishlist: (id: string, current: boolean) => void;
   emptyMessage: string;
   emptyCta: string;
@@ -337,6 +342,7 @@ function VerticalPlanList({
         <PlanCard
           plan={item}
           isWishlisted={!!wishlisted[item.id]}
+          isMember={!!memberIds[item.id]}
           onWishlist={onWishlist}
           variant="full"
         />
@@ -565,6 +571,12 @@ export default function PlansScreen() {
     return lookup;
   }, [wishlistIds]);
 
+  const memberIdSet = useMemo(() => {
+    const lookup: Record<string, boolean> = {};
+    myPlans.forEach((p: Plan) => { lookup[p.id] = true; });
+    return lookup;
+  }, [myPlans]);
+
   const wishlistMutation = useMutation({
     mutationFn: async ({ planId, isCurrentlyWishlisted }: { planId: string; isCurrentlyWishlisted: boolean }) => {
       if (!userId) return;
@@ -630,17 +642,15 @@ export default function PlansScreen() {
           <Text style={styles.logoText}>WashedUp</Text>
         </View>
         <TouchableOpacity
-          style={[styles.mapToggleButton, mapView && styles.mapToggleButtonActive]}
-          onPress={() => { Haptics.selectionAsync(); setMapView((v) => !v); }}
-          accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
+          style={styles.profileButton}
+          onPress={() => router.push('/profile')}
+          accessibilityLabel="Profile"
         >
-          {mapView
-            ? <LayoutList size={20} color="#FFFFFF" strokeWidth={2} />
-            : <Map size={20} color="#1A1A1A" strokeWidth={2} />}
+          <User size={22} color="#1A1A1A" strokeWidth={2} />
         </TouchableOpacity>
       </View>
 
-      {/* Filter Dropdowns — only relevant on the Plans tab */}
+      {/* Filter Dropdowns + Map Toggle — only relevant on the Plans tab */}
       {activeTab === 'plans' && (
         <View style={styles.filterRow}>
           <TouchableOpacity
@@ -661,6 +671,21 @@ export default function PlansScreen() {
               {categoryLabel}
             </Text>
             <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+          </TouchableOpacity>
+
+          <View style={{ flex: 1 }} />
+
+          <TouchableOpacity
+            style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
+            onPress={() => { Haptics.selectionAsync(); setMapView((v) => !v); }}
+            accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
+          >
+            {mapView
+              ? <LayoutList size={14} color="#FFFFFF" strokeWidth={2} />
+              : <Map size={14} color="#1A1A1A" strokeWidth={2} />}
+            <Text style={[styles.mapToggleLabel, mapView && styles.mapToggleLabelActive]}>
+              {mapView ? 'List' : 'Map'}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -742,6 +767,7 @@ export default function PlansScreen() {
                     def={def}
                     plans={plans}
                     wishlisted={wishlistedSet}
+                    memberIds={memberIdSet}
                     onWishlist={handleWishlist}
                   />
                 ))
@@ -756,6 +782,7 @@ export default function PlansScreen() {
             plans={myPlans}
             loading={myPlansLoading}
             wishlisted={wishlistedSet}
+            memberIds={memberIdSet}
             onWishlist={handleWishlist}
             emptyMessage="You haven't joined any plans yet."
             emptyCta="Browse Plans"
@@ -768,6 +795,7 @@ export default function PlansScreen() {
             plans={wishlistPlans}
             loading={wishlistLoading}
             wishlisted={wishlistedSet}
+            memberIds={memberIdSet}
             onWishlist={handleWishlist}
             emptyMessage="No wishlisted plans yet. Tap the heart on any plan."
             emptyCta="Browse Plans"
@@ -819,7 +847,7 @@ const styles = StyleSheet.create({
   },
   logoContainer: { justifyContent: 'center' },
   logoText: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 28, color: '#C4652A' },
-  mapToggleButton: {
+  profileButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -829,7 +857,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mapToggleButtonActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
+  mapTogglePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  mapTogglePillActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
+  mapToggleLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  mapToggleLabelActive: {
+    color: '#FFFFFF',
+  },
 
   filterRow: {
     flexDirection: 'row',
@@ -856,21 +903,19 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    gap: 8,
-    marginBottom: 12,
-    marginTop: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E6D3',
+    marginBottom: 4,
   },
   tab: {
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F0E6D3',
+    paddingVertical: 12,
+    marginRight: 24,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  tabActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A' },
-  tabText: { fontSize: 15, fontWeight: '600', color: '#9B8B7A' },
-  tabTextActive: { color: '#FFFFFF', fontWeight: '700' },
+  tabActive: { borderBottomColor: '#C4652A' },
+  tabText: { fontSize: 14, fontWeight: '500', color: '#9B8B7A' },
+  tabTextActive: { color: '#1C1917', fontWeight: '700' },
 
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   map: { flex: 1 },

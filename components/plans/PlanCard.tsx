@@ -36,6 +36,7 @@ interface PlanCardProps {
     } | null;
   };
   isWishlisted?: boolean;
+  isMember?: boolean;
   onWishlist?: (planId: string, currentState: boolean) => void;
   variant?: 'carousel' | 'full';
 }
@@ -87,6 +88,7 @@ function formatDate(dateString: string): string {
 export const PlanCard = React.memo<PlanCardProps>(({
   plan,
   isWishlisted = false,
+  isMember = false,
   onWishlist,
   variant = 'carousel',
 }) => {
@@ -205,6 +207,13 @@ export const PlanCard = React.memo<PlanCardProps>(({
         <Text style={styles.title} numberOfLines={2}>
           {plan.title}
         </Text>
+
+        {isMember && (
+          <View style={styles.goingBadge}>
+            <View style={styles.goingDot} />
+            <Text style={styles.goingText}>You're going</Text>
+          </View>
+        )}
 
         {plan.location_text && (
           <Text style={styles.neighborhood} numberOfLines={1}>
@@ -370,6 +379,27 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: '#1C1917',
     lineHeight: 28,
+  },
+  goingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#E8F5E9',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  goingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#4CAF50',
+  },
+  goingText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#2E7D32',
   },
   neighborhood: {
     fontSize: 13,
