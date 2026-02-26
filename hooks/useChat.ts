@@ -17,7 +17,8 @@ export interface ChatMessage {
 }
 
 async function attachSenders(messages: any[]): Promise<ChatMessage[]> {
-  const userIds = [...new Set(messages.map(m => m.user_id).filter(Boolean))];
+  const allIds = messages.map(m => m.user_id).filter(Boolean);
+  const userIds = allIds.filter((id: string, i: number) => allIds.indexOf(id) === i);
   if (userIds.length === 0) return messages as ChatMessage[];
 
   const { data: profiles } = await supabase
@@ -25,18 +26,19 @@ async function attachSenders(messages: any[]): Promise<ChatMessage[]> {
     .select('id, first_name_display, profile_photo_url')
     .in('id', userIds);
 
-  const profileMap = new Map(
-    (profiles ?? []).map((p: any) => [p.id, {
+  const profileMap: Record<string, any> = {};
+  (profiles ?? []).forEach((p: any) => {
+    profileMap[p.id] = {
       id: p.id,
       first_name: p.first_name_display ?? null,
       avatar_url: p.profile_photo_url ?? null,
-    }]),
-  );
+    };
+  });
 
   return messages.map(m => ({
     ...m,
     message_type: m.message_type ?? 'user',
-    sender: profileMap.get(m.user_id) ?? null,
+    sender: profileMap[m.user_id] ?? null,
   })) as ChatMessage[];
 }
 
@@ -45,7 +47,7 @@ export function useChat(eventId: string) {
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string>('');
   // Ref so the real-time channel closure always has the latest blocked set
-  const blockedIdsRef = useRef<Set<string>>(new Set());
+  const blockedIdsRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -65,7 +67,7 @@ export function useChat(eventId: string) {
         async (payload) => {
           const newMsg = payload.new as any;
           // Drop real-time messages from blocked users without a full refetch
-          if (blockedIdsRef.current.has(newMsg.user_id)) return;
+          if (blockedIdsRef.current[newMsg.user_id]) return;
           const enriched = await attachSenders([newMsg]);
           setMessages(prev => [...prev, enriched[0]]);
         },
@@ -95,10 +97,11 @@ export function useChat(eventId: string) {
         ),
       ]);
 
-      const blockedIds = new Set<string>(profile?.blocked_users ?? []);
-      blockedIdsRef.current = blockedIds;
+      const blockedLookup: Record<string, boolean> = {};
+      (profile?.blocked_users ?? []).forEach((uid: string) => { blockedLookup[uid] = true; });
+      blockedIdsRef.current = blockedLookup;
 
-      const filtered = (data ?? []).filter((msg: any) => !blockedIds.has(msg.user_id));
+      const filtered = (data ?? []).filter((msg: any) => !blockedLookup[msg.user_id]);
       const enriched = await attachSenders(filtered);
       setMessages(enriched);
     } else {

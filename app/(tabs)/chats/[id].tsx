@@ -487,6 +487,8 @@ export default function ChatScreen() {
             keyExtractor={item => item.id}
             contentContainerStyle={chatStyles.messageList}
             showsVerticalScrollIndicator={false}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
             renderItem={({ item, index }) => {
               if ('type' in item && item.type === 'date') {

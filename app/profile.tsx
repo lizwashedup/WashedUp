@@ -9,6 +9,7 @@ import {
   Linking,
   ActivityIndicator,
   TextInput,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -164,7 +165,7 @@ export default function ProfileScreen() {
           <View style={{ width: 24 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.deleteContent}>
+        <ScrollView contentContainerStyle={styles.deleteContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           {deleteStep === 1 && (
             <>
               <View style={styles.deleteWarningIcon}>

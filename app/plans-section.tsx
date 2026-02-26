@@ -47,7 +47,11 @@ export default function PlansSectionScreen() {
     staleTime: 30_000,
   });
 
-  const wishlistedSet = useMemo(() => new Set(wishlistIds), [wishlistIds]);
+  const wishlistedSet = useMemo(() => {
+    const lookup: Record<string, boolean> = {};
+    wishlistIds.forEach((id: string) => { lookup[id] = true; });
+    return lookup;
+  }, [wishlistIds]);
 
   const wishlistMutation = useMutation({
     mutationFn: async ({ planId, isCurrentlyWishlisted }: { planId: string; isCurrentlyWishlisted: boolean }) => {
@@ -97,7 +101,7 @@ export default function PlansSectionScreen() {
           renderItem={({ item }) => (
             <PlanCard
               plan={item}
-              isWishlisted={wishlistedSet.has(item.id)}
+              isWishlisted={!!wishlistedSet[item.id]}
               onWishlist={(planId, current) => wishlistMutation.mutate({ planId, isCurrentlyWishlisted: current })}
               variant="full"
             />

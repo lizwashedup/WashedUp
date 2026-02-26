@@ -54,26 +54,33 @@ const LA_REGION = {
 async function fetchEventsByIds(ids: string[]): Promise<Plan[]> {
   if (ids.length === 0) return [];
 
-  const { data: events } = await supabase
+  const { data: events, error: eventsError } = await supabase
     .from('events')
     .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id')
     .in('id', ids)
     .order('start_time', { ascending: true });
 
+  if (eventsError) {
+    console.error('[fetchEventsByIds] events query error:', eventsError.message);
+    return [];
+  }
   if (!events?.length) return [];
 
-  const creatorIds = [...new Set(events.map((e: any) => e.creator_user_id).filter(Boolean))];
-  let profileMap = new Map<string, any>();
-  if (creatorIds.length > 0) {
+  // Build profile lookup using plain object (avoids Hermes Map<generic> issue)
+  const profileMap: Record<string, any> = {};
+  const creatorIds = events.map((e: any) => e.creator_user_id).filter(Boolean);
+  const uniqueCreatorIds = creatorIds.filter((id: string, i: number) => creatorIds.indexOf(id) === i);
+
+  if (uniqueCreatorIds.length > 0) {
     const { data: profiles } = await supabase
       .from('profiles_public')
       .select('id, first_name_display, profile_photo_url')
-      .in('id', creatorIds);
-    profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
+      .in('id', uniqueCreatorIds);
+    (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
   }
 
   return events.map((e: any) => {
-    const hp = profileMap.get(e.creator_user_id) ?? null;
+    const hp = profileMap[e.creator_user_id] ?? null;
     return {
       id: e.id,
       title: e.title,
@@ -84,7 +91,7 @@ async function fetchEventsByIds(ids: string[]): Promise<Plan[]> {
       latitude: e.location_lat ?? null,
       longitude: e.location_lng ?? null,
       image_url: e.image_url ?? null,
-      category: e.primary_vibe ?? e.category ?? null,
+      category: e.primary_vibe ?? null,
       gender_rule: e.gender_rule ?? null,
       max_invites: e.max_invites ?? null,
       min_invites: e.min_invites ?? null,
@@ -242,7 +249,7 @@ const SectionRow = React.memo(({
 }: {
   def: SectionDef;
   plans: Plan[];
-  wishlisted: Set<string>;
+  wishlisted: Record<string, boolean>;
   onWishlist: (id: string, current: boolean) => void;
 }) => {
   const handleSeeAll = useCallback(() => {
@@ -277,7 +284,7 @@ const SectionRow = React.memo(({
         renderItem={({ item }) => (
           <PlanCard
             plan={item}
-            isWishlisted={wishlisted.has(item.id)}
+            isWishlisted={!!wishlisted[item.id]}
             onWishlist={onWishlist}
             variant="carousel"
           />
@@ -305,12 +312,13 @@ function VerticalPlanList({
 }: {
   plans: Plan[];
   loading: boolean;
-  wishlisted: Set<string>;
+  wishlisted: Record<string, boolean>;
   onWishlist: (id: string, current: boolean) => void;
   emptyMessage: string;
   emptyCta: string;
   onEmptyCta: () => void;
 }) {
+  console.log('[VerticalPlanList] loading:', loading, 'plans.length:', plans.length);
   if (loading) {
     return <View style={styles.centered}><ActivityIndicator size="large" color="#C4652A" /></View>;
   }
@@ -331,7 +339,7 @@ function VerticalPlanList({
       renderItem={({ item }) => (
         <PlanCard
           plan={item}
-          isWishlisted={wishlisted.has(item.id)}
+          isWishlisted={!!wishlisted[item.id]}
           onWishlist={onWishlist}
           variant="full"
         />
@@ -382,40 +390,172 @@ export default function PlansScreen() {
     staleTime: 30_000,
   });
 
-  // "My Plans" — events the user has joined
+  // "My Plans" — events the user has joined OR created (single JOIN query)
   const { data: myPlans = [], isLoading: myPlansLoading } = useQuery<Plan[]>({
     queryKey: ['my-plans', userId],
     queryFn: async () => {
       if (!userId) return [];
-      const { data: memberships } = await supabase
+
+      // Joined events via JOIN (avoids two-step fetchEventsByIds)
+      const { data: memberships, error: memError } = await supabase
         .from('event_members')
-        .select('event_id')
+        .select(`
+          event_id,
+          events (
+            id, title, start_time, location_text, location_lat, location_lng,
+            image_url, primary_vibe, gender_rule, max_invites, min_invites,
+            member_count, status, creator_user_id
+          )
+        `)
         .eq('user_id', userId)
         .eq('status', 'joined');
-      const ids = (memberships ?? []).map((m: any) => m.event_id as string);
-      return fetchEventsByIds(ids);
+
+      if (memError) {
+        console.error('[MyPlans] membership query error:', memError.message);
+        return [];
+      }
+
+      // Events user created directly
+      const { data: created, error: createdError } = await supabase
+        .from('events')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id')
+        .eq('creator_user_id', userId)
+        .in('status', ['forming', 'active', 'full']);
+
+      if (createdError) {
+        console.error('[MyPlans] created query error:', createdError.message);
+      }
+
+      const joinedEvents = (memberships ?? [])
+        .map((m: any) => m.events)
+        .filter((e: any) => e && ['forming', 'active', 'full'].includes(e.status));
+
+      // Merge and deduplicate
+      const seen: Record<string, boolean> = {};
+      const allEvents: any[] = [];
+      [...joinedEvents, ...(created ?? [])].forEach((e: any) => {
+        if (e && !seen[e.id]) {
+          seen[e.id] = true;
+          allEvents.push(e);
+        }
+      });
+
+      if (!allEvents.length) return [];
+
+      // Fetch host profiles
+      const creatorIds = allEvents.map((e: any) => e.creator_user_id).filter(Boolean);
+      const uniqueCreatorIds = creatorIds.filter((id: string, i: number) => creatorIds.indexOf(id) === i);
+      const profileMap: Record<string, any> = {};
+      if (uniqueCreatorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles_public')
+          .select('id, first_name_display, profile_photo_url')
+          .in('id', uniqueCreatorIds);
+        (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+      }
+
+      return allEvents.map((e: any) => {
+        const hp = profileMap[e.creator_user_id] ?? null;
+        return {
+          id: e.id,
+          title: e.title,
+          start_time: e.start_time,
+          location_text: e.location_text ?? null,
+          location_lat: e.location_lat ?? null,
+          location_lng: e.location_lng ?? null,
+          latitude: e.location_lat ?? null,
+          longitude: e.location_lng ?? null,
+          image_url: e.image_url ?? null,
+          category: e.primary_vibe ?? null,
+          gender_rule: e.gender_rule ?? null,
+          max_invites: e.max_invites ?? null,
+          min_invites: e.min_invites ?? null,
+          member_count: e.member_count ?? 0,
+          status: e.status ?? 'forming',
+          host: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
+        } as Plan;
+      });
     },
     enabled: !!userId,
-    staleTime: 30_000,
+    staleTime: 10_000,
+    refetchOnMount: 'always',
   });
 
-  // "Wishlist" — fetched from wishlists table joined with events
+  // "Wishlist" — fetched via JOIN (single query, avoids two-step)
   const { data: wishlistPlans = [], isLoading: wishlistLoading } = useQuery<Plan[]>({
     queryKey: ['wishlist-plans', userId],
     queryFn: async () => {
       if (!userId) return [];
-      const { data: wl } = await supabase
+
+      const { data: wl, error: wlError } = await supabase
         .from('wishlists')
-        .select('event_id')
+        .select(`
+          event_id,
+          events (
+            id, title, start_time, location_text, location_lat, location_lng,
+            image_url, primary_vibe, gender_rule, max_invites, min_invites,
+            member_count, status, creator_user_id
+          )
+        `)
         .eq('user_id', userId);
-      const ids = (wl ?? []).map((r: any) => r.event_id as string);
-      return fetchEventsByIds(ids);
+
+      if (wlError) {
+        console.error('[Wishlist] query error:', wlError.message);
+        return [];
+      }
+
+      if (!wl?.length) return [];
+
+      const plans = wl
+        .map((w: any) => w.events)
+        .filter((e: any) => e != null);
+
+      if (!plans.length) return [];
+
+      // Fetch host profiles
+      const creatorIds = plans.map((e: any) => e.creator_user_id).filter(Boolean);
+      const uniqueCreatorIds = creatorIds.filter((id: string, i: number) => creatorIds.indexOf(id) === i);
+      const profileMap: Record<string, any> = {};
+      if (uniqueCreatorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles_public')
+          .select('id, first_name_display, profile_photo_url')
+          .in('id', uniqueCreatorIds);
+        (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+      }
+
+      return plans.map((e: any) => {
+        const hp = profileMap[e.creator_user_id] ?? null;
+        return {
+          id: e.id,
+          title: e.title,
+          start_time: e.start_time,
+          location_text: e.location_text ?? null,
+          location_lat: e.location_lat ?? null,
+          location_lng: e.location_lng ?? null,
+          latitude: e.location_lat ?? null,
+          longitude: e.location_lng ?? null,
+          image_url: e.image_url ?? null,
+          category: e.primary_vibe ?? null,
+          gender_rule: e.gender_rule ?? null,
+          max_invites: e.max_invites ?? null,
+          min_invites: e.min_invites ?? null,
+          member_count: e.member_count ?? 0,
+          status: e.status ?? 'forming',
+          host: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
+        } as Plan;
+      });
     },
     enabled: !!userId,
-    staleTime: 30_000,
+    staleTime: 10_000,
+    refetchOnMount: 'always',
   });
 
-  const wishlistedSet = useMemo(() => new Set(wishlistIds), [wishlistIds]);
+  const wishlistedSet = useMemo(() => {
+    const lookup: Record<string, boolean> = {};
+    wishlistIds.forEach((id: string) => { lookup[id] = true; });
+    return lookup;
+  }, [wishlistIds]);
 
   const wishlistMutation = useMutation({
     mutationFn: async ({ planId, isCurrentlyWishlisted }: { planId: string; isCurrentlyWishlisted: boolean }) => {
@@ -557,7 +697,7 @@ export default function PlansScreen() {
                   coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
                   title={plan.title}
                   description={plan.location_text ?? undefined}
-                  pinColor={wishlistedSet.has(plan.id) ? '#E53935' : '#C4652A'}
+                  pinColor={wishlistedSet[plan.id] ? '#E53935' : '#C4652A'}
                   onCalloutPress={() => router.push(`/plan/${plan.id}`)}
                 />
               ))}
@@ -607,25 +747,29 @@ export default function PlansScreen() {
           )}
         </>
       ) : activeTab === 'myplans' ? (
-        <VerticalPlanList
-          plans={myPlans}
-          loading={myPlansLoading}
-          wishlisted={wishlistedSet}
-          onWishlist={handleWishlist}
-          emptyMessage="You haven't joined any plans yet."
-          emptyCta="Browse Plans"
-          onEmptyCta={() => setActiveTab('plans')}
-        />
+        <View style={{ flex: 1 }}>
+          <VerticalPlanList
+            plans={myPlans}
+            loading={myPlansLoading}
+            wishlisted={wishlistedSet}
+            onWishlist={handleWishlist}
+            emptyMessage="You haven't joined any plans yet."
+            emptyCta="Browse Plans"
+            onEmptyCta={() => setActiveTab('plans')}
+          />
+        </View>
       ) : (
-        <VerticalPlanList
-          plans={wishlistPlans}
-          loading={wishlistLoading}
-          wishlisted={wishlistedSet}
-          onWishlist={handleWishlist}
-          emptyMessage="No wishlisted plans yet. Tap the heart on any plan."
-          emptyCta="Browse Plans"
-          onEmptyCta={() => setActiveTab('plans')}
-        />
+        <View style={{ flex: 1 }}>
+          <VerticalPlanList
+            plans={wishlistPlans}
+            loading={wishlistLoading}
+            wishlisted={wishlistedSet}
+            onWishlist={handleWishlist}
+            emptyMessage="No wishlisted plans yet. Tap the heart on any plan."
+            emptyCta="Browse Plans"
+            onEmptyCta={() => setActiveTab('plans')}
+          />
+        </View>
       )}
 
       {/* When Sheet */}

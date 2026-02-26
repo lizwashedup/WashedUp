@@ -11,6 +11,10 @@ import {
   Dimensions,
   Linking,
   Platform,
+  Modal,
+  TextInput,
+  Pressable,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -200,12 +204,11 @@ async function fetchMembers(planId: string): Promise<Member[]> {
     .select('id, first_name_display, profile_photo_url')
     .in('id', userIds);
 
-  const profileMap = new Map<string, any>(
-    (profileRows ?? []).map((p: any) => [p.id, p]),
-  );
+  const profileMap: Record<string, any> = {};
+  (profileRows ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
   return memberRows.map((m: any) => {
-    const profile = profileMap.get(m.user_id);
+    const profile = profileMap[m.user_id];
     return {
       id: m.id,
       user_id: m.user_id,
@@ -242,6 +245,10 @@ export default function PlanDetailScreen() {
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [mapCoords, setMapCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [joinModalVisible, setJoinModalVisible] = useState(false);
+  const [joinMessage, setJoinMessage] = useState('');
+  const [joinConfirmed, setJoinConfirmed] = useState(false);
+  const [ticketModalVisible, setTicketModalVisible] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? null));
@@ -302,35 +309,117 @@ export default function PlanDetailScreen() {
   // ─── Join ────────────────────────────────────────────────────────────────────
 
   const joinMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (greeting?: string) => {
       if (!currentUserId || !id) throw new Error('Not authenticated');
 
-      const { error: joinError } = await supabase
+      // Check if there's an existing row (user previously left or partial insert)
+      const { data: existing } = await supabase
         .from('event_members')
-        .insert({ event_id: id, user_id: currentUserId, role: 'guest', status: 'joined' });
-      if (joinError) throw joinError;
+        .select('id')
+        .eq('event_id', id)
+        .eq('user_id', currentUserId)
+        .maybeSingle();
 
-      // System message
+      if (existing) {
+        const { error: updateError } = await supabase
+          .from('event_members')
+          .update({ status: 'joined', role: 'guest' })
+          .eq('event_id', id)
+          .eq('user_id', currentUserId);
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from('event_members')
+          .insert({ event_id: id, user_id: currentUserId, role: 'guest', status: 'joined' });
+        if (insertError) throw insertError;
+      }
+
       await supabase.from('messages').insert({
         event_id: id,
         user_id: currentUserId,
         content: 'joined the plan',
         message_type: 'system',
       });
+
+      if (greeting && greeting.trim().length > 0) {
+        await supabase.from('messages').insert({
+          event_id: id,
+          user_id: currentUserId,
+          content: greeting.trim(),
+          message_type: 'user',
+        });
+      }
     },
     onSuccess: () => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setJoinModalVisible(false);
+      setJoinMessage('');
+      setJoinConfirmed(false);
       queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
       queryClient.invalidateQueries({ queryKey: ['wishlist-plans'] });
       queryClient.invalidateQueries({ queryKey: ['wishlists'] });
+
+      // Navigate to chat so the user sees their greeting posted
+      router.push(`/(tabs)/chats/${id}` as any);
+
+      // If the event is ticketed, show the ticket prompt after a short delay
+      if (plan?.tickets_url) {
+        setTimeout(() => setTicketModalVisible(true), 600);
+      }
     },
     onError: (error: any) => {
       Alert.alert('Oops', error.message ?? 'Something went wrong.');
     },
   });
+
+  // ─── Leave ───────────────────────────────────────────────────────────────────
+
+  const leaveMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentUserId || !id) throw new Error('Not authenticated');
+
+      await supabase
+        .from('event_members')
+        .update({ status: 'left' })
+        .eq('event_id', id)
+        .eq('user_id', currentUserId);
+
+      await supabase.from('messages').insert({
+        event_id: id,
+        user_id: currentUserId,
+        content: 'had to leave the plan',
+        message_type: 'system',
+      });
+    },
+    onSuccess: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
+      queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
+      queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+    },
+    onError: (error: any) => {
+      Alert.alert('Oops', error.message ?? 'Something went wrong.');
+    },
+  });
+
+  const handleLeave = () => {
+    Alert.alert(
+      "Can't make it?",
+      'Your spot will open for someone else. The group will be notified.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave Plan',
+          style: 'destructive',
+          onPress: () => leaveMutation.mutate(),
+        },
+      ],
+    );
+  };
 
   // ─── Wishlist ────────────────────────────────────────────────────────────────
 
@@ -546,8 +635,8 @@ export default function PlanDetailScreen() {
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
       <View style={styles.stickyBar}>
-        {/* Get Tickets button — shown above the main action when tickets_url exists */}
-        {plan.tickets_url && (
+        {/* Get Tickets — only shown after joining */}
+        {plan.tickets_url && (isMember || isHost) && (
           <TouchableOpacity
             style={styles.ticketButton}
             onPress={() => Linking.openURL(plan.tickets_url!)}
@@ -565,17 +654,19 @@ export default function PlanDetailScreen() {
             <Text style={styles.manageButtonText}>Manage Plan</Text>
           </TouchableOpacity>
         ) : isMember ? (
-          <View style={styles.memberActions}>
-            <View style={styles.youreGoingBadge}>
-              <Text style={styles.youreGoingText}>You're going</Text>
+          <View>
+            <View style={styles.memberActions}>
+              <TouchableOpacity style={styles.youreGoingBadge} onPress={handleLeave}>
+                <Text style={styles.youreGoingText}>Can't make it?</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.openChatButton}
+                onPress={() => router.push(`/(tabs)/chats/${plan.id}` as any)}
+              >
+                <MessageCircle size={18} color="#FFFFFF" strokeWidth={2} />
+                <Text style={styles.openChatText}>Open Chat</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={styles.openChatButton}
-              onPress={() => router.push(`/(tabs)/chats/${plan.id}` as any)}
-            >
-              <MessageCircle size={18} color="#FFFFFF" strokeWidth={2} />
-              <Text style={styles.openChatText}>Open Chat</Text>
-            </TouchableOpacity>
           </View>
         ) : isFull ? (
           <TouchableOpacity style={styles.waitlistButton}>
@@ -583,21 +674,110 @@ export default function PlanDetailScreen() {
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
-            style={[styles.joinButton, joinMutation.isPending && { opacity: 0.6 }]}
+            style={styles.joinButton}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              joinMutation.mutate();
+              setJoinModalVisible(true);
             }}
-            disabled={joinMutation.isPending}
           >
-            {joinMutation.isPending ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.joinButtonText}>Join Plan</Text>
-            )}
+            <Text style={styles.joinButtonText}>Join Plan</Text>
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Join Confirmation Modal */}
+      <Modal visible={joinModalVisible} transparent animationType="fade" onRequestClose={() => setJoinModalVisible(false)}>
+        <Pressable style={joinStyles.overlay} onPress={() => { Keyboard.dismiss(); setJoinModalVisible(false); }}>
+          <Pressable style={joinStyles.sheet} onPress={() => Keyboard.dismiss()}>
+            <TouchableOpacity
+              style={joinStyles.closeButton}
+              onPress={() => setJoinModalVisible(false)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={joinStyles.closeX}>✕</Text>
+            </TouchableOpacity>
+
+            <Text style={joinStyles.title}>You're joining {plan?.title}</Text>
+            <Text style={joinStyles.subtitle}>
+              {plan ? `${formatFullDate(plan.start_time)} at ${formatTime(plan.start_time)}` : ''}
+            </Text>
+
+            <View style={joinStyles.infoBox}>
+              <Text style={joinStyles.infoTitle}>WashedUp groups are small on purpose.</Text>
+              <Text style={joinStyles.infoText}>You're not just a number.</Text>
+              <Text style={joinStyles.infoText}>You're part of the plan.</Text>
+            </View>
+
+            <Text style={joinStyles.label}>Say hi to people that are going too! <Text style={joinStyles.required}>*required</Text></Text>
+            <TextInput
+              style={[joinStyles.input, !joinMessage.trim() && joinConfirmed && joinStyles.inputRequired]}
+              placeholder="Hey everyone! Can't wait"
+              placeholderTextColor="#999999"
+              value={joinMessage}
+              onChangeText={setJoinMessage}
+              multiline
+              maxLength={200}
+            />
+            <Text style={joinStyles.hint}>This will be posted to the group chat when you join</Text>
+
+            <TouchableOpacity
+              style={joinStyles.checkRow}
+              onPress={() => setJoinConfirmed(!joinConfirmed)}
+              activeOpacity={0.7}
+            >
+              <View style={[joinStyles.checkbox, joinConfirmed && joinStyles.checkboxChecked]}>
+                {joinConfirmed && <Text style={joinStyles.checkmark}>✓</Text>}
+              </View>
+              <Text style={joinStyles.checkLabel}>I'm coming</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[joinStyles.joinBtn, (!joinConfirmed || !joinMessage.trim()) && joinStyles.joinBtnDisabled]}
+              onPress={() => joinMutation.mutate(joinMessage)}
+              disabled={!joinConfirmed || !joinMessage.trim() || joinMutation.isPending}
+              activeOpacity={0.85}
+            >
+              {joinMutation.isPending ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={joinStyles.joinBtnText}>Join</Text>
+              )}
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Ticket Prompt Modal — shown after joining a ticketed event */}
+      <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => setTicketModalVisible(false)}>
+        <Pressable style={joinStyles.overlay} onPress={() => setTicketModalVisible(false)}>
+          <Pressable style={ticketStyles.sheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={ticketStyles.emoji}>🎟</Text>
+            <Text style={ticketStyles.title}>This plan is ticketed!</Text>
+            <Text style={ticketStyles.subtitle}>
+              Make sure to grab your tickets so you're all set for the day.
+            </Text>
+
+            <TouchableOpacity
+              style={ticketStyles.primaryBtn}
+              onPress={() => {
+                setTicketModalVisible(false);
+                if (plan?.tickets_url) Linking.openURL(plan.tickets_url);
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={ticketStyles.primaryBtnText}>Get Tickets Now</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={ticketStyles.secondaryBtn}
+              onPress={() => setTicketModalVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={ticketStyles.secondaryBtnText}>I'll remember</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -869,4 +1049,191 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   manageButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+});
+
+const joinStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    position: 'relative',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 1,
+  },
+  closeX: {
+    fontSize: 18,
+    color: '#999999',
+    fontWeight: '600',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1A1A1A',
+    marginBottom: 4,
+    paddingRight: 32,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#999999',
+    marginBottom: 20,
+  },
+  infoBox: {
+    backgroundColor: '#FFF8F0',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 8,
+  },
+  required: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#C4652A',
+  },
+  input: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#F0E6D3',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 15,
+    color: '#1A1A1A',
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  inputRequired: {
+    borderColor: '#C4652A',
+  },
+  hint: {
+    fontSize: 12,
+    color: '#999999',
+    marginTop: 6,
+    marginBottom: 20,
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: '#DDDDDD',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#C4652A',
+    borderColor: '#C4652A',
+  },
+  checkmark: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  checkLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  joinBtn: {
+    backgroundColor: '#C4652A',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  joinBtnDisabled: {
+    opacity: 0.35,
+  },
+  joinBtnText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+});
+
+const ticketStyles = StyleSheet.create({
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 28,
+    width: '100%',
+    maxWidth: 340,
+    alignItems: 'center',
+  },
+  emoji: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1A1A1A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  primaryBtn: {
+    backgroundColor: '#C4652A',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 10,
+  },
+  primaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  secondaryBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    width: '100%',
+  },
+  secondaryBtnText: {
+    color: '#999999',
+    fontSize: 15,
+    fontWeight: '600',
+  },
 });

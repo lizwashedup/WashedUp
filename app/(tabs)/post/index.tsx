@@ -12,6 +12,7 @@ import {
   Pressable,
   Alert,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -26,8 +27,9 @@ const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CATEGORIES = [
-  'Music', 'Food', 'Outdoors', 'Nightlife', 'Film',
-  'Art', 'Fitness', 'Comedy', 'Wellness', 'Sports', 'Other',
+  'Art', 'Business', 'Comedy', 'Film', 'Fitness',
+  'Food', 'Gaming', 'Music', 'Nightlife', 'Outdoors',
+  'Sports', 'Tech', 'Wellness', 'Other',
 ] as const;
 type Category = typeof CATEGORIES[number];
 
@@ -38,7 +40,7 @@ const GENDER_OPTIONS: { label: string; value: GenderPreference }[] = [
 ];
 type GenderPreference = 'mixed' | 'women_only' | 'men_only';
 
-const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50+'] as const;
+const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
 type AgeRange = typeof AGE_RANGES[number];
 
 const MONTHS = [
@@ -52,6 +54,7 @@ const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
 const MIN_GROUP = 3;
 const MAX_GROUP = 8;
 const MSG_LIMIT = 150;
+const DESC_LIMIT = 500;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,6 +80,30 @@ function displayTime(hour: number, minute: string, period: 'AM' | 'PM'): string 
   return `${hour}:${minute} ${period}`;
 }
 
+function ageRangesToMinMax(ranges: AgeRange[]): { min: number | null; max: number | null } {
+  if (ranges.length === 0 || ranges.includes('All Ages')) return { min: null, max: null };
+
+  const bounds: Record<string, [number, number]> = {
+    '21+': [21, 99],
+    '20s': [20, 29],
+    '30s': [30, 39],
+    '40s': [40, 49],
+    '50s': [50, 59],
+    '60s': [60, 69],
+    '70+': [70, 99],
+  };
+
+  let min = 99, max = 0;
+  for (const r of ranges) {
+    const b = bounds[r];
+    if (b) {
+      if (b[0] < min) min = b[0];
+      if (b[1] > max) max = b[1];
+    }
+  }
+  return { min, max };
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PostScreen() {
@@ -92,11 +119,29 @@ export default function PostScreen() {
   const [ticketUrl, setTicketUrl] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
-  const [ageRange, setAgeRange] = useState<AgeRange>('All Ages');
-  const [message, setMessage] = useState('');
+  const [ageRanges, setAgeRanges] = useState<AgeRange[]>([]);
+  const [description, setDescription] = useState('');
+  const [hostMessage, setHostMessage] = useState('');
   const [groupSize, setGroupSize] = useState(6);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
   const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
+
+  const toggleAgeRange = (range: AgeRange) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (range === 'All Ages') {
+      setAgeRanges(['All Ages']);
+      return;
+    }
+    setAgeRanges((prev) => {
+      const filtered = prev.filter((r) => r !== 'All Ages');
+      if (filtered.includes(range)) {
+        return filtered.filter((r) => r !== range);
+      }
+      if (filtered.length >= 2) return filtered;
+      return [...filtered, range];
+    });
+  };
 
   // Date
   const [dateMonth, setDateMonth] = useState(now.getMonth());
@@ -124,7 +169,7 @@ export default function PostScreen() {
   const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
   const safeTempDay = Math.min(tempDay, daysInTempMonth);
 
-  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && !loading;
+  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && hostMessage.trim().length > 0 && !loading;
 
   // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -183,6 +228,8 @@ export default function PostScreen() {
         return;
       }
 
+      const ageBounds = ageRangesToMinMax(ageRanges);
+
       const { data: insertedEvent, error } = await supabase
         .from('events')
         .insert({
@@ -192,25 +239,28 @@ export default function PostScreen() {
           location_lat: locationLat,
           location_lng: locationLng,
           tickets_url: ticketUrl.trim() || null,
-          category: category?.toLowerCase() ?? null,
-          gender_preference: genderPref,
-          age_range: ageRange,
-          description: message.trim() || null,
+          primary_vibe: category?.toLowerCase() ?? null,
+          gender_rule: genderPref,
+          target_age_min: ageBounds.min,
+          target_age_max: ageBounds.max,
+          description: description.trim() || null,
+          host_message: hostMessage.trim() || null,
           max_invites: groupSize,
           min_invites: MIN_GROUP,
-          host_id: user.id,
-          status: 'active',
+          creator_user_id: user.id,
+          status: 'forming',
+          city: 'Los Angeles',
         })
         .select('id')
         .single();
 
       if (error) throw error;
 
-      // Add host as first member
       if (insertedEvent?.id) {
         await supabase.from('event_members').insert({
           event_id: insertedEvent.id,
           user_id: user.id,
+          role: 'host',
           status: 'joined',
         });
       }
@@ -222,8 +272,8 @@ export default function PostScreen() {
             onPress: () => {
             setTitle(''); setLocation(''); setLocationLat(null); setLocationLng(null);
             setTicketUrl(''); setCategory(null);
-            setGenderPref('mixed'); setAgeRange('All Ages');
-            setMessage(''); setGroupSize(6);
+            setGenderPref('mixed'); setAgeRanges([]);
+            setDescription(''); setHostMessage(''); setGroupSize(6);
             setDateSelected(false); setTimeSelected(false);
             placesRef.current?.clear();
             router.replace('/(tabs)/plans');
@@ -255,7 +305,8 @@ export default function PostScreen() {
           style={styles.flex}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="always"
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           {/* Header */}
           <View style={styles.header}>
@@ -265,7 +316,7 @@ export default function PostScreen() {
 
           {/* ── Title ── */}
           <View style={styles.field}>
-            <Text style={styles.label}>Title</Text>
+            <Text style={styles.label}>Title <Text style={styles.required}>*</Text></Text>
             <TextInput
               style={styles.input}
               placeholder="e.g. Comedy show at The Laugh Factory"
@@ -280,7 +331,7 @@ export default function PostScreen() {
           {/* ── Date & Time row ── */}
           <View style={styles.row}>
             <View style={[styles.field, styles.flex]}>
-              <Text style={styles.label}>Date</Text>
+              <Text style={styles.label}>Date <Text style={styles.required}>*</Text></Text>
               <TouchableOpacity
                 style={[styles.input, styles.pickerButton, !dateSelected && styles.pickerPlaceholder]}
                 onPress={openDatePicker}
@@ -293,7 +344,7 @@ export default function PostScreen() {
             </View>
             <View style={styles.rowSpacer} />
             <View style={[styles.field, styles.flex]}>
-              <Text style={styles.label}>Time</Text>
+              <Text style={styles.label}>Time <Text style={styles.required}>*</Text></Text>
               <TouchableOpacity
                 style={[styles.input, styles.pickerButton, !timeSelected && styles.pickerPlaceholder]}
                 onPress={openTimePicker}
@@ -361,28 +412,19 @@ export default function PostScreen() {
 
           {/* ── Category ── */}
           <View style={styles.field}>
-            <Text style={styles.label}>Category</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.pillRow}
+            <Text style={styles.label}>Category <Text style={styles.required}>*</Text></Text>
+            <TouchableOpacity
+              style={[styles.input, styles.pickerButton, !category && styles.pickerPlaceholder]}
+              onPress={() => setShowCategoryPicker(true)}
+              activeOpacity={0.8}
             >
-              {CATEGORIES.map((cat) => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[styles.pill, category === cat && styles.pillSelected]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setCategory(cat);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.pillText, category === cat && styles.pillTextSelected]}>
-                    {cat}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={[styles.pickerText, !category && styles.placeholderText]}>
+                  {category ?? 'Select a category'}
+                </Text>
+                <Text style={{ fontSize: 14, color: '#999' }}>▼</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
           {/* ── Who can join ── */}
@@ -411,40 +453,60 @@ export default function PostScreen() {
           <View style={styles.field}>
             <Text style={styles.label}>Age range</Text>
             <View style={styles.wrapRow}>
-              {AGE_RANGES.map((range) => (
-                <TouchableOpacity
-                  key={range}
-                  style={[styles.pill, ageRange === range && styles.pillSelected]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setAgeRange(range);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.pillText, ageRange === range && styles.pillTextSelected]}>
-                    {range}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {AGE_RANGES.map((range) => {
+                const isSelected = ageRanges.includes(range);
+                return (
+                  <TouchableOpacity
+                    key={range}
+                    style={[styles.pill, isSelected && styles.pillSelected]}
+                    onPress={() => toggleAgeRange(range)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.pillText, isSelected && styles.pillTextSelected]}>
+                      {range}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
+            <Text style={styles.stepperHint}>Select up to 2 ranges, or All Ages</Text>
           </View>
 
-          {/* ── Message ── */}
+          {/* ── Plan description ── */}
           <View style={styles.field}>
             <View style={styles.labelRow}>
-              <Text style={styles.label}>Your message</Text>
-              <Text style={styles.charCount}>{message.length}/{MSG_LIMIT}</Text>
+              <Text style={styles.label}>Plan description <Text style={styles.required}>*</Text></Text>
+              <Text style={styles.charCount}>{description.length}/{DESC_LIMIT}</Text>
             </View>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Tell people what to expect, dress code, vibe..."
+              placeholder="What's the plan? Dress code, what to expect, parking tips..."
               placeholderTextColor={Colors.textLight}
-              value={message}
-              onChangeText={(t) => setMessage(t.slice(0, MSG_LIMIT))}
+              value={description}
+              onChangeText={(t) => setDescription(t.slice(0, DESC_LIMIT))}
               multiline
               numberOfLines={4}
               textAlignVertical="top"
             />
+          </View>
+
+          {/* ── Host message (personal note) ── */}
+          <View style={styles.field}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Your message <Text style={styles.required}>*</Text></Text>
+              <Text style={styles.charCount}>{hostMessage.length}/{MSG_LIMIT}</Text>
+            </View>
+            <TextInput
+              style={[styles.input, { minHeight: 60 }]}
+              placeholder="Always wanted to check this out, who's in?"
+              placeholderTextColor={Colors.textLight}
+              value={hostMessage}
+              onChangeText={(t) => setHostMessage(t.slice(0, MSG_LIMIT))}
+              multiline
+              numberOfLines={2}
+              textAlignVertical="top"
+            />
+            <Text style={styles.stepperHint}>This shows on your plan card as a personal note</Text>
           </View>
 
           {/* ── Group size ── */}
@@ -497,7 +559,11 @@ export default function PostScreen() {
                   ? 'Select a date'
                   : !timeSelected
                     ? 'Select a time'
-                    : 'Select a category'}
+                    : category === null
+                      ? 'Select a category'
+                      : description.trim().length === 0
+                        ? 'Add a plan description'
+                        : 'Add a message'}
             </Text>
           )}
           <TouchableOpacity
@@ -622,6 +688,38 @@ export default function PostScreen() {
             <TouchableOpacity style={styles.modalBtn} onPress={confirmTime}>
               <Text style={styles.modalBtnText}>Done</Text>
             </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Category Picker Modal ── */}
+      <Modal visible={showCategoryPicker} transparent animationType="slide">
+        <Pressable style={styles.modalOverlay} onPress={() => setShowCategoryPicker(false)}>
+          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Select category</Text>
+            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+              {CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[
+                    styles.categoryItem,
+                    category === cat && styles.categoryItemSelected,
+                  ]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setCategory(cat);
+                    setShowCategoryPicker(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.categoryItemText,
+                    category === cat && styles.categoryItemTextSelected,
+                  ]}>
+                    {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -795,4 +893,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+
+  required: { color: '#DC2626', fontSize: 14, fontWeight: '400' },
+
+  categoryItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginBottom: 4,
+  },
+  categoryItemSelected: { backgroundColor: Colors.primaryOrange },
+  categoryItemText: { fontSize: 16, fontWeight: '400', color: Colors.textDark },
+  categoryItemTextSelected: { color: '#FFFFFF', fontWeight: '600' },
 });

@@ -69,7 +69,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -220,10 +220,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   topSection: {
-    flex: 0.4,
     justifyContent: 'flex-end',
     alignItems: 'center',
     paddingBottom: 24,
+    paddingTop: 16,
+    minHeight: 100,
   },
   logo: {
     fontSize: 36,
@@ -249,8 +250,8 @@ const styles = StyleSheet.create({
     minHeight: 320,
   },
   formTitle: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontFamily: 'DMSerifDisplay_400Regular',
+    fontSize: 28,
     color: Colors.textDark,
   },
   gap20: { height: 20 },

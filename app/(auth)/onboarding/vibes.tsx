@@ -17,20 +17,22 @@ const VIBE_TAGS = [
 
 export default function OnboardingVibesScreen() {
   const routerBack = useRouter();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
+
+  const selectedCount = Object.keys(selected).filter(k => selected[k]).length;
 
   const toggle = (tag: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(tag)) next.delete(tag);
-      else next.add(tag);
+      const next = { ...prev };
+      if (next[tag]) delete next[tag];
+      else next[tag] = true;
       return next;
     });
   };
 
-  const canContinue = selected.size >= 3;
+  const canContinue = selectedCount >= 3;
 
   const handleLetsGo = async () => {
     if (!canContinue || loading) return;
@@ -39,7 +41,7 @@ export default function OnboardingVibesScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const tags = Array.from(selected);
+      const tags = Object.keys(selected).filter(k => selected[k]);
       await supabase
         .from('profiles')
         .update({
@@ -82,7 +84,7 @@ export default function OnboardingVibesScreen() {
 
         <View style={styles.grid}>
           {VIBE_TAGS.map((tag) => {
-            const isSelected = selected.has(tag);
+            const isSelected = !!selected[tag];
             return (
               <TouchableOpacity
                 key={tag}
@@ -96,7 +98,7 @@ export default function OnboardingVibesScreen() {
           })}
         </View>
 
-        <Text style={styles.countText}>{selected.size} selected</Text>
+        <Text style={styles.countText}>{selectedCount} selected</Text>
 
         <View style={styles.spacer} />
         <TouchableOpacity
