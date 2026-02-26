@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import {
   Pressable,
   Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
@@ -47,13 +47,6 @@ const MANAGE_CATEGORIES = [
   'Sports', 'Tech', 'Wellness', 'Other',
 ] as const;
 
-const MANAGE_GENDER_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Mixed', value: 'mixed' },
-  { label: 'Women Only', value: 'women_only' },
-  { label: 'Men Only', value: 'men_only' },
-  { label: 'Nonbinary Only', value: 'nonbinary_only' },
-];
-
 const MIN_GROUP = 3;
 const MAX_GROUP = 8;
 
@@ -73,6 +66,8 @@ interface PlanDetail {
   gender_rule: string | null;
   max_invites: number | null;
   min_invites: number | null;
+  target_age_min: number | null;
+  target_age_max: number | null;
   status: string;
   host_id: string;
   tickets_url: string | null;
@@ -147,8 +142,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       id, title, description, host_message, start_time,
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
-      max_invites, min_invites, status, member_count, creator_user_id,
-      tickets_url
+      max_invites, min_invites, target_age_min, target_age_max,
+      status, member_count, creator_user_id, tickets_url
     `)
     .eq('id', id)
     .single();
@@ -190,6 +185,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     gender_rule: row.gender_rule ?? null,
     max_invites: row.max_invites ?? null,
     min_invites: row.min_invites ?? null,
+    target_age_min: row.target_age_min ?? null,
+    target_age_max: row.target_age_max ?? null,
     status: row.status,
     host_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
@@ -261,6 +258,7 @@ export default function PlanDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [mapCoords, setMapCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -281,9 +279,31 @@ export default function PlanDetailScreen() {
   const [editGenderRule, setEditGenderRule] = useState('mixed');
   const [editGroupSize, setEditGroupSize] = useState(6);
   const [editSaving, setEditSaving] = useState(false);
+  const [userGender, setUserGender] = useState<string | null>(null);
+  const [userAge, setUserAge] = useState<number | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? null));
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setCurrentUserId(user.id);
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('gender, birthday')
+        .eq('id', user.id)
+        .single();
+
+      if (profile?.gender) setUserGender(profile.gender);
+      if (profile?.birthday) {
+        const birth = new Date(profile.birthday);
+        const today = new Date();
+        let age = today.getFullYear() - birth.getFullYear();
+        const md = today.getMonth() - birth.getMonth();
+        if (md < 0 || (md === 0 && today.getDate() < birth.getDate())) age--;
+        setUserAge(age);
+      }
+    })();
   }, []);
 
   const { data: plan, isLoading: planLoading, error: planError } = useQuery({
@@ -338,11 +358,51 @@ export default function PlanDetailScreen() {
   const isFull = plan ? plan.member_count >= maxSpots : false;
   const spotsLeft = plan ? maxSpots - plan.member_count : 0;
 
+  const manageGenderOptions = useMemo(() => {
+    const opts: { label: string; value: string }[] = [
+      { label: 'Mixed', value: 'mixed' },
+    ];
+    if (userGender === 'woman') {
+      opts.push({ label: 'Women Only', value: 'women_only' });
+    } else if (userGender === 'man') {
+      opts.push({ label: 'Men Only', value: 'men_only' });
+    } else if (userGender === 'non_binary') {
+      opts.push({ label: 'Nonbinary Only', value: 'nonbinary_only' });
+    }
+    return opts;
+  }, [userGender]);
+
+  const isEligible = useMemo(() => {
+    if (!plan) return false;
+    const gr = plan.gender_rule;
+    if (gr === 'women_only' && userGender !== 'woman') return false;
+    if (gr === 'men_only' && userGender !== 'man') return false;
+    if (gr === 'nonbinary_only' && userGender !== 'non_binary') return false;
+    if (userAge !== null) {
+      if (plan.target_age_min !== null && userAge < plan.target_age_min) return false;
+      if (plan.target_age_max !== null && userAge > plan.target_age_max) return false;
+    }
+    return true;
+  }, [plan, userGender, userAge]);
+
   // ─── Join ────────────────────────────────────────────────────────────────────
 
   const joinMutation = useMutation({
     mutationFn: async (greeting?: string) => {
       if (!currentUserId || !id) throw new Error('Not authenticated');
+
+      try {
+        const { data: canJoinGender } = await supabase.rpc('can_join_event_gender', {
+          p_user_id: currentUserId,
+          p_event_id: id,
+        });
+        if (canJoinGender === false) {
+          throw new Error('This plan is restricted and you are not eligible to join.');
+        }
+      } catch (eligibilityError: any) {
+        if (eligibilityError.message?.includes('not eligible')) throw eligibilityError;
+        console.warn('[Ghost Protocol] Gender check RPC failed:', eligibilityError.message);
+      }
 
       // Check if there's an existing row (user previously left or partial insert)
       const { data: existing } = await supabase
@@ -606,7 +666,7 @@ export default function PlanDetailScreen() {
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
 
       <ScrollView
@@ -630,7 +690,7 @@ export default function PlanDetailScreen() {
 
           <TouchableOpacity
             onPress={() => router.back()}
-            style={styles.heroCircleButton}
+            style={[styles.heroCircleButton, { top: insets.top + 8 }]}
             accessibilityLabel="Go back"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -639,7 +699,7 @@ export default function PlanDetailScreen() {
 
           <TouchableOpacity
             onPress={handleShare}
-            style={[styles.heroCircleButton, styles.heroShareButton]}
+            style={[styles.heroCircleButton, styles.heroShareButton, { top: insets.top + 8 }]}
             accessibilityLabel="Share this plan"
           >
             <Share2 size={18} color="#1A1A1A" strokeWidth={2} />
@@ -662,6 +722,14 @@ export default function PlanDetailScreen() {
         <View style={styles.contentCard}>
           <Text style={styles.title}>{plan.title}</Text>
 
+          {/* Status badge inline */}
+          {(isMember || isHost) && (
+            <View style={styles.goingBadgeInline}>
+              <View style={styles.goingDot} />
+              <Text style={styles.goingBadgeText}>{isHost ? "You're hosting" : "You're going"}</Text>
+            </View>
+          )}
+
           {/* Date */}
           <View style={styles.detailRow}>
             <Calendar size={16} color="#C4652A" strokeWidth={2} />
@@ -683,9 +751,21 @@ export default function PlanDetailScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Static Map */}
+          {/* Map — tap to open in Maps app */}
           {mapCoords && (
-            <View style={styles.mapContainer}>
+            <TouchableOpacity
+              style={styles.mapContainer}
+              activeOpacity={0.9}
+              onPress={() => {
+                const q = plan.location_text ? encodeURIComponent(plan.location_text) : `${mapCoords.latitude},${mapCoords.longitude}`;
+                const url = Platform.OS === 'ios'
+                  ? `maps://?q=${q}&ll=${mapCoords.latitude},${mapCoords.longitude}`
+                  : `geo:${mapCoords.latitude},${mapCoords.longitude}?q=${q}`;
+                Linking.openURL(url).catch(() => {
+                  Linking.openURL(`https://maps.google.com/?q=${q}&ll=${mapCoords.latitude},${mapCoords.longitude}`);
+                });
+              }}
+            >
               <MapView
                 style={styles.map}
                 region={{
@@ -705,8 +785,20 @@ export default function PlanDetailScreen() {
                   pinColor="#C4652A"
                 />
               </MapView>
-            </View>
+              <View style={styles.mapOverlayHint}>
+                <MapPin size={14} color="#FFFFFF" strokeWidth={2} />
+                <Text style={styles.mapOverlayText}>Open in Maps</Text>
+              </View>
+            </TouchableOpacity>
           )}
+
+          {/* About this plan */}
+          {plan.description ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>About this plan</Text>
+              <Text style={styles.aboutText}>{plan.description}</Text>
+            </View>
+          ) : null}
 
           {/* Host */}
           <View style={styles.section}>
@@ -727,8 +819,8 @@ export default function PlanDetailScreen() {
               )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.hostName}>{plan.host?.first_name ?? 'Someone'}</Text>
-                {plan.description && (
-                  <Text style={styles.hostMessage} numberOfLines={3}>{plan.description}</Text>
+                {plan.host_message && (
+                  <Text style={styles.hostMessage} numberOfLines={3}>{plan.host_message}</Text>
                 )}
               </View>
             </View>
@@ -804,6 +896,11 @@ export default function PlanDetailScreen() {
                 <Text style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        ) : !isEligible ? (
+          <View style={styles.ineligibleBar}>
+            <Text style={styles.ineligibleText}>This plan isn't available for you</Text>
+            <Text style={styles.ineligibleSub}>It's restricted by age or gender</Text>
           </View>
         ) : isFull ? (
           <TouchableOpacity style={styles.waitlistButton}>
@@ -1038,7 +1135,7 @@ export default function PlanDetailScreen() {
               {/* Who can join */}
               <Text style={manageStyles.label}>Who can join</Text>
               <View style={manageStyles.genderRow}>
-                {MANAGE_GENDER_OPTIONS.map((opt) => {
+                {manageGenderOptions.map((opt) => {
                   const isSelected = editGenderRule === opt.value;
                   return (
                     <TouchableOpacity
@@ -1143,7 +1240,6 @@ const styles = StyleSheet.create({
   heroEmoji: { fontSize: 64 },
   heroCircleButton: {
     position: 'absolute',
-    top: 16,
     left: 16,
     width: 38,
     height: 38,
@@ -1201,6 +1297,29 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
 
+  goingBadgeInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#E8F5E9',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 14,
+  },
+  goingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+  },
+  goingBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2E7D32',
+  },
+
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1224,9 +1343,33 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 24,
     marginTop: 4,
+    position: 'relative',
   },
   map: {
     flex: 1,
+  },
+  mapOverlayHint: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  mapOverlayText: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+
+  aboutText: {
+    fontSize: 15,
+    color: '#666666',
+    lineHeight: 22,
   },
 
   section: {
@@ -1378,6 +1521,10 @@ const styles = StyleSheet.create({
     borderColor: '#C4652A',
   },
   waitlistButtonText: { fontSize: 17, fontWeight: '700', color: '#C4652A' },
+
+  ineligibleBar: { paddingVertical: 16, alignItems: 'center' },
+  ineligibleText: { fontSize: 15, color: '#999999', fontWeight: '600' },
+  ineligibleSub: { fontSize: 13, color: '#B8A99A', marginTop: 4 },
 
   manageButton: {
     flex: 1,

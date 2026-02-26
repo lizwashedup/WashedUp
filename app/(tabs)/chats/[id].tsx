@@ -159,8 +159,11 @@ function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, onPhot
       )}
 
       <View style={[bubbleStyles.bubbleWrapper, isOwn ? bubbleStyles.wrapperOwn : bubbleStyles.wrapperOther]}>
-        {!isOwn && showName && message.sender?.first_name && (
-          <Text style={bubbleStyles.senderName}>{message.sender.first_name}</Text>
+        {!isOwn && showName && (
+          <View style={bubbleStyles.nameTimeRow}>
+            <Text style={bubbleStyles.senderName}>{message.sender?.first_name ?? 'Someone'}</Text>
+            <Text style={bubbleStyles.nameTimestamp}>{formatMessageTime(message.created_at)}</Text>
+          </View>
         )}
 
         <View style={[
@@ -188,9 +191,11 @@ function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, onPhot
           )}
         </View>
 
-        <Text style={[bubbleStyles.timestamp, isOwn && bubbleStyles.timestampOwn]}>
-          {formatMessageTime(message.created_at)}
-        </Text>
+        {(isOwn || !showName) && (
+          <Text style={[bubbleStyles.timestamp, isOwn && bubbleStyles.timestampOwn]}>
+            {formatMessageTime(message.created_at)}
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -207,7 +212,18 @@ const bubbleStyles = StyleSheet.create({
   bubbleWrapper: { maxWidth: '75%', gap: 3 },
   wrapperOwn: { alignItems: 'flex-end' },
   wrapperOther: { alignItems: 'flex-start' },
-  senderName: { fontSize: 11, color: '#9B8B7A', marginLeft: 4, marginBottom: 1 },
+  senderName: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', marginBottom: 0 },
+  nameTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 4,
+    marginBottom: 2,
+  },
+  nameTimestamp: {
+    fontSize: 11,
+    color: '#B8A99A',
+  },
   bubble: { paddingHorizontal: 13, paddingVertical: 9, overflow: 'hidden' },
   bubbleOwn: { backgroundColor: '#C4652A' },
   bubbleOther: {

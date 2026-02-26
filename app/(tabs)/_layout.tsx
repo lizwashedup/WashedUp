@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from 'expo-router';
-import { TouchableOpacity } from 'react-native';
+import { Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
 
@@ -62,7 +62,10 @@ export default function TabLayout() {
         options={{
           title: 'Plans',
           tabBarLabel: 'Plans',
-          tabBarIcon: ({ color }) => <Ionicons name="map-outline" size={24} color={color} />,
+          headerShown: false,
+          tabBarIcon: ({ color }) => (
+            <Text style={{ fontSize: 22, fontWeight: '900', color, fontFamily: 'DMSerifDisplay_400Regular' }}>W</Text>
+          ),
         }}
       />
       {/* Chats */}

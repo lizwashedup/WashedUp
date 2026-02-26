@@ -11,11 +11,10 @@ import {
   Dimensions,
   Modal,
   Pressable,
-  Image as RNImage,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { LayoutList, Map, ChevronDown, Check, ArrowRight } from 'lucide-react-native';
 import MapView, { Marker } from 'react-native-maps';
@@ -113,43 +112,41 @@ function getSectionDefs(now: Date): SectionDef[] {
   const y = now.getFullYear();
   const mo = now.getMonth();
   const d = now.getDate();
+  const sections: SectionDef[] = [];
 
   const todayEnd = new Date(y, mo, d, 23, 59, 59, 999);
-  const tonight: SectionDef = { key: 'tonight', title: 'Tonight', from: now, to: todayEnd };
-
-  let middle: SectionDef;
-  let comingUpFrom: Date;
+  sections.push({ key: 'tonight', title: 'Tonight', from: now, to: todayEnd });
 
   if (day >= 1 && day <= 4) {
     const tomorrowStart = new Date(y, mo, d + 1, 0, 0, 0);
     const fridayEnd = new Date(y, mo, d + (5 - day), 23, 59, 59, 999);
-    middle = { key: 'this-week', title: 'This Week', from: tomorrowStart, to: fridayEnd };
-    comingUpFrom = new Date(fridayEnd.getTime() + 1);
+    sections.push({ key: 'this-week', title: 'This Week', from: tomorrowStart, to: fridayEnd });
+  }
+
+  if (day >= 1 && day <= 4) {
+    const daysToFri = 5 - day;
+    const friStart = new Date(y, mo, d + daysToFri, 0, 0, 0);
+    const sunEnd = new Date(y, mo, d + daysToFri + 2, 23, 59, 59, 999);
+    sections.push({ key: 'this-weekend', title: 'This Weekend', from: friStart, to: sunEnd });
   } else if (day === 5) {
     const satStart = new Date(y, mo, d + 1, 0, 0, 0);
     const sunEnd = new Date(y, mo, d + 2, 23, 59, 59, 999);
-    middle = { key: 'this-weekend', title: 'This Weekend', from: satStart, to: sunEnd };
-    comingUpFrom = new Date(sunEnd.getTime() + 1);
+    sections.push({ key: 'this-weekend', title: 'This Weekend', from: satStart, to: sunEnd });
   } else if (day === 6) {
     const sunStart = new Date(y, mo, d + 1, 0, 0, 0);
     const sunEnd = new Date(y, mo, d + 1, 23, 59, 59, 999);
-    middle = { key: 'this-weekend', title: 'This Weekend', from: sunStart, to: sunEnd };
-    comingUpFrom = new Date(sunEnd.getTime() + 1);
-  } else {
-    const monStart = new Date(y, mo, d + 1, 0, 0, 0);
-    const friEnd = new Date(y, mo, d + 5, 23, 59, 59, 999);
-    middle = { key: 'next-week', title: 'Next Week', from: monStart, to: friEnd };
-    comingUpFrom = new Date(friEnd.getTime() + 1);
+    sections.push({ key: 'this-weekend', title: 'This Weekend', from: sunStart, to: sunEnd });
   }
 
-  const comingUp: SectionDef = {
-    key: 'coming-up',
-    title: 'Coming Up',
-    from: comingUpFrom,
-    to: new Date(y + 2, 0, 1),
-  };
+  const daysToNextMon = day === 0 ? 1 : (8 - day);
+  const nextMonStart = new Date(y, mo, d + daysToNextMon, 0, 0, 0);
+  const nextFriEnd = new Date(y, mo, d + daysToNextMon + 4, 23, 59, 59, 999);
+  sections.push({ key: 'next-week', title: 'Next Week', from: nextMonStart, to: nextFriEnd });
 
-  return [tonight, middle, comingUp];
+  const comingUpStart = new Date(nextFriEnd.getTime() + 1);
+  sections.push({ key: 'coming-up', title: 'Coming Up', from: comingUpStart, to: new Date(y + 2, 0, 1) });
+
+  return sections;
 }
 
 function filterIntoSections(
@@ -359,6 +356,15 @@ export default function PlansScreen() {
 
   const [activeTab, setActiveTab] = useState<TabKey>('plans');
   const [mapView, setMapView] = useState(false);
+  const navigation = useNavigation();
+
+  React.useEffect(() => {
+    const unsubscribe = navigation.addListener('tabPress' as any, () => {
+      if (mapView) setMapView(false);
+      if (activeTab !== 'plans') setActiveTab('plans');
+    });
+    return unsubscribe;
+  }, [navigation, mapView, activeTab]);
   const [whenSheetOpen, setWhenSheetOpen] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [whenFilter, setWhenFilter] = useState<string[]>([]);
@@ -404,7 +410,7 @@ export default function PlansScreen() {
           events (
             id, title, start_time, location_text, location_lat, location_lng,
             image_url, primary_vibe, gender_rule, max_invites, min_invites,
-            member_count, status, creator_user_id
+            member_count, status, creator_user_id, host_message
           )
         `)
         .eq('user_id', userId)
@@ -472,6 +478,7 @@ export default function PlansScreen() {
           min_invites: e.min_invites ?? null,
           member_count: e.member_count ?? 0,
           status: e.status ?? 'forming',
+          host_message: e.host_message ?? null,
           host: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
         } as Plan;
       });
@@ -494,7 +501,7 @@ export default function PlansScreen() {
           events (
             id, title, start_time, location_text, location_lat, location_lng,
             image_url, primary_vibe, gender_rule, max_invites, min_invites,
-            member_count, status, creator_user_id
+            member_count, status, creator_user_id, host_message
           )
         `)
         .eq('user_id', userId);
@@ -542,6 +549,7 @@ export default function PlansScreen() {
           min_invites: e.min_invites ?? null,
           member_count: e.member_count ?? 0,
           status: e.status ?? 'forming',
+          host_message: e.host_message ?? null,
           host: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
         } as Plan;
       });
@@ -616,14 +624,10 @@ export default function PlansScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
 
-      {/* Header — RNImage for logo avoids expo-image placeholder flash/background bug */}
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <RNImage
-            source={require('../../../assets/images/logo-wordmark.png')}
-            style={styles.logoImage}
-            resizeMode="contain"
-          />
+          <Text style={styles.logoText}>WashedUp</Text>
         </View>
         <TouchableOpacity
           style={[styles.mapToggleButton, mapView && styles.mapToggleButtonActive]}
@@ -814,7 +818,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8F0',
   },
   logoContainer: { justifyContent: 'center' },
-  logoImage: { width: 160, height: 40 },
+  logoText: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 28, color: '#C4652A' },
   mapToggleButton: {
     width: 40,
     height: 40,
@@ -852,20 +856,21 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
-    marginBottom: 8,
+    gap: 8,
+    marginBottom: 12,
+    marginTop: 4,
   },
   tab: {
     paddingVertical: 10,
-    paddingBottom: 8,
-    marginRight: 24,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
   },
-  tabActive: { borderBottomColor: '#C4652A' },
-  tabText: { fontSize: 14, fontWeight: '500', color: '#9B8B7A' },
-  tabTextActive: { color: '#1A1A1A', fontWeight: '700' },
+  tabActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A' },
+  tabText: { fontSize: 15, fontWeight: '600', color: '#9B8B7A' },
+  tabTextActive: { color: '#FFFFFF', fontWeight: '700' },
 
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   map: { flex: 1 },

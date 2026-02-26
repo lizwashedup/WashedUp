@@ -157,18 +157,18 @@ function RootLayoutNav() {
   }, []);
 
   return (
-    <>
-      {!authResolved && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8F0' }}>
-          <ActivityIndicator size="large" color={Colors.primaryOrange} />
-        </View>
-      )}
+    <View style={{ flex: 1 }}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="profile" />
         <Stack.Screen name="plan/[id]" options={{ headerShown: false }} />
       </Stack>
-    </>
+      {!authResolved && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8F0' }}>
+          <ActivityIndicator size="large" color={Colors.primaryOrange} />
+        </View>
+      )}
+    </View>
   );
 }

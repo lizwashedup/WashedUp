@@ -93,15 +93,17 @@ export default function ProfileScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Delete user data explicitly before profile row
-      await supabase.from('wishlists').delete().eq('user_id', user.id);
-      await supabase.from('message_likes').delete().eq('user_id', user.id);
-      await supabase.from('chat_reads').delete().eq('user_id', user.id);
-      await supabase.from('messages').delete().eq('user_id', user.id);
-      await supabase.from('event_members').delete().eq('user_id', user.id);
-      await supabase.from('profiles').delete().eq('id', user.id);
+      const { error: rpcError } = await supabase.rpc('delete_own_account');
+      if (rpcError) {
+        console.warn('delete_own_account RPC failed, falling back to manual cleanup:', rpcError.message);
+        await supabase.from('wishlists').delete().eq('user_id', user.id);
+        await supabase.from('message_likes').delete().eq('user_id', user.id);
+        await supabase.from('chat_reads').delete().eq('user_id', user.id);
+        await supabase.from('messages').delete().eq('user_id', user.id);
+        await supabase.from('event_members').delete().eq('user_id', user.id);
+        await supabase.from('profiles').delete().eq('id', user.id);
+      }
 
-      // Sign out — auth.users row handled by DB trigger or admin on backend
       await supabase.auth.signOut();
     } catch {
       setDeleting(false);

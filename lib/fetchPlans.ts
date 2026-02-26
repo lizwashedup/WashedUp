@@ -17,6 +17,7 @@ export interface Plan {
   min_invites: number | null;
   member_count: number;
   status: string;
+  host_message: string | null;
   host: {
     id: string;
     first_name: string | null;
@@ -57,6 +58,7 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
     min_invites: item.min_invites ?? null,
     member_count: item.member_count ?? 0,
     status: item.status ?? 'forming',
+    host_message: item.host_message ?? null,
     host: item.host_id ? {
       id: item.host_id,
       first_name: item.host_name ?? null,

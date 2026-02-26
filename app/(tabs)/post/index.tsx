@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -33,12 +33,7 @@ const CATEGORIES = [
 ] as const;
 type Category = typeof CATEGORIES[number];
 
-const GENDER_OPTIONS: { label: string; value: GenderPreference }[] = [
-  { label: 'Mixed', value: 'mixed' },
-  { label: 'Women Only', value: 'women_only' },
-  { label: 'Men Only', value: 'men_only' },
-];
-type GenderPreference = 'mixed' | 'women_only' | 'men_only';
+type GenderPreference = 'mixed' | 'women_only' | 'men_only' | 'nonbinary_only';
 
 const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
 type AgeRange = typeof AGE_RANGES[number];
@@ -110,6 +105,35 @@ export default function PostScreen() {
   const now = new Date();
   const currentYear = now.getFullYear();
   const years = [currentYear, currentYear + 1];
+
+  const [userGender, setUserGender] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('gender')
+        .eq('id', user.id)
+        .single();
+      if (profile?.gender) setUserGender(profile.gender);
+    })();
+  }, []);
+
+  const genderOptions = useMemo(() => {
+    const opts: { label: string; value: GenderPreference }[] = [
+      { label: 'Mixed', value: 'mixed' },
+    ];
+    if (userGender === 'woman') {
+      opts.push({ label: 'Women Only', value: 'women_only' });
+    } else if (userGender === 'man') {
+      opts.push({ label: 'Men Only', value: 'men_only' });
+    } else if (userGender === 'non_binary') {
+      opts.push({ label: 'Nonbinary Only', value: 'nonbinary_only' });
+    }
+    return opts;
+  }, [userGender]);
 
   // Form fields
   const [title, setTitle] = useState('');
@@ -430,23 +454,27 @@ export default function PostScreen() {
           {/* ── Who can join ── */}
           <View style={styles.field}>
             <Text style={styles.label}>Who can join</Text>
-            <View style={styles.genderRow}>
-              {GENDER_OPTIONS.map((opt) => (
-                <TouchableOpacity
-                  key={opt.value}
-                  style={[styles.genderPill, genderPref === opt.value && styles.pillSelected]}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setGenderPref(opt.value);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.pillText, genderPref === opt.value && styles.pillTextSelected]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {userGender ? (
+              <View style={styles.genderRow}>
+                {genderOptions.map((opt) => (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.genderPill, genderPref === opt.value && styles.pillSelected]}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setGenderPref(opt.value);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.pillText, genderPref === opt.value && styles.pillTextSelected]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <ActivityIndicator size="small" color="#C4652A" />
+            )}
           </View>
 
           {/* ── Age range ── */}

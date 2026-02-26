@@ -28,6 +28,7 @@ interface PlanCardProps {
     min_invites: number | null;
     member_count: number;
     status: string;
+    host_message: string | null;
     host: {
       id: string;
       first_name: string | null;
@@ -193,6 +194,14 @@ export const PlanCard = React.memo<PlanCardProps>(({
       </View>
 
       <View style={styles.content}>
+        {plan.host_message ? (
+          <View style={styles.quoteBox}>
+            <Text style={styles.quoteText} numberOfLines={2}>
+              "{plan.host_message}"
+            </Text>
+          </View>
+        ) : null}
+
         <Text style={styles.title} numberOfLines={2}>
           {plan.title}
         </Text>
@@ -375,5 +384,20 @@ const styles = StyleSheet.create({
   dateText: {
     fontSize: 13,
     color: '#999999',
+  },
+  quoteBox: {
+    backgroundColor: '#FFF8F0',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#C4652A',
+  },
+  quoteText: {
+    fontSize: 12,
+    color: '#666666',
+    fontStyle: 'italic',
+    lineHeight: 16,
   },
 });

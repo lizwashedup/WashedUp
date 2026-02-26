@@ -108,7 +108,7 @@ export default function OnboardingPhotoScreen() {
 
       await supabase
         .from('profiles')
-        .update({ avatar_url: avatarUrl })
+        .update({ profile_photo_url: avatarUrl })
         .eq('id', user.id);
 
       router.push('/onboarding/vibes');
@@ -116,16 +116,11 @@ export default function OnboardingPhotoScreen() {
       Alert.alert(
         'Upload failed',
         e?.message ?? 'Could not upload photo. Please try again.',
-        [{ text: 'Try Again' }, { text: 'Skip', onPress: handleSkip }]
+        [{ text: 'Try Again' }]
       );
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleSkip = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/onboarding/vibes');
   };
 
   return (
@@ -200,16 +195,6 @@ export default function OnboardingPhotoScreen() {
         )}
 
         <View style={styles.spacer} />
-
-        {/* Skip */}
-        <TouchableOpacity
-          onPress={handleSkip}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={styles.skipWrap}
-        >
-          <Text style={styles.skipText}>Skip for now</Text>
-        </TouchableOpacity>
-        <View style={styles.gap12} />
 
         {/* Continue */}
         <TouchableOpacity
@@ -306,9 +291,6 @@ const styles = StyleSheet.create({
   },
 
   spacer: { flex: 1 },
-
-  skipWrap: { alignSelf: 'center', marginBottom: 4 },
-  skipText: { fontSize: 14, color: Colors.textLight },
 
   primaryButton: {
     height: 52,

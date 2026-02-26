@@ -299,6 +299,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 16,
     fontSize: 16,
+    fontWeight: '400',
     color: Colors.textDark,
   },
   inputFocused: {

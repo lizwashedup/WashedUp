@@ -9,7 +9,7 @@ export default function YourPeopleScreen() {
         <Ionicons name="people-outline" size={48} color="#C4652A" />
         <Text style={styles.heading}>Your People</Text>
         <Text style={styles.subtext}>
-          See what your friends are up to and make plans together. Coming soon.
+          Add people you want to do things with.{'\n'}When you post a plan, invite them first —{'\n'}before anyone else sees it.
         </Text>
       </View>
     </SafeAreaView>
