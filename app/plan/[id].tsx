@@ -1219,7 +1219,7 @@ export default function PlanDetailScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: '#f1e4d4' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   errorText: { fontSize: 16, color: '#666666' },
   linkText: { fontSize: 15, color: '#C4652A', fontWeight: '600' },
@@ -1578,7 +1578,7 @@ const joinStyles = StyleSheet.create({
     marginBottom: 20,
   },
   infoBox: {
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#f1e4d4',
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
@@ -1729,7 +1729,7 @@ const managePlacesStyles = {
   container: { flex: 0 },
   textInputContainer: { backgroundColor: 'transparent' },
   textInput: {
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#f1e4d4',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 12,
@@ -1793,7 +1793,7 @@ const manageStyles = StyleSheet.create({
     marginTop: 16,
   },
   input: {
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#f1e4d4',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 12,
@@ -1818,7 +1818,7 @@ const manageStyles = StyleSheet.create({
   pill: {
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#f1e4d4',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 20,
@@ -1844,7 +1844,7 @@ const manageStyles = StyleSheet.create({
   genderPill: {
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#f1e4d4',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 14,
@@ -1858,7 +1858,7 @@ const manageStyles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#f1e4d4',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     alignItems: 'center',

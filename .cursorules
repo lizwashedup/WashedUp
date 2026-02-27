@@ -71,7 +71,7 @@ These tables already exist and have data. Query them, don't recreate them.
 
 ## WashedUp Brand Colors
 - Primary Orange: #C4652A
-- Background Cream: #FFF8F0
+- Background Cream: #f1e4d4 (original: #FFF8F0)
 - Text Dark: #1A1A1A
 - Text Medium: #666666
 - Text Light: #999999

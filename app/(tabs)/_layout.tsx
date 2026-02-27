@@ -1,30 +1,13 @@
-import { Tabs, useRouter } from 'expo-router';
-import { Text, TouchableOpacity } from 'react-native';
+import { Tabs } from 'expo-router';
+import { Text, Image as RNImage } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
-
-function HeaderProfileButton() {
-  const router = useRouter();
-  return (
-    <TouchableOpacity
-      onPress={() => router.push('/profile')}
-      style={{ padding: 8, marginRight: 12 }}
-      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-    >
-      <Ionicons name="person-outline" size={24} color={Colors.textDark} />
-    </TouchableOpacity>
-  );
-}
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: true,
-        headerTitle: '',
-        headerShadowVisible: false,
-        headerStyle: { backgroundColor: Colors.backgroundCream },
-        headerRight: () => <HeaderProfileButton />,
+        headerShown: false,
         tabBarActiveTintColor: Colors.primaryOrange,
         tabBarInactiveTintColor: Colors.textLight,
         tabBarStyle: {
@@ -38,7 +21,6 @@ export default function TabLayout() {
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
       }}
     >
-      {/* Post — far left */}
       <Tabs.Screen
         name="post/index"
         options={{
@@ -47,7 +29,6 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Ionicons name="add-circle-outline" size={24} color={color} />,
         }}
       />
-      {/* Scene — discovery */}
       <Tabs.Screen
         name="explore/index"
         options={{
@@ -56,19 +37,20 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Ionicons name="compass-outline" size={24} color={color} />,
         }}
       />
-      {/* Plans — center */}
       <Tabs.Screen
         name="plans/index"
         options={{
           title: 'Plans',
           tabBarLabel: 'Plans',
-          headerShown: false,
-          tabBarIcon: ({ color }) => (
-            <Text style={{ fontSize: 22, fontWeight: '900', color, fontFamily: 'DMSerifDisplay_400Regular' }}>W</Text>
+          tabBarIcon: ({ focused }) => (
+            <RNImage
+              source={require('../../assets/w-icon.png')}
+              style={{ width: 28, height: 28, opacity: focused ? 1 : 0.4 }}
+              resizeMode="contain"
+            />
           ),
         }}
       />
-      {/* Chats */}
       <Tabs.Screen
         name="chats/index"
         options={{
@@ -77,7 +59,6 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Ionicons name="chatbubble-outline" size={24} color={color} />,
         }}
       />
-      {/* Your People — far right */}
       <Tabs.Screen
         name="friends/index"
         options={{
@@ -86,7 +67,6 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Ionicons name="people-outline" size={24} color={color} />,
         }}
       />
-      {/* Hide dynamic chat route from tab bar */}
       <Tabs.Screen
         name="chats/[id]"
         options={{

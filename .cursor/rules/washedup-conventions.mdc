@@ -20,7 +20,7 @@ Social activity app for finding people to do things with in Los Angeles. Not a d
 ## Design Tokens
 ```
 primary:    #C4652A  (orange — buttons, accents, brand)
-background: #FFF8F0
+background: #f1e4d4 (original: #FFF8F0)
 card:       #FFFFFF
 border:     #F0E6D3
 textDark:   #1A1A1A

@@ -16,7 +16,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { LayoutList, Map, ChevronDown, Check, ArrowRight, User } from 'lucide-react-native';
+import { LayoutList, Map, ChevronDown, Check, ArrowRight, Heart } from 'lucide-react-native';
+import ProfileButton from '../../../components/ProfileButton';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
 import { fetchPlans, Plan } from '../../../lib/fetchPlans';
@@ -26,7 +27,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TabKey = 'plans' | 'myplans' | 'wishlist';
+type TabKey = 'plans' | 'myplans';
 type CategoryOption = 'Music' | 'Food' | 'Outdoors' | 'Nightlife' | 'Film' | 'Art' | 'Fitness' | 'Comedy' | 'Wellness' | 'Sports';
 
 interface SectionDef {
@@ -244,12 +245,14 @@ const SectionRow = React.memo(({
   wishlisted,
   memberIds,
   onWishlist,
+  isFirst = false,
 }: {
   def: SectionDef;
   plans: Plan[];
   wishlisted: Record<string, boolean>;
   memberIds: Record<string, boolean>;
   onWishlist: (id: string, current: boolean) => void;
+  isFirst?: boolean;
 }) => {
   const handleSeeAll = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -265,6 +268,7 @@ const SectionRow = React.memo(({
 
   return (
     <View style={styles.section}>
+      {!isFirst && <View style={styles.sectionDivider} />}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{def.title}</Text>
         <TouchableOpacity
@@ -362,6 +366,7 @@ export default function PlansScreen() {
 
   const [activeTab, setActiveTab] = useState<TabKey>('plans');
   const [mapView, setMapView] = useState(false);
+  const [heartFilter, setHeartFilter] = useState(false);
   const navigation = useNavigation();
 
   React.useEffect(() => {
@@ -599,9 +604,14 @@ export default function PlansScreen() {
     wishlistMutation.mutate({ planId, isCurrentlyWishlisted });
   }, [wishlistMutation]);
 
+  const displayPlans = useMemo(() => {
+    if (!heartFilter) return allPlans;
+    return allPlans.filter(p => wishlistedSet[p.id]);
+  }, [allPlans, heartFilter, wishlistedSet]);
+
   const sections = useMemo(
-    () => filterIntoSections(allPlans, sectionDefs, categoryFilter, whenFilter),
-    [allPlans, sectionDefs, categoryFilter, whenFilter],
+    () => filterIntoSections(displayPlans, sectionDefs, categoryFilter, whenFilter),
+    [displayPlans, sectionDefs, categoryFilter, whenFilter],
   );
 
   const whenOptions = useMemo<SheetOption[]>(
@@ -625,11 +635,10 @@ export default function PlansScreen() {
   // Plans to show on the map depend on which tab is active
   const mapPlans = useMemo(() => {
     if (activeTab === 'myplans') return myPlans;
-    if (activeTab === 'wishlist') return wishlistPlans;
     return allPlans;
-  }, [activeTab, allPlans, myPlans, wishlistPlans]);
+  }, [activeTab, allPlans, myPlans]);
 
-  const mapLoading = activeTab === 'myplans' ? myPlansLoading : activeTab === 'wishlist' ? wishlistLoading : isLoading;
+  const mapLoading = activeTab === 'myplans' ? myPlansLoading : isLoading;
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -638,19 +647,26 @@ export default function PlansScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>WashedUp</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.profileButton}
-          onPress={() => router.push('/profile')}
-          accessibilityLabel="Profile"
-        >
-          <User size={22} color="#1A1A1A" strokeWidth={2} />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Plans</Text>
+        <ProfileButton />
       </View>
 
-      {/* Filter Dropdowns + Map Toggle — only relevant on the Plans tab */}
+      {/* Tab Bar: Plans / My Plans */}
+      <View style={styles.tabBar}>
+        {(['plans', 'myplans'] as const).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.tabActive]}
+            onPress={() => { setActiveTab(tab); if (tab !== 'plans') setMapView(false); }}
+          >
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+              {tab === 'plans' ? 'Plans' : 'My Plans'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Filter Dropdowns + Map Toggle — only on the Plans tab */}
       {activeTab === 'plans' && (
         <View style={styles.filterRow}>
           <TouchableOpacity
@@ -673,6 +689,18 @@ export default function PlansScreen() {
             <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={[styles.heartFilterPill, heartFilter && styles.heartFilterPillActive]}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setHeartFilter(v => !v); }}
+          >
+            <Heart
+              size={16}
+              color={heartFilter ? '#FFFFFF' : '#1A1A1A'}
+              fill={heartFilter ? '#FFFFFF' : 'transparent'}
+              strokeWidth={2}
+            />
+          </TouchableOpacity>
+
           <View style={{ flex: 1 }} />
 
           <TouchableOpacity
@@ -689,21 +717,6 @@ export default function PlansScreen() {
           </TouchableOpacity>
         </View>
       )}
-
-      {/* Tab Bar: Plans / My Plans / Wishlist */}
-      <View style={styles.tabBar}>
-        {(['plans', 'myplans', 'wishlist'] as const).map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab === 'plans' ? 'Plans' : tab === 'myplans' ? 'My Plans' : 'Wishlist'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
 
       {/* Map view — shared across all tabs, shows the relevant plans for the active tab */}
       {mapView ? (
@@ -761,7 +774,7 @@ export default function PlansScreen() {
                   </TouchableOpacity>
                 </View>
               ) : (
-                sections.map(({ def, plans }) => (
+                sections.map(({ def, plans }, idx) => (
                   <SectionRow
                     key={def.key}
                     def={def}
@@ -769,6 +782,7 @@ export default function PlansScreen() {
                     wishlisted={wishlistedSet}
                     memberIds={memberIdSet}
                     onWishlist={handleWishlist}
+                    isFirst={idx === 0}
                   />
                 ))
               )}
@@ -789,20 +803,7 @@ export default function PlansScreen() {
             onEmptyCta={() => setActiveTab('plans')}
           />
         </View>
-      ) : (
-        <View style={{ flex: 1 }}>
-          <VerticalPlanList
-            plans={wishlistPlans}
-            loading={wishlistLoading}
-            wishlisted={wishlistedSet}
-            memberIds={memberIdSet}
-            onWishlist={handleWishlist}
-            emptyMessage="No wishlisted plans yet. Tap the heart on any plan."
-            emptyCta="Browse Plans"
-            onEmptyCta={() => setActiveTab('plans')}
-          />
-        </View>
-      )}
+      ) : null}
 
       {/* When Sheet */}
       <BottomSheet
@@ -835,7 +836,7 @@ export default function PlansScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: '#f1e4d4' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -843,19 +844,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 12,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: '#f1e4d4',
   },
-  logoContainer: { justifyContent: 'center' },
-  logoText: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 28, color: '#C4652A' },
-  profileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F0E6D3',
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerTitle: {
+    fontFamily: 'DMSerifDisplay_400Regular',
+    fontSize: 28,
+    color: '#1A1A1A',
   },
   mapTogglePill: {
     paddingHorizontal: 10,
@@ -869,6 +863,20 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   mapTogglePillActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
+  heartFilterPill: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heartFilterPillActive: {
+    backgroundColor: '#C4652A',
+    borderColor: '#C4652A',
+  },
   mapToggleLabel: {
     fontSize: 9,
     fontWeight: '600',
@@ -903,24 +911,29 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
-    marginBottom: 4,
+    marginBottom: 12,
+    gap: 0,
   },
   tab: {
-    paddingVertical: 12,
-    marginRight: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
   tabActive: { borderBottomColor: '#C4652A' },
-  tabText: { fontSize: 14, fontWeight: '500', color: '#9B8B7A' },
-  tabTextActive: { color: '#1C1917', fontWeight: '700' },
+  tabText: { fontSize: 15, fontWeight: '600', color: '#999999' },
+  tabTextActive: { color: '#1A1A1A' },
 
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   map: { flex: 1 },
 
-  section: { marginBottom: 32 },
+  section: { marginBottom: 24 },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: '#F0E6D3',
+    marginHorizontal: 20,
+    marginBottom: 20,
+  },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',

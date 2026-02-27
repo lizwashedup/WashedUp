@@ -16,8 +16,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import ProfileButton from '../../../components/ProfileButton';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
@@ -149,6 +150,18 @@ export default function PostScreen() {
   const [groupSize, setGroupSize] = useState(6);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
+  const params = useLocalSearchParams<{ prefillTitle?: string; prefillExploreEventId?: string }>();
+  const [exploreEventId, setExploreEventId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (params.prefillTitle && !title) {
+      setTitle(params.prefillTitle);
+    }
+    if (params.prefillExploreEventId) {
+      setExploreEventId(params.prefillExploreEventId);
+    }
+  }, [params.prefillTitle, params.prefillExploreEventId]);
+
   const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
 
   const toggleAgeRange = (range: AgeRange) => {
@@ -274,6 +287,7 @@ export default function PostScreen() {
           creator_user_id: user.id,
           status: 'forming',
           city: 'Los Angeles',
+          explore_event_id: exploreEventId,
         })
         .select('id')
         .single();
@@ -334,8 +348,11 @@ export default function PostScreen() {
         >
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Post a Plan</Text>
-            <Text style={styles.headerSub}>Create something for people to join</Text>
+            <View>
+              <Text style={styles.headerTitle}>Post a Plan</Text>
+              <Text style={styles.headerSub}>Create something for people to join</Text>
+            </View>
+            <ProfileButton />
           </View>
 
           {/* ── Title ── */}
@@ -793,8 +810,23 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
 
-  header: { marginBottom: 24 },
-  headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 32, color: '#1C1917' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 28, color: '#1A1A1A' },
+  profileButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F0E6D3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerSub: { fontSize: 14, color: Colors.textLight, marginTop: 4 },
 
   field: { marginBottom: 20 },

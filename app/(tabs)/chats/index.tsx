@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import ProfileButton from '../../../components/ProfileButton';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -109,6 +110,7 @@ export default function ChatsScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Chats</Text>
+          <ProfileButton />
         </View>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#C4652A" />
@@ -121,6 +123,7 @@ export default function ChatsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
+        <ProfileButton />
       </View>
 
       {chats.length === 0 ? (
@@ -170,15 +173,16 @@ export default function ChatsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: '#f1e4d4' },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
+    paddingBottom: 12,
   },
-  headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 32, color: '#1C1917' },
+  headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 28, color: '#1A1A1A' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingBottom: 32 },
 

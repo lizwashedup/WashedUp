@@ -120,7 +120,7 @@ export default function PlansSectionScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: '#f1e4d4' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

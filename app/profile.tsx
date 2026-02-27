@@ -141,10 +141,10 @@ export default function ProfileScreen() {
         const response = await fetch(editPhotoUri);
         const blob = await response.blob();
         const { error: uploadError } = await supabase.storage
-          .from('avatars')
+          .from('profile-photos')
           .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
         if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+        const { data: urlData } = supabase.storage.from('profile-photos').getPublicUrl(path);
         newPhotoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
       }
 
@@ -546,7 +546,7 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: '#f1e4d4' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingBottom: 48 },
 
@@ -749,7 +749,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#FFF8F0',
+    borderColor: '#f1e4d4',
   },
   editPhotoHint: {
     fontSize: 12,

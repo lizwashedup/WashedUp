@@ -1,9 +1,11 @@
 /**
  * WashedUp brand colors (.cursorrules)
+ * backgroundCreamOriginal: '#FFF8F0' — use if switching back
  */
 const brand = {
   primaryOrange: '#C4652A',
-  backgroundCream: '#FFF8F0',
+  backgroundCream: '#f1e4d4',
+  backgroundCreamOriginal: '#FFF8F0',
   textDark: '#1A1A1A',
   textMedium: '#666666',
   textLight: '#999999',

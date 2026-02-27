@@ -10,7 +10,7 @@ module.exports = {
       colors: {
         washedup: {
           orange: '#C4652A',
-          cream: '#FFF8F0',
+          cream: '#f1e4d4', // original: #FFF8F0
           'text-dark': '#1A1A1A',
           'text-medium': '#666666',
           'text-light': '#999999',
