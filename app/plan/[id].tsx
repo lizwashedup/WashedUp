@@ -32,9 +32,12 @@ import {
   Share2,
   MessageCircle,
   ChevronRight,
+  MoreHorizontal,
 } from 'lucide-react-native';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../lib/supabase';
+import { ReportModal } from '../../components/modals/ReportModal';
+import { useBlock } from '../../hooks/useBlock';
 
 const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
 
@@ -281,6 +284,10 @@ export default function PlanDetailScreen() {
   const [editSaving, setEditSaving] = useState(false);
   const [userGender, setUserGender] = useState<string | null>(null);
   const [userAge, setUserAge] = useState<number | null>(null);
+  const [showReport, setShowReport] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+
+  const { blockUser } = useBlock();
 
   useEffect(() => {
     (async () => {
@@ -401,7 +408,6 @@ export default function PlanDetailScreen() {
         }
       } catch (eligibilityError: any) {
         if (eligibilityError.message?.includes('not eligible')) throw eligibilityError;
-        console.warn('[Ghost Protocol] Gender check RPC failed:', eligibilityError.message);
       }
 
       // Check if there's an existing row (user previously left or partial insert)
@@ -632,6 +638,30 @@ export default function PlanDetailScreen() {
     });
   }, [plan]);
 
+  const handleReportMenu = useCallback(() => {
+    if (isHost || !plan?.host) return;
+    const hostName = plan.host.first_name ?? 'Host';
+    Alert.alert(
+      'Options',
+      undefined,
+      [
+        {
+          text: `Report ${hostName}`,
+          onPress: () => {
+            setReportTarget({ id: plan.host!.id, name: hostName });
+            setShowReport(true);
+          },
+        },
+        {
+          text: `Block ${hostName}`,
+          style: 'destructive',
+          onPress: () => blockUser(plan.host!.id, hostName, () => router.back()),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }, [isHost, plan, blockUser]);
+
   // ─── Loading / Error ─────────────────────────────────────────────────────────
 
   if (planLoading) {
@@ -697,6 +727,16 @@ export default function PlanDetailScreen() {
             <ArrowLeft size={20} color="#1A1A1A" strokeWidth={2.5} />
           </TouchableOpacity>
 
+          {!isHost && plan?.host && (
+            <TouchableOpacity
+              onPress={handleReportMenu}
+              style={[styles.heroCircleButton, styles.heroEllipsisButton, { top: insets.top + 8 }]}
+              accessibilityLabel="Report or block"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <MoreHorizontal size={20} color="#1A1A1A" strokeWidth={2} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             onPress={handleShare}
             style={[styles.heroCircleButton, styles.heroShareButton, { top: insets.top + 8 }]}
@@ -1212,6 +1252,16 @@ export default function PlanDetailScreen() {
           </View>
         </View>
       </Modal>
+
+      {reportTarget && (
+        <ReportModal
+          visible={showReport}
+          onClose={() => { setShowReport(false); setReportTarget(null); }}
+          reportedUserId={reportTarget.id}
+          reportedUserName={reportTarget.name}
+          eventId={plan.id}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -1256,6 +1306,10 @@ const styles = StyleSheet.create({
   heroShareButton: {
     left: undefined,
     right: 16,
+  },
+  heroEllipsisButton: {
+    left: undefined,
+    right: 62,
   },
   photoTag: {
     position: 'absolute',

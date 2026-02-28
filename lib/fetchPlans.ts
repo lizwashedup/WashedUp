@@ -30,17 +30,7 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
   const { data, error } = await supabase
     .rpc('get_filtered_feed', { p_user_id: userId });
 
-  if (error) {
-    console.error('[fetchPlans] RPC error:', error.code, '|', error.message);
-    throw error;
-  }
-
-  // DEBUG — remove after confirming image issue
-  if (data && data.length > 0) {
-    console.log('[fetchPlans] RPC sample keys:', Object.keys(data[0]));
-    console.log('[fetchPlans] RPC sample image_url:', data[0].image_url);
-    console.log('[fetchPlans] RPC sample host:', JSON.stringify(data[0].host));
-  }
+  if (error) throw error;
 
   return (data ?? []).map((item: any) => ({
     id: item.id,

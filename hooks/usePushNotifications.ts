@@ -27,12 +27,7 @@ export function usePushNotifications(userId?: string | null) {
       if (token) setExpoPushToken(token);
     });
 
-    // Foreground notification received handler (logging / future badge count updates)
-    notificationListener.current = Notifications.addNotificationReceivedListener(
-      (notification) => {
-        console.log('[PushNotifications] Received in foreground:', notification.request.content.title);
-      },
-    );
+    notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
 
     return () => {
       notificationListener.current?.remove();
@@ -43,11 +38,7 @@ export function usePushNotifications(userId?: string | null) {
 }
 
 async function registerForPushNotifications(): Promise<string | null> {
-  if (!Device.isDevice) {
-    // Simulator/emulator — cannot receive push tokens
-    console.log('[PushNotifications] Skipping — requires a physical device.');
-    return null;
-  }
+  if (!Device.isDevice) return null;
 
   // Android requires a notification channel before any notification can be shown
   if (Platform.OS === 'android') {
@@ -67,22 +58,14 @@ async function registerForPushNotifications(): Promise<string | null> {
     finalStatus = status;
   }
 
-  if (finalStatus !== 'granted') {
-    console.log('[PushNotifications] Permission denied.');
-    return null;
-  }
+  if (finalStatus !== 'granted') return null;
 
   // Resolve projectId from app.json extra.eas — run `eas init` if this is missing
   const projectId =
     Constants.expoConfig?.extra?.eas?.projectId ??
     (Constants as any).easConfig?.projectId;
 
-  if (!projectId || projectId === 'YOUR_PROJECT_ID_RUN_EAS_INIT') {
-    console.warn(
-      '[PushNotifications] No EAS project ID found. Run `eas init` and update app.json extra.eas.projectId.',
-    );
-    return null;
-  }
+  if (!projectId || projectId === 'YOUR_PROJECT_ID_RUN_EAS_INIT') return null;
 
   try {
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
@@ -99,6 +82,7 @@ async function registerForPushNotifications(): Promise<string | null> {
 
     return token;
   } catch (err) {
+    // Kept for crash debugging when push token registration fails
     console.warn('[PushNotifications] getExpoPushTokenAsync failed:', err);
     return null;
   }

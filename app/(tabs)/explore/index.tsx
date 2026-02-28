@@ -129,10 +129,7 @@ async function fetchExploreWishlists(userId: string): Promise<string[]> {
     .from('explore_wishlists')
     .select('explore_event_id')
     .eq('user_id', userId);
-  if (error) {
-    console.log('[Scene] explore_wishlists query error (table may not exist):', error.message);
-    return [];
-  }
+  if (error) return [];
   return (data ?? []).map((d: any) => d.explore_event_id);
 }
 

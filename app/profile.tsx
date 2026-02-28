@@ -187,7 +187,6 @@ export default function ProfileScreen() {
 
       const { error: rpcError } = await supabase.rpc('delete_own_account');
       if (rpcError) {
-        console.warn('delete_own_account RPC failed, falling back to manual cleanup:', rpcError.message);
         await supabase.from('wishlists').delete().eq('user_id', user.id);
         await supabase.from('message_likes').delete().eq('user_id', user.id);
         await supabase.from('chat_reads').delete().eq('user_id', user.id);

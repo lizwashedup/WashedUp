@@ -69,10 +69,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="chats/[id]"
-        options={{
-          href: null,
-          headerShown: false,
-        }}
+        options={{ href: null }}
       />
     </Tabs>
   );

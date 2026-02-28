@@ -331,7 +331,7 @@ export default function PostScreen() {
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <StatusBar style="dark" />
 
       <KeyboardAvoidingView
@@ -808,12 +808,14 @@ const placesStyles = {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.backgroundCream },
   flex: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 24 },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingTop: 8,
+    paddingBottom: 12,
     marginBottom: 24,
   },
   headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 28, color: '#1A1A1A' },

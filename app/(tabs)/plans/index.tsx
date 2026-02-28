@@ -60,10 +60,7 @@ async function fetchEventsByIds(ids: string[]): Promise<Plan[]> {
     .in('id', ids)
     .order('start_time', { ascending: true });
 
-  if (eventsError) {
-    console.error('[fetchEventsByIds] events query error:', eventsError.message);
-    return [];
-  }
+  if (eventsError) return [];
   if (!events?.length) return [];
 
   // Build profile lookup using plain object (avoids Hermes Map<generic> issue)
@@ -324,7 +321,6 @@ function VerticalPlanList({
   emptyCta: string;
   onEmptyCta: () => void;
 }) {
-  console.log('[VerticalPlanList] loading:', loading, 'plans.length:', plans.length);
   if (loading) {
     return <View style={styles.centered}><ActivityIndicator size="large" color="#C4652A" /></View>;
   }
@@ -427,10 +423,7 @@ export default function PlansScreen() {
         .eq('user_id', userId)
         .eq('status', 'joined');
 
-      if (memError) {
-        console.error('[MyPlans] membership query error:', memError.message);
-        return [];
-      }
+      if (memError) return [];
 
       // Events user created directly
       const { data: created, error: createdError } = await supabase
@@ -439,9 +432,7 @@ export default function PlansScreen() {
         .eq('creator_user_id', userId)
         .in('status', ['forming', 'active', 'full']);
 
-      if (createdError) {
-        console.error('[MyPlans] created query error:', createdError.message);
-      }
+      if (createdError) { /* created query failed */ }
 
       const joinedEvents = (memberships ?? [])
         .map((m: any) => m.events)
@@ -517,10 +508,7 @@ export default function PlansScreen() {
         `)
         .eq('user_id', userId);
 
-      if (wlError) {
-        console.error('[Wishlist] query error:', wlError.message);
-        return [];
-      }
+      if (wlError) return [];
 
       if (!wl?.length) return [];
 
@@ -595,9 +583,7 @@ export default function PlansScreen() {
       queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
       queryClient.invalidateQueries({ queryKey: ['wishlist-plans', userId] });
     },
-    onError: (error: any) => {
-      console.error('[Wishlist] Mutation error:', error.message, error);
-    },
+    onError: () => {},
   });
 
   const handleWishlist = useCallback((planId: string, isCurrentlyWishlisted: boolean) => {
