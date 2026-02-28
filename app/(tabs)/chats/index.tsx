@@ -173,7 +173,7 @@ export default function ChatsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f1e4d4' },
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -182,7 +182,14 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
-  headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 28, color: '#1A1A1A' },
+  headerTitle: {
+    fontFamily: 'DMSerifDisplay_400Regular',
+    fontSize: 28,
+    color: '#C4652A',
+    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingBottom: 32 },
 

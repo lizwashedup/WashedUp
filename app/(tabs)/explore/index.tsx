@@ -104,7 +104,7 @@ async function fetchSceneEvents(): Promise<SceneEvent[]> {
   if (error) throw error;
   if (!events || events.length === 0) return [];
 
-  const eventIds = events.map(e => e.id);
+  const eventIds = events.map((e: any) => e.id);
   const { data: planCounts } = await supabase
     .from('events')
     .select('explore_event_id')
@@ -118,7 +118,7 @@ async function fetchSceneEvents(): Promise<SceneEvent[]> {
     }
   });
 
-  return events.map(e => ({
+  return events.map((e: any) => ({
     ...e,
     plans_count: countMap[e.id] || 0,
   }));
@@ -158,11 +158,6 @@ function SceneCard({ event, isWishlisted, onWishlist }: {
         )}
 
         <View style={styles.cardTopLeft}>
-          {event.category && (
-            <View style={[styles.categoryPill, { backgroundColor: catColor }]}>
-              <Text style={styles.categoryText}>{event.category}</Text>
-            </View>
-          )}
           {event.plans_count > 0 && (
             <View style={styles.plansCountPill}>
               <Text style={styles.plansCountText}>
@@ -181,26 +176,38 @@ function SceneCard({ event, isWishlisted, onWishlist }: {
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Heart
-            size={20}
-            color={isWishlisted ? '#E53935' : '#FFFFFF'}
+            size={18}
+            color={isWishlisted ? '#E53935' : '#1A1A1A'}
             fill={isWishlisted ? '#E53935' : 'transparent'}
             strokeWidth={2}
           />
         </TouchableOpacity>
+
+        {formatEventDate(event.event_date, event.start_time) ? (
+          <View style={styles.dateOverlay}>
+            <Calendar size={14} color="#1A1A1A" strokeWidth={2} />
+            <Text style={styles.dateOverlayText}>{formatEventDate(event.event_date, event.start_time)}</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.cardInfo}>
         <Text style={styles.cardTitle} numberOfLines={2}>{event.title}</Text>
+        {event.category && (
+          <Text style={[styles.cardCategory, { color: catColor }]}>{event.category}</Text>
+        )}
         {event.venue && (
           <View style={styles.cardMetaRow}>
-            <MapPin size={13} color="#9B8B7A" strokeWidth={2} />
+            <MapPin size={14} color="#666666" strokeWidth={2} />
             <Text style={styles.cardMeta} numberOfLines={1}>{event.venue}</Text>
           </View>
         )}
-        <View style={styles.cardMetaRow}>
-          <Calendar size={13} color="#9B8B7A" strokeWidth={2} />
-          <Text style={styles.cardMeta}>{formatEventDate(event.event_date, event.start_time)}</Text>
-        </View>
+        {formatEventDate(event.event_date, event.start_time) ? (
+          <View style={styles.cardMetaRow}>
+            <Calendar size={14} color="#666666" strokeWidth={2} />
+            <Text style={styles.cardMeta}>{formatEventDate(event.event_date, event.start_time)}</Text>
+          </View>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -564,7 +571,7 @@ export default function SceneScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f1e4d4' },
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -576,7 +583,10 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontFamily: 'DMSerifDisplay_400Regular',
     fontSize: 28,
-    color: '#1A1A1A',
+    color: '#C4652A',
+    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 
   sceneTabBar: {
@@ -607,7 +617,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 20,
     gap: 10,
-    marginBottom: 8,
+    marginBottom: 20,
     alignItems: 'center',
   },
   heartFilterPill: {
@@ -660,17 +670,15 @@ const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
 
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+    marginBottom: 24,
   },
-  cardImageContainer: { width: '100%', height: 200, position: 'relative' },
+  cardImageContainer: {
+    width: '100%',
+    height: 200,
+    borderRadius: 14,
+    overflow: 'hidden',
+    position: 'relative',
+  },
   cardTopLeft: {
     position: 'absolute',
     top: 12,
@@ -678,30 +686,60 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
-  categoryPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  categoryText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF', textTransform: 'capitalize' },
   plansCountPill: { backgroundColor: '#C4652A', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   plansCountText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
+  dateOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  dateOverlayText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
   heartButton: {
     position: 'absolute',
     top: 12,
     right: 12,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  cardInfo: { padding: 16, gap: 6 },
+  cardInfo: {
+    paddingTop: 8,
+    paddingHorizontal: 0,
+    gap: 4,
+  },
+  cardCategory: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
   cardTitle: {
     fontFamily: 'DMSerifDisplay_400Regular',
-    fontSize: 20,
+    fontSize: 18,
     color: '#1A1A1A',
-    lineHeight: 26,
+    lineHeight: 23,
   },
   cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardMeta: { fontSize: 13, color: '#9B8B7A', flex: 1 },
+  cardMeta: { fontSize: 14, color: '#666666', flex: 1 },
 
   bottomCta: { alignItems: 'center', paddingVertical: 32, gap: 6 },
   bottomCtaText: { fontSize: 14, color: '#9B8B7A' },

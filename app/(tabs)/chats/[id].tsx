@@ -405,7 +405,7 @@ export default function ChatScreen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f1e4d4' }}>
+    <View style={{ flex: 1, backgroundColor: '#FFF8F0' }}>
       {/* ── Header ── */}
       <SafeAreaView edges={['top']} style={{ backgroundColor: '#FFFFFF' }}>
         <View style={chatStyles.header}>
@@ -641,7 +641,7 @@ const chatStyles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderLeftWidth: 3,
     borderLeftColor: '#C4652A',
     borderBottomWidth: 1,
@@ -680,7 +680,7 @@ const chatStyles = StyleSheet.create({
   cameraBtn: { padding: 4, paddingBottom: 8 },
   input: {
     flex: 1,
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 22,

@@ -24,7 +24,8 @@
         "googleMapsApiKey": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
       },
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDisplayName": "WashedUp"
       }
     },
     "android": {

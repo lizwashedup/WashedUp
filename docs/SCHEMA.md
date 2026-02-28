@@ -70,6 +70,7 @@
 | `onboarding_status` | onboarding_status | default `pending` |
 | `blocked_users` | uuid[] | default `'{}'` |
 | `phone_number` / `phone_verified` | text / bool | |
+| `handle` | text | nullable, UNIQUE — @handle for search/share (2-20 chars, lowercase alphanumeric + _) |
 | `instagram_handle` / `linkedin_url` / `tiktok_handle` | text | nullable |
 | `is_in_la` | boolean | nullable |
 | `push_new_messages` / `push_someone_joins` / `push_new_plans_area` | boolean | default true |
@@ -82,7 +83,23 @@
 ## `profiles_public` (VIEW)
 
 Safe subset of `profiles` for displaying other users. Use this for member lists, host info, etc.
-Fields: `id`, `first_name_display`, `profile_photo_url`, `bio`, `vibe_tags`, `city`, `gender`, `instagram_handle`, `linkedin_url`, `tiktok_handle`
+Fields: `id`, `first_name_display`, `profile_photo_url`, `bio`, `vibe_tags`, `city`, `gender`, `handle`, `instagram_handle`, `linkedin_url`, `tiktok_handle`
+
+---
+
+## `friends`
+
+Symmetric social graph (Your People). When A adds B, both rows exist.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | PK |
+| `user_id` | uuid | FK → profiles.id |
+| `friend_id` | uuid | FK → profiles.id |
+| `created_at` | timestamptz | |
+
+UNIQUE(user_id, friend_id). RLS: users can only see/add/delete their own rows.
+Use RPCs `add_friend(p_friend_id)` and `remove_friend(p_friend_id)` for symmetric add/remove.
 
 ---
 
@@ -149,6 +166,21 @@ Unique constraint on `(user_id, event_id)`. RLS: users can only see/add/delete t
 ## `explore_events`
 
 Curated "Ideas" feed. Filter by `status = 'Live'`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | PK |
+| `title` | text | |
+| `description` | text | nullable |
+| `image_url` | text | nullable |
+| `event_date` or `date` | date/text | nullable — event date |
+| `start_time` or `time` | text | nullable — time (e.g. "19:00") |
+| `venue` | text | nullable |
+| `venue_address` | text | nullable |
+| `category` | text | nullable |
+| `external_url` | text | nullable |
+| `ticket_price` | text | nullable |
+| `status` | text | filter `Live` |
 
 ---
 

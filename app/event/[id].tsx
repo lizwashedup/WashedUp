@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Linking,
   Dimensions,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -15,6 +16,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight } from 'lucide-react-native';
+import { ShareLinkModal } from '../../components/modals/ShareLinkModal';
 import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -69,6 +71,7 @@ export default function EventDetailScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
@@ -179,7 +182,15 @@ export default function EventDetailScreen() {
 
           <TouchableOpacity
             style={[styles.circleButton, { top: insets.top + 8, right: 60 }]}
-            onPress={() => Haptics.selectionAsync()}
+            onPress={async () => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              try {
+                await Share.share({
+                  message: `Check out "${event.title}" on WashedUp!\nhttps://washedup.app/event/${event.id}`,
+                  title: 'Share this event',
+                });
+              } catch {}
+            }}
           >
             <Share2 size={18} color="#1A1A1A" strokeWidth={2} />
           </TouchableOpacity>
@@ -322,7 +333,7 @@ export default function EventDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f1e4d4' },
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   heroContainer: { width: SCREEN_WIDTH, height: 280, position: 'relative' },
   circleButton: {
@@ -378,7 +389,7 @@ const styles = StyleSheet.create({
   stickyBar: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderTopWidth: 1,
     borderTopColor: '#F0E6D3',
   },

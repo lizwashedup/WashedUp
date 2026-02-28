@@ -16,9 +16,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import { ImagePlus, X } from 'lucide-react-native';
 import ProfileButton from '../../../components/ProfileButton';
+import { ShareLinkModal } from '../../../components/modals/ShareLinkModal';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
@@ -137,6 +141,8 @@ export default function PostScreen() {
   }, [userGender]);
 
   // Form fields
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
   const [title, setTitle] = useState('');
   const [location, setLocation] = useState('');
   const [locationLat, setLocationLat] = useState<number | null>(null);
@@ -163,6 +169,53 @@ export default function PostScreen() {
   }, [params.prefillTitle, params.prefillExploreEventId]);
 
   const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Go to Settings and allow photo access.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 10],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setImageUrl(result.assets[0].uri);
+      uploadPhoto(result.assets[0].uri);
+    }
+  };
+
+  const uploadPhoto = async (uri: string) => {
+    setImageLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const fileName = `${user.id}/${Date.now()}.jpg`;
+
+      const { error } = await supabase.storage
+        .from('event-images')
+        .upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
+
+      if (error) throw error;
+
+      const { data: urlData } = supabase.storage
+        .from('event-images')
+        .getPublicUrl(fileName);
+
+      setImageUrl(`${urlData.publicUrl}?t=${Date.now()}`);
+    } catch {
+      setImageUrl(null);
+      Alert.alert('Upload failed', 'Could not upload photo. Try again.');
+    } finally {
+      setImageLoading(false);
+    }
+  };
 
   const toggleAgeRange = (range: AgeRange) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -202,11 +255,13 @@ export default function PostScreen() {
 
   // Submit
   const [loading, setLoading] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [createdPlanId, setCreatedPlanId] = useState<string | null>(null);
 
   const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
   const safeTempDay = Math.min(tempDay, daysInTempMonth);
 
-  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && hostMessage.trim().length > 0 && !loading;
+  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && hostMessage.trim().length > 0 && !loading && !imageLoading;
 
   // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -288,6 +343,7 @@ export default function PostScreen() {
           status: 'forming',
           city: 'Los Angeles',
           explore_event_id: exploreEventId,
+          image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
         })
         .select('id')
         .single();
@@ -304,20 +360,8 @@ export default function PostScreen() {
       }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Plan posted!', 'Your plan is live. People can now join.', [
-        {
-          text: 'View Plans',
-            onPress: () => {
-            setTitle(''); setLocation(''); setLocationLat(null); setLocationLng(null);
-            setTicketUrl(''); setCategory(null);
-            setGenderPref('mixed'); setAgeRanges([]);
-            setDescription(''); setHostMessage(''); setGroupSize(6);
-            setDateSelected(false); setTimeSelected(false);
-            placesRef.current?.clear();
-            router.replace('/(tabs)/plans');
-          },
-        },
-      ]);
+      setCreatedPlanId(insertedEvent?.id ?? null);
+      setShowShareModal(true);
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
@@ -354,6 +398,43 @@ export default function PostScreen() {
             </View>
             <ProfileButton />
           </View>
+
+          {/* ── Photo (first field) ── */}
+          {!imageUrl ? (
+            <TouchableOpacity
+              style={styles.photoUpload}
+              onPress={pickImage}
+              activeOpacity={0.8}
+            >
+              <ImagePlus size={32} color="#C4652A" strokeWidth={2} />
+              <Text style={styles.photoUploadText}>Add a photo</Text>
+              <Text style={styles.photoUploadHint}>Optional — your plan works without one</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.photoPreview}>
+              <Image source={{ uri: imageUrl }} style={styles.photoPreviewImage} contentFit="cover" />
+              {imageLoading ? (
+                <View style={styles.photoLoadingOverlay}>
+                  <ActivityIndicator size="large" color="#C4652A" />
+                </View>
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={styles.photoRemoveBtn}
+                    onPress={() => setImageUrl(null)}
+                  >
+                    <X size={14} color="#666666" strokeWidth={2.5} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.photoChangeBtn}
+                    onPress={pickImage}
+                  >
+                    <Text style={styles.photoChangeBtnText}>Change</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          )}
 
           {/* ── Title ── */}
           <View style={styles.field}>
@@ -405,6 +486,7 @@ export default function PostScreen() {
               ref={placesRef}
               placeholder="Venue or neighborhood"
               fetchDetails
+              disableScroll={true}
               onPress={(data, details) => {
                 const lat = details?.geometry?.location?.lat ?? null;
                 const lng = details?.geometry?.location?.lng ?? null;
@@ -625,6 +707,25 @@ export default function PostScreen() {
         </View>
       </KeyboardAvoidingView>
 
+      <ShareLinkModal
+        visible={showShareModal}
+        onClose={() => {
+          setShowShareModal(false);
+          setImageUrl(null);
+          setTitle(''); setLocation(''); setLocationLat(null); setLocationLng(null);
+          setTicketUrl(''); setCategory(null);
+          setGenderPref('mixed'); setAgeRanges([]);
+          setDescription(''); setHostMessage(''); setGroupSize(6);
+          setDateSelected(false); setTimeSelected(false);
+          placesRef.current?.clear();
+          setCreatedPlanId(null);
+          router.replace('/(tabs)/plans');
+        }}
+        shareUrl={createdPlanId ? `https://washedup.app/plan/${createdPlanId}` : 'https://washedup.app'}
+        shareTitle="Share your plan"
+        shareMessage={title.trim() ? `Join me for "${title}" on WashedUp!\nhttps://washedup.app/plan/${createdPlanId}` : undefined}
+      />
+
       {/* ── Date Picker Modal ── */}
       <Modal visible={showDatePicker} transparent animationType="slide">
         <Pressable style={styles.modalOverlay} onPress={() => setShowDatePicker(false)}>
@@ -818,7 +919,14 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     marginBottom: 24,
   },
-  headerTitle: { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 28, color: '#1A1A1A' },
+  headerTitle: {
+    fontFamily: 'DMSerifDisplay_400Regular',
+    fontSize: 28,
+    color: '#C4652A',
+    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   profileButton: {
     width: 40,
     height: 40,
@@ -830,6 +938,67 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerSub: { fontSize: 14, color: Colors.textLight, marginTop: 4 },
+
+  photoUpload: {
+    width: '100%',
+    aspectRatio: 16 / 10,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#D4C5B4',
+    backgroundColor: '#F5EDE4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  photoUploadText: { fontSize: 14, color: '#9B8B7A', marginTop: 8 },
+  photoUploadHint: { fontSize: 12, color: '#BBAA99', marginTop: 4 },
+  photoPreview: {
+    width: '100%',
+    aspectRatio: 16 / 10,
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginBottom: 20,
+    position: 'relative',
+  },
+  photoPreviewImage: { width: '100%', height: '100%' },
+  photoLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoRemoveBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  photoChangeBtn: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  photoChangeBtnText: { fontSize: 12, fontWeight: '600', color: '#1A1A1A' },
 
   field: { marginBottom: 20 },
   placesField: { zIndex: 10 },

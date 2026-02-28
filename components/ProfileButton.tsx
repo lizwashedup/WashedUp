@@ -1,25 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { TouchableOpacity, Text, View, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { User } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 
 export default function ProfileButton() {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase
-        .from('profiles')
-        .select('profile_photo_url')
-        .eq('id', user.id)
-        .single();
-      if (data?.profile_photo_url) setPhotoUrl(data.profile_photo_url);
-    })();
-  }, []);
+  const fetchPhoto = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase
+      .from('profiles')
+      .select('profile_photo_url')
+      .eq('id', user.id)
+      .single();
+    setPhotoUrl(data?.profile_photo_url ?? null);
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchPhoto();
+    }, [])
+  );
 
   return (
     <TouchableOpacity

@@ -37,6 +37,7 @@ import {
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../lib/supabase';
 import { ReportModal } from '../../components/modals/ReportModal';
+import { ShareLinkModal } from '../../components/modals/ShareLinkModal';
 import { useBlock } from '../../hooks/useBlock';
 
 const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
@@ -107,6 +108,20 @@ function formatTime(dateString: string): string {
     minute: '2-digit',
     hour12: true,
   });
+}
+
+function buildCalendarUrl(title: string, startTime: string, location?: string): string {
+  const start = new Date(startTime);
+  const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: title,
+    dates: `${fmt(start)}/${fmt(end)}`,
+    location: location || '',
+    details: 'WashedUp plan — washedup.app',
+  });
+  return `https://calendar.google.com/calendar/event?${params.toString()}`;
 }
 
 function formatGenderLabel(gender_rule: string | null): string | null {
@@ -286,6 +301,8 @@ export default function PlanDetailScreen() {
   const [userAge, setUserAge] = useState<number | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareModalFromJoin, setShareModalFromJoin] = useState(false);
 
   const { blockUser } = useBlock();
 
@@ -460,13 +477,9 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['wishlist-plans'] });
       queryClient.invalidateQueries({ queryKey: ['wishlists'] });
 
-      // Navigate to chat so the user sees their greeting posted
-      router.push(`/(tabs)/chats/${id}` as any);
-
-      // If the event is ticketed, show the ticket prompt after a short delay
-      if (plan?.tickets_url) {
-        setTimeout(() => setTicketModalVisible(true), 600);
-      }
+      // Show share modal to encourage sharing, then navigate to chat
+      setShareModalFromJoin(true);
+      setShowShareModal(true);
     },
     onError: (error: any) => {
       Alert.alert('Oops', error.message ?? 'Something went wrong.');
@@ -630,12 +643,11 @@ export default function PlanDetailScreen() {
 
   // ─── Share ───────────────────────────────────────────────────────────────────
 
-  const handleShare = useCallback(async () => {
+  const handleShare = useCallback(() => {
     if (!plan) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await Share.share({
-      message: `Join me for "${plan.title}" on WashedUp!\nhttps://washedup.app/plan/${plan.id}`,
-    });
+    setShareModalFromJoin(false);
+    setShowShareModal(true);
   }, [plan]);
 
   const handleReportMenu = useCallback(() => {
@@ -777,6 +789,19 @@ export default function PlanDetailScreen() {
               {formatFullDate(plan.start_time)} · {formatTime(plan.start_time)}
             </Text>
           </View>
+
+          {/* Add to Calendar */}
+          <TouchableOpacity
+            style={styles.addToCalendarRow}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              Linking.openURL(buildCalendarUrl(plan.title, plan.start_time, plan.location_text ?? undefined));
+            }}
+            activeOpacity={0.7}
+          >
+            <Calendar size={14} color="#C4652A" strokeWidth={2} />
+            <Text style={styles.addToCalendarText}>Add to Calendar</Text>
+          </TouchableOpacity>
 
           {/* Location */}
           {plan.location_text && (
@@ -1021,6 +1046,23 @@ export default function PlanDetailScreen() {
         </Pressable>
       </Modal>
 
+      <ShareLinkModal
+        visible={showShareModal}
+        onClose={() => {
+          setShowShareModal(false);
+          if (shareModalFromJoin) {
+            setShareModalFromJoin(false);
+            router.push(`/(tabs)/chats/${id}` as any);
+            if (plan?.tickets_url) {
+              setTimeout(() => setTicketModalVisible(true), 600);
+            }
+          }
+        }}
+        shareUrl={plan ? `https://washedup.app/plan/${plan.id}` : 'https://washedup.app'}
+        shareTitle="Share this plan"
+        shareMessage={plan ? `Join me for "${plan.title}" on WashedUp!\nhttps://washedup.app/plan/${plan.id}` : undefined}
+      />
+
       {/* Ticket Prompt Modal — shown after joining a ticketed event */}
       <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => setTicketModalVisible(false)}>
         <Pressable style={joinStyles.overlay} onPress={() => setTicketModalVisible(false)}>
@@ -1112,6 +1154,7 @@ export default function PlanDetailScreen() {
                   ref={managePlacesRef}
                   placeholder="Venue or neighborhood"
                   fetchDetails
+                  disableScroll={true}
                   onPress={(data, details) => {
                     const lat = details?.geometry?.location?.lat ?? null;
                     const lng = details?.geometry?.location?.lng ?? null;
@@ -1269,7 +1312,7 @@ export default function PlanDetailScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f1e4d4' },
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   errorText: { fontSize: 16, color: '#666666' },
   linkText: { fontSize: 15, color: '#C4652A', fontWeight: '600' },
@@ -1389,6 +1432,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#C4652A',
     fontWeight: '600',
+  },
+  addToCalendarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 14,
+  },
+  addToCalendarText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#C4652A',
   },
 
   mapContainer: {
@@ -1632,7 +1686,7 @@ const joinStyles = StyleSheet.create({
     marginBottom: 20,
   },
   infoBox: {
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
@@ -1783,7 +1837,7 @@ const managePlacesStyles = {
   container: { flex: 0 },
   textInputContainer: { backgroundColor: 'transparent' },
   textInput: {
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 12,
@@ -1847,7 +1901,7 @@ const manageStyles = StyleSheet.create({
     marginTop: 16,
   },
   input: {
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 12,
@@ -1872,7 +1926,7 @@ const manageStyles = StyleSheet.create({
   pill: {
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 20,
@@ -1898,7 +1952,7 @@ const manageStyles = StyleSheet.create({
   genderPill: {
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     borderRadius: 14,
@@ -1912,7 +1966,7 @@ const manageStyles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
     borderWidth: 1,
     borderColor: '#F0E6D3',
     alignItems: 'center',

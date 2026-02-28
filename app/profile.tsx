@@ -21,7 +21,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
 
-// Uses correct column names from profiles table: first_name_display, profile_photo_url
+// Uses correct column names from profiles table: first_name_display, profile_photo_url, handle
 interface Profile {
   id: string;
   first_name: string | null;
@@ -29,6 +29,7 @@ interface Profile {
   bio: string | null;
   city: string | null;
   gender: string | null;
+  handle: string | null;
 }
 
 export default function ProfileScreen() {
@@ -43,6 +44,7 @@ export default function ProfileScreen() {
   const [showEditFlow, setShowEditFlow] = useState(false);
   const [editName, setEditName] = useState('');
   const [editBio, setEditBio] = useState('');
+  const [editHandle, setEditHandle] = useState('');
   const [editPhotoUri, setEditPhotoUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -55,7 +57,7 @@ export default function ProfileScreen() {
     if (!user) return;
     const { data } = await supabase
       .from('profiles')
-      .select('id, first_name_display, profile_photo_url, bio, city, gender')
+      .select('id, first_name_display, profile_photo_url, bio, city, gender, handle')
       .eq('id', user.id)
       .single();
     if (data) {
@@ -66,6 +68,7 @@ export default function ProfileScreen() {
         bio: data.bio ?? null,
         city: data.city ?? null,
         gender: data.gender ?? null,
+        handle: (data as any).handle ?? null,
       });
     }
     setLoading(false);
@@ -91,6 +94,7 @@ export default function ProfileScreen() {
   const openEditFlow = () => {
     setEditName(profile?.first_name ?? '');
     setEditBio(profile?.bio ?? '');
+    setEditHandle(profile?.handle ?? '');
     setEditPhotoUri(null);
     setShowEditFlow(true);
   };
@@ -148,12 +152,14 @@ export default function ProfileScreen() {
         newPhotoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
       }
 
+      const handleVal = editHandle.trim().toLowerCase() || null;
       const { error } = await supabase
         .from('profiles')
         .update({
           first_name_display: trimmedName,
           bio: editBio.trim() || null,
           profile_photo_url: newPhotoUrl,
+          handle: handleVal,
         })
         .eq('id', user.id);
 
@@ -391,6 +397,25 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.editFieldGroup}>
+            <Text style={styles.editLabel}>Handle</Text>
+            <View style={styles.handleInputRow}>
+              <Text style={styles.handlePrefix}>@</Text>
+              <TextInput
+                style={styles.handleInput}
+                value={editHandle}
+                onChangeText={(t) => setEditHandle(t.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20))}
+                placeholder="yourname"
+                placeholderTextColor="#C8BEB5"
+                maxLength={20}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+              />
+            </View>
+            <Text style={styles.editHelp}>This is how people find you on WashedUp</Text>
+          </View>
+
+          <View style={styles.editFieldGroup}>
             <Text style={styles.editLabel}>Bio</Text>
             <TextInput
               style={[styles.editInput, styles.editBioInput]}
@@ -476,6 +501,13 @@ export default function ProfileScreen() {
             )}
           </View>
           <Text style={styles.profileName}>{profile?.first_name ?? 'Your Profile'}</Text>
+          {profile?.handle ? (
+            <Text style={styles.profileHandle}>@{profile.handle}</Text>
+          ) : (
+            <TouchableOpacity onPress={openEditFlow} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.profileHandleLink}>Set a handle</Text>
+            </TouchableOpacity>
+          )}
           {profile?.city && (
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={14} color="#9B8B7A" />
@@ -545,7 +577,7 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f1e4d4' },
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingBottom: 48 },
 
@@ -567,7 +599,10 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontFamily: 'DMSerifDisplay_400Regular',
     fontSize: 32,
-    color: '#1C1917',
+    color: '#C4652A',
+    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 
   // Profile section
@@ -598,6 +633,8 @@ const styles = StyleSheet.create({
   },
   avatarInitial: { fontSize: 32, fontWeight: '700', color: '#C4652A' },
   profileName: { fontSize: 22, fontWeight: '700', color: '#1C1917', marginTop: 4 },
+  profileHandle: { fontSize: 15, color: '#888888', marginTop: 2 },
+  profileHandleLink: { fontSize: 15, color: '#C4652A', fontWeight: '600', marginTop: 2 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationText: { fontSize: 13, color: '#9B8B7A' },
   bio: {
@@ -748,7 +785,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#f1e4d4',
+    borderColor: '#FFF8F0',
   },
   editPhotoHint: {
     fontSize: 12,
@@ -777,6 +814,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1C1917',
     fontWeight: '400',
+  },
+  handleInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#F0E6D3',
+    borderRadius: 14,
+  },
+  handlePrefix: { fontSize: 16, color: '#888888', marginLeft: 16 },
+  handleInput: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    fontSize: 16,
+    color: '#1C1917',
   },
   editBioInput: {
     minHeight: 90,

@@ -112,11 +112,19 @@ export const PlanCard = React.memo<PlanCardProps>(({
   const categoryColor = getCategoryColor(plan.category);
   const cardWidth = variant === 'carousel' ? CARD_WIDTH : '100%';
 
+  const metaText = plan.location_text
+    ? `${formatDate(plan.start_time)} · ${plan.location_text}`
+    : formatDate(plan.start_time);
+
   return (
     <TouchableOpacity
       onPress={handlePress}
       activeOpacity={0.92}
-      style={[styles.card, { width: cardWidth as any }, variant === 'full' && { marginRight: 0 }]}
+      style={[
+        styles.card,
+        { width: cardWidth as any },
+        variant === 'carousel' && styles.cardCarousel,
+      ]}
       accessibilityLabel={`${plan.title} plan`}
       accessibilityRole="button"
     >
@@ -137,7 +145,7 @@ export const PlanCard = React.memo<PlanCardProps>(({
           </View>
         )}
 
-        {/* Top-left: status badge — Full (orange) or 1 spot left (amber), nothing otherwise */}
+        {/* Top-left: status badge — Full or 1 spot left */}
         {isFull ? (
           <View style={[styles.statusBadge, styles.statusBadgeFull]}>
             <Text style={styles.statusBadgeText}>
@@ -164,10 +172,16 @@ export const PlanCard = React.memo<PlanCardProps>(({
             strokeWidth={2}
           />
         </TouchableOpacity>
+      </View>
 
-        {/* Host avatar + name — bottom left, horizontal row */}
-        <View style={styles.hostOverlay}>
-          {plan.host?.avatar_url ? (
+      {/* Content below image — directly on page background */}
+      <View style={styles.content}>
+        <Text style={styles.title} numberOfLines={2}>
+          {plan.title}
+        </Text>
+
+        <View style={styles.hostRow}>
+          {plan.host && (plan.host.avatar_url ? (
             <Image
               source={{ uri: plan.host.avatar_url }}
               style={styles.hostAvatar}
@@ -176,55 +190,35 @@ export const PlanCard = React.memo<PlanCardProps>(({
           ) : (
             <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
               <Text style={styles.hostAvatarInitial}>
-                {plan.host?.first_name?.[0]?.toUpperCase() ?? '?'}
+                {plan.host.first_name?.[0]?.toUpperCase() ?? '?'}
               </Text>
             </View>
-          )}
+          ))}
           {plan.host?.first_name && (
             <Text style={styles.hostName} numberOfLines={1}>
               {plan.host.first_name}
             </Text>
           )}
+          {plan.host?.first_name && plan.category && (
+            <Text style={styles.separator}> · </Text>
+          )}
+          {plan.category && (
+            <Text style={[styles.categoryText, { color: categoryColor }]}>
+              {formatCategoryLabel(plan.category)}
+            </Text>
+          )}
+          {isMember && (
+            <View style={styles.goingBadge}>
+              <View style={styles.goingDot} />
+              <Text style={styles.goingText}>You're going</Text>
+            </View>
+          )}
         </View>
 
-        {/* Category badge — bottom right */}
-        {plan.category && (
-          <View style={styles.categoryBadge}>
-            <Text style={styles.categoryBadgeText}>{formatCategoryLabel(plan.category)}</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.content}>
-        {plan.host_message ? (
-          <View style={styles.quoteBox}>
-            <Text style={styles.quoteText} numberOfLines={2}>
-              "{plan.host_message}"
-            </Text>
-          </View>
-        ) : null}
-
-        <Text style={styles.title} numberOfLines={2}>
-          {plan.title}
-        </Text>
-
-        {isMember && (
-          <View style={styles.goingBadge}>
-            <View style={styles.goingDot} />
-            <Text style={styles.goingText}>You're going</Text>
-          </View>
-        )}
-
-        {plan.location_text && (
-          <Text style={styles.neighborhood} numberOfLines={1}>
-            {plan.location_text}
-          </Text>
-        )}
-
-        <View style={styles.dateRow}>
-          <Calendar size={12} color="#999999" strokeWidth={2} />
-          <Text style={styles.dateText} numberOfLines={1}>
-            {formatDate(plan.start_time)}
+        <View style={styles.metaRow}>
+          <Calendar size={12} color="#888888" strokeWidth={2} />
+          <Text style={styles.metaText} numberOfLines={1}>
+            {metaText}
           </Text>
         </View>
       </View>
@@ -236,19 +230,16 @@ PlanCard.displayName = 'PlanCard';
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    marginBottom: 24,
+  },
+  cardCarousel: {
     marginRight: 12,
   },
   imageContainer: {
     width: '100%',
-    aspectRatio: 16 / 9,
+    aspectRatio: 16 / 10,
+    borderRadius: 14,
+    overflow: 'hidden',
     position: 'relative',
   },
   image: {
@@ -268,7 +259,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  // Status badges — top left
   statusBadge: {
     position: 'absolute',
     top: 10,
@@ -294,7 +284,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
-  // Heart — top right
   heartButton: {
     position: 'absolute',
     top: 10,
@@ -312,21 +301,25 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
 
-  // Host overlay — bottom left, horizontal
-  hostOverlay: {
-    position: 'absolute',
-    bottom: 10,
-    left: 10,
+  content: {
+    paddingTop: 8,
+    gap: 4,
+  },
+  title: {
+    fontFamily: 'DMSerifDisplay_400Regular',
+    fontSize: 18,
+    color: '#1C1917',
+    lineHeight: 23,
+  },
+  hostRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   hostAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
   },
   hostAvatarPlaceholder: {
     backgroundColor: '#C4652A',
@@ -334,58 +327,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hostAvatarInitial: {
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   hostName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    textShadowColor: 'rgba(0,0,0,0.4)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#44403C',
     maxWidth: 100,
   },
-
-  // Category badge — bottom right
-  categoryBadge: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 2,
+  separator: {
+    fontSize: 13,
+    color: '#CCCCCC',
   },
-  categoryBadgeText: {
+  categoryText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#C4652A',
-  },
-
-  // Content below image
-  content: {
-    padding: 12,
-    gap: 5,
-  },
-  title: {
-    fontFamily: 'DMSerifDisplay_400Regular',
-    fontSize: 22,
-    color: '#1C1917',
-    lineHeight: 28,
   },
   goingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     backgroundColor: '#E8F5E9',
-    alignSelf: 'flex-start',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
@@ -401,33 +365,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2E7D32',
   },
-  neighborhood: {
-    fontSize: 13,
-    color: '#666666',
-  },
-  dateRow: {
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    marginTop: 1,
   },
-  dateText: {
+  metaText: {
     fontSize: 13,
-    color: '#999999',
-  },
-  quoteBox: {
-    backgroundColor: '#f1e4d4',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 6,
-    borderLeftWidth: 3,
-    borderLeftColor: '#C4652A',
-  },
-  quoteText: {
-    fontSize: 12,
-    color: '#666666',
-    fontStyle: 'italic',
-    lineHeight: 16,
+    color: '#888888',
+    flex: 1,
   },
 });

@@ -348,7 +348,6 @@ function VerticalPlanList({
         />
       )}
       contentContainerStyle={styles.verticalListContent}
-      ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
       showsVerticalScrollIndicator={false}
     />
   );
@@ -822,7 +821,7 @@ export default function PlansScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f1e4d4' },
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -830,12 +829,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 12,
-    backgroundColor: '#f1e4d4',
+    backgroundColor: '#FFF8F0',
   },
   headerTitle: {
     fontFamily: 'DMSerifDisplay_400Regular',
     fontSize: 28,
-    color: '#1A1A1A',
+    color: '#C4652A',
+    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   mapTogglePill: {
     paddingHorizontal: 10,
@@ -876,7 +878,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 20,
     gap: 10,
-    marginBottom: 8,
+    marginBottom: 20,
   },
   dropdownPill: {
     flexDirection: 'row',

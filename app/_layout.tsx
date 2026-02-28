@@ -166,7 +166,7 @@ function RootLayoutNav() {
         <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
       </Stack>
       {!authResolved && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1e4d4' }}>
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8F0' }}>
           <ActivityIndicator size="large" color={Colors.primaryOrange} />
         </View>
       )}
