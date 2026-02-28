@@ -163,6 +163,37 @@ Unique constraint on `(user_id, event_id)`. RLS: users can only see/add/delete t
 
 ---
 
+## `event_waitlist`
+
+Users join when a plan is full; they get notified (via push/backend) when a spot opens. **Do not auto-join** — just notify.
+
+| Column | Notes |
+|---|---|
+| `id` | uuid PK |
+| `event_id` | FK → `events.id` |
+| `user_id` | FK → `profiles.id` |
+| `created_at` | timestamptz |
+| `notified` | boolean, default false — set true after push sent |
+
+Unique constraint on `(event_id, user_id)`. RLS: users can view/add/remove their own rows only.
+
+**Trigger:** When someone leaves a plan (status → `left`) and a spot opens, rows are inserted into `waitlist_notification_queue`. An edge function/cron should process the queue, send push notifications, and set `notified = true`.
+
+---
+
+## `waitlist_notification_queue`
+
+Queue for waitlist notifications. Trigger populates when a spot opens. Edge function/cron processes: send push via `expo_push_token` on profiles, then `UPDATE event_waitlist SET notified = true` and delete from queue.
+
+| Column | Notes |
+|---|---|
+| `id` | uuid PK |
+| `event_id` | FK → `events.id` |
+| `user_id` | FK → `profiles.id` |
+| `created_at` | timestamptz |
+
+---
+
 ## `explore_events`
 
 Curated "Ideas" feed. Filter by `status = 'Live'`.

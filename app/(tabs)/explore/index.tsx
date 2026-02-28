@@ -11,13 +11,14 @@ import {
   Linking,
   Modal,
   Pressable,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Heart, Calendar, MapPin, Map, LayoutList, Check, ChevronDown, Utensils, Lightbulb } from 'lucide-react-native';
+import { Heart, Calendar, MapPin, Map, LayoutList, Check, ChevronDown, Utensils, Lightbulb, Share2 } from 'lucide-react-native';
 import ProfileButton from '../../../components/ProfileButton';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
@@ -149,13 +150,11 @@ function SceneCard({ event, isWishlisted, onWishlist }: {
       onPress={() => router.push(`/event/${event.id}`)}
     >
       <View style={styles.cardImageContainer}>
-        {event.image_url ? (
-          <Image source={{ uri: event.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: catColor + '20', alignItems: 'center', justifyContent: 'center' }]}>
-            <Calendar size={40} color={catColor} />
-          </View>
-        )}
+        <Image
+          source={event.image_url ? { uri: event.image_url } : require('../../../assets/images/plan-placeholder.png')}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+        />
 
         <View style={styles.cardTopLeft}>
           {event.plans_count > 0 && (
@@ -167,21 +166,35 @@ function SceneCard({ event, isWishlisted, onWishlist }: {
           )}
         </View>
 
-        <TouchableOpacity
-          style={styles.heartButton}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onWishlist(event.id, isWishlisted);
-          }}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Heart
-            size={18}
-            color={isWishlisted ? '#E53935' : '#1A1A1A'}
-            fill={isWishlisted ? '#E53935' : 'transparent'}
-            strokeWidth={2}
-          />
-        </TouchableOpacity>
+        <View style={styles.cardTopRight}>
+          <TouchableOpacity
+            style={styles.shareButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              Share.share({
+                message: `Check out ${event.title} in LA on WashedUp!\nhttps://washedup.app/e/${event.id}`,
+              }).catch(() => {});
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Share2 size={14} color="#1A1A1A" strokeWidth={2} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.heartButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onWishlist(event.id, isWishlisted);
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Heart
+              size={18}
+              color={isWishlisted ? '#E53935' : '#1A1A1A'}
+              fill={isWishlisted ? '#E53935' : 'transparent'}
+              strokeWidth={2}
+            />
+          </TouchableOpacity>
+        </View>
 
         {formatEventDate(event.event_date, event.start_time) ? (
           <View style={styles.dateOverlay}>
@@ -706,10 +719,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1A1A1A',
   },
-  heartButton: {
+  cardTopRight: {
     position: 'absolute',
     top: 12,
     right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  shareButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  heartButton: {
     width: 34,
     height: 34,
     borderRadius: 17,

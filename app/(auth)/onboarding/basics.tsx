@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
   },
   inputError: { borderColor: Colors.errorRed, borderWidth: 1.5 },
   inputText: { fontSize: 16, color: Colors.textDark },
-  placeholder: { color: Colors.textLight },
+  placeholder: { color: Colors.textMedium },
   errorText: { fontSize: 14, color: Colors.errorRed, marginTop: 4 },
   errorPlaceholder: { height: 22, marginTop: 4 },
   label: { fontSize: 16, color: Colors.textDark, fontWeight: '500' },

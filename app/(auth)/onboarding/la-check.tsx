@@ -114,7 +114,7 @@ export default function OnboardingLACheckScreen() {
                 <TextInput
                   style={styles.input}
                   placeholder="City name"
-                  placeholderTextColor={Colors.textLight}
+                  placeholderTextColor={Colors.textMedium}
                   value={city}
                   onChangeText={setCity}
                   autoCapitalize="words"

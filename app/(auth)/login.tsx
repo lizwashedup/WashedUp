@@ -17,6 +17,7 @@ import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
@@ -82,7 +83,7 @@ export default function LoginScreen() {
               entering={FadeIn.duration(400)}
               style={styles.topSection}
             >
-              <Text style={styles.logo}>WashedUp</Text>
+              <Image source={require('../../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
               <Text style={styles.tagline}>Find People to Go With.</Text>
               <Text style={styles.socialProof}>{SOCIAL_PROOF}</Text>
             </Animated.View>
@@ -103,7 +104,7 @@ export default function LoginScreen() {
                 placeholder="Email address"
                 onFocus={() => setEmailFocused(true)}
                 onBlur={() => setEmailFocused(false)}
-                placeholderTextColor={Colors.textLight}
+                placeholderTextColor={Colors.textMedium}
                 value={email}
                 onChangeText={(t) => { setEmail(t); setError(null); }}
                 keyboardType="email-address"
@@ -126,7 +127,7 @@ export default function LoginScreen() {
                   placeholder="Password"
                   onFocus={() => setPasswordFocused(true)}
                   onBlur={() => setPasswordFocused(false)}
-                  placeholderTextColor={Colors.textLight}
+                  placeholderTextColor={Colors.textMedium}
                   value={password}
                   onChangeText={(t) => { setPassword(t); setError(null); }}
                   secureTextEntry={!passwordVisible}
@@ -227,10 +228,8 @@ const styles = StyleSheet.create({
     minHeight: 100,
   },
   logo: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: Colors.primaryOrange,
-    textAlign: 'center',
+    width: 260,
+    height: 56,
   },
   tagline: {
     fontSize: 16,
@@ -299,10 +298,10 @@ const styles = StyleSheet.create({
   primaryButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: '#C4652A', // WashedUp orange — matches logo
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.primaryOrange,
+    shadowColor: '#C4652A',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

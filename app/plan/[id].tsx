@@ -37,7 +37,7 @@ import {
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../lib/supabase';
 import { ReportModal } from '../../components/modals/ReportModal';
-import { ShareLinkModal } from '../../components/modals/ShareLinkModal';
+import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { useBlock } from '../../hooks/useBlock';
 
 const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
@@ -301,8 +301,9 @@ export default function PlanDetailScreen() {
   const [userAge, setUserAge] = useState<number | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [shareModalFromJoin, setShareModalFromJoin] = useState(false);
+  const [shareAfterJoinVisible, setShareAfterJoinVisible] = useState(false);
+  const [isOnWaitlist, setIsOnWaitlist] = useState(false);
+  const [waitlistLoading, setWaitlistLoading] = useState(false);
 
   const { blockUser } = useBlock();
 
@@ -374,6 +375,18 @@ export default function PlanDetailScreen() {
       .eq('event_id', id)
       .maybeSingle()
       .then(({ data }) => setIsWishlisted(!!data));
+  }, [currentUserId, id]);
+
+  // Waitlist check
+  useEffect(() => {
+    if (!currentUserId || !id) return;
+    supabase
+      .from('event_waitlist')
+      .select('id')
+      .eq('event_id', id)
+      .eq('user_id', currentUserId)
+      .maybeSingle()
+      .then(({ data }) => setIsOnWaitlist(!!data));
   }, [currentUserId, id]);
 
   const isMember = members.some((m) => m.user_id === currentUserId);
@@ -477,9 +490,7 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['wishlist-plans'] });
       queryClient.invalidateQueries({ queryKey: ['wishlists'] });
 
-      // Show share modal to encourage sharing, then navigate to chat
-      setShareModalFromJoin(true);
-      setShowShareModal(true);
+      setShareAfterJoinVisible(true);
     },
     onError: (error: any) => {
       Alert.alert('Oops', error.message ?? 'Something went wrong.');
@@ -641,13 +652,48 @@ export default function PlanDetailScreen() {
     queryClient.invalidateQueries({ queryKey: ['wishlists', currentUserId] });
   }, [currentUserId, id, isWishlisted, queryClient]);
 
+  // ─── Waitlist ─────────────────────────────────────────────────────────────────
+
+  const handleJoinWaitlist = useCallback(async () => {
+    if (waitlistLoading || !currentUserId || !id) return;
+    setWaitlistLoading(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      if (isOnWaitlist) {
+        await supabase
+          .from('event_waitlist')
+          .delete()
+          .eq('event_id', id)
+          .eq('user_id', currentUserId);
+        setIsOnWaitlist(false);
+      } else {
+        await supabase
+          .from('event_waitlist')
+          .insert({ event_id: id, user_id: currentUserId });
+        setIsOnWaitlist(true);
+        Alert.alert(
+          "You're on the waitlist",
+          "We'll notify you if a spot opens up.",
+        );
+      }
+    } catch {
+      Alert.alert('Error', 'Please try again.');
+    } finally {
+      setWaitlistLoading(false);
+    }
+  }, [currentUserId, id, isOnWaitlist, waitlistLoading]);
+
   // ─── Share ───────────────────────────────────────────────────────────────────
 
-  const handleShare = useCallback(() => {
+  const handleShare = useCallback(async () => {
     if (!plan) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setShareModalFromJoin(false);
-    setShowShareModal(true);
+    try {
+      await Share.share({
+        message: `Join me for "${plan.title}" on WashedUp!\nhttps://washedup.app/e/${plan.id}`,
+      });
+    } catch {}
   }, [plan]);
 
   const handleReportMenu = useCallback(() => {
@@ -717,18 +763,12 @@ export default function PlanDetailScreen() {
       >
         {/* Hero */}
         <View style={styles.heroContainer}>
-          {plan.image_url ? (
-            <Image
-              source={{ uri: plan.image_url }}
-              style={styles.heroImage}
-              contentFit="cover"
-              transition={200}
-            />
-          ) : (
-            <View style={styles.heroPlaceholder}>
-              <Text style={styles.heroEmoji}>{getCategoryEmoji(plan.primary_vibe)}</Text>
-            </View>
-          )}
+          <Image
+            source={plan.image_url ? { uri: plan.image_url } : require('../../assets/images/plan-placeholder.png')}
+            style={styles.heroImage}
+            contentFit="cover"
+            transition={200}
+          />
 
           <TouchableOpacity
             onPress={() => router.back()}
@@ -968,8 +1008,25 @@ export default function PlanDetailScreen() {
             <Text style={styles.ineligibleSub}>It's restricted by age or gender</Text>
           </View>
         ) : isFull ? (
-          <TouchableOpacity style={styles.waitlistButton}>
-            <Text style={styles.waitlistButtonText}>Join Waitlist</Text>
+          <TouchableOpacity
+            style={[
+              styles.waitlistButton,
+              isOnWaitlist && styles.waitlistButtonActive,
+            ]}
+            onPress={handleJoinWaitlist}
+            disabled={waitlistLoading}
+            activeOpacity={0.9}
+          >
+            {waitlistLoading ? (
+              <ActivityIndicator size="small" color={isOnWaitlist ? '#FFFFFF' : '#C4652A'} />
+            ) : (
+              <Text style={[
+                styles.waitlistButtonText,
+                isOnWaitlist && styles.waitlistButtonTextActive,
+              ]}>
+                {isOnWaitlist ? 'On Waitlist ✓' : 'Join Waitlist'}
+              </Text>
+            )}
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -1046,21 +1103,18 @@ export default function PlanDetailScreen() {
         </Pressable>
       </Modal>
 
-      <ShareLinkModal
-        visible={showShareModal}
+      <SharePlanModal
+        visible={shareAfterJoinVisible}
         onClose={() => {
-          setShowShareModal(false);
-          if (shareModalFromJoin) {
-            setShareModalFromJoin(false);
-            router.push(`/(tabs)/chats/${id}` as any);
-            if (plan?.tickets_url) {
-              setTimeout(() => setTicketModalVisible(true), 600);
-            }
+          setShareAfterJoinVisible(false);
+          router.push(`/(tabs)/chats/${id}` as any);
+          if (plan?.tickets_url) {
+            setTimeout(() => setTicketModalVisible(true), 600);
           }
         }}
-        shareUrl={plan ? `https://washedup.app/plan/${plan.id}` : 'https://washedup.app'}
-        shareTitle="Share this plan"
-        shareMessage={plan ? `Join me for "${plan.title}" on WashedUp!\nhttps://washedup.app/plan/${plan.id}` : undefined}
+        planTitle={plan?.title || ''}
+        planId={id as string}
+        variant="joined"
       />
 
       {/* Ticket Prompt Modal — shown after joining a ticketed event */}
@@ -1628,7 +1682,14 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#C4652A',
   },
+  waitlistButtonActive: {
+    backgroundColor: '#C4652A',
+    borderColor: '#C4652A',
+  },
   waitlistButtonText: { fontSize: 17, fontWeight: '700', color: '#C4652A' },
+  waitlistButtonTextActive: {
+    color: '#FFFFFF',
+  },
 
   ineligibleBar: { paddingVertical: 16, alignItems: 'center' },
   ineligibleText: { fontSize: 15, color: '#999999', fontWeight: '600' },

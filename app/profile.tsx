@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -19,7 +20,10 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { PHOTO_FORMAT_ERROR_MESSAGE } from '../constants/PhotoUpload';
+import { PROFILE_PHOTO_KEY } from '../components/ProfileButton';
 
 // Uses correct column names from profiles table: first_name_display, profile_photo_url, handle
 interface Profile {
@@ -34,6 +38,7 @@ interface Profile {
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDeleteFlow, setShowDeleteFlow] = useState(false);
@@ -47,10 +52,45 @@ export default function ProfileScreen() {
   const [editHandle, setEditHandle] = useState('');
   const [editPhotoUri, setEditPhotoUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
+  const [checkingHandle, setCheckingHandle] = useState(false);
 
   useEffect(() => {
     fetchProfile();
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchProfile();
+    }, [])
+  );
+
+  // Debounced handle availability check (500ms) — skip if unchanged from current
+  useEffect(() => {
+    if (!showEditFlow) return;
+    const clean = editHandle.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const currentHandle = (profile?.handle ?? '').toLowerCase().trim();
+    if (clean.length < 2) {
+      setHandleAvailable(null);
+      return;
+    }
+    if (clean === currentHandle) {
+      setHandleAvailable(true);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setCheckingHandle(true);
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('handle', clean)
+        .neq('id', profile?.id ?? '')
+        .maybeSingle();
+      setHandleAvailable(!data);
+      setCheckingHandle(false);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [editHandle, profile?.handle, profile?.id, showEditFlow]);
 
   const fetchProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -96,6 +136,8 @@ export default function ProfileScreen() {
     setEditBio(profile?.bio ?? '');
     setEditHandle(profile?.handle ?? '');
     setEditPhotoUri(null);
+    setHandleAvailable(null);
+    setCheckingHandle(false);
     setShowEditFlow(true);
   };
 
@@ -121,7 +163,7 @@ export default function ProfileScreen() {
       );
       setEditPhotoUri(manipulated.uri);
     } catch {
-      setEditPhotoUri(result.assets[0].uri);
+      Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
     }
   };
 
@@ -141,7 +183,10 @@ export default function ProfileScreen() {
       let newPhotoUrl = profile?.avatar_url ?? null;
 
       if (editPhotoUri) {
-        const path = `${user.id}/${user.id}.jpg`;
+        // Ensure fresh JWT — expired tokens cause RLS "new row violates" on upload
+        await supabase.auth.refreshSession();
+
+        const path = `${user.id}.jpg`;
         const response = await fetch(editPhotoUri);
         const blob = await response.blob();
         const { error: uploadError } = await supabase.storage
@@ -165,6 +210,7 @@ export default function ProfileScreen() {
 
       if (error) throw error;
 
+      queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
       setProfile((prev) =>
         prev ? { ...prev, first_name: trimmedName, bio: editBio.trim() || null, avatar_url: newPhotoUrl } : prev,
       );
@@ -191,18 +237,16 @@ export default function ProfileScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { error: rpcError } = await supabase.rpc('delete_own_account');
-      if (rpcError) {
-        await supabase.from('wishlists').delete().eq('user_id', user.id);
-        await supabase.from('message_likes').delete().eq('user_id', user.id);
-        await supabase.from('chat_reads').delete().eq('user_id', user.id);
-        await supabase.from('messages').delete().eq('user_id', user.id);
-        await supabase.from('event_members').delete().eq('user_id', user.id);
-        await supabase.from('profiles').delete().eq('id', user.id);
-      }
+      // RPC cascades through all user data and removes auth identity (SECURITY DEFINER)
+      const { error } = await supabase.rpc('delete_own_account');
+      if (error) throw error;
 
-      await supabase.auth.signOut();
-    } catch {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Session may already be invalid after deletion; ignore
+      }
+    } catch (err: any) {
       setDeleting(false);
       Alert.alert(
         'Something went wrong',
@@ -347,6 +391,8 @@ export default function ProfileScreen() {
 
   if (showEditFlow) {
     const displayPhoto = editPhotoUri ?? profile?.avatar_url;
+    const handleChanged = editHandle.trim().toLowerCase() !== (profile?.handle ?? '').trim().toLowerCase();
+    const saveDisabledByHandle = handleChanged && (handleAvailable !== true || checkingHandle);
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.deleteHeader}>
@@ -412,6 +458,13 @@ export default function ProfileScreen() {
                 returnKeyType="next"
               />
             </View>
+            {checkingHandle ? (
+              <ActivityIndicator size="small" color="#999999" style={styles.handleAvailability} />
+            ) : handleAvailable === true ? (
+              <Text style={styles.handleAvailable}>Available</Text>
+            ) : handleAvailable === false ? (
+              <Text style={styles.handleTaken}>Taken</Text>
+            ) : null}
             <Text style={styles.editHelp}>This is how people find you on WashedUp</Text>
           </View>
 
@@ -445,9 +498,9 @@ export default function ProfileScreen() {
           )}
 
           <TouchableOpacity
-            style={[styles.editSaveBtn, saving && { opacity: 0.7 }]}
+            style={[styles.editSaveBtn, (saving || saveDisabledByHandle) && { opacity: 0.7 }]}
             onPress={handleSaveProfile}
-            disabled={saving}
+            disabled={saving || saveDisabledByHandle}
             activeOpacity={0.85}
           >
             {saving ? (
@@ -856,6 +909,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#9B8B7A',
   },
+  handleAvailability: { marginTop: 6, marginBottom: 4 },
+  handleAvailable: { fontSize: 12, color: '#16A34A', fontWeight: '600', marginTop: 6, marginBottom: 4 },
+  handleTaken: { fontSize: 12, color: '#DC2626', fontWeight: '600', marginTop: 6, marginBottom: 4 },
   editHelp: {
     fontSize: 11,
     color: '#C8BEB5',

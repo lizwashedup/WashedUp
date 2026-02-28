@@ -22,7 +22,8 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 export const unstable_settings = {
-  initialRouteName: '(auth)',
+  // Start with (tabs) so we never flash login before auth check completes
+  initialRouteName: '(tabs)',
 };
 
 export default function RootLayout() {

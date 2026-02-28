@@ -19,13 +19,15 @@ import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { ImagePlus, X } from 'lucide-react-native';
 import ProfileButton from '../../../components/ProfileButton';
-import { ShareLinkModal } from '../../../components/modals/ShareLinkModal';
+import { SharePlanModal } from '../../../components/modals/SharePlanModal';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
+import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 
 const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
 
@@ -180,11 +182,22 @@ export default function PostScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [16, 10],
-      quality: 0.8,
+      quality: 1,
     });
     if (!result.canceled && result.assets[0]) {
-      setImageUrl(result.assets[0].uri);
-      uploadPhoto(result.assets[0].uri);
+      const picked = result.assets[0];
+      setImageUrl(picked.uri);
+      try {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          picked.uri,
+          [{ resize: { width: 1200 } }],
+          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
+        );
+        uploadPhoto(manipulated.uri);
+      } catch {
+        setImageUrl(null);
+        Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
+      }
     }
   };
 
@@ -255,8 +268,11 @@ export default function PostScreen() {
 
   // Submit
   const [loading, setLoading] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [createdPlanId, setCreatedPlanId] = useState<string | null>(null);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [postedPlanId, setPostedPlanId] = useState<string | null>(null);
+  const [postedPlanTitle, setPostedPlanTitle] = useState('');
+  const [postedSpotsLeft, setPostedSpotsLeft] = useState<number | undefined>();
+  const [postedGenderLabel, setPostedGenderLabel] = useState<string | undefined>();
 
   const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
   const safeTempDay = Math.min(tempDay, daysInTempMonth);
@@ -336,7 +352,7 @@ export default function PostScreen() {
           target_age_min: ageBounds.min,
           target_age_max: ageBounds.max,
           description: description.trim() || null,
-          host_message: hostMessage.trim() || null,
+          host_message: hostMessage.trim().slice(0, MSG_LIMIT) || null,
           max_invites: groupSize,
           min_invites: MIN_GROUP,
           creator_user_id: user.id,
@@ -360,8 +376,22 @@ export default function PostScreen() {
       }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setCreatedPlanId(insertedEvent?.id ?? null);
-      setShowShareModal(true);
+      setPostedPlanId(insertedEvent?.id ?? null);
+      setPostedPlanTitle(title.trim());
+      setPostedSpotsLeft(groupSize - 1);
+      setPostedGenderLabel(
+        genderPref === 'women_only' ? 'Women only' :
+        genderPref === 'men_only' ? 'Men only' :
+        genderPref === 'nonbinary_only' ? 'Nonbinary only' : undefined
+      );
+      setShareModalVisible(true);
+      setImageUrl(null);
+      setTitle(''); setLocation(''); setLocationLat(null); setLocationLng(null);
+      setTicketUrl(''); setCategory(null);
+      setGenderPref('mixed'); setAgeRanges([]);
+      setDescription(''); setHostMessage(''); setGroupSize(6);
+      setDateSelected(false); setTimeSelected(false);
+      placesRef.current?.clear();
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
@@ -707,23 +737,24 @@ export default function PostScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      <ShareLinkModal
-        visible={showShareModal}
+      <SharePlanModal
+        visible={shareModalVisible}
         onClose={() => {
-          setShowShareModal(false);
-          setImageUrl(null);
-          setTitle(''); setLocation(''); setLocationLat(null); setLocationLng(null);
-          setTicketUrl(''); setCategory(null);
-          setGenderPref('mixed'); setAgeRanges([]);
-          setDescription(''); setHostMessage(''); setGroupSize(6);
-          setDateSelected(false); setTimeSelected(false);
-          placesRef.current?.clear();
-          setCreatedPlanId(null);
-          router.replace('/(tabs)/plans');
+          const planIdToNavigate = postedPlanId;
+          setShareModalVisible(false);
+          setPostedPlanId(null);
+          setPostedPlanTitle('');
+          if (planIdToNavigate) {
+            router.push(`/plan/${planIdToNavigate}` as any);
+          } else {
+            router.replace('/(tabs)/plans');
+          }
         }}
-        shareUrl={createdPlanId ? `https://washedup.app/plan/${createdPlanId}` : 'https://washedup.app'}
-        shareTitle="Share your plan"
-        shareMessage={title.trim() ? `Join me for "${title}" on WashedUp!\nhttps://washedup.app/plan/${createdPlanId}` : undefined}
+        planTitle={postedPlanTitle}
+        planId={postedPlanId || ''}
+        spotsLeft={postedSpotsLeft}
+        genderLabel={postedGenderLabel}
+        variant="posted"
       />
 
       {/* ── Date Picker Modal ── */}

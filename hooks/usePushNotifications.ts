@@ -82,8 +82,9 @@ async function registerForPushNotifications(): Promise<string | null> {
 
     return token;
   } catch (err) {
-    // Kept for crash debugging when push token registration fails
-    console.warn('[PushNotifications] getExpoPushTokenAsync failed:', err);
+    if (__DEV__) {
+      console.warn('[PushNotifications] getExpoPushTokenAsync failed:', err);
+    }
     return null;
   }
 }

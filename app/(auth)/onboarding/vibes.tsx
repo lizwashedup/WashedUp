@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { PROFILE_PHOTO_KEY } from '../../../components/ProfileButton';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import { ChevronLeft } from 'lucide-react-native';
@@ -17,6 +19,7 @@ const VIBE_TAGS = [
 
 export default function OnboardingVibesScreen() {
   const routerBack = useRouter();
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
 
@@ -50,9 +53,10 @@ export default function OnboardingVibesScreen() {
         })
         .eq('id', user.id);
 
+      // Invalidate profile-photo cache so ProfileButton fetches fresh (avoids stale read)
+      queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
+
       // Ask for push permission at the natural completion moment.
-      // Fire-and-forget — onboarding proceeds regardless of the user's answer.
-      // The actual token is registered and saved via usePushNotifications on next launch.
       Notifications.requestPermissionsAsync().catch(() => {});
 
       router.replace('/(tabs)/plans');

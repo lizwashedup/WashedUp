@@ -47,13 +47,11 @@ function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) 
       style={[styles.row, chat.is_past && styles.rowPast]}
     >
       <View style={styles.avatarContainer}>
-        {chat.image_url ? (
-          <Image source={{ uri: chat.image_url }} style={styles.avatar} contentFit="cover" />
-        ) : (
-          <View style={[styles.avatar, { backgroundColor: catColor + '30' }]}>
-            <Ionicons name="calendar-outline" size={20} color={catColor} />
-          </View>
-        )}
+        <Image
+          source={chat.image_url ? { uri: chat.image_url } : require('../../../assets/images/plan-placeholder.png')}
+          style={styles.avatar}
+          contentFit="cover"
+        />
         {chat.unread_count > 0 && <View style={styles.unreadDot} />}
       </View>
 

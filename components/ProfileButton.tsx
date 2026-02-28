@@ -1,30 +1,48 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { TouchableOpacity, Text, View, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import { useQuery } from '@tanstack/react-query';
 import { User } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 
+export const PROFILE_PHOTO_KEY = ['profile-photo'] as const;
+
+async function fetchProfilePhoto(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from('profiles')
+    .select('profile_photo_url')
+    .eq('id', user.id)
+    .single();
+  return data?.profile_photo_url ?? null;
+}
+
 export default function ProfileButton() {
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const { data: photoUrl, refetch } = useQuery({
+    queryKey: PROFILE_PHOTO_KEY,
+    queryFn: fetchProfilePhoto,
+    staleTime: 0, // Avoid cache serving pre-onboarding data
+  });
 
-  const fetchPhoto = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data } = await supabase
-      .from('profiles')
-      .select('profile_photo_url')
-      .eq('id', user.id)
-      .single();
-    setPhotoUrl(data?.profile_photo_url ?? null);
-  };
-
+  // Refetch when screen gains focus (e.g. after editing profile)
   useFocusEffect(
     React.useCallback(() => {
-      fetchPhoto();
-    }, [])
+      refetch();
+    }, [refetch])
   );
+
+  // Delayed refetches on mount — handles post-onboarding race (profile update can lag)
+  React.useEffect(() => {
+    const t1 = setTimeout(() => refetch(), 1500);
+    const t2 = setTimeout(() => refetch(), 4000);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [refetch]);
 
   return (
     <TouchableOpacity

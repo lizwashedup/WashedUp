@@ -5,10 +5,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { Heart, Calendar } from 'lucide-react-native';
+import { Heart, Calendar, Share2 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
@@ -105,6 +106,15 @@ export const PlanCard = React.memo<PlanCardProps>(({
     onWishlist?.(plan.id, isWishlisted);
   }, [plan.id, isWishlisted, onWishlist]);
 
+  const handleShare = useCallback((e: any) => {
+    e.stopPropagation();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Share.share({
+      message: `Check out "${plan.title}" on WashedUp!\nhttps://washedup.app/e/${plan.id}`,
+      title: 'Share plan',
+    }).catch(() => {});
+  }, [plan.id, plan.title]);
+
   const spotsLeft = plan.max_invites ? plan.max_invites - plan.member_count : null;
   const isFull = plan.status === 'full' || (spotsLeft !== null && spotsLeft <= 0);
   const oneSpotLeft = !isFull && spotsLeft === 1;
@@ -129,21 +139,12 @@ export const PlanCard = React.memo<PlanCardProps>(({
       accessibilityRole="button"
     >
       <View style={styles.imageContainer}>
-        {plan.image_url ? (
-          <Image
-            source={{ uri: plan.image_url }}
-            style={styles.image}
-            contentFit="cover"
-            transition={200}
-          />
-        ) : (
-          <View style={[styles.imagePlaceholder, { backgroundColor: '#F0E6D3' }]}>
-            <Ionicons name="calendar-outline" size={32} color="#C4652A" />
-            <Text style={styles.placeholderLabel}>
-              {plan.category ?? 'Plan'}
-            </Text>
-          </View>
-        )}
+        <Image
+          source={plan.image_url ? { uri: plan.image_url } : require('../../assets/images/plan-placeholder.png')}
+          style={styles.image}
+          contentFit="cover"
+          transition={200}
+        />
 
         {/* Top-left: status badge — Full or 1 spot left */}
         {isFull ? (
@@ -158,20 +159,30 @@ export const PlanCard = React.memo<PlanCardProps>(({
           </View>
         ) : null}
 
-        {/* Heart — top right */}
-        <TouchableOpacity
-          onPress={handleWishlist}
-          style={styles.heartButton}
-          accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Heart
-            size={18}
-            color={isWishlisted ? '#E53935' : '#1A1A1A'}
-            fill={isWishlisted ? '#E53935' : 'transparent'}
-            strokeWidth={2}
-          />
-        </TouchableOpacity>
+        {/* Share + Heart — top right */}
+        <View style={styles.topRightRow}>
+          <TouchableOpacity
+            onPress={handleShare}
+            style={styles.shareButton}
+            accessibilityLabel="Share plan"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Share2 size={16} color="#1A1A1A" strokeWidth={2} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleWishlist}
+            style={styles.heartButton}
+            accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Heart
+              size={18}
+              color={isWishlisted ? '#E53935' : '#1A1A1A'}
+              fill={isWishlisted ? '#E53935' : 'transparent'}
+              strokeWidth={2}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Content below image — directly on page background */}
@@ -246,18 +257,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  imagePlaceholder: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#C4652A',
-    marginTop: 8,
-  },
 
   statusBadge: {
     position: 'absolute',
@@ -284,10 +283,28 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
-  heartButton: {
+  topRightRow: {
     position: 'absolute',
     top: 10,
     right: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  shareButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  heartButton: {
     width: 34,
     height: 34,
     borderRadius: 17,

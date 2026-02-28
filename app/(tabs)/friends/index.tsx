@@ -68,12 +68,34 @@ export default function YourPeopleScreen() {
   const [handleInput, setHandleInput] = useState('');
   const [savingHandle, setSavingHandle] = useState(false);
   const [handleError, setHandleError] = useState<string | null>(null);
+  const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
+  const [checkingHandle, setCheckingHandle] = useState(false);
 
   // Debounce search
   React.useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 300);
     return () => clearTimeout(t);
   }, [searchQuery]);
+
+  // Debounced handle availability check (500ms)
+  React.useEffect(() => {
+    const clean = handleInput.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (clean.length < 2) {
+      setHandleAvailable(null);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setCheckingHandle(true);
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('handle', clean)
+        .maybeSingle();
+      setHandleAvailable(!data);
+      setCheckingHandle(false);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [handleInput]);
 
   // Current user
   const { data: userId } = useQuery({
@@ -347,11 +369,18 @@ export default function YourPeopleScreen() {
                     maxLength={20}
                   />
                 </View>
+                {checkingHandle ? (
+                  <ActivityIndicator size="small" color="#999999" style={styles.handleAvailability} />
+                ) : handleAvailable === true ? (
+                  <Text style={styles.handleAvailable}>Available</Text>
+                ) : handleAvailable === false ? (
+                  <Text style={styles.handleTaken}>Taken</Text>
+                ) : null}
                 {handleError && <Text style={styles.handleError}>{handleError}</Text>}
                 <TouchableOpacity
-                  style={[styles.saveHandleBtn, savingHandle && { opacity: 0.7 }]}
+                  style={[styles.saveHandleBtn, (savingHandle || checkingHandle || handleAvailable === false || handleAvailable === null) && { opacity: 0.7 }]}
                   onPress={saveHandle}
-                  disabled={savingHandle || handleInput.length < 2}
+                  disabled={savingHandle || checkingHandle || handleAvailable === false || handleAvailable === null || handleInput.length < 2}
                 >
                   {savingHandle ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
@@ -552,6 +581,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1A1A1A',
   },
+  handleAvailability: { marginTop: 6, marginBottom: 4 },
+  handleAvailable: { fontSize: 12, color: '#16A34A', fontWeight: '600', marginTop: 6, marginBottom: 4 },
+  handleTaken: { fontSize: 12, color: '#DC2626', fontWeight: '600', marginTop: 6, marginBottom: 4 },
   handleError: { fontSize: 13, color: '#E53935', marginBottom: 8 },
   saveHandleBtn: {
     backgroundColor: '#C4652A',

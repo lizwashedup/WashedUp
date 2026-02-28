@@ -16,7 +16,6 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight } from 'lucide-react-native';
-import { ShareLinkModal } from '../../components/modals/ShareLinkModal';
 import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -165,13 +164,11 @@ export default function EventDetailScreen() {
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.heroContainer}>
-          {event.image_url ? (
-            <Image source={{ uri: event.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
-          ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#F0E6D3', alignItems: 'center', justifyContent: 'center' }]}>
-              <Calendar size={48} color="#C4652A" />
-            </View>
-          )}
+          <Image
+            source={event.image_url ? { uri: event.image_url } : require('../../assets/images/plan-placeholder.png')}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+          />
 
           <TouchableOpacity
             style={[styles.circleButton, { top: insets.top + 8, left: 16 }]}
@@ -186,7 +183,7 @@ export default function EventDetailScreen() {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               try {
                 await Share.share({
-                  message: `Check out "${event.title}" on WashedUp!\nhttps://washedup.app/event/${event.id}`,
+                  message: `Check out "${event.title}" in LA on WashedUp!\nhttps://washedup.app/e/${event.id}`,
                   title: 'Share this event',
                 });
               } catch {}

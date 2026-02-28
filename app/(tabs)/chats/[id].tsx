@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
+import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { useChat, ChatMessage } from '../../../hooks/useChat';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
@@ -387,7 +388,7 @@ export default function ChatScreen() {
 
       await sendMessage('', urlData.publicUrl);
     } catch {
-      Alert.alert('Upload failed', 'Could not send photo. Try again.');
+      Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
     } finally {
       setUploading(false);
     }

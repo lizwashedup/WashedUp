@@ -7,6 +7,8 @@ import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { PROFILE_PHOTO_KEY } from '../../../components/ProfileButton';
 import { StatusBar } from 'expo-status-bar';
 import { Camera, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { useState } from 'react';
@@ -21,12 +23,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
+import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { supabase } from '../../../lib/supabase';
 
 const AVATAR_SIZE = 180;
 
 export default function OnboardingPhotoScreen() {
   const routerBack = useRouter();
+  const queryClient = useQueryClient();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -56,8 +60,7 @@ export default function OnboardingPhotoScreen() {
     const picked = result.assets[0];
 
     // ── Normalize to JPEG regardless of input format ──────────────────────────
-    // This is the key fix: screenshots are PNG, camera photos can be HEIC.
-    // We convert everything to JPEG at 800x800px so the upload never fails.
+    // Converts HEIC (iPhone), PNG (screenshots), etc. to JPEG so upload never fails.
     try {
       const manipulated = await ImageManipulator.manipulateAsync(
         picked.uri,
@@ -66,8 +69,7 @@ export default function OnboardingPhotoScreen() {
       );
       setImageUri(manipulated.uri);
     } catch {
-      // If manipulator fails for any reason, fall back to original URI
-      setImageUri(picked.uri);
+      Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE, [{ text: 'OK' }]);
     }
   };
 
@@ -83,8 +85,11 @@ export default function OnboardingPhotoScreen() {
       let avatarUrl: string | null = null;
 
       if (imageUri) {
-        // Always upload as JPEG now that we normalized above
-        const path = `${user.id}/${user.id}.jpg`;
+        // Ensure fresh JWT — expired tokens cause RLS "new row violates" on upload
+        await supabase.auth.refreshSession();
+
+        // Root-level path to match Lovable/storage policy: {user_id}.jpg
+        const path = `${user.id}.jpg`;
 
         const response = await fetch(imageUri);
         const blob = await response.blob();
@@ -106,10 +111,15 @@ export default function OnboardingPhotoScreen() {
         avatarUrl = urlData.publicUrl + `?t=${Date.now()}`;
       }
 
-      await supabase
+      const { error: updateError } = await supabase
         .from('profiles')
         .update({ profile_photo_url: avatarUrl })
         .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      // Invalidate so ProfileButton (when it mounts on Plans) fetches fresh data
+      queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
 
       router.push('/onboarding/vibes');
     } catch (e: any) {

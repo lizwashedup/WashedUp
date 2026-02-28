@@ -4,7 +4,7 @@
     "slug": "washedup-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/app-icon.png",
     "scheme": "washedupapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -14,7 +14,7 @@
       "backgroundColor": "#FFF8F0"
     },
     "notification": {
-      "icon": "./assets/images/icon.png",
+      "icon": "./assets/images/app-icon.png",
       "color": "#C4652A"
     },
     "ios": {
@@ -69,7 +69,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
+          "icon": "./assets/images/app-icon.png",
           "color": "#C4652A",
           "sounds": []
         }
