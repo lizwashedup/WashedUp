@@ -67,7 +67,6 @@ export default function ProfileButton() {
             source={{ uri: photoUrl }}
             style={styles.photo}
             contentFit="cover"
-            cacheKey={photoUrl}
           />
         ) : (
           <User size={20} color="#1A1A1A" strokeWidth={2} />

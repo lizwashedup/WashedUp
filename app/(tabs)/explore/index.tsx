@@ -18,10 +18,12 @@ import { Image } from 'expo-image';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Heart, Calendar, MapPin, Map, LayoutList, Check, ChevronDown, Utensils, Lightbulb, Share2 } from 'lucide-react-native';
+import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown, Utensils, Lightbulb, Share2 } from 'lucide-react-native';
 import ProfileButton from '../../../components/ProfileButton';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
+import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
+import { CATEGORY_OPTIONS } from '../../../constants/Categories';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -72,11 +74,15 @@ function formatEventDate(dateStr: string | null, timeStr: string | null): string
 
 const CATEGORY_COLORS: Record<string, string> = {
   music: '#7C5CBF',
-  comedy: '#C4652A',
-  film: '#5C7CBF',
-  nightlife: '#BF5C7C',
   food: '#BF7C5C',
+  outdoors: '#3D8B6E',
+  nightlife: '#BF5C7C',
+  film: '#5C7CBF',
   art: '#BF5CBF',
+  fitness: '#5CBF7C',
+  comedy: '#C4652A',
+  wellness: '#5CA0BF',
+  sports: '#BF8C5C',
   community: '#5CA0BF',
   tech: '#3D8B6E',
   default: '#C4652A',
@@ -317,11 +323,6 @@ export default function SceneScreen() {
     wishlistMutation.mutate({ exploreEventId: id, current });
   }, [wishlistMutation]);
 
-  const allCategories = useMemo(() => {
-    const cats = events.map(e => e.category).filter(Boolean) as string[];
-    return [...new Set(cats)].sort();
-  }, [events]);
-
   const filteredEvents = useMemo(() => {
     let result = events;
     if (heartFilter) {
@@ -331,7 +332,9 @@ export default function SceneScreen() {
       result = result.filter(e => matchesWhenFilter(e.event_date, whenFilter));
     }
     if (categoryFilter.length > 0) {
-      result = result.filter(e => e.category && categoryFilter.includes(e.category));
+      result = result.filter(e =>
+        e.category && categoryFilter.some(c => c.toLowerCase() === e.category?.toLowerCase())
+      );
     }
     return result;
   }, [events, heartFilter, wishlistedSet, whenFilter, categoryFilter]);
@@ -508,75 +511,29 @@ export default function SceneScreen() {
         </View>
       )}
 
-      <Modal visible={whenSheetOpen} transparent animationType="slide">
-        <Pressable style={styles.sheetOverlay} onPress={() => setWhenSheetOpen(false)}>
-          <View />
-        </Pressable>
-        <View style={styles.sheetContent}>
-          <Text style={styles.sheetTitle}>When</Text>
-          {WHEN_OPTIONS.map(opt => {
-            const selected = whenFilter.includes(opt.key);
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                style={styles.sheetRow}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setWhenFilter(prev =>
-                    selected ? prev.filter(k => k !== opt.key) : [...prev, opt.key]
-                  );
-                }}
-              >
-                <Text style={[styles.sheetRowText, selected && { color: '#C4652A', fontWeight: '700' }]}>
-                  {opt.label}
-                </Text>
-                {selected && <Check size={18} color="#C4652A" strokeWidth={2.5} />}
-              </TouchableOpacity>
-            );
-          })}
-          <TouchableOpacity
-            style={styles.sheetDone}
-            onPress={() => setWhenSheetOpen(false)}
-          >
-            <Text style={styles.sheetDoneText}>Done</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      <FilterBottomSheet
+        visible={whenSheetOpen}
+        title="When"
+        options={WHEN_OPTIONS}
+        selected={whenFilter}
+        onToggle={(key) => setWhenFilter(prev =>
+          prev.includes(key as WhenKey) ? prev.filter(k => k !== key) : [...prev, key as WhenKey]
+        )}
+        onClose={() => setWhenSheetOpen(false)}
+        onClear={() => setWhenFilter([])}
+      />
 
-      <Modal visible={categorySheetOpen} transparent animationType="slide">
-        <Pressable style={styles.sheetOverlay} onPress={() => setCategorySheetOpen(false)}>
-          <View />
-        </Pressable>
-        <View style={styles.sheetContent}>
-          <Text style={styles.sheetTitle}>Category</Text>
-          {allCategories.map(cat => {
-            const selected = categoryFilter.includes(cat);
-            return (
-              <TouchableOpacity
-                key={cat}
-                style={styles.sheetRow}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setCategoryFilter(prev =>
-                    selected ? prev.filter(c => c !== cat) : [...prev, cat]
-                  );
-                }}
-              >
-                <Text style={[styles.sheetRowText, selected && { color: '#C4652A', fontWeight: '700' }]}>
-                  {cat}
-                </Text>
-                {selected && <Check size={18} color="#C4652A" strokeWidth={2.5} />}
-              </TouchableOpacity>
-            );
-          })}
-          <TouchableOpacity
-            style={styles.sheetDone}
-            onPress={() => setCategorySheetOpen(false)}
-          >
-            <Text style={styles.sheetDoneText}>Done</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      <FilterBottomSheet
+        visible={categorySheetOpen}
+        title="Category"
+        options={CATEGORY_OPTIONS.map(c => ({ key: c, label: c }))}
+        selected={categoryFilter}
+        onToggle={(key) => setCategoryFilter(prev =>
+          prev.includes(key) ? prev.filter(c => c !== key) : [...prev, key]
+        )}
+        onClose={() => setCategorySheetOpen(false)}
+        onClear={() => setCategoryFilter([])}
+      />
     </SafeAreaView>
   );
 }
@@ -775,33 +732,6 @@ const styles = StyleSheet.create({
   bottomCta: { alignItems: 'center', paddingVertical: 32, gap: 6 },
   bottomCtaText: { fontSize: 14, color: '#9B8B7A' },
   bottomCtaLink: { fontSize: 14, color: '#C4652A', fontWeight: '700' },
-
-  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheetContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    paddingBottom: 40,
-  },
-  sheetTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A1A', marginBottom: 16 },
-  sheetRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
-  },
-  sheetRowText: { fontSize: 16, color: '#1A1A1A' },
-  sheetDone: {
-    backgroundColor: '#C4652A',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  sheetDoneText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
 
   comingSoonContainer: {
     flex: 1,

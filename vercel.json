@@ -2,7 +2,18 @@
   "rewrites": [
     {
       "source": "/e/:code",
-      "destination": "https://uwjhbfxragjyvylciwrb.supabase.co/functions/v1/og-plan?code=:code"
+      "destination": "https://uwjhbfxragjyvylciwrb.supabase.co/functions/v1/og-event?code=:code"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/e/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, max-age=0"
+        }
+      ]
     }
   ]
 }

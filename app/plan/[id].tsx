@@ -1985,6 +1985,11 @@ const manageStyles = StyleSheet.create({
     minHeight: 50,
     textAlignVertical: 'top',
   },
+  hint: {
+    fontSize: 13,
+    color: '#999999',
+    marginTop: 4,
+  },
   pillWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',

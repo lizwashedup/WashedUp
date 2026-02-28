@@ -401,11 +401,10 @@ export default function YourPeopleScreen() {
           {friends.length === 0 ? (
             <View style={styles.emptyState}>
               <Users size={48} color="#C4652A" />
-              <Text style={styles.emptyTitle}>No people yet</Text>
+              <Text style={[styles.emptyTitle, { textAlign: 'center' }]}>This is where you can add people you might want to invite first to your plans.</Text>
               <Text style={styles.emptySub}>
-                After your first plan, you can add the people you vibed with.
+                If you know anyone on WashedUp, or after your first plan add people you want to spend time with again!
               </Text>
-              <Text style={styles.emptyHint}>Or search for someone above</Text>
             </View>
           ) : (
             <FlatList

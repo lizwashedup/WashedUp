@@ -16,19 +16,21 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { LayoutList, Map, ChevronDown, Check, ArrowRight, Heart } from 'lucide-react-native';
+import { LayoutList, Map, ChevronDown, ArrowRight, Heart } from 'lucide-react-native';
 import ProfileButton from '../../../components/ProfileButton';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
 import { fetchPlans, Plan } from '../../../lib/fetchPlans';
 import { PlanCard } from '../../../components/plans/PlanCard';
+import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
+import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
+import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type TabKey = 'plans' | 'myplans';
-type CategoryOption = 'Music' | 'Food' | 'Outdoors' | 'Nightlife' | 'Film' | 'Art' | 'Fitness' | 'Comedy' | 'Wellness' | 'Sports';
 
 interface SectionDef {
   key: string;
@@ -38,8 +40,6 @@ interface SectionDef {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const CATEGORY_OPTIONS: CategoryOption[] = ['Music', 'Food', 'Outdoors', 'Nightlife', 'Film', 'Art', 'Fitness', 'Comedy', 'Wellness', 'Sports'];
 
 const LA_REGION = {
   latitude: 34.0522,
@@ -167,71 +167,6 @@ function filterIntoSections(
       }),
     }))
     .filter((s) => s.plans.length > 0);
-}
-
-// ─── Bottom Sheet ─────────────────────────────────────────────────────────────
-
-interface SheetOption {
-  key: string;
-  label: string;
-}
-
-function BottomSheet({
-  visible,
-  title,
-  options,
-  selected,
-  onToggle,
-  onClose,
-  onClear,
-}: {
-  visible: boolean;
-  title: string;
-  options: SheetOption[];
-  selected: string[];
-  onToggle: (key: string) => void;
-  onClose: () => void;
-  onClear: () => void;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{title}</Text>
-            <TouchableOpacity onPress={onClear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.sheetClear}>Clear all</Text>
-            </TouchableOpacity>
-          </View>
-
-          {options.map((opt) => {
-            const active = selected.includes(opt.key);
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                style={styles.sheetRow}
-                onPress={() => { Haptics.selectionAsync(); onToggle(opt.key); }}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.sheetRowText, active && styles.sheetRowTextActive]}>
-                  {opt.label}
-                </Text>
-                <View style={[styles.sheetCheck, active && styles.sheetCheckActive]}>
-                  {active && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-
-          <TouchableOpacity style={styles.sheetDone} onPress={onClose}>
-            <Text style={styles.sheetDoneText}>Done</Text>
-          </TouchableOpacity>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
 }
 
 // ─── Section Row ──────────────────────────────────────────────────────────────
@@ -599,15 +534,10 @@ export default function PlansScreen() {
     [displayPlans, sectionDefs, categoryFilter, whenFilter],
   );
 
-  const whenOptions = useMemo<SheetOption[]>(
-    () => sectionDefs.map((s) => ({ key: s.key, label: s.title })),
-    [sectionDefs],
-  );
-
   const whenLabel = whenFilter.length === 0
     ? 'When'
     : whenFilter.length === 1
-      ? sectionDefs.find((s) => s.key === whenFilter[0])?.title ?? 'When'
+      ? WHEN_OPTIONS.find((o) => o.key === whenFilter[0])?.label ?? 'When'
       : `When · ${whenFilter.length}`;
 
   const categoryLabel = categoryFilter.length === 0
@@ -654,42 +584,42 @@ export default function PlansScreen() {
       {/* Filter Dropdowns + Map Toggle — only on the Plans tab */}
       {activeTab === 'plans' && (
         <View style={styles.filterRow}>
-          <TouchableOpacity
-            style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWhenSheetOpen(true); }}
-          >
-            <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
-              {whenLabel}
-            </Text>
-            <ChevronDown size={13} color={whenActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
-          </TouchableOpacity>
+          <View style={styles.filterPillsWrap}>
+            <TouchableOpacity
+              style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWhenSheetOpen(true); }}
+            >
+              <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
+                {whenLabel}
+              </Text>
+              <ChevronDown size={13} color={whenActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCategorySheetOpen(true); }}
+            >
+              <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
+                {categoryLabel}
+              </Text>
+              <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.heartFilterPill, heartFilter && styles.heartFilterPillActive]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setHeartFilter(v => !v); }}
+            >
+              <Heart
+                size={16}
+                color={heartFilter ? '#FFFFFF' : '#1A1A1A'}
+                fill={heartFilter ? '#FFFFFF' : 'transparent'}
+                strokeWidth={2}
+              />
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity
-            style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCategorySheetOpen(true); }}
-          >
-            <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
-              {categoryLabel}
-            </Text>
-            <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.heartFilterPill, heartFilter && styles.heartFilterPillActive]}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setHeartFilter(v => !v); }}
-          >
-            <Heart
-              size={16}
-              color={heartFilter ? '#FFFFFF' : '#1A1A1A'}
-              fill={heartFilter ? '#FFFFFF' : 'transparent'}
-              strokeWidth={2}
-            />
-          </TouchableOpacity>
-
-          <View style={{ flex: 1 }} />
-
-          <TouchableOpacity
-            style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
+            style={[styles.mapTogglePill, styles.mapTogglePillPinned, mapView && styles.mapTogglePillActive]}
             onPress={() => { Haptics.selectionAsync(); setMapView((v) => !v); }}
             accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
           >
@@ -732,7 +662,7 @@ export default function PlansScreen() {
         )
       ) : activeTab === 'plans' ? (
         <>
-          {isLoading ? (
+          {!userId || isLoading ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color="#C4652A" />
             </View>
@@ -753,7 +683,13 @@ export default function PlansScreen() {
             >
               {sections.length === 0 ? (
                 <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>No plans match your filters.</Text>
+                  <Text style={styles.emptyText}>
+                    {heartFilter
+                      ? 'When you <3 a plan it shows up here'
+                      : allPlans.length > 0
+                        ? 'No plans match your filters.'
+                        : 'No plans yet.'}
+                  </Text>
                   <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
                     <Text style={styles.emptyButtonText}>Post a Plan</Text>
                   </TouchableOpacity>
@@ -791,10 +727,10 @@ export default function PlansScreen() {
       ) : null}
 
       {/* When Sheet */}
-      <BottomSheet
+      <FilterBottomSheet
         visible={whenSheetOpen}
         title="When"
-        options={whenOptions}
+        options={[...WHEN_OPTIONS]}
         selected={whenFilter}
         onToggle={(key) => setWhenFilter((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])}
         onClose={() => setWhenSheetOpen(false)}
@@ -802,7 +738,7 @@ export default function PlansScreen() {
       />
 
       {/* Category Sheet */}
-      <BottomSheet
+      <FilterBottomSheet
         visible={categorySheetOpen}
         title="Category"
         options={CATEGORY_OPTIONS.map((c) => ({ key: c, label: c }))}
@@ -850,6 +786,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 1,
   },
+  mapTogglePillPinned: {
+    flexShrink: 0,
+  },
   mapTogglePillActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
   heartFilterPill: {
     width: 40,
@@ -876,9 +815,18 @@ const styles = StyleSheet.create({
 
   filterRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 20,
     gap: 10,
     marginBottom: 20,
+  },
+  filterPillsWrap: {
+    flex: 1,
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
   },
   dropdownPill: {
     flexDirection: 'row',
@@ -890,6 +838,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#F0E6D3',
+    flexShrink: 1,
+    minWidth: 0,
   },
   dropdownPillActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
   dropdownText: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
@@ -951,59 +901,4 @@ const styles = StyleSheet.create({
   errorMessage: { fontSize: 13, color: '#999999', textAlign: 'center', marginBottom: 20, paddingHorizontal: 32 },
   retryButton: { backgroundColor: '#C4652A', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
   retryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-
-  // Bottom Sheet
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingBottom: 44,
-  },
-  sheetHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#E5E5E5',
-    alignSelf: 'center',
-    marginTop: 12,
-    marginBottom: 20,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  sheetTitle: { fontSize: 18, fontWeight: '800', color: '#1A1A1A' },
-  sheetClear: { fontSize: 14, color: '#999999', fontWeight: '500' },
-  sheetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F5',
-  },
-  sheetRowText: { fontSize: 16, color: '#1A1A1A', fontWeight: '500' },
-  sheetRowTextActive: { color: '#C4652A', fontWeight: '700' },
-  sheetCheck: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#DDDDDD',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sheetCheckActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
-  sheetDone: {
-    marginTop: 20,
-    backgroundColor: '#C4652A',
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  sheetDoneText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });
