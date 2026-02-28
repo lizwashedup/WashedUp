@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
+import { openUrl } from '../../../lib/url';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { useChat, ChatMessage } from '../../../hooks/useChat';
 import { ReportModal } from '../../../components/modals/ReportModal';
@@ -445,7 +446,7 @@ export default function ChatScreen() {
         {event?.tickets_url && (
           <TouchableOpacity
             style={chatStyles.ticketBanner}
-            onPress={() => Linking.openURL(event.tickets_url!)}
+            onPress={() => openUrl(event.tickets_url!)}
           >
             <View style={chatStyles.ticketLeft}>
               <Ionicons name="ticket-outline" size={16} color="#C4652A" />

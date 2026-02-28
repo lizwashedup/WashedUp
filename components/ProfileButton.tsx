@@ -1,5 +1,5 @@
 import React from 'react';
-import { TouchableOpacity, Text, View, StyleSheet } from 'react-native';
+import { TouchableOpacity, Text, View, StyleSheet, AppState, AppStateStatus } from 'react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -24,7 +24,8 @@ export default function ProfileButton() {
   const { data: photoUrl, refetch } = useQuery({
     queryKey: PROFILE_PHOTO_KEY,
     queryFn: fetchProfilePhoto,
-    staleTime: 0, // Avoid cache serving pre-onboarding data
+    staleTime: 0,
+    refetchOnMount: 'always', // Always refetch when ProfileButton mounts (post-onboarding, etc.)
   });
 
   // Refetch when screen gains focus (e.g. after editing profile)
@@ -34,14 +35,24 @@ export default function ProfileButton() {
     }, [refetch])
   );
 
-  // Delayed refetches on mount — handles post-onboarding race (profile update can lag)
+  // Delayed refetches — handles DB replication lag and post-onboarding race
   React.useEffect(() => {
-    const t1 = setTimeout(() => refetch(), 1500);
-    const t2 = setTimeout(() => refetch(), 4000);
+    const t1 = setTimeout(() => refetch(), 800);
+    const t2 = setTimeout(() => refetch(), 2500);
+    const t3 = setTimeout(() => refetch(), 6000);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
     };
+  }, [refetch]);
+
+  // Refetch when app comes to foreground (e.g. after picking photo from system UI)
+  React.useEffect(() => {
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active') refetch();
+    });
+    return () => sub.remove();
   }, [refetch]);
 
   return (
@@ -52,7 +63,12 @@ export default function ProfileButton() {
     >
       <View style={styles.circle}>
         {photoUrl ? (
-          <Image source={{ uri: photoUrl }} style={styles.photo} contentFit="cover" />
+          <Image
+            source={{ uri: photoUrl }}
+            style={styles.photo}
+            contentFit="cover"
+            cacheKey={photoUrl}
+          />
         ) : (
           <User size={20} color="#1A1A1A" strokeWidth={2} />
         )}

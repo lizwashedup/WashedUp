@@ -24,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
+import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { supabase } from '../../../lib/supabase';
 
 const AVATAR_SIZE = 180;
@@ -32,11 +33,10 @@ export default function OnboardingPhotoScreen() {
   const routerBack = useRouter();
   const queryClient = useQueryClient();
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const pickImage = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
+  const pickImageFromLibrary = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert(
@@ -46,31 +46,56 @@ export default function OnboardingPhotoScreen() {
       );
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
-      // 'images' accepts ALL image types: JPEG, PNG, HEIC, screenshots, everything
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,   // ← This is the pan/zoom/crop UI — drag your face into the circle
-      aspect: [1, 1],        // ← Forces square crop
-      quality: 1,            // ← Keep full quality here; we compress below
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
     });
-
     if (result.canceled) return;
+    await processPickedImage(result.assets[0].uri);
+  };
 
-    const picked = result.assets[0];
+  const takePhotoFromCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permission needed',
+        'Go to Settings → WashedUp → Camera and allow access.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (result.canceled) return;
+    await processPickedImage(result.assets[0].uri);
+  };
 
-    // ── Normalize to JPEG regardless of input format ──────────────────────────
-    // Converts HEIC (iPhone), PNG (screenshots), etc. to JPEG so upload never fails.
+  const processPickedImage = async (uri: string) => {
     try {
       const manipulated = await ImageManipulator.manipulateAsync(
-        picked.uri,
+        uri,
         [{ resize: { width: 800, height: 800 } }],
-        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true }
       );
       setImageUri(manipulated.uri);
+      setImageBase64(manipulated.base64 ?? null);
     } catch {
       Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE, [{ text: 'OK' }]);
     }
+  };
+
+  const pickImage = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert('Add a profile photo', 'Choose how to add your photo', [
+      { text: 'Take Photo', onPress: takePhotoFromCamera },
+      { text: 'Choose from Library', onPress: pickImageFromLibrary },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const handleContinue = async () => {
@@ -84,31 +109,13 @@ export default function OnboardingPhotoScreen() {
 
       let avatarUrl: string | null = null;
 
-      if (imageUri) {
-        // Ensure fresh JWT — expired tokens cause RLS "new row violates" on upload
-        await supabase.auth.refreshSession();
+      if (imageBase64) {
+        const { data: { session }, error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr) throw new Error('Session expired. Please log in again.');
+        if (!session?.user) throw new Error('Not authenticated');
 
-        // Root-level path to match Lovable/storage policy: {user_id}.jpg
-        const path = `${user.id}.jpg`;
-
-        const response = await fetch(imageUri);
-        const blob = await response.blob();
-
-        const { error: uploadError } = await supabase.storage
-          .from('profile-photos')
-          .upload(path, blob, {
-            upsert: true,
-            contentType: 'image/jpeg',  // Always JPEG after manipulator
-          });
-
-        if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage
-          .from('profile-photos')
-          .getPublicUrl(path);
-
-        // Bust cache so the new photo shows immediately everywhere
-        avatarUrl = urlData.publicUrl + `?t=${Date.now()}`;
+        const path = `${user.id}/${Date.now()}.jpg`;
+        avatarUrl = await uploadBase64ToStorage('profile-photos', path, imageBase64, { upsert: true });
       }
 
       const { error: updateError } = await supabase
@@ -118,8 +125,12 @@ export default function OnboardingPhotoScreen() {
 
       if (updateError) throw updateError;
 
-      // Invalidate so ProfileButton (when it mounts on Plans) fetches fresh data
+      // Invalidate and refetch so ProfileButton gets fresh data when it mounts
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
+      await queryClient.refetchQueries({ queryKey: PROFILE_PHOTO_KEY });
+
+      // Brief delay so DB write is visible before navigation
+      await new Promise((r) => setTimeout(r, 400));
 
       router.push('/onboarding/vibes');
     } catch (e: any) {

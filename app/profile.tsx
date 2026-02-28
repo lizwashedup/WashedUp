@@ -23,6 +23,7 @@ import * as Haptics from 'expo-haptics';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../constants/PhotoUpload';
+import { uploadBase64ToStorage } from '../lib/uploadPhoto';
 import { PROFILE_PHOTO_KEY } from '../components/ProfileButton';
 
 // Uses correct column names from profiles table: first_name_display, profile_photo_url, handle
@@ -51,6 +52,7 @@ export default function ProfileScreen() {
   const [editBio, setEditBio] = useState('');
   const [editHandle, setEditHandle] = useState('');
   const [editPhotoUri, setEditPhotoUri] = useState<string | null>(null);
+  const [editPhotoBase64, setEditPhotoBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
   const [checkingHandle, setCheckingHandle] = useState(false);
@@ -136,13 +138,13 @@ export default function ProfileScreen() {
     setEditBio(profile?.bio ?? '');
     setEditHandle(profile?.handle ?? '');
     setEditPhotoUri(null);
+    setEditPhotoBase64(null);
     setHandleAvailable(null);
     setCheckingHandle(false);
     setShowEditFlow(true);
   };
 
-  const pickEditPhoto = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const pickEditPhotoFromLibrary = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Go to Settings and allow photo access.');
@@ -155,16 +157,45 @@ export default function ProfileScreen() {
       quality: 1,
     });
     if (result.canceled) return;
+    await processEditPhoto(result.assets[0].uri);
+  };
+
+  const takeEditPhotoFromCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Go to Settings and allow camera access.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (result.canceled) return;
+    await processEditPhoto(result.assets[0].uri);
+  };
+
+  const processEditPhoto = async (uri: string) => {
     try {
       const manipulated = await ImageManipulator.manipulateAsync(
-        result.assets[0].uri,
+        uri,
         [{ resize: { width: 800, height: 800 } }],
-        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true },
       );
       setEditPhotoUri(manipulated.uri);
+      setEditPhotoBase64(manipulated.base64 ?? null);
     } catch {
       Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
     }
+  };
+
+  const pickEditPhoto = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert('Change photo', 'Choose how to add your photo', [
+      { text: 'Take Photo', onPress: takeEditPhotoFromCamera },
+      { text: 'Choose from Library', onPress: pickEditPhotoFromLibrary },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const handleSaveProfile = async () => {
@@ -182,19 +213,13 @@ export default function ProfileScreen() {
 
       let newPhotoUrl = profile?.avatar_url ?? null;
 
-      if (editPhotoUri) {
-        // Ensure fresh JWT — expired tokens cause RLS "new row violates" on upload
-        await supabase.auth.refreshSession();
+      if (editPhotoBase64) {
+        const { data: { session }, error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr) throw new Error('Session expired. Please log in again.');
+        if (!session?.user) throw new Error('Not authenticated');
 
-        const path = `${user.id}.jpg`;
-        const response = await fetch(editPhotoUri);
-        const blob = await response.blob();
-        const { error: uploadError } = await supabase.storage
-          .from('profile-photos')
-          .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
-        if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('profile-photos').getPublicUrl(path);
-        newPhotoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+        const path = `${user.id}/${Date.now()}.jpg`;
+        newPhotoUrl = await uploadBase64ToStorage('profile-photos', path, editPhotoBase64, { upsert: true });
       }
 
       const handleVal = editHandle.trim().toLowerCase() || null;

@@ -81,7 +81,7 @@ export default function SignupScreen() {
       if (user) {
         await supabase
           .from('profiles')
-          .update({ first_name: trimmedFirst })
+          .update({ first_name_display: trimmedFirst })
           .eq('id', user.id);
       }
       // Root layout will redirect to onboarding/basics when session exists and onboarding not complete

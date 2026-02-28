@@ -17,6 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
+import { openUrl } from '../../lib/url';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -247,7 +248,7 @@ export default function EventDetailScreen() {
           {event.external_url && (
             <TouchableOpacity
               style={styles.ticketLink}
-              onPress={() => Linking.openURL(event.external_url!)}
+              onPress={() => openUrl(event.external_url!)}
             >
               <Text style={styles.ticketLinkText}>Get Tickets</Text>
               <ChevronRight size={16} color="#C4652A" strokeWidth={2} />

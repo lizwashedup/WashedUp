@@ -36,6 +36,7 @@ import {
 } from 'lucide-react-native';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../lib/supabase';
+import { openUrl } from '../../lib/url';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { useBlock } from '../../hooks/useBlock';
@@ -592,7 +593,11 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not save changes.');
+      const rawMsg = e?.message ?? '';
+      const msg = rawMsg.includes('events_host_message_length')
+        ? 'Message must be at least 10 characters.'
+        : rawMsg || 'Could not save changes.';
+      Alert.alert('Error', msg);
     } finally {
       setEditSaving(false);
     }
@@ -962,7 +967,7 @@ export default function PlanDetailScreen() {
         {plan.tickets_url && (isMember || isHost) && (
           <TouchableOpacity
             style={styles.ticketButton}
-            onPress={() => Linking.openURL(plan.tickets_url!)}
+            onPress={() => openUrl(plan.tickets_url!)}
             activeOpacity={0.85}
           >
             <Text style={styles.ticketButtonText}>Get Tickets →</Text>
@@ -1131,7 +1136,7 @@ export default function PlanDetailScreen() {
               style={ticketStyles.primaryBtn}
               onPress={() => {
                 setTicketModalVisible(false);
-                if (plan?.tickets_url) Linking.openURL(plan.tickets_url);
+                if (plan?.tickets_url) openUrl(plan.tickets_url);
               }}
               activeOpacity={0.85}
             >
@@ -1200,6 +1205,7 @@ export default function PlanDetailScreen() {
                 placeholder="A personal note to people joining"
                 placeholderTextColor="#999"
               />
+              <Text style={manageStyles.hint}>Min 10 characters · Max 150</Text>
 
               {/* Location */}
               <Text style={manageStyles.label}>Location</Text>

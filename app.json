@@ -56,7 +56,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "WashedUp needs access to your photos so you can share images in group chats and set your profile picture."
+          "photosPermission": "WashedUp needs access to your photos so you can share images in group chats and set your profile picture.",
+          "cameraPermission": "WashedUp needs camera access so you can take a profile photo."
         }
       ],
       [

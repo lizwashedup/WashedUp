@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/e/:code",
+      "destination": "https://uwjhbfxragjyvylciwrb.supabase.co/functions/v1/og-plan?code=:code"
+    }
+  ]
+}

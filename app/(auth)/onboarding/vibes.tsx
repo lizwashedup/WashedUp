@@ -53,8 +53,9 @@ export default function OnboardingVibesScreen() {
         })
         .eq('id', user.id);
 
-      // Invalidate profile-photo cache so ProfileButton fetches fresh (avoids stale read)
+      // Invalidate and refetch profile-photo so it shows when user lands on Plans
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
+      await queryClient.refetchQueries({ queryKey: PROFILE_PHOTO_KEY });
 
       // Ask for push permission at the natural completion moment.
       Notifications.requestPermissionsAsync().catch(() => {});

@@ -1,14 +1,30 @@
 # Share Link Previews (Open Graph)
 
-When users share a plan or event link (e.g. `https://washedup.app/e/abc123`) to Facebook, Slack, Instagram, etc., the preview shows the **plan/event photo**, title, and description.
+When users share a plan or event link (e.g. `https://washedup.app/e/abc123`) to Facebook, Slack, Instagram, iMessage, etc., the preview shows the **plan/event photo** (or placeholder), **plan title**, and description.
 
-## How It Works (Lovable)
+## How It Works
 
-- **/e/:code** — Short code route handled client-side via React Router (ShortCodeRedirect component)
-- **og-event Edge Function** — Lovable's Edge Function generates dynamic OG metadata for social crawlers
-- **Fallback image** — `/images/og-image-v2.png` when no plan/event photo
+1. **Share URLs** — `https://washedup.app/e/{planId}` (used in PlanCard, SharePlanModal, plan detail, etc.)
+2. **Vercel rewrite** — `vercel.json` rewrites `/e/:code` to the Supabase Edge Function
+3. **og-plan Edge Function** — Fetches plan data from `events` table and returns HTML with:
+   - `og:title` — plan title
+   - `og:image` — plan image (or fallback placeholder)
+   - `og:description` — date, location, description snippet
+4. **Deep link** — Meta refresh redirects to `washedupapp://plan/{id}` so users open in the app
 
 Social crawlers don't execute the SPA, so they hit the Edge Function for dynamic meta tags.
+
+## Deployment
+
+1. **Deploy the Edge Function:**
+   ```bash
+   supabase functions deploy og-plan
+   ```
+
+2. **Hosting** — If using Vercel, `vercel.json` is already configured. For other hosts (Netlify, etc.), add a similar rewrite:
+   - `/e/:code` → `https://uwjhbfxragjyvylciwrb.supabase.co/functions/v1/og-plan?code=:code`
+
+3. **Placeholder image** — Ensure `https://washedup.app/assets/images/plan-placeholder.png` is publicly accessible (e.g. from your static export).
 
 ## Testing
 

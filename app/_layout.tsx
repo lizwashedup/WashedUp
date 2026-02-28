@@ -91,8 +91,10 @@ function RootLayoutNav() {
           : null;
 
         if (!session?.user) {
-          setAuthResolved(true);
           router.replace('/login');
+          // Delay overlay hide so router.replace completes before we reveal the stack
+          // (avoids flash of (tabs) before login mounts)
+          setTimeout(() => setAuthResolved(true), 80);
           return;
         }
 
@@ -111,8 +113,8 @@ function RootLayoutNav() {
         if (cancelled) return;
 
         if (!profileData) {
-          setAuthResolved(true);
           router.replace('/login');
+          setTimeout(() => setAuthResolved(true), 80);
           return;
         }
 
@@ -122,8 +124,8 @@ function RootLayoutNav() {
         router.replace(dest as any);
       } catch {
         if (!cancelled) {
-          setAuthResolved(true);
           router.replace('/login');
+          setTimeout(() => setAuthResolved(true), 80);
         }
       }
     }

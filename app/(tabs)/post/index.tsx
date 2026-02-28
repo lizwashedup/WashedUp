@@ -25,6 +25,7 @@ import { ImagePlus, X } from 'lucide-react-native';
 import ProfileButton from '../../../components/ProfileButton';
 import { SharePlanModal } from '../../../components/modals/SharePlanModal';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
+import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
@@ -55,6 +56,7 @@ const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
 
 const MIN_GROUP = 3;
 const MAX_GROUP = 8;
+const MSG_MIN = 10;
 const MSG_LIMIT = 150;
 const DESC_LIMIT = 500;
 
@@ -186,14 +188,19 @@ export default function PostScreen() {
     });
     if (!result.canceled && result.assets[0]) {
       const picked = result.assets[0];
-      setImageUrl(picked.uri);
       try {
         const manipulated = await ImageManipulator.manipulateAsync(
           picked.uri,
           [{ resize: { width: 1200 } }],
-          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
+          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true },
         );
-        uploadPhoto(manipulated.uri);
+        setImageUrl(manipulated.uri);
+        if (manipulated.base64) {
+          uploadPhoto(manipulated.base64);
+        } else {
+          setImageUrl(null);
+          Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
+        }
       } catch {
         setImageUrl(null);
         Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
@@ -201,27 +208,17 @@ export default function PostScreen() {
     }
   };
 
-  const uploadPhoto = async (uri: string) => {
+  const uploadPhoto = async (base64: string) => {
     setImageLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      await supabase.auth.refreshSession();
+
       const fileName = `${user.id}/${Date.now()}.jpg`;
-
-      const { error } = await supabase.storage
-        .from('event-images')
-        .upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
-
-      if (error) throw error;
-
-      const { data: urlData } = supabase.storage
-        .from('event-images')
-        .getPublicUrl(fileName);
-
-      setImageUrl(`${urlData.publicUrl}?t=${Date.now()}`);
+      const publicUrl = await uploadBase64ToStorage('event-images', fileName, base64);
+      setImageUrl(publicUrl);
     } catch {
       setImageUrl(null);
       Alert.alert('Upload failed', 'Could not upload photo. Try again.');
@@ -277,7 +274,7 @@ export default function PostScreen() {
   const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
   const safeTempDay = Math.min(tempDay, daysInTempMonth);
 
-  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && hostMessage.trim().length > 0 && !loading && !imageLoading;
+  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && hostMessage.trim().length >= MSG_MIN && hostMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
 
   // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -393,9 +390,12 @@ export default function PostScreen() {
       setDateSelected(false); setTimeSelected(false);
       placesRef.current?.clear();
     } catch (e: unknown) {
-      const msg = e && typeof e === 'object' && 'message' in e
+      const rawMsg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
-        : 'Could not post your plan. Please try again.';
+        : '';
+      const msg = rawMsg.includes('events_host_message_length')
+        ? `Message must be at least ${MSG_MIN} characters.`
+        : rawMsg || 'Could not post your plan. Please try again.';
       Alert.alert('Something went wrong', msg);
     } finally {
       setLoading(false);
@@ -663,7 +663,7 @@ export default function PostScreen() {
               numberOfLines={2}
               textAlignVertical="top"
             />
-            <Text style={styles.stepperHint}>This shows on your plan card as a personal note</Text>
+            <Text style={styles.stepperHint}>Min {MSG_MIN} characters · Max {MSG_LIMIT}</Text>
           </View>
 
           {/* ── Group size ── */}
@@ -720,7 +720,9 @@ export default function PostScreen() {
                       ? 'Select a category'
                       : description.trim().length === 0
                         ? 'Add a plan description'
-                        : 'Add a message'}
+                        : hostMessage.trim().length < MSG_MIN
+                          ? `Message must be at least ${MSG_MIN} characters`
+                          : 'Add a message'}
             </Text>
           )}
           <TouchableOpacity
