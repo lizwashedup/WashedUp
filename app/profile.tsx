@@ -259,23 +259,25 @@ export default function ProfileScreen() {
 
     setDeleting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+      if (sessionError || !session?.user) throw new Error(sessionError?.message ?? 'Not authenticated');
 
-      // RPC cascades through all user data and removes auth identity (SECURITY DEFINER)
-      const { error } = await supabase.rpc('delete_own_account');
-      if (error) throw error;
+      // RPC deletes all public data + auth user in one call
+      const { error: rpcError } = await supabase.rpc('delete_own_account');
+      if (rpcError) throw rpcError;
 
       try {
         await supabase.auth.signOut();
       } catch {
-        // Session may already be invalid after deletion; ignore
+        // Session invalid after deletion; ignore
       }
+      router.replace('/login');
     } catch (err: any) {
       setDeleting(false);
+      const msg = err?.message ?? String(err);
       Alert.alert(
         'Something went wrong',
-        'We could not delete your account automatically. Please email hello@washedup.app and we will delete it within 24 hours.',
+        `We could not delete your account automatically. ${msg}\n\nPlease email hello@washedup.app and we will delete it within 24 hours.`,
       );
     }
   };
@@ -286,17 +288,17 @@ export default function ProfileScreen() {
     {
       icon: 'shield-outline',
       label: 'Privacy Policy',
-      onPress: () => Linking.openURL('https://washedup.app/privacy-policy'),
+      onPress: () => Linking.openURL('https://washedup.app/privacy'),
     },
     {
       icon: 'document-text-outline',
       label: 'Terms of Service',
-      onPress: () => Linking.openURL('https://washedup.app/terms-of-service'),
+      onPress: () => Linking.openURL('https://washedup.app/terms'),
     },
     {
       icon: 'people-outline',
       label: 'Community Guidelines',
-      onPress: () => Linking.openURL('https://washedup.app/community-guidelines'),
+      onPress: () => Linking.openURL('https://washedup.app/guidelines'),
     },
     {
       icon: 'mail-outline',
@@ -887,11 +889,13 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#F0E6D3',
     borderRadius: 14,
-    paddingHorizontal: 16,
+    paddingLeft: 16,
+    paddingRight: 16,
     paddingVertical: 14,
     fontSize: 16,
     color: '#1C1917',
     fontWeight: '400',
+    textAlign: 'left',
   },
   handleInputRow: {
     flexDirection: 'row',
@@ -905,9 +909,11 @@ const styles = StyleSheet.create({
   handleInput: {
     flex: 1,
     paddingVertical: 14,
-    paddingHorizontal: 8,
+    paddingLeft: 8,
+    paddingRight: 16,
     fontSize: 16,
     color: '#1C1917',
+    textAlign: 'left',
   },
   editBioInput: {
     minHeight: 90,

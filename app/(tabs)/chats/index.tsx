@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ProfileButton from '../../../components/ProfileButton';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
@@ -93,6 +94,12 @@ export default function ChatsScreen() {
   const router = useRouter();
   const { chats, loading, refetch } = useChatList();
   const [refreshing, setRefreshing] = React.useState(false);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refetch();
+    }, [refetch]),
+  );
 
   const handleRefresh = async () => {
     setRefreshing(true);

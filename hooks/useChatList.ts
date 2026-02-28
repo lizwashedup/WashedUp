@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
 export interface ChatPreview {
@@ -19,11 +19,7 @@ export function useChatList() {
   const [chats, setChats] = useState<ChatPreview[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchChats();
-  }, []);
-
-  const fetchChats = async () => {
+  const fetchChats = useCallback(async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
@@ -63,7 +59,7 @@ export function useChatList() {
 
         const lastMsg = lastMsgArr?.[0];
 
-        // Unread count
+        // Unread count: messages from others after last_read_at (or all from others if never read)
         const { data: readData } = await supabase
           .from('chat_reads')
           .select('last_read_at')
@@ -72,15 +68,16 @@ export function useChatList() {
           .maybeSingle();
 
         let unreadCount = 0;
+        let q = supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('event_id', event.id)
+          .neq('user_id', user.id);
         if (readData?.last_read_at) {
-          const { count } = await supabase
-            .from('messages')
-            .select('*', { count: 'exact', head: true })
-            .eq('event_id', event.id)
-            .gt('created_at', readData.last_read_at)
-            .neq('user_id', user.id);
-          unreadCount = count ?? 0;
+          q = q.gt('created_at', readData.last_read_at);
         }
+        const { count } = await q;
+        unreadCount = count ?? 0;
 
         return {
           eventId: event.id,
@@ -110,7 +107,31 @@ export function useChatList() {
 
     setChats([...active, ...past]);
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchChats();
+  }, [fetchChats]);
+
+  // Realtime: when a new message arrives in any of our chats, refetch to update unread badges
+  useEffect(() => {
+    if (chats.length === 0) return;
+    const eventIds = new Set(chats.map(c => c.eventId));
+    const channel = supabase
+      .channel('chat-list-messages')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const eid = (payload.new as any)?.event_id;
+          if (eid && eventIds.has(eid)) fetchChats();
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [chats, fetchChats]);
 
   return { chats, loading, refetch: fetchChats };
 }

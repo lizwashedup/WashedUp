@@ -1045,10 +1045,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
-    paddingHorizontal: 16,
+    paddingLeft: 16,
+    paddingRight: 16,
     paddingVertical: 14,
     fontSize: 16,
     color: Colors.textDark,
+    textAlign: 'left',
   },
   textArea: { minHeight: 100, paddingTop: 14 },
 

@@ -190,9 +190,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
-    paddingHorizontal: 16,
+    paddingLeft: 16,
+    paddingRight: 16,
+    paddingVertical: 0,
     fontSize: 16,
     fontWeight: '400',
     color: Colors.textDark,
+    textAlign: 'left',
   },
 });
