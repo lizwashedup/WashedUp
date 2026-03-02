@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FFF8F0"
+      "backgroundColor": "#D97746"
     },
     "notification": {
       "icon": "./assets/images/app-icon.png",
@@ -48,7 +48,7 @@
       },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#FFF8F0"
+        "backgroundColor": "#D97746"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
