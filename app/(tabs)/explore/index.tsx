@@ -18,7 +18,6 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
-import ProfileButton from '../../../components/ProfileButton';
 import { MapView } from '../../../components/MapView';
 import { supabase } from '../../../lib/supabase';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
@@ -600,7 +599,6 @@ export default function SceneScreen() {
         <Text style={styles.headerTitle}>
           The <Text style={styles.headerTitleItalic}>Scene</Text>
         </Text>
-        <ProfileButton />
       </View>
 
       {/* Filter Tabs: Events only (Restaurants & Ideas hidden until ready) */}

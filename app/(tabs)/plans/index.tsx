@@ -15,7 +15,6 @@ import { router, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import ProfileButton from '../../../components/ProfileButton';
 import { MapView, Marker } from '../../../components/MapView';
 import { supabase } from '../../../lib/supabase';
 import { fetchPlans, Plan } from '../../../lib/fetchPlans';
@@ -48,11 +47,11 @@ interface PlanCardPlan {
   category: string | null;
   max_invites: number;
   member_count: number;
-  host: {
+  creator: {
     first_name_display: string;
     profile_photo_url: string | null;
     member_since?: string;
-    plans_hosted?: number;
+    plans_posted?: number;
   };
   attendees: { profile_photo_url: string | null }[];
 }
@@ -78,9 +77,9 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
     category: plan.category ?? null,
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
-    host: {
-      first_name_display: plan.host?.first_name ?? 'Host',
-      profile_photo_url: plan.host?.avatar_url ?? null,
+    creator: {
+      first_name_display: plan.creator?.first_name ?? 'Creator',
+      profile_photo_url: plan.creator?.avatar_url ?? null,
     },
     attendees: [],
   };
@@ -271,7 +270,7 @@ export default function PlansScreen() {
           member_count: e.member_count ?? 0,
           status: e.status ?? 'forming',
           host_message: e.host_message ?? null,
-          host: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
+          creator: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
         } as Plan;
       });
     },
@@ -384,7 +383,6 @@ export default function PlansScreen() {
               <Ionicons name="map-outline" size={22} color={Colors.asphalt} />
             )}
           </TouchableOpacity>
-          <ProfileButton />
         </View>
       </View>
 

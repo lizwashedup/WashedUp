@@ -72,15 +72,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="profile"
+        name="friends/index"
         options={{
-          title: 'Profile',
-          tabBarLabel: 'Profile',
+          title: 'Your People',
+          tabBarLabel: 'Your People',
           tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="friends/index"
+        name="profile"
         options={{ href: null }}
       />
       <Tabs.Screen

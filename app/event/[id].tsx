@@ -274,15 +274,15 @@ export default function EventDetailScreen() {
                 >
                   <View style={styles.planCardTop}>
                     {plan.host_photo ? (
-                      <Image source={{ uri: plan.host_photo }} style={styles.planHostAvatar} contentFit="cover" />
+                      <Image source={{ uri: plan.host_photo }} style={styles.planCreatorAvatar} contentFit="cover" />
                     ) : (
-                      <View style={[styles.planHostAvatar, { backgroundColor: '#F0E6D3', alignItems: 'center', justifyContent: 'center' }]}>
+                      <View style={[styles.planCreatorAvatar, { backgroundColor: '#F0E6D3', alignItems: 'center', justifyContent: 'center' }]}>
                         <Text style={{ fontSize: 12, fontWeight: '700', color: '#C4652A' }}>
                           {plan.host_name?.[0]?.toUpperCase() ?? '?'}
                         </Text>
                       </View>
                     )}
-                    <Text style={styles.planHostName}>{plan.host_name ?? 'Someone'}'s plan</Text>
+                    <Text style={styles.planCreatorName}>Posted by {plan.host_name ?? 'Someone'}</Text>
                     {plan.primary_vibe && (
                       <View style={styles.planVibePill}>
                         <Text style={styles.planVibeText}>{plan.primary_vibe}</Text>
@@ -377,8 +377,8 @@ const styles = StyleSheet.create({
     borderColor: '#F0E6D3',
   },
   planCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  planHostAvatar: { width: 28, height: 28, borderRadius: 14, overflow: 'hidden' },
-  planHostName: { fontSize: 13, fontWeight: '600', color: '#1A1A1A' },
+  planCreatorAvatar: { width: 28, height: 28, borderRadius: 14, overflow: 'hidden' },
+  planCreatorName: { fontSize: 13, fontWeight: '600', color: '#1A1A1A' },
   planVibePill: { backgroundColor: '#F0E6D3', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   planVibeText: { fontSize: 10, fontWeight: '600', color: '#9B8B7A', textTransform: 'capitalize' },
   planJoinBtn: { backgroundColor: '#C4652A', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8 },

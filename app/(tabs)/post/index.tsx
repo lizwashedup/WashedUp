@@ -22,7 +22,6 @@ import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { ImagePlus, X } from 'lucide-react-native';
-import ProfileButton from '../../../components/ProfileButton';
 import { SharePlanModal } from '../../../components/modals/SharePlanModal';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
@@ -157,7 +156,7 @@ export default function PostScreen() {
   const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
   const [ageRanges, setAgeRanges] = useState<AgeRange[]>([]);
   const [description, setDescription] = useState('');
-  const [hostMessage, setHostMessage] = useState('');
+  const [creatorMessage, setCreatorMessage] = useState('');
   const [groupSize, setGroupSize] = useState(6);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
@@ -275,7 +274,7 @@ export default function PostScreen() {
   const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
   const safeTempDay = Math.min(tempDay, daysInTempMonth);
 
-  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && hostMessage.trim().length >= MSG_MIN && hostMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
+  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
 
   // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -350,7 +349,7 @@ export default function PostScreen() {
           target_age_min: ageBounds.min,
           target_age_max: ageBounds.max,
           description: description.trim() || null,
-          host_message: hostMessage.trim().slice(0, MSG_LIMIT) || null,
+          host_message: creatorMessage.trim().slice(0, MSG_LIMIT) || null,
           max_invites: groupSize,
           min_invites: MIN_GROUP,
           creator_user_id: user.id,
@@ -387,7 +386,7 @@ export default function PostScreen() {
       setTitle(''); setLocation(''); setLocationLat(null); setLocationLng(null);
       setTicketUrl(''); setCategory(null);
       setGenderPref('mixed'); setAgeRanges([]);
-      setDescription(''); setHostMessage(''); setGroupSize(6);
+      setDescription(''); setCreatorMessage(''); setGroupSize(6);
       setDateSelected(false); setTimeSelected(false);
       placesRef.current?.clear();
     } catch (e: unknown) {
@@ -427,7 +426,6 @@ export default function PostScreen() {
               <Text style={styles.headerTitle}>Post a Plan</Text>
               <Text style={styles.headerSub}>Create something for people to join</Text>
             </View>
-            <ProfileButton />
           </View>
 
           {/* ── Photo (first field) ── */}
@@ -648,18 +646,18 @@ export default function PostScreen() {
             />
           </View>
 
-          {/* ── Host message (personal note) ── */}
+          {/* ── Creator note (personal message) ── */}
           <View style={styles.field}>
             <View style={styles.labelRow}>
               <Text style={styles.label}>Your message <Text style={styles.required}>*</Text></Text>
-              <Text style={styles.charCount}>{hostMessage.length}/{MSG_LIMIT}</Text>
+              <Text style={styles.charCount}>{creatorMessage.length}/{MSG_LIMIT}</Text>
             </View>
             <TextInput
               style={[styles.input, { minHeight: 60 }]}
               placeholder="Always wanted to check this out, who's in?"
               placeholderTextColor={Colors.textLight}
-              value={hostMessage}
-              onChangeText={(t) => setHostMessage(t.slice(0, MSG_LIMIT))}
+              value={creatorMessage}
+              onChangeText={(t) => setCreatorMessage(t.slice(0, MSG_LIMIT))}
               multiline
               numberOfLines={2}
               textAlignVertical="top"
@@ -721,7 +719,7 @@ export default function PostScreen() {
                       ? 'Select a category'
                       : description.trim().length === 0
                         ? 'Add a plan description'
-                        : hostMessage.trim().length < MSG_MIN
+                        : creatorMessage.trim().length < MSG_MIN
                           ? `Message must be at least ${MSG_MIN} characters`
                           : 'Add a message'}
             </Text>

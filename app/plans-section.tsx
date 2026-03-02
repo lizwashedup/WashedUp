@@ -28,9 +28,9 @@ function toPlanCardPlan(plan: Plan) {
     category: plan.category ?? null,
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
-    host: {
-      first_name_display: plan.host?.first_name ?? 'Host',
-      profile_photo_url: plan.host?.avatar_url ?? null,
+    creator: {
+      first_name_display: plan.creator?.first_name ?? 'Creator',
+      profile_photo_url: plan.creator?.avatar_url ?? null,
     },
     attendees: [],
   };

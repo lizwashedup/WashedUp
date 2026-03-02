@@ -13,7 +13,6 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import ProfileButton from '../../../components/ProfileButton';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 import { Fonts } from '../../../constants/Typography';
 
@@ -116,7 +115,6 @@ export default function ChatsScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Chats</Text>
-          <ProfileButton />
         </View>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#C4652A" />
@@ -129,7 +127,6 @@ export default function ChatsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
-        <ProfileButton />
       </View>
 
       {chats.length === 0 ? (

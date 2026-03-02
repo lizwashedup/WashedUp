@@ -18,7 +18,7 @@ export interface Plan {
   member_count: number;
   status: string;
   host_message: string | null;
-  host: {
+  creator: {
     id: string;
     first_name: string | null;
     avatar_url: string | null;
@@ -49,7 +49,7 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
     member_count: item.member_count ?? 0,
     status: item.status ?? 'forming',
     host_message: item.host_message ?? null,
-    host: item.host_id ? {
+    creator: item.host_id ? {
       id: item.host_id,
       first_name: item.host_name ?? null,
       avatar_url: item.host_photo ?? null,

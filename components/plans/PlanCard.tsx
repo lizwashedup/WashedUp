@@ -23,11 +23,11 @@ interface PlanCardProps {
     category: string | null;
     max_invites: number;
     member_count: number;
-    host: {
+    creator: {
       first_name_display: string;
       profile_photo_url: string | null;
       member_since?: string;
-      plans_hosted?: number;
+      plans_posted?: number;
     };
     attendees: { profile_photo_url: string | null }[];
   };
@@ -55,18 +55,18 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) =
   const oneSpotLeft = spotsLeft === 1;
   const spotsText = spotsLeft > 0 ? `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : null;
 
-  const hostLine2 = [
-    plan.host.member_since && `Member since ${plan.host.member_since}`,
-    plan.host.plans_hosted != null && `${plan.host.plans_hosted} plans hosted`,
+  const creatorLine2 = [
+    plan.creator.member_since && `Member since ${plan.creator.member_since}`,
+    plan.creator.plans_posted != null && `${plan.creator.plans_posted} plans posted`,
   ]
     .filter(Boolean)
     .join(' • ') || 'New member';
 
-  const hostLine1 = plan.location_text
-    ? `${plan.host.first_name_display} hosting in ${plan.location_text}`
-    : `${plan.host.first_name_display} hosting`;
+  const creatorLine1 = plan.location_text
+    ? `Posted by ${plan.creator.first_name_display} in ${plan.location_text}`
+    : `Posted by ${plan.creator.first_name_display}`;
 
-  const hostNote = plan.host_message
+  const creatorNote = plan.host_message
     ? `"${plan.host_message}"`
     : null;
 
@@ -81,26 +81,26 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) =
       accessibilityLabel={`${plan.title} plan`}
       accessibilityRole="button"
     >
-      {/* A. Host Info Block */}
-      <View style={styles.hostRow}>
-        <View style={styles.hostLeft}>
-          {plan.host.profile_photo_url ? (
+      {/* A. Creator Info */}
+      <View style={styles.creatorRow}>
+        <View style={styles.creatorLeft}>
+          {plan.creator.profile_photo_url ? (
             <Image
-              source={{ uri: plan.host.profile_photo_url }}
-              style={styles.hostAvatar}
+              source={{ uri: plan.creator.profile_photo_url }}
+              style={styles.creatorAvatar}
               contentFit="cover"
             />
           ) : (
-            <View style={styles.hostAvatarPlaceholder}>
+            <View style={styles.creatorAvatarPlaceholder}>
               <Ionicons name="person-outline" size={24} color={Colors.textLight} />
             </View>
           )}
-          <View style={styles.hostDetails}>
-            <Text style={styles.hostLine1} numberOfLines={1}>
-              {hostLine1}
+          <View style={styles.creatorDetails}>
+            <Text style={styles.creatorLine1} numberOfLines={1}>
+              {creatorLine1}
             </Text>
-            <Text style={styles.hostLine2} numberOfLines={1}>
-              {hostLine2}
+            <Text style={styles.creatorLine2} numberOfLines={1}>
+              {creatorLine2}
             </Text>
           </View>
         </View>
@@ -126,10 +126,10 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) =
         {plan.title}
       </Text>
 
-      {/* C. Host's Note */}
-      {hostNote && (
-        <Text style={styles.hostNote} numberOfLines={2}>
-          {hostNote}
+      {/* C. Creator's Note */}
+      {creatorNote && (
+        <Text style={styles.creatorNote} numberOfLines={2}>
+          {creatorNote}
         </Text>
       )}
 
@@ -180,24 +180,24 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     padding: 16,
   },
-  hostRow: {
+  creatorRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 12,
   },
-  hostLeft: {
+  creatorLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
     minWidth: 0,
   },
-  hostAvatar: {
+  creatorAvatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
   },
-  hostAvatarPlaceholder: {
+  creatorAvatarPlaceholder: {
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -207,18 +207,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hostDetails: {
+  creatorDetails: {
     marginLeft: 12,
     flex: 1,
     minWidth: 0,
   },
-  hostLine1: {
+  creatorLine1: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
     marginBottom: 2,
   },
-  hostLine2: {
+  creatorLine2: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
     color: Colors.textMedium,
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     marginBottom: 8,
   },
-  hostNote: {
+  creatorNote: {
     fontFamily: Fonts.displayItalic,
     fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,

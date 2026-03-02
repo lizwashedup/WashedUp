@@ -79,7 +79,7 @@ interface PlanDetail {
   status: string;
   host_id: string;
   tickets_url: string | null;
-  host: {
+  creator: {
     id: string;
     first_name: string | null;
     avatar_url: string | null;
@@ -186,8 +186,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
 
   const row = data as any;
 
-  // Fetch host via profiles_public view (bypasses profiles RLS for other users)
-  let host: PlanDetail['host'] = null;
+  // Fetch creator via profiles_public view (bypasses profiles RLS for other users)
+  let creator: PlanDetail['creator'] = null;
   if (row.creator_user_id) {
     const { data: profileRow } = await supabase
       .from('profiles_public')
@@ -196,7 +196,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       .maybeSingle();
 
     if (profileRow) {
-      host = {
+      creator = {
         id: profileRow.id,
         first_name: profileRow.first_name_display ?? null,
         avatar_url: profileRow.profile_photo_url ?? null,
@@ -225,7 +225,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     host_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
     member_count: row.member_count ?? 0,
-    host,
+    creator,
   };
 }
 
@@ -303,7 +303,7 @@ export default function PlanDetailScreen() {
   const [manageModalVisible, setManageModalVisible] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
-  const [editHostMessage, setEditHostMessage] = useState('');
+  const [editCreatorMessage, setEditCreatorMessage] = useState('');
   const [editLocation, setEditLocation] = useState('');
   const [editLocationLat, setEditLocationLat] = useState<number | null>(null);
   const [editLocationLng, setEditLocationLng] = useState<number | null>(null);
@@ -406,7 +406,7 @@ export default function PlanDetailScreen() {
   }, [currentUserId, id]);
 
   const isMember = members.some((m) => m.user_id === currentUserId);
-  const isHost = plan?.host_id === currentUserId;
+  const isCreator = plan?.host_id === currentUserId;
   const maxSpots = plan?.max_invites ?? 8;
   const isFull = plan ? plan.member_count >= maxSpots : false;
   const spotsLeft = plan ? maxSpots - plan.member_count : 0;
@@ -565,7 +565,7 @@ export default function PlanDetailScreen() {
     if (!plan) return;
     setEditTitle(plan.title);
     setEditDescription(plan.description ?? '');
-    setEditHostMessage(plan.host_message ?? '');
+    setEditCreatorMessage(plan.host_message ?? '');
     setEditLocation(plan.location_text ?? '');
     setEditLocationLat(plan.location_lat ?? null);
     setEditLocationLng(plan.location_lng ?? null);
@@ -588,7 +588,7 @@ export default function PlanDetailScreen() {
         .update({
           title: editTitle.trim(),
           description: editDescription.trim() || null,
-          host_message: editHostMessage.trim() || null,
+          host_message: editCreatorMessage.trim() || null,
           location_text: editLocation.trim() || null,
           location_lat: editLocationLat,
           location_lng: editLocationLng,
@@ -717,28 +717,28 @@ export default function PlanDetailScreen() {
   }, [plan]);
 
   const handleReportMenu = useCallback(() => {
-    if (isHost || !plan?.host) return;
-    const hostName = plan.host?.first_name ?? 'Host';
+    if (isCreator || !plan?.creator) return;
+    const creatorName = plan.creator?.first_name ?? 'Creator';
     Alert.alert(
       'Options',
       undefined,
       [
         {
-          text: `Report ${hostName}`,
+          text: `Report ${creatorName}`,
           onPress: () => {
-            setReportTarget({ id: plan.host?.id ?? '', name: hostName });
+            setReportTarget({ id: plan.creator?.id ?? '', name: creatorName });
             setShowReport(true);
           },
         },
         {
-          text: `Block ${hostName}`,
+          text: `Block ${creatorName}`,
           style: 'destructive',
-          onPress: () => blockUser(plan.host?.id ?? '', hostName, () => router.back()),
+          onPress: () => blockUser(plan.creator?.id ?? '', creatorName, () => router.back()),
         },
         { text: 'Cancel', style: 'cancel' },
       ],
     );
-  }, [isHost, plan, blockUser]);
+  }, [isCreator, plan, blockUser]);
 
   // ─── Loading / Error ─────────────────────────────────────────────────────────
 
@@ -773,9 +773,9 @@ export default function PlanDetailScreen() {
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
-  const hostMeta = [
+  const creatorMeta = [
       plan.location_text,
-      '4 plans hosted',
+      '4 plans posted',
       'Joined Jan 2025',
     ].filter(Boolean).join(' • ');
 
@@ -821,7 +821,7 @@ export default function PlanDetailScreen() {
               strokeWidth={2}
             />
           </TouchableOpacity>
-          {!isHost && plan?.host && (
+          {!isCreator && plan?.creator && (
             <TouchableOpacity
               onPress={handleReportMenu}
               style={styles.headerIconButton}
@@ -837,19 +837,19 @@ export default function PlanDetailScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* A. Host Info Block */}
-        <View style={styles.hostBlock}>
-          {plan.host?.avatar_url ? (
-            <Image source={{ uri: plan.host?.avatar_url ?? '' }} style={styles.hostAvatarLarge} contentFit="cover" />
+        {/* A. Creator Info */}
+        <View style={styles.creatorBlock}>
+          {plan.creator?.avatar_url ? (
+            <Image source={{ uri: plan.creator?.avatar_url ?? '' }} style={styles.creatorAvatarLarge} contentFit="cover" />
           ) : (
-            <View style={[styles.hostAvatarLarge, styles.hostAvatarPlaceholder]}>
+            <View style={[styles.creatorAvatarLarge, styles.creatorAvatarPlaceholder]}>
               <Ionicons name="person-outline" size={32} color={Colors.textLight} />
             </View>
           )}
-          <View style={styles.hostDetails}>
-            <Text style={styles.hostedBy}>HOSTED BY</Text>
-            <Text style={styles.hostNameLarge}>{plan.host?.first_name ?? 'Someone'}</Text>
-            <Text style={styles.hostMeta}>{hostMeta}</Text>
+          <View style={styles.creatorDetails}>
+            <Text style={styles.postedBy}>POSTED BY</Text>
+            <Text style={styles.creatorNameLarge}>{plan.creator?.first_name ?? 'Someone'}</Text>
+            <Text style={styles.creatorMeta}>{creatorMeta}</Text>
           </View>
         </View>
 
@@ -867,10 +867,10 @@ export default function PlanDetailScreen() {
           </View>
         )}
 
-        {/* D. Sofia's Note */}
+        {/* D. Creator's Note */}
         {plan.host_message && (
           <View style={styles.noteBox}>
-            <Text style={styles.noteLabel}>{`${plan.host?.first_name ?? 'HOST'}'S NOTE`}</Text>
+            <Text style={styles.noteLabel}>{`${plan.creator?.first_name ?? 'CREATOR'}'S NOTE`}</Text>
             <Text style={styles.noteText}>{plan.host_message}</Text>
           </View>
         )}
@@ -925,7 +925,7 @@ export default function PlanDetailScreen() {
           {visibleMembers.map((member) => (
             <MemberAvatar key={member.id} member={member} />
           ))}
-          {!isMember && !isHost && (
+          {!isMember && !isCreator && (
             <View style={styles.youPlaceholder}>
               <Text style={styles.youPlaceholderText}>You?</Text>
             </View>
@@ -939,7 +939,7 @@ export default function PlanDetailScreen() {
 
         {/* G. CTA Block */}
         <View style={styles.ctaBlock}>
-          {!isHost && !isMember && isEligible && !isFull && (
+          {!isCreator && !isMember && isEligible && !isFull && (
             <>
               <TouchableOpacity
                 style={styles.ctaButton}
@@ -966,7 +966,7 @@ export default function PlanDetailScreen() {
 
       <View style={styles.stickyBar}>
         {/* Get Tickets — only shown after joining */}
-        {plan.tickets_url && (isMember || isHost) && (
+        {plan.tickets_url && (isMember || isCreator) && (
           <TouchableOpacity
             style={styles.ticketButton}
             onPress={() => openUrl(plan.tickets_url!)}
@@ -976,7 +976,7 @@ export default function PlanDetailScreen() {
           </TouchableOpacity>
         )}
 
-        {isHost ? (
+        {isCreator ? (
           <View>
             <View style={styles.memberActions}>
               <TouchableOpacity
@@ -1196,12 +1196,12 @@ export default function PlanDetailScreen() {
                 placeholderTextColor="#999"
               />
 
-              {/* Host message */}
+              {/* Creator note */}
               <Text style={manageStyles.label}>Your message</Text>
               <TextInput
-                style={[manageStyles.input, manageStyles.hostMessageInput]}
-                value={editHostMessage}
-                onChangeText={setEditHostMessage}
+                style={[manageStyles.input, manageStyles.creatorMessageInput]}
+                value={editCreatorMessage}
+                onChangeText={setEditCreatorMessage}
                 multiline
                 maxLength={150}
                 placeholder="A personal note to people joining"
@@ -1416,41 +1416,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 140,
   },
-  hostBlock: {
+  creatorBlock: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
   },
-  hostAvatarLarge: {
+  creatorAvatarLarge: {
     width: 64,
     height: 64,
     borderRadius: 32,
   },
-  hostAvatarPlaceholder: {
+  creatorAvatarPlaceholder: {
     backgroundColor: Colors.white,
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hostDetails: {
+  creatorDetails: {
     marginLeft: 16,
     flex: 1,
   },
-  hostedBy: {
+  postedBy: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.caption,
     color: Colors.textLight,
     letterSpacing: 0.8,
     marginBottom: 2,
   },
-  hostNameLarge: {
+  creatorNameLarge: {
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     marginBottom: 2,
   },
-  hostMeta: {
+  creatorMeta: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
     color: Colors.textMedium,
@@ -1967,7 +1967,7 @@ const manageStyles = StyleSheet.create({
     minHeight: 80,
     textAlignVertical: 'top',
   },
-  hostMessageInput: {
+  creatorMessageInput: {
     minHeight: 50,
     textAlignVertical: 'top',
   },
