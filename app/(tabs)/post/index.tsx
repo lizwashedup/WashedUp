@@ -959,16 +959,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
-  profileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F0E6D3',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   headerSub: { fontSize: 14, color: Colors.textLight, marginTop: 4 },
 
   photoUpload: {

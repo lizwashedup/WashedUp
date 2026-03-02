@@ -20,7 +20,6 @@ import * as Haptics from 'expo-haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Users, QrCode, Share2, X } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
-import ProfileButton from '../../../components/ProfileButton';
 import { supabase } from '../../../lib/supabase';
 import { Fonts } from '../../../constants/Typography';
 
@@ -269,7 +268,6 @@ export default function YourPeopleScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Your People</Text>
-        <ProfileButton />
       </View>
 
       {/* Search bar */}
