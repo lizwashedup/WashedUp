@@ -19,7 +19,7 @@ import * as Haptics from 'expo-haptics';
 import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ProfileButton from '../../../components/ProfileButton';
-import MapView, { Marker } from 'react-native-maps';
+import { MapView } from '../../../components/MapView';
 import { supabase } from '../../../lib/supabase';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { CATEGORY_OPTIONS } from '../../../constants/Categories';

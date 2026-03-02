@@ -22,7 +22,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
-import MapView, { Marker } from 'react-native-maps';
+import { MapView, Marker } from '../../components/MapView';
 import {
   ArrowLeft,
   Calendar,

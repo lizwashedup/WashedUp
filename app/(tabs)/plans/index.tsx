@@ -16,7 +16,7 @@ import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import ProfileButton from '../../../components/ProfileButton';
-import MapView, { Marker } from 'react-native-maps';
+import { MapView, Marker } from '../../../components/MapView';
 import { supabase } from '../../../lib/supabase';
 import { fetchPlans, Plan } from '../../../lib/fetchPlans';
 import { PlanCard } from '../../../components/plans/PlanCard';
