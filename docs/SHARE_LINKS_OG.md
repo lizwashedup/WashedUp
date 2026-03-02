@@ -22,7 +22,7 @@ Social crawlers don't execute the SPA, so they hit the Edge Function for dynamic
    ```
 
 2. **Hosting** — If using Vercel, `vercel.json` is already configured. For other hosts (Netlify, etc.), add a similar rewrite:
-   - `/e/:code` → `https://uwjhbfxragjyvylciwrb.supabase.co/functions/v1/og-event?code=:code`
+   - `/e/:code` → `https://upstjumasqblszevlgik.supabase.co/functions/v1/og-event?code=:code`
 
 3. **Placeholder image** — Ensure `https://washedup.app/assets/images/plan-placeholder.png` is publicly accessible (e.g. from your static export).
 

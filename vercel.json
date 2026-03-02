@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/e/:code",
-      "destination": "https://uwjhbfxragjyvylciwrb.supabase.co/functions/v1/og-event?code=:code"
+      "destination": "https://upstjumasqblszevlgik.supabase.co/functions/v1/og-event?code=:code"
     }
   ],
   "headers": [

@@ -1,6 +1,6 @@
 # WashedUp — Supabase Schema Reference
-> Project ref: uwjhbfxragjyvylciwrb
-> Supabase URL: https://uwjhbfxragjyvylciwrb.supabase.co
+> Project ref: upstjumasqblszevlgik
+> Supabase URL: https://upstjumasqblszevlgik.supabase.co
 > Last updated from Lovable backend export.
 
 ---
@@ -223,7 +223,7 @@ Curated "Ideas" feed. Filter by `status = 'Live'`.
 | `event-images` | any path |
 | `chat-images` | any path |
 
-Public URL: `https://uwjhbfxragjyvylciwrb.supabase.co/storage/v1/object/public/{bucket}/{path}`
+Public URL: `https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/{bucket}/{path}`
 
 ---
 
