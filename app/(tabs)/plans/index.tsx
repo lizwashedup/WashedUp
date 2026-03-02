@@ -384,13 +384,6 @@ export default function PlansScreen() {
               <Ionicons name="map-outline" size={22} color={Colors.asphalt} />
             )}
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-            accessibilityLabel="Activity"
-          >
-            <Ionicons name="flash-outline" size={22} color={Colors.asphalt} />
-          </TouchableOpacity>
           <ProfileButton />
         </View>
       </View>

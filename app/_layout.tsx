@@ -16,10 +16,11 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useState } from 'react';
+import { Linking } from 'react-native';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { View, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
@@ -88,6 +89,29 @@ function RootLayoutNav() {
     return () => sub.remove();
   }, []);
 
+  // Handle auth callback deep link (password recovery)
+  useEffect(() => {
+    const parseSessionFromUrl = async (url: string) => {
+      if (!url || !url.includes('auth/callback')) return;
+      const hashPart = url.split('#')[1] || url.split('?')[1] || '';
+      const params = new URLSearchParams(hashPart);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+      const type = params.get('type');
+      if (accessToken && refreshToken && type === 'recovery') {
+        const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        if (!error) {
+          setAuthResolved(true);
+          router.replace('/reset-password');
+        }
+      }
+    };
+
+    Linking.getInitialURL().then((url) => url && parseSessionFromUrl(url));
+    const sub = Linking.addEventListener('url', ({ url }) => parseSessionFromUrl(url));
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -146,8 +170,13 @@ function RootLayoutNav() {
 
     checkAuth();
 
-    // Keep listening for sign-in/out after initial load
+    // Keep listening for sign-in/out and password recovery after initial load
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthResolved(true);
+        router.replace('/reset-password');
+        return;
+      }
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
       if (!session?.user) {
@@ -175,8 +204,14 @@ function RootLayoutNav() {
 
   return (
     <View style={{ flex: 1 }}>
+      {__DEV__ && (
+        <View style={{ backgroundColor: '#D97746', paddingVertical: 6, paddingHorizontal: 16, alignItems: 'center', zIndex: 9999 }}>
+          <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>GOLDEN HOUR V2 — NEW DESIGN</Text>
+        </View>
+      )}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
+        <Stack.Screen name="reset-password" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="plan/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="event/[id]" options={{ headerShown: false }} />

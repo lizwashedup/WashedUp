@@ -38,6 +38,15 @@ Then link the environment in `eas.json`:
 }
 ```
 
+## Supabase Auth: Password Reset Redirect
+
+For the password reset flow to work, add this redirect URL in your Supabase project:
+
+1. Supabase Dashboard → Authentication → URL Configuration
+2. Add to **Redirect URLs**: `washedupapp://auth/callback`
+
+This allows the reset link in the email to deep-link back into the app.
+
 ## Security Notes
 
 - The Supabase anon key is designed to be public; security is enforced via Row Level Security (RLS).

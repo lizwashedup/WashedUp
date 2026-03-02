@@ -5,6 +5,8 @@
   "scripts": {
     "start": "expo start",
     "start:clean": "rm -rf node_modules/.cache .expo && expo start --clear",
+    "build:ios": "npx expo prebuild --clean && npx expo run:ios",
+    "build:android": "npx expo prebuild --clean && npx expo run:android",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"

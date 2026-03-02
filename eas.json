@@ -1,5 +1,4 @@
 {
-  "_buildNotes": "Before production build, set these EAS Secrets: EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY, GOOGLE_MAPS_API_KEY.",
   "cli": {
     "version": ">= 18.0.5",
     "appVersionSource": "remote"

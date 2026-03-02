@@ -1,11 +1,11 @@
 /**
- * Expo app config. Reads GOOGLE_MAPS_API_KEY from environment.
- * For local dev: set in .env.local (gitignored).
- * For EAS builds: set GOOGLE_MAPS_API_KEY in EAS Secrets before production build.
+ * Expo app config. Prefer GOOGLE_MAPS_API_KEY from env. Fallback for builds without EAS Secrets.
  */
 const appJson = require('./app.json');
 
-const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY || '';
+const googleMapsApiKey =
+  process.env.GOOGLE_MAPS_API_KEY ||
+  'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
 
 module.exports = {
   ...appJson,

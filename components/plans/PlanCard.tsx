@@ -60,7 +60,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) =
     plan.host.plans_hosted != null && `${plan.host.plans_hosted} plans hosted`,
   ]
     .filter(Boolean)
-    .join(' • ') || 'Member since Jan 2025 • 4 plans hosted';
+    .join(' • ') || 'New member';
 
   const hostLine1 = plan.location_text
     ? `${plan.host.first_name_display} hosting in ${plan.location_text}`

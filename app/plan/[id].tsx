@@ -726,14 +726,14 @@ export default function PlanDetailScreen() {
         {
           text: `Report ${hostName}`,
           onPress: () => {
-            setReportTarget({ id: plan.host!.id, name: hostName });
+            setReportTarget({ id: plan.host?.id ?? '', name: hostName });
             setShowReport(true);
           },
         },
         {
           text: `Block ${hostName}`,
           style: 'destructive',
-          onPress: () => blockUser(plan.host!.id, hostName, () => router.back()),
+          onPress: () => blockUser(plan.host?.id ?? '', hostName, () => router.back()),
         },
         { text: 'Cancel', style: 'cancel' },
       ],

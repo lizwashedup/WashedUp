@@ -16,7 +16,7 @@ import { Image } from 'expo-image';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown, Utensils, Lightbulb } from 'lucide-react-native';
+import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ProfileButton from '../../../components/ProfileButton';
 import MapView, { Marker } from 'react-native-maps';
@@ -603,13 +603,9 @@ export default function SceneScreen() {
         <ProfileButton />
       </View>
 
-      {/* Filter Tabs: Events / Restaurants / Ideas */}
+      {/* Filter Tabs: Events only (Restaurants & Ideas hidden until ready) */}
       <View style={styles.filterTabs}>
-        {[
-          { key: 'events' as SceneTab, label: 'Events' },
-          { key: 'restaurants' as SceneTab, label: 'Restaurants', comingSoon: true },
-          { key: 'ideas' as SceneTab, label: 'Ideas', comingSoon: true },
-        ].map((tab) => (
+        {[{ key: 'events' as SceneTab, label: 'Events' }].map((tab) => (
           <TouchableOpacity
             key={tab.key}
             style={[styles.filterTab, activeTab === tab.key && styles.filterTabActive]}
@@ -626,9 +622,8 @@ export default function SceneScreen() {
         ))}
       </View>
 
-      {activeTab === 'events' ? (
-        <>
-          {/* Category Chips */}
+      <>
+        {/* Category Chips */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -760,36 +755,15 @@ export default function SceneScreen() {
 
               <View style={styles.bottomCta}>
                 <Text style={styles.bottomCtaText}>Want your event here?</Text>
+                {/* Temporarily commented out until web page is live
                 <TouchableOpacity onPress={() => Linking.openURL('https://washedup.app/list-your-event')}>
                   <Text style={styles.bottomCtaLink}>List your event</Text>
                 </TouchableOpacity>
+                */}
               </View>
             </ScrollView>
           )}
-        </>
-      ) : activeTab === 'restaurants' ? (
-        <View style={styles.comingSoonContainer}>
-          <View style={styles.comingSoonCard}>
-            <Utensils size={48} color={Colors.terracotta} strokeWidth={1.5} />
-            <Text style={styles.comingSoonTitle}>Restaurants</Text>
-            <Text style={styles.comingSoonBadge}>Coming Soon</Text>
-            <Text style={styles.comingSoonSubtitle}>
-              Curated spots to eat with your crew.{'\n'}We're working on it.
-            </Text>
-          </View>
-        </View>
-      ) : (
-        <View style={styles.comingSoonContainer}>
-          <View style={styles.comingSoonCard}>
-            <Lightbulb size={48} color={Colors.terracotta} strokeWidth={1.5} />
-            <Text style={styles.comingSoonTitle}>Ideas</Text>
-            <Text style={styles.comingSoonBadge}>Coming Soon</Text>
-            <Text style={styles.comingSoonSubtitle}>
-              Activity ideas to inspire your next plan.{'\n'}Stay tuned.
-            </Text>
-          </View>
-        </View>
-      )}
+      </>
 
       <FilterBottomSheet
         visible={whenSheetOpen}

@@ -11,6 +11,8 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -21,7 +23,7 @@ import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
-import { Fonts } from '../../constants/Typography';
+import { Fonts, FontSizes } from '../../constants/Typography';
 
 const SOCIAL_PROOF = '700+ people in LA already joined';
 
@@ -33,6 +35,10 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+  const [resetModalVisible, setResetModalVisible] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const passwordInputRef = useRef<TextInput>(null);
 
   const handleLogin = async () => {
@@ -59,7 +65,37 @@ export default function LoginScreen() {
 
   const handleForgotPassword = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert('Forgot password?', 'Check your email');
+    setResetEmail('');
+    setResetError(null);
+    setResetModalVisible(true);
+  };
+
+  const handleSendResetLink = async () => {
+    setResetError(null);
+    const emailTrimmed = resetEmail.trim();
+    if (!emailTrimmed) {
+      setResetError('Please enter your email address.');
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const { error: err } = await supabase.auth.resetPasswordForEmail(emailTrimmed, {
+        redirectTo: 'washedupapp://auth/callback',
+      });
+      if (err) {
+        setResetError(err.message);
+        return;
+      }
+      setResetModalVisible(false);
+      Alert.alert('Check your email', 'Check your email for a password reset link.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const closeResetModal = () => {
+    setResetModalVisible(false);
+    setResetError(null);
   };
 
   const handleSignUpPress = () => {
@@ -204,6 +240,49 @@ export default function LoginScreen() {
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+
+      {/* Reset Password Modal */}
+      <Modal
+        visible={resetModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeResetModal}
+      >
+        <Pressable style={modalStyles.overlay} onPress={closeResetModal}>
+          <Pressable style={modalStyles.content} onPress={(e) => e.stopPropagation()}>
+            <Text style={modalStyles.title}>Reset Password</Text>
+            <Text style={modalStyles.subtitle}>Enter your email to receive a reset link.</Text>
+            <TextInput
+              style={[styles.input, modalStyles.input]}
+              placeholder="Email address"
+              placeholderTextColor={Colors.textMedium}
+              value={resetEmail}
+              onChangeText={(t) => { setResetEmail(t); setResetError(null); }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!resetLoading}
+            />
+            {resetError ? <Text style={modalStyles.errorText}>{resetError}</Text> : null}
+            <TouchableOpacity
+              style={[styles.primaryButton, resetLoading && styles.primaryButtonDisabled]}
+              onPress={handleSendResetLink}
+              onPressIn={triggerHaptic}
+              activeOpacity={0.9}
+              disabled={resetLoading}
+            >
+              {resetLoading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Send Reset Link</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={closeResetModal} style={modalStyles.cancelButton}>
+              <Text style={modalStyles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -363,5 +442,50 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: Colors.primaryOrange,
+  },
+});
+
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  content: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 20,
+    padding: 24,
+  },
+  title: {
+    fontFamily: Fonts.display,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.textMedium,
+    marginBottom: 20,
+  },
+  input: {
+    marginBottom: 16,
+  },
+  errorText: {
+    fontSize: 14,
+    color: Colors.errorRed,
+    marginBottom: 12,
+  },
+  cancelButton: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  cancelText: {
+    fontSize: 15,
+    color: Colors.textMedium,
   },
 });
