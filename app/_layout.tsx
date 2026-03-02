@@ -2,7 +2,16 @@ import '../global.css';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFonts } from 'expo-font';
-import { DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif-display';
+import {
+  CormorantGaramond_400Regular,
+  CormorantGaramond_700Bold,
+  CormorantGaramond_400Regular_Italic,
+} from '@expo-google-fonts/cormorant-garamond';
+import {
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_700Bold,
+} from '@expo-google-fonts/dm-sans';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
@@ -29,7 +38,12 @@ export const unstable_settings = {
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-    DMSerifDisplay_400Regular,
+    CormorantGaramond_400Regular,
+    CormorantGaramond_700Bold,
+    CormorantGaramond_400Regular_Italic,
+    DMSans_400Regular,
+    DMSans_500Medium,
+    DMSans_700Bold,
     ...FontAwesome.font,
     ...Ionicons.font,
   });
@@ -164,12 +178,11 @@ function RootLayoutNav() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="profile" />
         <Stack.Screen name="plan/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
       </Stack>
       {!authResolved && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8F0' }}>
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.backgroundCream }}>
           <ActivityIndicator size="large" color={Colors.primaryOrange} />
         </View>
       )}

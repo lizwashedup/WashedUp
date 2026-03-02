@@ -4,107 +4,43 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Dimensions,
   Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { Heart, Calendar, Share2 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH - 48;
+import Colors from '../../constants/Colors';
+import { Fonts, FontSizes } from '../../constants/Typography';
 
 interface PlanCardProps {
   plan: {
     id: string;
     title: string;
+    host_message: string | null;
     start_time: string;
     location_text: string | null;
-    image_url: string | null;
     category: string | null;
-    gender_rule: string | null;
-    max_invites: number | null;
-    min_invites: number | null;
+    max_invites: number;
     member_count: number;
-    status: string;
-    host_message: string | null;
     host: {
-      id: string;
-      first_name: string | null;
-      avatar_url: string | null;
-    } | null;
+      first_name_display: string;
+      profile_photo_url: string | null;
+      member_since?: string;
+      plans_hosted?: number;
+    };
+    attendees: { profile_photo_url: string | null }[];
   };
-  isWishlisted?: boolean;
   isMember?: boolean;
-  onWishlist?: (planId: string, currentState: boolean) => void;
-  variant?: 'carousel' | 'full';
 }
 
-const CATEGORY_COLORS: Record<string, string> = {
-  music: '#7C5CBF',
-  film: '#5C7CBF',
-  nightlife: '#BF5C7C',
-  food: '#BF7C5C',
-  outdoors: '#5CBF7C',
-  fitness: '#5CBFBF',
-  art: '#BF5CBF',
-  comedy: '#C4652A',
-  sports: '#5C7CBF',
-  wellness: '#5CBF9C',
-  default: '#C4652A',
-};
-
-function getCategoryColor(category: string | null): string {
-  if (!category) return CATEGORY_COLORS.default;
-  return CATEGORY_COLORS[category.toLowerCase()] ?? CATEGORY_COLORS.default;
-}
-
-function formatCategoryLabel(category: string | null): string {
-  if (!category) return 'Plan';
-  return category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
-}
-
-function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-  const timeStr = date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-
-  if (dateStart.getTime() === todayStart.getTime()) return `Tonight · ${timeStr}`;
-  if (dateStart.getTime() === tomorrowStart.getTime()) return `Tomorrow · ${timeStr}`;
-
-  const dayStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  return `${dayStr} · ${timeStr}`;
-}
-
-export const PlanCard = React.memo<PlanCardProps>(({
-  plan,
-  isWishlisted = false,
-  isMember = false,
-  onWishlist,
-  variant = 'carousel',
-}) => {
+export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) => {
   const router = useRouter();
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(`/plan/${plan.id}`);
   }, [plan.id, router]);
-
-  const handleWishlist = useCallback((e: any) => {
-    e.stopPropagation();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onWishlist?.(plan.id, isWishlisted);
-  }, [plan.id, isWishlisted, onWishlist]);
 
   const handleShare = useCallback((e: any) => {
     e.stopPropagation();
@@ -115,123 +51,120 @@ export const PlanCard = React.memo<PlanCardProps>(({
     }).catch(() => {});
   }, [plan.id, plan.title]);
 
-  const spotsLeft = plan.max_invites ? plan.max_invites - plan.member_count : null;
-  const isFull = plan.status === 'full' || (spotsLeft !== null && spotsLeft <= 0);
-  const oneSpotLeft = !isFull && spotsLeft === 1;
+  const spotsLeft = plan.max_invites - plan.member_count;
+  const oneSpotLeft = spotsLeft === 1;
+  const spotsText = spotsLeft > 0 ? `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : null;
 
-  const categoryColor = getCategoryColor(plan.category);
-  const cardWidth = variant === 'carousel' ? CARD_WIDTH : '100%';
+  const hostLine2 = [
+    plan.host.member_since && `Member since ${plan.host.member_since}`,
+    plan.host.plans_hosted != null && `${plan.host.plans_hosted} plans hosted`,
+  ]
+    .filter(Boolean)
+    .join(' • ') || 'Member since Jan 2025 • 4 plans hosted';
 
-  const metaText = plan.location_text
-    ? `${formatDate(plan.start_time)} · ${plan.location_text}`
-    : formatDate(plan.start_time);
+  const hostLine1 = plan.location_text
+    ? `${plan.host.first_name_display} hosting in ${plan.location_text}`
+    : `${plan.host.first_name_display} hosting`;
+
+  const hostNote = plan.host_message
+    ? `"${plan.host_message}"`
+    : null;
+
+  const goingText = `${plan.member_count} going`;
+  const spotsTextFull = spotsText ? `${goingText} • ${spotsText}` : goingText;
 
   return (
     <TouchableOpacity
       onPress={handlePress}
       activeOpacity={0.92}
-      style={[
-        styles.card,
-        { width: cardWidth as any },
-        variant === 'carousel' && styles.cardCarousel,
-      ]}
+      style={styles.card}
       accessibilityLabel={`${plan.title} plan`}
       accessibilityRole="button"
     >
-      <View style={styles.imageContainer}>
-        <Image
-          source={plan.image_url ? { uri: plan.image_url } : require('../../assets/images/plan-placeholder.png')}
-          style={styles.image}
-          contentFit="cover"
-          transition={200}
-        />
-
-        {/* Top-left: status badge — Full or 1 spot left */}
-        {isFull ? (
-          <View style={[styles.statusBadge, styles.statusBadgeFull]}>
-            <Text style={styles.statusBadgeText}>
-              {plan.member_count > 0 ? `${plan.member_count} going · Full` : 'Full'}
-            </Text>
-          </View>
-        ) : oneSpotLeft ? (
-          <View style={[styles.statusBadge, styles.statusBadgeOneLeft]}>
-            <Text style={styles.statusBadgeText}>1 spot left</Text>
-          </View>
-        ) : null}
-
-        {/* Share + Heart — top right */}
-        <View style={styles.topRightRow}>
-          <TouchableOpacity
-            onPress={handleShare}
-            style={styles.shareButton}
-            accessibilityLabel="Share plan"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Share2 size={16} color="#1A1A1A" strokeWidth={2} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleWishlist}
-            style={styles.heartButton}
-            accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Heart
-              size={18}
-              color={isWishlisted ? '#E53935' : '#1A1A1A'}
-              fill={isWishlisted ? '#E53935' : 'transparent'}
-              strokeWidth={2}
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Content below image — directly on page background */}
-      <View style={styles.content}>
-        <Text style={styles.title} numberOfLines={2}>
-          {plan.title}
-        </Text>
-
-        <View style={styles.hostRow}>
-          {plan.host && (plan.host.avatar_url ? (
+      {/* A. Host Info Block */}
+      <View style={styles.hostRow}>
+        <View style={styles.hostLeft}>
+          {plan.host.profile_photo_url ? (
             <Image
-              source={{ uri: plan.host.avatar_url }}
+              source={{ uri: plan.host.profile_photo_url }}
               style={styles.hostAvatar}
               contentFit="cover"
             />
           ) : (
-            <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
-              <Text style={styles.hostAvatarInitial}>
-                {plan.host.first_name?.[0]?.toUpperCase() ?? '?'}
-              </Text>
-            </View>
-          ))}
-          {plan.host?.first_name && (
-            <Text style={styles.hostName} numberOfLines={1}>
-              {plan.host.first_name}
-            </Text>
-          )}
-          {plan.host?.first_name && plan.category && (
-            <Text style={styles.separator}> · </Text>
-          )}
-          {plan.category && (
-            <Text style={[styles.categoryText, { color: categoryColor }]}>
-              {formatCategoryLabel(plan.category)}
-            </Text>
-          )}
-          {isMember && (
-            <View style={styles.goingBadge}>
-              <View style={styles.goingDot} />
-              <Text style={styles.goingText}>You're going</Text>
+            <View style={styles.hostAvatarPlaceholder}>
+              <Ionicons name="person-outline" size={24} color={Colors.textLight} />
             </View>
           )}
+          <View style={styles.hostDetails}>
+            <Text style={styles.hostLine1} numberOfLines={1}>
+              {hostLine1}
+            </Text>
+            <Text style={styles.hostLine2} numberOfLines={1}>
+              {hostLine2}
+            </Text>
+          </View>
         </View>
+        <View style={styles.badgesRow}>
+          {oneSpotLeft && (
+            <View style={styles.spotsBadge}>
+              <Text style={styles.spotsBadgeText}>1 spot left</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            onPress={handleShare}
+            style={styles.shareButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Share plan"
+          >
+            <Ionicons name="share-outline" size={18} color={Colors.asphalt} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
-        <View style={styles.metaRow}>
-          <Calendar size={12} color="#888888" strokeWidth={2} />
-          <Text style={styles.metaText} numberOfLines={1}>
-            {metaText}
-          </Text>
+      {/* B. Plan Title */}
+      <Text style={styles.title} numberOfLines={2}>
+        {plan.title}
+      </Text>
+
+      {/* C. Host's Note */}
+      {hostNote && (
+        <Text style={styles.hostNote} numberOfLines={2}>
+          {hostNote}
+        </Text>
+      )}
+
+      {/* D. Logistics & CTA */}
+      <View style={styles.bottomRow}>
+        <View style={styles.avatarPile}>
+          {plan.attendees.slice(0, 4).map((a, i) =>
+            a.profile_photo_url ? (
+              <Image
+                key={i}
+                source={{ uri: a.profile_photo_url }}
+                style={[styles.attendeeAvatar, { marginLeft: i > 0 ? -8 : 0 }]}
+                contentFit="cover"
+              />
+            ) : (
+              <View
+                key={i}
+                style={[styles.attendeeAvatar, styles.attendeeAvatarPlaceholder, { marginLeft: i > 0 ? -8 : 0 }]}
+              >
+                <Ionicons name="person-outline" size={12} color={Colors.textLight} />
+              </View>
+            ),
+          )}
         </View>
+        <Text style={styles.spotsText}>{spotsTextFull}</Text>
+        <View style={styles.ctaSpacer} />
+        <TouchableOpacity
+          style={[styles.ctaButton, isMember && styles.ctaButtonJoined]}
+          onPress={handlePress}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.ctaButtonText}>
+            {isMember ? "Going ✓" : "Let's Go →"}
+          </Text>
+        </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
@@ -241,155 +174,130 @@ PlanCard.displayName = 'PlanCard';
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: 24,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 16,
   },
-  cardCarousel: {
-    marginRight: 12,
+  hostRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  imageContainer: {
-    width: '100%',
-    aspectRatio: 16 / 10,
-    borderRadius: 14,
-    overflow: 'hidden',
-    position: 'relative',
+  hostLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
   },
-  image: {
-    width: '100%',
-    height: '100%',
+  hostAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
-
-  statusBadge: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 2,
+  hostAvatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  statusBadgeFull: {
-    backgroundColor: '#C4652A',
+  hostDetails: {
+    marginLeft: 12,
+    flex: 1,
+    minWidth: 0,
   },
-  statusBadgeOneLeft: {
-    backgroundColor: '#F59E0B',
+  hostLine1: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+    marginBottom: 2,
   },
-  statusBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  hostLine2: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
   },
-
-  topRightRow: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
+  badgesRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+  spotsBadge: {
+    backgroundColor: Colors.goldenAmber,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  spotsBadgeText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.white,
+  },
   shareButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  heartButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-
-  content: {
-    paddingTop: 8,
-    gap: 4,
+    padding: 4,
   },
   title: {
-    fontFamily: 'DMSerifDisplay_400Regular',
-    fontSize: 18,
-    color: '#1C1917',
-    lineHeight: 23,
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    lineHeight: 28,
+    marginBottom: 8,
   },
-  hostRow: {
+  hostNote: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
-  hostAvatar: {
+  avatarPile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  attendeeAvatar: {
     width: 24,
     height: 24,
     borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.cardBg,
   },
-  hostAvatarPlaceholder: {
-    backgroundColor: '#C4652A',
+  attendeeAvatarPlaceholder: {
+    backgroundColor: Colors.white,
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hostAvatarInitial: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  spotsText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
   },
-  hostName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#44403C',
-    maxWidth: 100,
-  },
-  separator: {
-    fontSize: 13,
-    color: '#CCCCCC',
-  },
-  categoryText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  goingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-  },
-  goingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#4CAF50',
-  },
-  goingText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#2E7D32',
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  metaText: {
-    fontSize: 13,
-    color: '#888888',
+  ctaSpacer: {
     flex: 1,
+  },
+  ctaButton: {
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  ctaButtonJoined: {
+    backgroundColor: Colors.asphalt,
+  },
+  ctaButtonText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.white,
   },
 });

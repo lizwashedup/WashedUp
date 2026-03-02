@@ -29,6 +29,7 @@ import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
+import { Fonts } from '../../../constants/Typography';
 
 const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
 
@@ -953,7 +954,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   headerTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
+    fontFamily: Fonts.display,
     fontSize: 28,
     color: '#C4652A',
     textShadowColor: 'rgba(0,0,0,0.2)',

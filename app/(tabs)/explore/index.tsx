@@ -9,8 +9,6 @@ import {
   Dimensions,
   RefreshControl,
   Linking,
-  Modal,
-  Pressable,
   Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,14 +16,18 @@ import { Image } from 'expo-image';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown, Utensils, Lightbulb, Share2 } from 'lucide-react-native';
+import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown, Utensils, Lightbulb } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import ProfileButton from '../../../components/ProfileButton';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../../lib/supabase';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { CATEGORY_OPTIONS } from '../../../constants/Categories';
+import Colors from '../../../constants/Colors';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const CARD_IMAGE_HEIGHT = 220;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,24 +74,15 @@ function formatEventDate(dateStr: string | null, timeStr: string | null): string
   return dayLabel;
 }
 
-const CATEGORY_COLORS: Record<string, string> = {
-  music: '#7C5CBF',
-  food: '#BF7C5C',
-  outdoors: '#3D8B6E',
-  nightlife: '#BF5C7C',
-  film: '#5C7CBF',
-  art: '#BF5CBF',
-  fitness: '#5CBF7C',
-  comedy: '#C4652A',
-  wellness: '#5CA0BF',
-  sports: '#BF8C5C',
-  community: '#5CA0BF',
-  tech: '#3D8B6E',
-  default: '#C4652A',
-};
+function formatVenueLocation(venueAddress: string | null): string {
+  if (!venueAddress) return '';
+  const parts = venueAddress.split(',').map((p) => p.trim());
+  return parts[parts.length - 2] || parts[0] || venueAddress;
+}
 
-function getCatColor(category: string | null): string {
-  return CATEGORY_COLORS[category?.toLowerCase() ?? ''] ?? CATEGORY_COLORS.default;
+function getPriceLabel(ticketPrice: string | null): string {
+  if (!ticketPrice || ticketPrice.toLowerCase() === 'free') return 'Free';
+  return ticketPrice;
 }
 
 const LA_REGION = {
@@ -140,101 +133,325 @@ async function fetchExploreWishlists(userId: string): Promise<string[]> {
   return (data ?? []).map((d: any) => d.explore_event_id);
 }
 
-// ─── Scene Card ───────────────────────────────────────────────────────────────
+// ─── SceneCard ───────────────────────────────────────────────────────────────
 
-function SceneCard({ event, isWishlisted, onWishlist }: {
+type SceneTab = 'events' | 'restaurants' | 'ideas';
+
+const SceneCard = React.memo(function SceneCard({
+  event,
+  isWishlisted,
+  onWishlist,
+}: {
   event: SceneEvent;
   isWishlisted: boolean;
   onWishlist: (id: string, current: boolean) => void;
 }) {
-  const catColor = getCatColor(event.category);
+  const priceLabel = getPriceLabel(event.ticket_price);
+  const dateTimeStr = formatEventDate(event.event_date, event.start_time);
+  const locationStr = formatVenueLocation(event.venue_address) || event.venue || '';
+  const isFree = !event.ticket_price || event.ticket_price.toLowerCase() === 'free';
+
+  const handlePress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/event/${event.id}`);
+  }, [event.id]);
+
+  const handleCta = useCallback(
+    (e: any) => {
+      e.stopPropagation();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (event.external_url) {
+        Linking.openURL(event.external_url);
+      } else {
+        router.push(`/event/${event.id}`);
+      }
+    },
+    [event.external_url, event.id],
+  );
+
+  const handleWishlist = useCallback(
+    (e: any) => {
+      e.stopPropagation();
+      onWishlist(event.id, isWishlisted);
+    },
+    [event.id, isWishlisted, onWishlist],
+  );
+
+  const handleShare = useCallback(
+    (e: any) => {
+      e.stopPropagation();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Share.share({
+        message: `Check out ${event.title} in LA on WashedUp!\nhttps://washedup.app/e/${event.id}`,
+      }).catch(() => {});
+    },
+    [event.title, event.id],
+  );
+
+  const handleSocialProof = useCallback(
+    (e: any) => {
+      e.stopPropagation();
+      if (event.plans_count > 0) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push(`/event/${event.id}`);
+      }
+    },
+    [event.id, event.plans_count],
+  );
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      style={styles.card}
-      onPress={() => router.push(`/event/${event.id}`)}
-    >
-      <View style={styles.cardImageContainer}>
+    <TouchableOpacity activeOpacity={0.95} style={cardStyles.card} onPress={handlePress}>
+      {/* Image with overlay */}
+      <View style={cardStyles.imageContainer}>
         <Image
           source={event.image_url ? { uri: event.image_url } : require('../../../assets/images/plan-placeholder.png')}
-          style={StyleSheet.absoluteFill}
+          style={cardStyles.image}
           contentFit="cover"
         />
+        <View style={cardStyles.imageOverlay} />
 
-        <View style={styles.cardTopLeft}>
-          {event.plans_count > 0 && (
-            <View style={styles.plansCountPill}>
-              <Text style={styles.plansCountText}>
-                {event.plans_count} {event.plans_count === 1 ? 'plan' : 'plans'} formed
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.cardTopRight}>
-          <TouchableOpacity
-            style={styles.shareButton}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              Share.share({
-                message: `Check out ${event.title} in LA on WashedUp!\nhttps://washedup.app/e/${event.id}`,
-              }).catch(() => {});
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Share2 size={14} color="#1A1A1A" strokeWidth={2} />
+        {/* Top right: Price badge + Share + Heart */}
+        <View style={cardStyles.topRightActions}>
+          <View style={cardStyles.priceBadge}>
+            <Text style={cardStyles.priceBadgeText}>{priceLabel}</Text>
+          </View>
+          <TouchableOpacity style={cardStyles.iconButton} onPress={handleShare} hitSlop={10}>
+            <Ionicons name="share-outline" size={18} color={Colors.white} />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.heartButton}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onWishlist(event.id, isWishlisted);
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
+          <TouchableOpacity style={cardStyles.iconButton} onPress={handleWishlist} hitSlop={10}>
             <Heart
               size={18}
-              color={isWishlisted ? '#E53935' : '#1A1A1A'}
-              fill={isWishlisted ? '#E53935' : 'transparent'}
+              color={isWishlisted ? Colors.errorRed : Colors.white}
+              fill={isWishlisted ? Colors.errorRed : 'transparent'}
               strokeWidth={2}
             />
           </TouchableOpacity>
         </View>
 
-        {formatEventDate(event.event_date, event.start_time) ? (
-          <View style={styles.dateOverlay}>
-            <Calendar size={14} color="#1A1A1A" strokeWidth={2} />
-            <Text style={styles.dateOverlayText}>{formatEventDate(event.event_date, event.start_time)}</Text>
+        {/* Venue badge — bottom left */}
+        {event.venue && (
+          <View style={cardStyles.venueBadge}>
+            <Text style={cardStyles.venueBadgeText} numberOfLines={1}>
+              {event.venue}
+            </Text>
           </View>
-        ) : null}
+        )}
       </View>
 
-      <View style={styles.cardInfo}>
-        <Text style={styles.cardTitle} numberOfLines={2}>{event.title}</Text>
-        {event.category && (
-          <Text style={[styles.cardCategory, { color: catColor }]}>{event.category}</Text>
-        )}
-        {event.venue && (
-          <View style={styles.cardMetaRow}>
-            <MapPin size={14} color="#666666" strokeWidth={2} />
-            <Text style={styles.cardMeta} numberOfLines={1}>{event.venue}</Text>
+      {/* Content below image */}
+      <View style={cardStyles.content}>
+        <Text style={cardStyles.eventTitle} numberOfLines={2}>
+          {event.title}
+        </Text>
+
+        {(dateTimeStr || locationStr) && (
+          <View style={cardStyles.metaRow}>
+            {dateTimeStr ? (
+              <View style={cardStyles.metaItem}>
+                <Calendar size={14} color={Colors.textMedium} strokeWidth={2} />
+                <Text style={cardStyles.metaText}>{dateTimeStr}</Text>
+              </View>
+            ) : null}
+            {locationStr ? (
+              <View style={[cardStyles.metaItem, dateTimeStr && { marginLeft: 12 }]}>
+                <MapPin size={14} color={Colors.textMedium} strokeWidth={2} />
+                <Text style={cardStyles.metaText} numberOfLines={1}>
+                  {locationStr}
+                </Text>
+              </View>
+            ) : null}
           </View>
         )}
-        {formatEventDate(event.event_date, event.start_time) ? (
-          <View style={styles.cardMetaRow}>
-            <Calendar size={14} color="#666666" strokeWidth={2} />
-            <Text style={styles.cardMeta}>{formatEventDate(event.event_date, event.start_time)}</Text>
-          </View>
-        ) : null}
+
+        {/* Social proof */}
+        {event.plans_count > 0 && (
+          <TouchableOpacity style={cardStyles.socialProofRow} onPress={handleSocialProof} activeOpacity={0.8}>
+            <View style={cardStyles.avatarPile}>
+              {[1, 2, 3].slice(0, Math.min(3, event.plans_count)).map((i) => (
+                <View key={i} style={[cardStyles.avatarPlaceholder, { marginLeft: i > 1 ? -8 : 0 }]}>
+                  <Ionicons name="people" size={12} color={Colors.terracotta} />
+                </View>
+              ))}
+            </View>
+            <Text style={cardStyles.socialProofText}>
+              {event.plans_count} WashedUp {event.plans_count === 1 ? 'group' : 'groups'} going
+            </Text>
+            <Text style={cardStyles.socialProofLink}>Find others →</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Category & CTA row */}
+        <View style={cardStyles.ctaRow}>
+          {event.category && (
+            <View style={cardStyles.categoryTag}>
+              <Text style={cardStyles.categoryTagText}>{event.category}</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[cardStyles.ctaButton, isFree && cardStyles.ctaButtonFree]}
+            onPress={handleCta}
+            activeOpacity={0.9}
+          >
+            <Text style={cardStyles.ctaButtonText}>
+              {isFree ? 'RSVP Free ↗' : 'Get Tickets ↗'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </TouchableOpacity>
   );
-}
+});
+
+const cardStyles = StyleSheet.create({
+  card: { marginBottom: 24 },
+  imageContainer: {
+    width: '100%',
+    height: CARD_IMAGE_HEIGHT,
+    borderRadius: 20,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  image: { width: '100%', height: '100%' },
+  imageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  priceBadge: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  priceBadgeText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.white,
+  },
+  venueBadge: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    maxWidth: SCREEN_WIDTH * 0.5,
+  },
+  venueBadgeText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.white,
+  },
+  topRightActions: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  content: { paddingTop: 14, paddingHorizontal: 2 },
+  eventTitle: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    lineHeight: 28,
+    marginBottom: 8,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 10,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+  },
+  socialProofRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.inputBg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginBottom: 12,
+    gap: 8,
+  },
+  avatarPile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarPlaceholder: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  socialProofText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+    flex: 1,
+  },
+  socialProofLink: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
+  ctaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  categoryTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  categoryTagText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+  },
+  ctaButton: {
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  ctaButtonFree: {
+    backgroundColor: Colors.asphalt,
+  },
+  ctaButtonText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.white,
+  },
+});
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
-
-type SceneTab = 'events' | 'restaurants' | 'ideas';
 
 type WhenKey = 'today' | 'tomorrow' | 'this_weekend' | 'next_week';
 
@@ -244,6 +461,8 @@ const WHEN_OPTIONS: { key: WhenKey; label: string }[] = [
   { key: 'this_weekend', label: 'This Weekend' },
   { key: 'next_week', label: 'Next Week' },
 ];
+
+const CATEGORY_CHIPS = ['This Weekend', ...CATEGORY_OPTIONS];
 
 function matchesWhenFilter(eventDate: string | null, filters: WhenKey[]): boolean {
   if (!eventDate) return false;
@@ -275,6 +494,13 @@ function matchesWhenFilter(eventDate: string | null, filters: WhenKey[]): boolea
   return false;
 }
 
+function matchesCategoryChip(event: SceneEvent, chip: string): boolean {
+  if (chip === 'This Weekend') {
+    return matchesWhenFilter(event.event_date, ['this_weekend']);
+  }
+  return event.category?.toLowerCase() === chip.toLowerCase();
+}
+
 export default function SceneScreen() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
@@ -284,6 +510,7 @@ export default function SceneScreen() {
   const [whenSheetOpen, setWhenSheetOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
+  const [activeChip, setActiveChip] = useState<string | null>(null);
   const [mapView, setMapView] = useState(false);
 
   React.useEffect(() => {
@@ -303,7 +530,7 @@ export default function SceneScreen() {
   });
 
   const wishlistedSet: Record<string, boolean> = {};
-  wishlistedIds.forEach(id => { wishlistedSet[id] = true; });
+  wishlistedIds.forEach((id) => { wishlistedSet[id] = true; });
 
   const wishlistMutation = useMutation({
     mutationFn: async ({ exploreEventId, current }: { exploreEventId: string; current: boolean }) => {
@@ -326,18 +553,21 @@ export default function SceneScreen() {
   const filteredEvents = useMemo(() => {
     let result = events;
     if (heartFilter) {
-      result = result.filter(e => wishlistedSet[e.id]);
+      result = result.filter((e) => wishlistedSet[e.id]);
     }
     if (whenFilter.length > 0) {
-      result = result.filter(e => matchesWhenFilter(e.event_date, whenFilter));
+      result = result.filter((e) => matchesWhenFilter(e.event_date, whenFilter));
     }
     if (categoryFilter.length > 0) {
-      result = result.filter(e =>
-        e.category && categoryFilter.some(c => c.toLowerCase() === e.category?.toLowerCase())
+      result = result.filter((e) =>
+        e.category && categoryFilter.some((c) => c.toLowerCase() === e.category?.toLowerCase()),
       );
     }
+    if (activeChip) {
+      result = result.filter((e) => matchesCategoryChip(e, activeChip));
+    }
     return result;
-  }, [events, heartFilter, wishlistedSet, whenFilter, categoryFilter]);
+  }, [events, heartFilter, wishlistedSet, whenFilter, categoryFilter, activeChip]);
 
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
@@ -347,38 +577,48 @@ export default function SceneScreen() {
   }, [refetch]);
 
   const whenActive = whenFilter.length > 0;
-  const whenLabel = whenFilter.length === 0 ? 'When'
-    : whenFilter.length === 1 ? WHEN_OPTIONS.find(o => o.key === whenFilter[0])?.label ?? 'When'
-    : `When · ${whenFilter.length}`;
+  const whenLabel =
+    whenFilter.length === 0
+      ? 'When'
+      : whenFilter.length === 1
+        ? WHEN_OPTIONS.find((o) => o.key === whenFilter[0])?.label ?? 'When'
+        : `When · ${whenFilter.length}`;
 
   const categoryActive = categoryFilter.length > 0;
-  const categoryLabel = categoryFilter.length === 0 ? 'Category'
-    : categoryFilter.length === 1 ? categoryFilter[0] : `Category · ${categoryFilter.length}`;
+  const categoryLabel =
+    categoryFilter.length === 0
+      ? 'Category'
+      : categoryFilter.length === 1
+        ? categoryFilter[0]
+        : `Category · ${categoryFilter.length}`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Scene</Text>
+        <Text style={styles.headerTitle}>
+          The <Text style={styles.headerTitleItalic}>Scene</Text>
+        </Text>
         <ProfileButton />
       </View>
 
-      {/* Sub-tabs: Events / Restaurants / Ideas */}
-      <View style={styles.sceneTabBar}>
-        {([
+      {/* Filter Tabs: Events / Restaurants / Ideas */}
+      <View style={styles.filterTabs}>
+        {[
           { key: 'events' as SceneTab, label: 'Events' },
           { key: 'restaurants' as SceneTab, label: 'Restaurants', comingSoon: true },
           { key: 'ideas' as SceneTab, label: 'Ideas', comingSoon: true },
-        ]).map((tab) => (
+        ].map((tab) => (
           <TouchableOpacity
             key={tab.key}
-            style={[styles.sceneTab, activeTab === tab.key && styles.sceneTabActive]}
+            style={[styles.filterTab, activeTab === tab.key && styles.filterTabActive]}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setActiveTab(tab.key);
               if (tab.key !== 'events') setMapView(false);
             }}
           >
-            <Text style={[styles.sceneTabText, activeTab === tab.key && styles.sceneTabTextActive]}>
+            <Text style={[styles.filterTabText, activeTab === tab.key && styles.filterTabTextActive]}>
               {tab.label}
             </Text>
           </TouchableOpacity>
@@ -387,35 +627,66 @@ export default function SceneScreen() {
 
       {activeTab === 'events' ? (
         <>
+          {/* Category Chips */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipsScroll}
+            style={styles.chipsScrollView}
+          >
+            {CATEGORY_CHIPS.map((chip) => (
+              <TouchableOpacity
+                key={chip}
+                style={[styles.chip, activeChip === chip && styles.chipActive]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setActiveChip((prev) => (prev === chip ? null : chip));
+                }}
+              >
+                <Text style={[styles.chipText, activeChip === chip && styles.chipTextActive]}>{chip}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Filter row (When, Category, Heart, Map) */}
           <View style={styles.filterRow}>
             <TouchableOpacity
               style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWhenSheetOpen(true); }}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setWhenSheetOpen(true);
+              }}
             >
               <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
                 {whenLabel}
               </Text>
-              <ChevronDown size={13} color={whenActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+              <ChevronDown size={13} color={whenActive ? Colors.white : Colors.asphalt} strokeWidth={2.5} />
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCategorySheetOpen(true); }}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setCategorySheetOpen(true);
+              }}
             >
               <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
                 {categoryLabel}
               </Text>
-              <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#1A1A1A'} strokeWidth={2.5} />
+              <ChevronDown size={13} color={categoryActive ? Colors.white : Colors.asphalt} strokeWidth={2.5} />
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.heartFilterPill, heartFilter && styles.heartFilterPillActive]}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setHeartFilter(v => !v); }}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setHeartFilter((v) => !v);
+              }}
             >
               <Heart
                 size={16}
-                color={heartFilter ? '#FFFFFF' : '#1A1A1A'}
-                fill={heartFilter ? '#FFFFFF' : 'transparent'}
+                color={heartFilter ? Colors.white : Colors.asphalt}
+                fill={heartFilter ? Colors.white : 'transparent'}
                 strokeWidth={2}
               />
             </TouchableOpacity>
@@ -424,12 +695,17 @@ export default function SceneScreen() {
 
             <TouchableOpacity
               style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
-              onPress={() => { Haptics.selectionAsync(); setMapView(v => !v); }}
+              onPress={() => {
+                Haptics.selectionAsync();
+                setMapView((v) => !v);
+              }}
               accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
             >
-              {mapView
-                ? <LayoutList size={14} color="#FFFFFF" strokeWidth={2} />
-                : <Map size={14} color="#1A1A1A" strokeWidth={2} />}
+              {mapView ? (
+                <LayoutList size={14} color={Colors.white} strokeWidth={2} />
+              ) : (
+                <Map size={14} color={Colors.asphalt} strokeWidth={2} />
+              )}
               <Text style={[styles.mapToggleLabel, mapView && styles.mapToggleLabelActive]}>
                 {mapView ? 'List' : 'Map'}
               </Text>
@@ -438,7 +714,7 @@ export default function SceneScreen() {
 
           {isLoading ? (
             <View style={styles.centered}>
-              <ActivityIndicator size="large" color="#C4652A" />
+              <ActivityIndicator size="large" color={Colors.terracotta} />
             </View>
           ) : mapView ? (
             <MapView
@@ -451,13 +727,13 @@ export default function SceneScreen() {
             <View style={styles.centered}>
               {heartFilter ? (
                 <>
-                  <Heart size={40} color="#C4652A" />
+                  <Heart size={40} color={Colors.terracotta} />
                   <Text style={styles.emptyTitle}>No hearted events</Text>
                   <Text style={styles.emptySubtitle}>Tap the heart on events you're interested in.</Text>
                 </>
               ) : (
                 <>
-                  <Calendar size={40} color="#C4652A" />
+                  <Calendar size={40} color={Colors.terracotta} />
                   <Text style={styles.emptyTitle}>Nothing yet</Text>
                   <Text style={styles.emptySubtitle}>Check back soon — events are being added.</Text>
                 </>
@@ -467,9 +743,11 @@ export default function SceneScreen() {
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.scrollContent}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#C4652A" />}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.terracotta} />
+              }
             >
-              {filteredEvents.map(event => (
+              {filteredEvents.map((event) => (
                 <SceneCard
                   key={event.id}
                   event={event}
@@ -490,7 +768,7 @@ export default function SceneScreen() {
       ) : activeTab === 'restaurants' ? (
         <View style={styles.comingSoonContainer}>
           <View style={styles.comingSoonCard}>
-            <Utensils size={48} color="#C4652A" strokeWidth={1.5} />
+            <Utensils size={48} color={Colors.terracotta} strokeWidth={1.5} />
             <Text style={styles.comingSoonTitle}>Restaurants</Text>
             <Text style={styles.comingSoonBadge}>Coming Soon</Text>
             <Text style={styles.comingSoonSubtitle}>
@@ -501,7 +779,7 @@ export default function SceneScreen() {
       ) : (
         <View style={styles.comingSoonContainer}>
           <View style={styles.comingSoonCard}>
-            <Lightbulb size={48} color="#C4652A" strokeWidth={1.5} />
+            <Lightbulb size={48} color={Colors.terracotta} strokeWidth={1.5} />
             <Text style={styles.comingSoonTitle}>Ideas</Text>
             <Text style={styles.comingSoonBadge}>Coming Soon</Text>
             <Text style={styles.comingSoonSubtitle}>
@@ -516,9 +794,11 @@ export default function SceneScreen() {
         title="When"
         options={WHEN_OPTIONS}
         selected={whenFilter}
-        onToggle={(key) => setWhenFilter(prev =>
-          prev.includes(key as WhenKey) ? prev.filter(k => k !== key) : [...prev, key as WhenKey]
-        )}
+        onToggle={(key) =>
+          setWhenFilter((prev) =>
+            prev.includes(key as WhenKey) ? prev.filter((k) => k !== key) : [...prev, key as WhenKey],
+          )
+        }
         onClose={() => setWhenSheetOpen(false)}
         onClear={() => setWhenFilter([])}
       />
@@ -526,11 +806,13 @@ export default function SceneScreen() {
       <FilterBottomSheet
         visible={categorySheetOpen}
         title="Category"
-        options={CATEGORY_OPTIONS.map(c => ({ key: c, label: c }))}
+        options={CATEGORY_OPTIONS.map((c) => ({ key: c, label: c }))}
         selected={categoryFilter}
-        onToggle={(key) => setCategoryFilter(prev =>
-          prev.includes(key) ? prev.filter(c => c !== key) : [...prev, key]
-        )}
+        onToggle={(key) =>
+          setCategoryFilter((prev) =>
+            prev.includes(key) ? prev.filter((c) => c !== key) : [...prev, key],
+          )
+        }
         onClose={() => setCategorySheetOpen(false)}
         onClear={() => setCategoryFilter([])}
       />
@@ -541,7 +823,7 @@ export default function SceneScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: Colors.parchment },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -551,38 +833,69 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
-    fontSize: 28,
-    color: '#C4652A',
-    textShadowColor: 'rgba(0,0,0,0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    fontFamily: Fonts.display,
+    fontSize: FontSizes.displayLG,
+    color: Colors.asphalt,
   },
-
-  sceneTabBar: {
+  headerTitleItalic: {
+    fontFamily: Fonts.displayItalic,
+  },
+  filterTabs: {
     flexDirection: 'row',
     paddingHorizontal: 20,
     marginBottom: 12,
     gap: 0,
+    backgroundColor: Colors.border,
+    marginHorizontal: 20,
+    borderRadius: 24,
+    padding: 4,
   },
-  sceneTab: {
+  filterTab: {
+    flex: 1,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    borderRadius: 20,
+    alignItems: 'center',
   },
-  sceneTabActive: {
-    borderBottomColor: '#C4652A',
+  filterTabActive: {
+    backgroundColor: Colors.asphalt,
   },
-  sceneTabText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#999999',
+  filterTabText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
   },
-  sceneTabTextActive: {
-    color: '#1A1A1A',
+  filterTabTextActive: {
+    color: Colors.white,
   },
-
+  chipsScrollView: { maxHeight: 44 },
+  chipsScroll: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    gap: 10,
+    alignItems: 'center',
+  },
+  chip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 24,
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  chipActive: {
+    backgroundColor: Colors.asphalt,
+    borderColor: Colors.asphalt,
+  },
+  chipText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  chipTextActive: {
+    color: Colors.white,
+  },
   filterRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
@@ -594,15 +907,15 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   heartFilterPillActive: {
-    backgroundColor: '#C4652A',
-    borderColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
   },
   dropdownPill: {
     flexDirection: 'row',
@@ -611,128 +924,69 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 20,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
   },
-  dropdownPillActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
-  dropdownText: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
-  dropdownTextActive: { color: '#FFFFFF' },
+  dropdownPillActive: {
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
+  },
+  dropdownText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  dropdownTextActive: {
+    color: Colors.white,
+  },
   mapTogglePill: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 18,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 1,
   },
-  mapTogglePillActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
-  mapToggleLabel: { fontSize: 9, fontWeight: '700', color: '#1A1A1A' },
-  mapToggleLabelActive: { color: '#FFFFFF' },
-
+  mapTogglePillActive: {
+    backgroundColor: Colors.asphalt,
+    borderColor: Colors.asphalt,
+  },
+  mapToggleLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.micro,
+    color: Colors.asphalt,
+  },
+  mapToggleLabelActive: {
+    color: Colors.white,
+  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
-  emptySubtitle: { fontSize: 14, color: '#9B8B7A', textAlign: 'center' },
-
+  emptyTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.asphalt,
+  },
+  emptySubtitle: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+    textAlign: 'center',
+  },
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
-
-  card: {
-    marginBottom: 24,
-  },
-  cardImageContainer: {
-    width: '100%',
-    height: 200,
-    borderRadius: 14,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  cardTopLeft: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    flexDirection: 'row',
-    gap: 6,
-  },
-  plansCountPill: { backgroundColor: '#C4652A', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  plansCountText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
-  dateOverlay: {
-    position: 'absolute',
-    bottom: 10,
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  dateOverlayText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  cardTopRight: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  shareButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  heartButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  cardInfo: {
-    paddingTop: 8,
-    paddingHorizontal: 0,
-    gap: 4,
-  },
-  cardCategory: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  cardTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
-    fontSize: 18,
-    color: '#1A1A1A',
-    lineHeight: 23,
-  },
-  cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardMeta: { fontSize: 14, color: '#666666', flex: 1 },
-
   bottomCta: { alignItems: 'center', paddingVertical: 32, gap: 6 },
-  bottomCtaText: { fontSize: 14, color: '#9B8B7A' },
-  bottomCtaLink: { fontSize: 14, color: '#C4652A', fontWeight: '700' },
-
+  bottomCtaText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+  },
+  bottomCtaLink: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
   comingSoonContainer: {
     flex: 1,
     alignItems: 'center',
@@ -744,16 +998,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   comingSoonTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
-    fontSize: 24,
-    color: '#1A1A1A',
+    fontFamily: Fonts.display,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
     marginTop: 4,
   },
   comingSoonBadge: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#C4652A',
-    backgroundColor: '#C4652A18',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    backgroundColor: `${Colors.terracotta}18`,
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 10,
@@ -762,10 +1016,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   comingSoonSubtitle: {
-    fontSize: 14,
-    color: '#9B8B7A',
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 22,
     marginTop: 4,
   },
 });

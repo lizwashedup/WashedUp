@@ -10,6 +10,7 @@ import {
   Platform,
   StyleSheet,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -20,6 +21,7 @@ import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
+import { Fonts } from '../../constants/Typography';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -66,6 +68,10 @@ export default function SignupScreen() {
       setError('Password must be at least 6 characters.');
       return;
     }
+    if (!agreedToTerms) {
+      setError('Please agree to the Terms of Service and Community Guidelines.');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -100,6 +106,7 @@ export default function SignupScreen() {
   const [firstNameFocused, setFirstNameFocused] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -202,12 +209,37 @@ export default function SignupScreen() {
               <Text style={styles.helperText}>At least 6 characters</Text>
               <View style={styles.gap20} />
 
+              <View style={styles.agreementRow}>
+                <TouchableOpacity
+                  onPress={() => { setAgreedToTerms((v) => !v); triggerHaptic(); }}
+                  activeOpacity={0.7}
+                  disabled={loading}
+                  style={styles.checkboxTouch}
+                >
+                  <View style={[styles.checkbox, agreedToTerms && styles.checkboxChecked]}>
+                    {agreedToTerms && <Text style={styles.checkmark}>✓</Text>}
+                  </View>
+                </TouchableOpacity>
+                <View style={styles.agreementTextWrap}>
+                  <Text style={styles.agreementText}>By creating an account, you agree to our </Text>
+                  <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/terms'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+                    <Text style={styles.agreementLink}>Terms of Service</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.agreementText}> and </Text>
+                  <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/guidelines'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+                    <Text style={styles.agreementLink}>Community Guidelines</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.agreementText}>.</Text>
+                </View>
+              </View>
+              <View style={styles.gap16} />
+
               <TouchableOpacity
-                style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+                style={[styles.primaryButton, (loading || !agreedToTerms) && styles.primaryButtonDisabled]}
                 onPress={handleSignUp}
                 onPressIn={triggerHaptic}
                 activeOpacity={0.9}
-                disabled={loading}
+                disabled={loading || !agreedToTerms}
               >
                 {loading ? (
                   <ActivityIndicator color="#FFFFFF" />
@@ -277,7 +309,7 @@ const styles = StyleSheet.create({
     paddingTop: 32,
   },
   formTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
+    fontFamily: Fonts.display,
     fontSize: 28,
     color: Colors.textDark,
   },
@@ -287,6 +319,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   gap20: { height: 20 },
+  gap16: { height: 16 },
   gap12: { height: 12 },
   gap4: { height: 4 },
   gap8: { height: 8 },
@@ -330,6 +363,50 @@ const styles = StyleSheet.create({
   helperText: {
     fontSize: 12,
     color: Colors.textLight,
+  },
+  agreementRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  checkboxTouch: {
+    paddingTop: 2,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: Colors.primaryOrange,
+    borderColor: Colors.primaryOrange,
+  },
+  checkmark: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  agreementTextWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+  agreementText: {
+    fontSize: 14,
+    color: Colors.textDark,
+    lineHeight: 20,
+  },
+  agreementLink: {
+    fontSize: 14,
+    color: Colors.primaryOrange,
+    textDecorationLine: 'underline',
+    fontWeight: '600',
+    lineHeight: 20,
   },
   primaryButton: {
     height: 52,

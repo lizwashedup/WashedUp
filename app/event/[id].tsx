@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import { Fonts } from '../../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -352,7 +353,7 @@ const styles = StyleSheet.create({
   detailCategoryPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   detailCategoryText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF', textTransform: 'capitalize' },
   title: {
-    fontFamily: 'DMSerifDisplay_400Regular',
+    fontFamily: Fonts.display,
     fontSize: 28,
     color: '#1A1A1A',
     lineHeight: 34,

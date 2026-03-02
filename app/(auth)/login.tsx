@@ -21,6 +21,7 @@ import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
+import { Fonts } from '../../constants/Typography';
 
 const SOCIAL_PROOF = '700+ people in LA already joined';
 
@@ -249,7 +250,7 @@ const styles = StyleSheet.create({
     minHeight: 320,
   },
   formTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
+    fontFamily: Fonts.display,
     fontSize: 28,
     color: Colors.textDark,
   },

@@ -34,6 +34,9 @@ import {
   ChevronRight,
   MoreHorizontal,
 } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import Colors from '../../constants/Colors';
+import { Fonts, FontSizes } from '../../constants/Typography';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
@@ -109,6 +112,18 @@ function formatTime(dateString: string): string {
     minute: '2-digit',
     hour12: true,
   });
+}
+
+function formatWhenShort(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  if (dateStart.getTime() === todayStart.getTime()) return 'Tonight';
+  if (dateStart.getTime() === tomorrowStart.getTime()) return 'Tomorrow';
+  return date.toLocaleDateString('en-US', { weekday: 'short' });
 }
 
 function buildCalendarUrl(title: string, startTime: string, location?: string): string {
@@ -732,7 +747,7 @@ export default function PlanDetailScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#C4652A" />
+          <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
       </SafeAreaView>
     );
@@ -758,204 +773,191 @@ export default function PlanDetailScreen() {
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
+  const hostMeta = [
+      plan.location_text,
+      '4 plans hosted',
+      'Joined Jan 2025',
+    ].filter(Boolean).join(' • ');
+
+  const categoryTags = [
+      plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null,
+      genderLabel,
+    ].filter(Boolean);
+
+  const groupSizeLabel = maxSpots <= 4 ? 'Small group • intimate' : maxSpots <= 6 ? 'Cozy group' : 'Larger group';
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}
-      >
-        {/* Hero */}
-        <View style={styles.heroContainer}>
-          <Image
-            source={plan.image_url ? { uri: plan.image_url } : require('../../assets/images/plan-placeholder.png')}
-            style={styles.heroImage}
-            contentFit="cover"
-            transition={200}
-          />
-
+      {/* Custom Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel="Go back to plans"
+        >
+          <ArrowLeft size={20} color={Colors.asphalt} strokeWidth={2.5} />
+          <Text style={styles.backButtonText}>Plans</Text>
+        </TouchableOpacity>
+        <View style={styles.headerIcons}>
           <TouchableOpacity
-            onPress={() => router.back()}
-            style={[styles.heroCircleButton, { top: insets.top + 8 }]}
-            accessibilityLabel="Go back"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={handleShare}
+            style={styles.headerIconButton}
+            accessibilityLabel="Share this plan"
           >
-            <ArrowLeft size={20} color="#1A1A1A" strokeWidth={2.5} />
+            <Ionicons name="share-outline" size={22} color={Colors.asphalt} />
           </TouchableOpacity>
-
+          <TouchableOpacity
+            onPress={toggleWishlist}
+            style={styles.headerIconButton}
+            accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
+          >
+            <Heart
+              size={20}
+              color={isWishlisted ? Colors.errorRed : Colors.asphalt}
+              fill={isWishlisted ? Colors.errorRed : 'transparent'}
+              strokeWidth={2}
+            />
+          </TouchableOpacity>
           {!isHost && plan?.host && (
             <TouchableOpacity
               onPress={handleReportMenu}
-              style={[styles.heroCircleButton, styles.heroEllipsisButton, { top: insets.top + 8 }]}
+              style={styles.headerIconButton}
               accessibilityLabel="Report or block"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <MoreHorizontal size={20} color="#1A1A1A" strokeWidth={2} />
+              <MoreHorizontal size={20} color={Colors.asphalt} strokeWidth={2} />
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            onPress={handleShare}
-            style={[styles.heroCircleButton, styles.heroShareButton, { top: insets.top + 8 }]}
-            accessibilityLabel="Share this plan"
-          >
-            <Share2 size={18} color="#1A1A1A" strokeWidth={2} />
-          </TouchableOpacity>
+        </View>
+      </View>
 
-          {/* Photo overlay tags */}
-          {genderLabel && (
-            <View style={[styles.photoTag, styles.photoTagBottomLeft]}>
-              <Text style={styles.photoTagText}>{genderLabel}</Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* A. Host Info Block */}
+        <View style={styles.hostBlock}>
+          {plan.host?.avatar_url ? (
+            <Image source={{ uri: plan.host.avatar_url }} style={styles.hostAvatarLarge} contentFit="cover" />
+          ) : (
+            <View style={[styles.hostAvatarLarge, styles.hostAvatarPlaceholder]}>
+              <Ionicons name="person-outline" size={32} color={Colors.textLight} />
             </View>
           )}
-          {plan.primary_vibe && (
-            <View style={[styles.photoTag, styles.photoTagBottomRight]}>
-              <Text style={styles.photoTagText}>{plan.primary_vibe}</Text>
+          <View style={styles.hostDetails}>
+            <Text style={styles.hostedBy}>HOSTED BY</Text>
+            <Text style={styles.hostNameLarge}>{plan.host?.first_name ?? 'Someone'}</Text>
+            <Text style={styles.hostMeta}>{hostMeta}</Text>
+          </View>
+        </View>
+
+        {/* B. Plan Title */}
+        <Text style={styles.planTitle}>{plan.title}</Text>
+
+        {/* C. Category Tags */}
+        {categoryTags.length > 0 && (
+          <View style={styles.categoryTagsRow}>
+            {categoryTags.map((tag) => (
+              <View key={tag} style={styles.categoryTag}>
+                <Text style={styles.categoryTagText}>{tag}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* D. Sofia's Note */}
+        {plan.host_message && (
+          <View style={styles.noteBox}>
+            <Text style={styles.noteLabel}>{`${plan.host?.first_name ?? 'HOST'}'S NOTE`}</Text>
+            <Text style={styles.noteText}>{plan.host_message}</Text>
+          </View>
+        )}
+
+        {/* E. Logistics Section */}
+        <View style={styles.logisticsCard}>
+          <View style={styles.logisticsRow}>
+            <Calendar size={18} color={Colors.terracotta} strokeWidth={2} />
+            <View style={styles.logisticsContent}>
+              <Text style={styles.logisticsMain}>
+                {formatWhenShort(plan.start_time)} • {formatTime(plan.start_time)}
+              </Text>
+              <Text style={styles.logisticsSub}>{formatFullDate(plan.start_time)}</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => Linking.openURL(buildCalendarUrl(plan.title, plan.start_time, plan.location_text ?? undefined))}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.logisticsLink}>Add to Calendar</Text>
+            </TouchableOpacity>
+          </View>
+
+          {plan.location_text && (
+            <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
+              <MapPin size={18} color={Colors.terracotta} strokeWidth={2} />
+              <View style={styles.logisticsContent}>
+                <Text style={styles.logisticsMain}>{plan.location_text}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => openDirections(plan.location_text!)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.logisticsLink}>Map →</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
+            <Users size={18} color={Colors.terracotta} strokeWidth={2} />
+            <View style={styles.logisticsContent}>
+              <Text style={styles.logisticsMain}>
+                {plan.member_count} of {maxSpots} spots filled
+              </Text>
+              <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* F. Who's Going */}
+        <Text style={styles.whoGoingTitle}>Who's going</Text>
+        <View style={styles.memberAvatarRow}>
+          {visibleMembers.map((member) => (
+            <MemberAvatar key={member.id} member={member} />
+          ))}
+          {!isMember && !isHost && (
+            <View style={styles.youPlaceholder}>
+              <Text style={styles.youPlaceholderText}>You?</Text>
+            </View>
+          )}
+          {overflowCount > 0 && (
+            <View style={[styles.memberAvatar, styles.memberAvatarOverflow]}>
+              <Text style={styles.memberAvatarOverflowText}>+{overflowCount}</Text>
             </View>
           )}
         </View>
 
-        {/* Content card — overlaps photo */}
-        <View style={styles.contentCard}>
-          <Text style={styles.title}>{plan.title}</Text>
-
-          {/* Status badge inline */}
-          {(isMember || isHost) && (
-            <View style={styles.goingBadgeInline}>
-              <View style={styles.goingDot} />
-              <Text style={styles.goingBadgeText}>{isHost ? "You're hosting" : "You're going"}</Text>
-            </View>
-          )}
-
-          {/* Date */}
-          <View style={styles.detailRow}>
-            <Calendar size={16} color="#C4652A" strokeWidth={2} />
-            <Text style={styles.detailText}>
-              {formatFullDate(plan.start_time)} · {formatTime(plan.start_time)}
-            </Text>
-          </View>
-
-          {/* Add to Calendar */}
-          <TouchableOpacity
-            style={styles.addToCalendarRow}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              Linking.openURL(buildCalendarUrl(plan.title, plan.start_time, plan.location_text ?? undefined));
-            }}
-            activeOpacity={0.7}
-          >
-            <Calendar size={14} color="#C4652A" strokeWidth={2} />
-            <Text style={styles.addToCalendarText}>Add to Calendar</Text>
-          </TouchableOpacity>
-
-          {/* Location */}
-          {plan.location_text && (
-            <TouchableOpacity
-              style={styles.detailRow}
-              onPress={() => openDirections(plan.location_text!)}
-              activeOpacity={0.7}
-            >
-              <MapPin size={16} color="#C4652A" strokeWidth={2} />
-              <Text style={[styles.detailText, { flex: 1 }]}>{plan.location_text}</Text>
-              <Text style={styles.directionsLink}>Get Directions</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Map — tap to open in Maps app */}
-          {mapCoords && (
-            <TouchableOpacity
-              style={styles.mapContainer}
-              activeOpacity={0.9}
-              onPress={() => {
-                const q = plan.location_text ? encodeURIComponent(plan.location_text) : `${mapCoords.latitude},${mapCoords.longitude}`;
-                const url = Platform.OS === 'ios'
-                  ? `maps://?q=${q}&ll=${mapCoords.latitude},${mapCoords.longitude}`
-                  : `geo:${mapCoords.latitude},${mapCoords.longitude}?q=${q}`;
-                Linking.openURL(url).catch(() => {
-                  Linking.openURL(`https://maps.google.com/?q=${q}&ll=${mapCoords.latitude},${mapCoords.longitude}`);
-                });
-              }}
-            >
-              <MapView
-                style={styles.map}
-                region={{
-                  latitude: mapCoords.latitude,
-                  longitude: mapCoords.longitude,
-                  latitudeDelta: 0.01,
-                  longitudeDelta: 0.01,
+        {/* G. CTA Block */}
+        <View style={styles.ctaBlock}>
+          {!isHost && !isMember && isEligible && !isFull && (
+            <>
+              <TouchableOpacity
+                style={styles.ctaButton}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setJoinModalVisible(true);
                 }}
-                zoomEnabled={false}
-                scrollEnabled={false}
-                rotateEnabled={false}
-                pitchEnabled={false}
-                pointerEvents="none"
+                activeOpacity={0.9}
               >
-                <Marker
-                  coordinate={mapCoords}
-                  pinColor="#C4652A"
-                />
-              </MapView>
-              <View style={styles.mapOverlayHint}>
-                <MapPin size={14} color="#FFFFFF" strokeWidth={2} />
-                <Text style={styles.mapOverlayText}>Open in Maps</Text>
-              </View>
-            </TouchableOpacity>
-          )}
-
-          {/* About this plan */}
-          {plan.description ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>About this plan</Text>
-              <Text style={styles.aboutText}>{plan.description}</Text>
-            </View>
-          ) : null}
-
-          {/* Host */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Posted by</Text>
-            <View style={styles.hostRow}>
-              {plan.host?.avatar_url ? (
-                <Image
-                  source={{ uri: plan.host.avatar_url }}
-                  style={styles.hostAvatar}
-                  contentFit="cover"
-                />
-              ) : (
-                <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
-                  <Text style={styles.hostAvatarInitial}>
-                    {plan.host?.first_name?.[0]?.toUpperCase() ?? '?'}
-                  </Text>
-                </View>
+                <Text style={styles.ctaButtonText}>Let's Go → Join this plan</Text>
+              </TouchableOpacity>
+              {spotsLeft > 0 && spotsLeft <= 2 && (
+                <Text style={styles.ctaInfo}>
+                  {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left — group closes soon
+                </Text>
               )}
-              <View style={{ flex: 1 }}>
-                <Text style={styles.hostName}>{plan.host?.first_name ?? 'Someone'}</Text>
-                {plan.host_message && (
-                  <Text style={styles.hostMessage} numberOfLines={3}>{plan.host_message}</Text>
-                )}
-              </View>
-            </View>
-          </View>
-
-          {/* Who's going */}
-          {members.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.whoGoingLabel}>
-                <Text style={styles.whoGoingCount}>{plan.member_count} going</Text>
-                {plan.max_invites ? (
-                  <Text style={styles.whoGoingSpotsLeft}> · {spotsLeft} spot{spotsLeft !== 1 ? 's' : ''} left</Text>
-                ) : null}
-              </Text>
-              <View style={styles.memberAvatarRow}>
-                {visibleMembers.map((member) => (
-                  <MemberAvatar key={member.id} member={member} />
-                ))}
-                {overflowCount > 0 && (
-                  <View style={[styles.memberAvatar, styles.memberAvatarOverflow]}>
-                    <Text style={styles.memberAvatarOverflowText}>+{overflowCount}</Text>
-                  </View>
-                )}
-              </View>
-            </View>
+              <Text style={styles.ctaSub}>A group chat opens the moment you join</Text>
+            </>
           )}
         </View>
       </ScrollView>
@@ -1372,222 +1374,182 @@ export default function PlanDetailScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: Colors.parchment },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  errorText: { fontSize: 16, color: '#666666' },
-  linkText: { fontSize: 15, color: '#C4652A', fontWeight: '600' },
+  errorText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textMedium },
+  linkText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
 
-  heroContainer: {
-    width: SCREEN_WIDTH,
-    height: HERO_HEIGHT,
-    position: 'relative',
-  },
-  heroImage: { width: '100%', height: '100%' },
-  heroPlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#F0E6D3',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroEmoji: { fontSize: 64 },
-  heroCircleButton: {
-    position: 'absolute',
-    left: 16,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  heroShareButton: {
-    left: undefined,
-    right: 16,
-  },
-  heroEllipsisButton: {
-    left: undefined,
-    right: 62,
-  },
-  photoTag: {
-    position: 'absolute',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  photoTagBottomLeft: { bottom: 14, left: 14 },
-  photoTagBottomRight: { bottom: 14, right: 14 },
-  photoTagText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#C4652A',
-    textTransform: 'capitalize',
-  },
-
-  contentCard: {
-    marginTop: -20,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    paddingTop: 28,
-    flex: 1,
-  },
-
-  title: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#1A1A1A',
-    lineHeight: 32,
-    letterSpacing: -0.3,
-    marginBottom: 18,
-  },
-
-  goingBadgeInline: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#E8F5E9',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginBottom: 14,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    backgroundColor: Colors.parchment,
   },
-  goingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#4CAF50',
-  },
-  goingBadgeText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#2E7D32',
-  },
-
-  detailRow: {
+  backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 14,
+    gap: 4,
   },
-  detailText: {
-    fontSize: 15,
-    color: '#1A1A1A',
-    fontWeight: '500',
+  backButtonText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
   },
-  directionsLink: {
-    fontSize: 14,
-    color: '#C4652A',
-    fontWeight: '600',
-  },
-  addToCalendarRow: {
+  headerIcons: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 14,
+    gap: 8,
   },
-  addToCalendarText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#C4652A',
-  },
-
-  mapContainer: {
-    height: 160,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 24,
-    marginTop: 4,
-    position: 'relative',
-  },
-  map: {
-    flex: 1,
-  },
-  mapOverlayHint: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  mapOverlayText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-
-  aboutText: {
-    fontSize: 15,
-    color: '#666666',
-    lineHeight: 22,
-  },
-
-  section: {
-    marginTop: 8,
-    marginBottom: 20,
-  },
-  sectionLabel: {
-    fontSize: 13,
-    color: '#999999',
-    fontWeight: '500',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  hostRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  hostAvatar: {
+  headerIconButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-  },
-  hostAvatarPlaceholder: {
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hostAvatarInitial: { fontSize: 16, fontWeight: '700', color: '#C4652A' },
-  hostName: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
-  hostMessage: { fontSize: 14, color: '#666666', lineHeight: 20 },
-
-  whoGoingLabel: {
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 140,
+  },
+  hostBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  hostAvatarLarge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+  },
+  hostAvatarPlaceholder: {
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hostDetails: {
+    marginLeft: 16,
+    flex: 1,
+  },
+  hostedBy: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.textLight,
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+  hostNameLarge: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    marginBottom: 2,
+  },
+  hostMeta: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+  },
+  planTitle: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayLG,
+    color: Colors.asphalt,
+    lineHeight: 34,
     marginBottom: 12,
   },
-  whoGoingCount: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#C4652A',
+  categoryTagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 20,
   },
-  whoGoingSpotsLeft: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#999999',
+  categoryTag: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  categoryTagText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+  },
+  noteBox: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.goldenAmber,
+  },
+  noteLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.textLight,
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+  noteText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+    lineHeight: 22,
+  },
+  logisticsCard: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  logisticsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  logisticsRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    marginTop: 12,
+    paddingTop: 12,
+  },
+  logisticsContent: {
+    flex: 1,
+  },
+  logisticsMain: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  logisticsSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    marginTop: 2,
+  },
+  logisticsLink: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
+  whoGoingTitle: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    marginBottom: 12,
   },
   memberAvatarRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: -8,
+    marginBottom: 24,
   },
   memberAvatarWrapper: {
     marginRight: -8,
@@ -1597,21 +1559,63 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: Colors.parchment,
   },
   memberAvatarPlaceholder: {
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  memberAvatarInitial: { fontSize: 14, fontWeight: '700', color: '#C4652A' },
+  memberAvatarInitial: { fontFamily: Fonts.sansBold, fontSize: 14, color: Colors.terracotta },
   memberAvatarOverflow: {
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  memberAvatarOverflowText: { fontSize: 12, fontWeight: '700', color: '#C4652A' },
-
+  memberAvatarOverflowText: { fontFamily: Fonts.sansBold, fontSize: 12, color: Colors.terracotta },
+  youPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -8,
+  },
+  youPlaceholderText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
+  },
+  ctaBlock: {
+    marginTop: 8,
+  },
+  ctaButton: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  ctaButtonText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.white,
+  },
+  ctaInfo: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    marginBottom: 4,
+  },
+  ctaSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
+  },
   stickyBar: {
     position: 'absolute',
     bottom: 0,
@@ -1620,37 +1624,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 32,
     paddingTop: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.parchment,
     borderTopWidth: 1,
-    borderTopColor: '#F0E6D3',
+    borderTopColor: Colors.border,
   },
-
   ticketButton: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     borderWidth: 1.5,
-    borderColor: '#C4652A',
+    borderColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 13,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
   },
-  ticketButtonText: { color: '#C4652A', fontSize: 16, fontWeight: '700' },
-
+  ticketButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   joinButton: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#C4652A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  joinButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
-
+  joinButtonText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: 17 },
   memberActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1658,59 +1654,49 @@ const styles = StyleSheet.create({
   },
   youreGoingBadge: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: Colors.inputBg,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
   },
-  youreGoingText: { fontSize: 16, fontWeight: '600', color: '#666666' },
+  youreGoingText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textMedium },
   openChatButton: {
     flex: 1,
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    shadowColor: '#C4652A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  openChatText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-
+  openChatText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
   waitlistButton: {
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#C4652A',
+    borderColor: Colors.terracotta,
   },
   waitlistButtonActive: {
-    backgroundColor: '#C4652A',
-    borderColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
   },
-  waitlistButtonText: { fontSize: 17, fontWeight: '700', color: '#C4652A' },
-  waitlistButtonTextActive: {
-    color: '#FFFFFF',
-  },
-
+  waitlistButtonText: { fontFamily: Fonts.sansBold, fontSize: 17, color: Colors.terracotta },
+  waitlistButtonTextActive: { color: Colors.white },
   ineligibleBar: { paddingVertical: 16, alignItems: 'center' },
-  ineligibleText: { fontSize: 15, color: '#999999', fontWeight: '600' },
-  ineligibleSub: { fontSize: 13, color: '#B8A99A', marginTop: 4 },
-
+  ineligibleText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textLight },
+  ineligibleSub: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, marginTop: 4 },
   manageButton: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     borderWidth: 1.5,
-    borderColor: '#C4652A',
+    borderColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  manageButtonText: { color: '#C4652A', fontSize: 15, fontWeight: '700' },
+  manageButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
 });
 
 const joinStyles = StyleSheet.create({
@@ -1781,7 +1767,7 @@ const joinStyles = StyleSheet.create({
   required: {
     fontSize: 12,
     fontWeight: '400',
-    color: '#C4652A',
+    color: Colors.terracotta,
   },
   input: {
     backgroundColor: '#FFFFFF',
@@ -1795,7 +1781,7 @@ const joinStyles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   inputRequired: {
-    borderColor: '#C4652A',
+    borderColor: Colors.terracotta,
   },
   hint: {
     fontSize: 12,
@@ -1819,8 +1805,8 @@ const joinStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#C4652A',
-    borderColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
   },
   checkmark: {
     color: '#FFFFFF',
@@ -1833,7 +1819,7 @@ const joinStyles = StyleSheet.create({
     color: '#1A1A1A',
   },
   joinBtn: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
@@ -1876,7 +1862,7 @@ const ticketStyles = StyleSheet.create({
     marginBottom: 24,
   },
   primaryBtn: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',

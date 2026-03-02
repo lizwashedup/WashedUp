@@ -15,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ProfileButton from '../../../components/ProfileButton';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
+import { Fonts } from '../../../constants/Typography';
 
 const CATEGORY_COLORS: Record<string, string> = {
   music: '#7C5CBF', film: '#5C7CBF', nightlife: '#BF5C7C',
@@ -188,7 +189,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
+    fontFamily: Fonts.display,
     fontSize: 28,
     color: '#C4652A',
     textShadowColor: 'rgba(0,0,0,0.2)',

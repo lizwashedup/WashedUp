@@ -1,32 +1,50 @@
 import { Tabs } from 'expo-router';
-import { Text, Image as RNImage } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
+import { Fonts } from '../../constants/Typography';
+import { Image } from 'expo-image';
+
+function PostTabIcon() {
+  return (
+    <View style={styles.postButton}>
+      <Ionicons name="add" size={28} color={Colors.white} />
+    </View>
+  );
+}
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: Colors.primaryOrange,
+        tabBarActiveTintColor: Colors.asphalt,
         tabBarInactiveTintColor: Colors.textLight,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopColor: Colors.border,
-          borderTopWidth: 1,
+          backgroundColor: Colors.parchment,
+          borderTopWidth: 0,
           height: 84,
           paddingBottom: 28,
           paddingTop: 8,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
+        tabBarLabelStyle: {
+          fontFamily: Fonts.sansMedium,
+          fontSize: 11,
+        },
       }}
     >
       <Tabs.Screen
-        name="post/index"
+        name="plans/index"
         options={{
-          title: 'Post',
-          tabBarLabel: 'Post',
-          tabBarIcon: ({ color }) => <Ionicons name="add-circle-outline" size={24} color={color} />,
+          title: 'Plans',
+          tabBarLabel: 'Plans',
+          tabBarIcon: ({ focused }) => (
+            <Image
+              source={require('../../assets/w-icon.png')}
+              style={{ width: 28, height: 28, opacity: focused ? 1 : 0.4 }}
+              contentFit="contain"
+            />
+          ),
         }}
       />
       <Tabs.Screen
@@ -38,17 +56,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="plans/index"
+        name="post/index"
         options={{
-          title: 'Plans',
-          tabBarLabel: 'Plans',
-          tabBarIcon: ({ focused }) => (
-            <RNImage
-              source={require('../../assets/w-icon.png')}
-              style={{ width: 28, height: 28, opacity: focused ? 1 : 0.4 }}
-              resizeMode="contain"
-            />
-          ),
+          title: 'Post',
+          tabBarLabel: '',
+          tabBarIcon: () => <PostTabIcon />,
         }}
       />
       <Tabs.Screen
@@ -60,12 +72,16 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="friends/index"
+        name="profile"
         options={{
-          title: 'Your People',
-          tabBarLabel: 'Your People',
-          tabBarIcon: ({ color }) => <Ionicons name="people-outline" size={24} color={color} />,
+          title: 'Profile',
+          tabBarLabel: 'Profile',
+          tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={24} color={color} />,
         }}
+      />
+      <Tabs.Screen
+        name="friends/index"
+        options={{ href: null }}
       />
       <Tabs.Screen
         name="chats/[id]"
@@ -74,3 +90,20 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  postButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.terracotta,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -20,
+    shadowColor: Colors.asphalt,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+});

@@ -21,10 +21,12 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
-import { PHOTO_FORMAT_ERROR_MESSAGE } from '../constants/PhotoUpload';
-import { uploadBase64ToStorage } from '../lib/uploadPhoto';
-import { PROFILE_PHOTO_KEY } from '../components/ProfileButton';
+import { supabase } from '../../lib/supabase';
+import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
+import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
+import { PROFILE_PHOTO_KEY } from '../../components/ProfileButton';
+import Colors from '../../constants/Colors';
+import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 
 // Uses correct column names from profiles table: first_name_display, profile_photo_url, handle
 interface Profile {
@@ -282,29 +284,15 @@ export default function ProfileScreen() {
     }
   };
 
-  // ── Settings rows ───────────────────────────────────────────────────────────
+  // ── Settings rows (grouped: Legal, Support, Account) ───────────────────────
 
-  const settingsRows = [
-    {
-      icon: 'shield-outline',
-      label: 'Privacy Policy',
-      onPress: () => Linking.openURL('https://washedup.app/privacy'),
-    },
-    {
-      icon: 'document-text-outline',
-      label: 'Terms of Service',
-      onPress: () => Linking.openURL('https://washedup.app/terms'),
-    },
-    {
-      icon: 'people-outline',
-      label: 'Community Guidelines',
-      onPress: () => Linking.openURL('https://washedup.app/guidelines'),
-    },
-    {
-      icon: 'mail-outline',
-      label: 'Contact Us',
-      onPress: () => Linking.openURL('mailto:hello@washedup.app'),
-    },
+  const legalRows = [
+    { icon: 'shield-outline', label: 'Privacy Policy', onPress: () => Linking.openURL('https://washedup.app/privacy') },
+    { icon: 'document-text-outline', label: 'Terms of Service', onPress: () => Linking.openURL('https://washedup.app/terms') },
+    { icon: 'people-outline', label: 'Community Guidelines', onPress: () => Linking.openURL('https://washedup.app/guidelines') },
+  ];
+  const supportRows = [
+    { icon: 'mail-outline', label: 'Contact Us', onPress: () => Linking.openURL('mailto:hello@washedup.app') },
   ];
 
   // ── Loading ─────────────────────────────────────────────────────────────────
@@ -313,7 +301,7 @@ export default function ProfileScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#C4652A" />
+          <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
       </SafeAreaView>
     );
@@ -329,7 +317,7 @@ export default function ProfileScreen() {
             onPress={resetDeleteFlow}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+            <Ionicons name="chevron-back" size={24} color={Colors.asphalt} />
           </TouchableOpacity>
           <Text style={styles.deleteHeaderTitle}>Delete Account</Text>
           <View style={{ width: 24 }} />
@@ -339,7 +327,7 @@ export default function ProfileScreen() {
           {deleteStep === 1 && (
             <>
               <View style={styles.deleteWarningIcon}>
-                <Ionicons name="warning-outline" size={40} color="#C4652A" />
+                <Ionicons name="warning-outline" size={40} color={Colors.terracotta} />
               </View>
               <Text style={styles.deleteTitle}>Are you sure?</Text>
               <Text style={styles.deleteBody}>
@@ -383,7 +371,7 @@ export default function ProfileScreen() {
                 value={deleteConfirmText}
                 onChangeText={setDeleteConfirmText}
                 placeholder="Type DELETE here"
-                placeholderTextColor="#C8BEB5"
+                placeholderTextColor={Colors.textLight}
                 autoCapitalize="characters"
                 autoCorrect={false}
               />
@@ -427,7 +415,7 @@ export default function ProfileScreen() {
             onPress={() => setShowEditFlow(false)}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+            <Ionicons name="chevron-back" size={24} color={Colors.asphalt} />
           </TouchableOpacity>
           <Text style={styles.deleteHeaderTitle}>Edit Profile</Text>
           <View style={{ width: 24 }} />
@@ -462,7 +450,7 @@ export default function ProfileScreen() {
               value={editName}
               onChangeText={setEditName}
               placeholder="Your name"
-              placeholderTextColor="#C8BEB5"
+              placeholderTextColor={Colors.textLight}
               maxLength={30}
               autoCorrect={false}
               returnKeyType="next"
@@ -478,7 +466,7 @@ export default function ProfileScreen() {
                 value={editHandle}
                 onChangeText={(t) => setEditHandle(t.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20))}
                 placeholder="yourname"
-                placeholderTextColor="#C8BEB5"
+                placeholderTextColor={Colors.textLight}
                 maxLength={20}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -486,7 +474,7 @@ export default function ProfileScreen() {
               />
             </View>
             {checkingHandle ? (
-              <ActivityIndicator size="small" color="#999999" style={styles.handleAvailability} />
+              <ActivityIndicator size="small" color={Colors.textLight} style={styles.handleAvailability} />
             ) : handleAvailable === true ? (
               <Text style={styles.handleAvailable}>Available</Text>
             ) : handleAvailable === false ? (
@@ -502,7 +490,7 @@ export default function ProfileScreen() {
               value={editBio}
               onChangeText={setEditBio}
               placeholder="Tell people a little about yourself"
-              placeholderTextColor="#C8BEB5"
+              placeholderTextColor={Colors.textLight}
               maxLength={150}
               multiline
               textAlignVertical="top"
@@ -518,7 +506,7 @@ export default function ProfileScreen() {
                 <Text style={styles.editReadOnlyText}>
                   {profile.gender === 'woman' ? 'Woman' : profile.gender === 'man' ? 'Man' : 'Non-binary'}
                 </Text>
-                <Ionicons name="lock-closed-outline" size={14} color="#C8BEB5" />
+                <Ionicons name="lock-closed-outline" size={14} color={Colors.textLight} />
               </View>
               <Text style={styles.editHelp}>Contact hello@washedup.app to update</Text>
             </View>
@@ -550,6 +538,19 @@ export default function ProfileScreen() {
 
   // ── Main Profile Screen ─────────────────────────────────────────────────────
 
+  const renderSettingsRow = (row: { icon: string; label: string; onPress: () => void }, isLast: boolean) => (
+    <TouchableOpacity
+      key={row.label}
+      style={[styles.settingsRow, !isLast && styles.settingsRowDivider]}
+      onPress={row.onPress}
+      activeOpacity={0.7}
+    >
+      <Ionicons name={row.icon as any} size={20} color={Colors.terracotta} />
+      <Text style={styles.settingsLabel}>{row.label}</Text>
+      <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -561,13 +562,13 @@ export default function ProfileScreen() {
             style={styles.backButton}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="chevron-back" size={26} color="#1C1917" />
+            <Ionicons name="chevron-back" size={26} color={Colors.asphalt} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Profile</Text>
           <View style={{ width: 40 }} />
         </View>
 
-        {/* Avatar + Name */}
+        {/* Profile header: avatar, display name, handle */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             {profile?.avatar_url ? (
@@ -590,7 +591,7 @@ export default function ProfileScreen() {
           )}
           {profile?.city && (
             <View style={styles.locationRow}>
-              <Ionicons name="location-outline" size={14} color="#9B8B7A" />
+              <Ionicons name="location-outline" size={14} color={Colors.warmGray} />
               <Text style={styles.locationText}>{profile.city}</Text>
             </View>
           )}
@@ -599,54 +600,41 @@ export default function ProfileScreen() {
           )}
 
           <TouchableOpacity style={styles.editProfileBtn} onPress={openEditFlow} activeOpacity={0.8}>
-            <Ionicons name="create-outline" size={16} color="#C4652A" />
+            <Ionicons name="create-outline" size={16} color={Colors.terracotta} />
             <Text style={styles.editProfileBtnText}>Edit Profile</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Settings */}
+        {/* Legal */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Settings</Text>
+          <Text style={styles.sectionTitle}>Legal</Text>
+        </View>
+        <View style={styles.settingsGroup}>
+          {legalRows.map((row, i) => renderSettingsRow(row, i === legalRows.length - 1))}
         </View>
 
+        {/* Support */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Support</Text>
+        </View>
         <View style={styles.settingsGroup}>
-          {settingsRows.map((row, i) => (
-            <TouchableOpacity
-              key={row.label}
-              style={[styles.settingsRow, i < settingsRows.length - 1 && styles.settingsRowBorder]}
-              onPress={row.onPress}
-              activeOpacity={0.7}
-            >
-              <Ionicons name={row.icon as any} size={20} color="#9B8B7A" />
-              <Text style={styles.settingsLabel}>{row.label}</Text>
-              <Ionicons name="chevron-forward" size={16} color="#C8BEB5" />
-            </TouchableOpacity>
-          ))}
+          {supportRows.map((row, i) => renderSettingsRow(row, i === supportRows.length - 1))}
         </View>
 
         {/* Account */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Account</Text>
         </View>
-
         <View style={styles.settingsGroup}>
-          <TouchableOpacity
-            style={[styles.settingsRow, styles.settingsRowBorder]}
-            onPress={handleLogOut}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="log-out-outline" size={20} color="#9B8B7A" />
-            <Text style={styles.settingsLabel}>Log Out</Text>
-            <Ionicons name="chevron-forward" size={16} color="#C8BEB5" />
+          <TouchableOpacity style={styles.settingsRow} onPress={() => setShowDeleteFlow(true)} activeOpacity={0.7}>
+            <Text style={styles.deleteAccountLink}>Delete Account</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.settingsRow}
-            onPress={() => setShowDeleteFlow(true)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="trash-outline" size={20} color="#dc2626" />
-            <Text style={[styles.settingsLabel, { color: '#dc2626' }]}>Delete Account</Text>
-            <Ionicons name="chevron-forward" size={16} color="#C8BEB5" />
+        </View>
+
+        {/* Log Out button — full-width outlined at bottom */}
+        <View style={styles.logOutWrap}>
+          <TouchableOpacity style={styles.logOutBtn} onPress={handleLogOut} activeOpacity={0.85}>
+            <Text style={styles.logOutBtnText}>Log Out</Text>
           </TouchableOpacity>
         </View>
 
@@ -657,7 +645,7 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: Colors.parchment },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingBottom: 48 },
 
@@ -677,74 +665,77 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
+    fontFamily: Fonts.display,
     fontSize: 32,
-    color: '#C4652A',
-    textShadowColor: 'rgba(0,0,0,0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: Colors.terracotta,
   },
 
-  // Profile section
+  // Profile section — avatar 100px, display name displaySmall, handle bodySmall
   profileSection: {
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingBottom: 32,
     gap: 8,
   },
-  avatarContainer: {
-    shadowColor: '#C4652A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 6,
-  },
+  avatarContainer: {},
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 3,
-    borderColor: '#C4652A',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 2,
+    borderColor: Colors.warmGray,
   },
   avatarFallback: {
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarInitial: { fontSize: 32, fontWeight: '700', color: '#C4652A' },
-  profileName: { fontSize: 22, fontWeight: '700', color: '#1C1917', marginTop: 4 },
-  profileHandle: { fontSize: 15, color: '#888888', marginTop: 2 },
-  profileHandleLink: { fontSize: 15, color: '#C4652A', fontWeight: '600', marginTop: 2 },
+  avatarInitial: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayLG,
+    color: Colors.terracotta,
+  },
+  profileName: {
+    ...displaySmall,
+    color: Colors.asphalt,
+    marginTop: 4,
+  },
+  profileHandle: {
+    ...bodySmall,
+    color: Colors.warmGray,
+    marginTop: 2,
+  },
+  profileHandleLink: {
+    ...bodySmall,
+    fontFamily: Fonts.sansMedium,
+    color: Colors.terracotta,
+    marginTop: 2,
+  },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  locationText: { fontSize: 13, color: '#9B8B7A' },
+  locationText: { ...bodySmall, color: Colors.warmGray },
   bio: {
-    fontSize: 14,
-    color: '#44403C',
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
     textAlign: 'center',
     lineHeight: 20,
     paddingHorizontal: 24,
   },
 
-  // Settings list
+  // Settings list — section headers labelSmall, rows with terracotta icon, bodyMedium label, warmGray chevron
   sectionHeader: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
   sectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#9B8B7A',
+    ...labelSmall,
+    color: Colors.warmGray,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   settingsGroup: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     marginHorizontal: 20,
     borderRadius: 16,
     marginBottom: 24,
     overflow: 'hidden',
-    shadowColor: '#1C1917',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
   },
   settingsRow: {
     flexDirection: 'row',
@@ -753,8 +744,39 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     gap: 12,
   },
-  settingsRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F0E6D3' },
-  settingsLabel: { flex: 1, fontSize: 15, color: '#1C1917', fontWeight: '500' },
+  settingsRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.parchment,
+  },
+  settingsLabel: {
+    ...bodyMedium,
+    flex: 1,
+    color: Colors.asphalt,
+  },
+  deleteAccountLink: {
+    ...bodyMedium,
+    flex: 1,
+    color: '#dc2626',
+  },
+  logOutWrap: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 32,
+  },
+  logOutBtn: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: Colors.terracotta,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logOutBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
 
   // Delete flow
   deleteHeader: {
@@ -764,21 +786,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
+    borderBottomColor: Colors.border,
   },
-  deleteHeaderTitle: { fontSize: 17, fontWeight: '700', color: '#1C1917' },
+  deleteHeaderTitle: { fontFamily: Fonts.sansBold, fontSize: 17, color: Colors.asphalt },
   deleteContent: { padding: 24, alignItems: 'center', gap: 16 },
   deleteWarningIcon: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#FFF0E8',
+    backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
-  deleteTitle: { fontSize: 24, fontWeight: '700', color: '#1C1917', textAlign: 'center' },
-  deleteBody: { fontSize: 15, color: '#44403C', textAlign: 'center', lineHeight: 22 },
+  deleteTitle: { fontFamily: Fonts.displayBold, fontSize: 24, color: Colors.asphalt, textAlign: 'center' },
+  deleteBody: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.textMedium, textAlign: 'center', lineHeight: 22 },
   deleteListRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -795,20 +817,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#1C1917',
+    color: Colors.asphalt,
     textAlign: 'center',
     letterSpacing: 2,
   },
   deleteNextBtn: {
     alignSelf: 'stretch',
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     paddingVertical: 16,
     borderRadius: 14,
     alignItems: 'center',
   },
-  deleteNextBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  deleteNextBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: 15 },
   deleteCancelBtn: { paddingVertical: 12 },
-  deleteCancelBtnText: { fontSize: 15, color: '#9B8B7A' },
+  deleteCancelBtnText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.warmGray },
   deleteFinalBtn: {
     alignSelf: 'stretch',
     backgroundColor: '#dc2626',
@@ -816,8 +838,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
   },
-  deleteFinalBtnDisabled: { backgroundColor: '#F0E6D3' },
-  deleteFinalBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  deleteFinalBtnDisabled: { backgroundColor: Colors.inputBg },
+  deleteFinalBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: 15 },
 
   // Edit Profile button on main profile
   editProfileBtn: {
@@ -829,12 +851,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#C4652A',
+    borderColor: Colors.terracotta,
   },
   editProfileBtnText: {
+    fontFamily: Fonts.sansMedium,
     fontSize: 13,
-    fontWeight: '600',
-    color: '#C4652A',
+    color: Colors.terracotta,
   },
 
   // Edit Profile flow
@@ -851,8 +873,8 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    borderWidth: 3,
-    borderColor: '#C4652A',
+    borderWidth: 2,
+    borderColor: Colors.warmGray,
   },
   editAvatarBadge: {
     position: 'absolute',
@@ -861,15 +883,16 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#FFF8F0',
+    borderColor: Colors.parchment,
   },
   editPhotoHint: {
+    fontFamily: Fonts.sans,
     fontSize: 12,
-    color: '#9B8B7A',
+    color: Colors.warmGray,
     marginBottom: 20,
   },
   editFieldGroup: {
@@ -877,42 +900,40 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   editLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#9B8B7A',
+    ...labelSmall,
+    color: Colors.warmGray,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
     marginBottom: 6,
   },
   editInput: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     borderWidth: 1.5,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
     borderRadius: 14,
     paddingLeft: 16,
     paddingRight: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#1C1917',
-    fontWeight: '400',
+    color: Colors.asphalt,
     textAlign: 'left',
   },
   handleInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     borderWidth: 1.5,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
     borderRadius: 14,
   },
-  handlePrefix: { fontSize: 16, color: '#888888', marginLeft: 16 },
+  handlePrefix: { fontFamily: Fonts.sans, fontSize: 16, color: Colors.textLight, marginLeft: 16 },
   handleInput: {
     flex: 1,
     paddingVertical: 14,
     paddingLeft: 8,
     paddingRight: 16,
     fontSize: 16,
-    color: '#1C1917',
+    color: Colors.asphalt,
     textAlign: 'left',
   },
   editBioInput: {
@@ -920,8 +941,9 @@ const styles = StyleSheet.create({
     paddingTop: 14,
   },
   editCharCount: {
+    fontFamily: Fonts.sans,
     fontSize: 11,
-    color: '#C8BEB5',
+    color: Colors.textLight,
     textAlign: 'right',
     marginTop: 4,
   },
@@ -929,39 +951,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#F5F0EA',
+    backgroundColor: Colors.inputBg,
     borderWidth: 1.5,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
   editReadOnlyText: {
+    fontFamily: Fonts.sans,
     fontSize: 16,
-    color: '#9B8B7A',
+    color: Colors.warmGray,
   },
   handleAvailability: { marginTop: 6, marginBottom: 4 },
-  handleAvailable: { fontSize: 12, color: '#16A34A', fontWeight: '600', marginTop: 6, marginBottom: 4 },
-  handleTaken: { fontSize: 12, color: '#DC2626', fontWeight: '600', marginTop: 6, marginBottom: 4 },
+  handleAvailable: { fontFamily: Fonts.sansMedium, fontSize: 12, color: Colors.successGreen, marginTop: 6, marginBottom: 4 },
+  handleTaken: { fontFamily: Fonts.sansMedium, fontSize: 12, color: Colors.errorRed, marginTop: 6, marginBottom: 4 },
   editHelp: {
+    fontFamily: Fonts.sans,
     fontSize: 11,
-    color: '#C8BEB5',
+    color: Colors.textLight,
     marginTop: 4,
   },
   editSaveBtn: {
     alignSelf: 'stretch',
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     paddingVertical: 16,
     borderRadius: 14,
     alignItems: 'center',
     marginTop: 12,
   },
   editSaveBtnText: {
-    color: '#FFFFFF',
+    color: Colors.white,
+    fontFamily: Fonts.sansBold,
     fontSize: 15,
-    fontWeight: '700',
   },
 
   // Footer
-  footer: { textAlign: 'center', fontSize: 12, color: '#C8BEB5', marginTop: 8 },
+  footer: { textAlign: 'center', fontFamily: Fonts.sans, fontSize: 12, color: Colors.textLight, marginTop: 8 },
 });

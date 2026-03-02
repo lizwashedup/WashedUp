@@ -58,7 +58,7 @@ export default function ProfileButton() {
   return (
     <TouchableOpacity
       style={styles.container}
-      onPress={() => router.push('/profile')}
+      onPress={() => router.push('/(tabs)/profile')}
       accessibilityLabel="Profile"
     >
       <View style={styles.circle}>

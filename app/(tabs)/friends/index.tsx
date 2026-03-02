@@ -22,6 +22,7 @@ import { Search, Users, QrCode, Share2, X } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import ProfileButton from '../../../components/ProfileButton';
 import { supabase } from '../../../lib/supabase';
+import { Fonts } from '../../../constants/Typography';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -468,7 +469,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: 'DMSerifDisplay_400Regular',
+    fontFamily: Fonts.display,
     fontSize: 28,
     color: '#C4652A',
     textShadowColor: 'rgba(0,0,0,0.2)',
