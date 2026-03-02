@@ -20,20 +20,31 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.washedup.app",
-      "config": {
-        "googleMapsApiKey": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
-      },
+      "config": {},
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "CFBundleDisplayName": "WashedUp"
+        "CFBundleDisplayName": "WashedUp",
+        "NSCameraUsageDescription": "WashedUp needs camera access so you can take a profile photo.",
+        "NSPhotoLibraryUsageDescription": "WashedUp needs access to your photos so you can share images in group chats and set your profile picture.",
+        "NSLocationWhenInUseUsageDescription": "WashedUp uses your location to show plans near you and help you find events in Los Angeles."
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+          }
+        ]
       }
     },
     "android": {
       "package": "com.washedup.app",
       "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
-        }
+        "googleMaps": {}
       },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",

@@ -9,15 +9,35 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { fetchPlans, Plan } from '../lib/fetchPlans';
 import { PlanCard } from '../components/plans/PlanCard';
+import Colors from '../constants/Colors';
+import { Fonts } from '../constants/Typography';
+
+// Map Plan (from fetchPlans) to PlanCard shape
+function toPlanCardPlan(plan: Plan) {
+  return {
+    id: plan.id,
+    title: plan.title,
+    host_message: plan.host_message ?? null,
+    start_time: plan.start_time,
+    location_text: plan.location_text ?? null,
+    category: plan.category ?? null,
+    max_invites: plan.max_invites ?? 0,
+    member_count: plan.member_count ?? 0,
+    host: {
+      first_name_display: plan.host?.first_name ?? 'Host',
+      profile_photo_url: plan.host?.avatar_url ?? null,
+    },
+    attendees: [],
+  };
+}
 
 export default function PlansSectionScreen() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const { title, from, to } = useLocalSearchParams<{ title: string; from: string; to: string }>();
 
   const fromDate = useMemo(() => (from ? new Date(from) : new Date(0)), [from]);
@@ -34,35 +54,6 @@ export default function PlansSectionScreen() {
     queryFn: () => fetchPlans(userId!),
     enabled: !!userId,
     staleTime: 60_000,
-  });
-
-  const { data: wishlistIds = [] } = useQuery<string[]>({
-    queryKey: ['wishlists', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      const { data } = await supabase.from('wishlists').select('event_id').eq('user_id', userId);
-      return (data ?? []).map((r: any) => r.event_id as string);
-    },
-    enabled: !!userId,
-    staleTime: 30_000,
-  });
-
-  const wishlistedSet = useMemo(() => {
-    const lookup: Record<string, boolean> = {};
-    wishlistIds.forEach((id: string) => { lookup[id] = true; });
-    return lookup;
-  }, [wishlistIds]);
-
-  const wishlistMutation = useMutation({
-    mutationFn: async ({ planId, isCurrentlyWishlisted }: { planId: string; isCurrentlyWishlisted: boolean }) => {
-      if (!userId) return;
-      if (isCurrentlyWishlisted) {
-        await supabase.from('wishlists').delete().eq('user_id', userId).eq('event_id', planId);
-      } else {
-        await supabase.from('wishlists').insert({ user_id: userId, event_id: planId });
-      }
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wishlists', userId] }),
   });
 
   const sectionPlans = useMemo(
@@ -84,7 +75,7 @@ export default function PlansSectionScreen() {
           style={styles.backButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <ArrowLeft size={22} color="#1A1A1A" strokeWidth={2.5} />
+          <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{title ?? 'Plans'}</Text>
         <View style={styles.backButton} />
@@ -92,19 +83,14 @@ export default function PlansSectionScreen() {
 
       {isLoading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#C4652A" />
+          <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
       ) : (
         <FlatList
           data={sectionPlans}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <PlanCard
-              plan={item}
-              isWishlisted={!!wishlistedSet[item.id]}
-              onWishlist={(planId, current) => wishlistMutation.mutate({ planId, isCurrentlyWishlisted: current })}
-              variant="full"
-            />
+            <PlanCard plan={toPlanCardPlan(item)} isMember={false} />
           )}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
@@ -120,7 +106,7 @@ export default function PlansSectionScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: Colors.parchment },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -128,7 +114,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
+    borderBottomColor: Colors.border,
   },
   backButton: {
     width: 40,
@@ -137,13 +123,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
+    fontFamily: Fonts.sansBold,
     fontSize: 18,
-    fontWeight: '800',
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     letterSpacing: -0.3,
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { padding: 20, gap: 16 },
   empty: { alignItems: 'center', paddingTop: 80 },
-  emptyText: { fontSize: 16, color: '#999999' },
+  emptyText: { fontFamily: Fonts.sans, fontSize: 16, color: Colors.textLight },
 });
