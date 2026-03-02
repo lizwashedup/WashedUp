@@ -28,7 +28,7 @@ import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
-import { Fonts } from '../../../constants/Typography';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
 
@@ -435,7 +435,7 @@ export default function PostScreen() {
               onPress={pickImage}
               activeOpacity={0.8}
             >
-              <ImagePlus size={32} color="#C4652A" strokeWidth={2} />
+              <ImagePlus size={32} color={Colors.terracotta} strokeWidth={2} />
               <Text style={styles.photoUploadText}>Add a photo</Text>
               <Text style={styles.photoUploadHint}>Optional — your plan works without one</Text>
             </TouchableOpacity>
@@ -444,7 +444,7 @@ export default function PostScreen() {
               <Image source={{ uri: imageUrl }} style={styles.photoPreviewImage} contentFit="cover" />
               {imageLoading ? (
                 <View style={styles.photoLoadingOverlay}>
-                  <ActivityIndicator size="large" color="#C4652A" />
+                  <ActivityIndicator size="large" color={Colors.terracotta} />
                 </View>
               ) : (
                 <>
@@ -452,7 +452,7 @@ export default function PostScreen() {
                     style={styles.photoRemoveBtn}
                     onPress={() => setImageUrl(null)}
                   >
-                    <X size={14} color="#666666" strokeWidth={2.5} />
+                    <X size={14} color={Colors.textMedium} strokeWidth={2.5} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.photoChangeBtn}
@@ -574,7 +574,7 @@ export default function PostScreen() {
                 <Text style={[styles.pickerText, !category && styles.placeholderText]}>
                   {category ?? 'Select a category'}
                 </Text>
-                <Text style={{ fontSize: 14, color: '#999' }}>▼</Text>
+                <Text style={{ fontSize: FontSizes.bodyMD, color: Colors.textLight }}>▼</Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -601,7 +601,7 @@ export default function PostScreen() {
                 ))}
               </View>
             ) : (
-              <ActivityIndicator size="small" color="#C4652A" />
+              <ActivityIndicator size="small" color={Colors.terracotta} />
             )}
           </View>
 
@@ -731,7 +731,7 @@ export default function PostScreen() {
             activeOpacity={0.9}
           >
             {loading
-              ? <ActivityIndicator color="#FFFFFF" size="small" />
+              ? <ActivityIndicator color={Colors.white} size="small" />
               : <Text style={styles.submitBtnText}>Post It  →</Text>
             }
           </TouchableOpacity>
@@ -911,35 +911,36 @@ const placesStyles = {
   container: { flex: 0 },
   textInputContainer: { backgroundColor: 'transparent' },
   textInput: {
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
     paddingHorizontal: 16,
-    fontSize: 16,
-    color: Colors.textDark,
+    fontSize: FontSizes.bodyLG,
+    fontFamily: Fonts.sans,
+    color: Colors.asphalt,
     height: 52,
     marginBottom: 0,
   },
   listView: {
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
     marginTop: 4,
     overflow: 'hidden' as const,
   },
-  row: { paddingHorizontal: 16, paddingVertical: 13, backgroundColor: Colors.cardBackground },
+  row: { paddingHorizontal: 16, paddingVertical: 13, backgroundColor: Colors.cardBg },
   separator: { height: 1, backgroundColor: Colors.border, marginHorizontal: 16 },
-  description: { color: Colors.textDark, fontSize: 15 },
-  predefinedPlacesDescription: { color: Colors.primaryOrange },
+  description: { color: Colors.asphalt, fontSize: FontSizes.bodyLG, fontFamily: Fonts.sans },
+  predefinedPlacesDescription: { color: Colors.terracotta },
   poweredContainer: { display: 'none' as const },
 };
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.backgroundCream },
+  safe: { flex: 1, backgroundColor: Colors.parchment },
   flex: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 24 },
 
@@ -952,14 +953,14 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   headerTitle: {
-    fontFamily: Fonts.display,
-    fontSize: 28,
-    color: '#C4652A',
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayLG,
+    color: Colors.terracotta,
     textShadowColor: 'rgba(0,0,0,0.2)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
-  headerSub: { fontSize: 14, color: Colors.textLight, marginTop: 4 },
+  headerSub: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.textLight, marginTop: 4 },
 
   photoUpload: {
     width: '100%',
@@ -967,14 +968,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: '#D4C5B4',
-    backgroundColor: '#F5EDE4',
+    borderColor: Colors.border,
+    backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
   },
-  photoUploadText: { fontSize: 14, color: '#9B8B7A', marginTop: 8 },
-  photoUploadHint: { fontSize: 12, color: '#BBAA99', marginTop: 4 },
+  photoUploadText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.warmGray, marginTop: 8 },
+  photoUploadHint: { fontSize: FontSizes.caption, fontFamily: Fonts.sans, color: Colors.textLight, marginTop: 4 },
   photoPreview: {
     width: '100%',
     aspectRatio: 16 / 10,
@@ -997,10 +998,10 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
+    shadowColor: 'rgba(0,0,0,0.15)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
@@ -1010,35 +1011,36 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 10,
     right: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    shadowColor: '#000',
+    shadowColor: 'rgba(0,0,0,0.15)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
     elevation: 3,
   },
-  photoChangeBtnText: { fontSize: 12, fontWeight: '600', color: '#1A1A1A' },
+  photoChangeBtnText: { fontSize: FontSizes.caption, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
 
   field: { marginBottom: 20 },
   placesField: { zIndex: 10 },
-  label: { fontSize: 14, fontWeight: '600', color: Colors.textMedium, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  label: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.textMedium, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  labelOptional: { fontSize: 13, color: Colors.textLight, fontStyle: 'italic' },
-  charCount: { fontSize: 13, color: Colors.textLight },
+  labelOptional: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sans, color: Colors.textLight, fontStyle: 'italic' },
+  charCount: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sans, color: Colors.textLight },
 
   input: {
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
     paddingLeft: 16,
     paddingRight: 16,
     paddingVertical: 14,
-    fontSize: 16,
-    color: Colors.textDark,
+    fontSize: FontSizes.bodyLG,
+    fontFamily: Fonts.sans,
+    color: Colors.asphalt,
     textAlign: 'left',
   },
   textArea: { minHeight: 100, paddingTop: 14 },
@@ -1048,28 +1050,28 @@ const styles = StyleSheet.create({
 
   pickerButton: { justifyContent: 'center' },
   pickerPlaceholder: { borderColor: Colors.border },
-  pickerText: { fontSize: 16, color: Colors.textDark },
-  placeholderText: { color: Colors.textLight },
+  pickerText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sans, color: Colors.asphalt },
+  placeholderText: { color: Colors.textLight, fontFamily: Fonts.sans },
 
   pillRow: { gap: 8, paddingRight: 8 },
   pill: {
     paddingVertical: 10,
     paddingHorizontal: 16,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 20,
   },
-  pillSelected: { backgroundColor: Colors.primaryOrange, borderColor: Colors.primaryOrange },
-  pillText: { fontSize: 15, color: Colors.textDark, fontWeight: '500' },
-  pillTextSelected: { color: '#FFFFFF', fontWeight: '600' },
+  pillSelected: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
+  pillText: { fontSize: FontSizes.bodyLG, color: Colors.asphalt, fontFamily: Fonts.sansMedium },
+  pillTextSelected: { color: Colors.white, fontFamily: Fonts.sansMedium },
 
   genderRow: { flexDirection: 'row', gap: 10 },
   genderPill: {
     flex: 1,
     paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
@@ -1082,42 +1084,42 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepperBtnDisabled: { opacity: 0.35 },
-  stepperBtnText: { fontSize: 22, color: Colors.textDark, fontWeight: '300' },
+  stepperBtnText: { fontSize: FontSizes.displayMD, color: Colors.asphalt, fontFamily: Fonts.sans },
   stepperValue: { flex: 1, alignItems: 'center' },
-  stepperValueText: { fontSize: 32, fontWeight: '700', color: Colors.primaryOrange },
-  stepperValueSub: { fontSize: 12, color: Colors.textLight, marginTop: -2 },
-  stepperHint: { fontSize: 12, color: Colors.textLight, marginTop: 6 },
+  stepperValueText: { fontSize: FontSizes.displayLG, fontFamily: Fonts.sansBold, color: Colors.terracotta },
+  stepperValueSub: { fontSize: FontSizes.caption, color: Colors.textLight, marginTop: -2 },
+  stepperHint: { fontSize: FontSizes.caption, color: Colors.textLight, marginTop: 6 },
 
   stickyFooter: {
     paddingHorizontal: 20,
     paddingBottom: Platform.OS === 'ios' ? 8 : 16,
     paddingTop: 12,
-    backgroundColor: Colors.backgroundCream,
+    backgroundColor: Colors.parchment,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
-  requiredHint: { fontSize: 13, color: Colors.textLight, textAlign: 'center', marginBottom: 8 },
+  requiredHint: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sans, color: Colors.textLight, textAlign: 'center', marginBottom: 8 },
   submitBtn: {
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: Colors.primaryOrange,
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   submitBtnDisabled: { opacity: 0.45, shadowOpacity: 0 },
-  submitBtnText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.3 },
+  submitBtnText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansBold, color: Colors.white, letterSpacing: 0.3 },
 
   // Modal
   modalOverlay: {
@@ -1126,30 +1128,30 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: Colors.backgroundCream,
+    backgroundColor: Colors.parchment,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
     paddingBottom: Platform.OS === 'ios' ? 40 : 24,
   },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: Colors.textDark, marginBottom: 16 },
+  modalTitle: { fontSize: FontSizes.displaySM, fontFamily: Fonts.sansBold, color: Colors.asphalt, marginBottom: 16 },
   pickerRow: { flexDirection: 'row', gap: 8, maxHeight: 200, marginBottom: 20 },
   pickerCol: { flex: 2 },
   pickerColSm: { flex: 1 },
   pickerItem: { paddingVertical: 11, paddingHorizontal: 6, alignItems: 'center', borderRadius: 8 },
-  pickerItemSelected: { backgroundColor: Colors.primaryOrange },
-  pickerItemText: { fontSize: 16, color: Colors.textDark },
-  pickerItemTextSel: { color: '#FFFFFF', fontWeight: '600' },
+  pickerItemSelected: { backgroundColor: Colors.terracotta },
+  pickerItemText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sans, color: Colors.asphalt },
+  pickerItemTextSel: { color: Colors.white, fontFamily: Fonts.sansMedium },
   modalBtn: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  modalBtnText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansBold, color: Colors.white },
 
-  required: { color: '#DC2626', fontSize: 14, fontWeight: '400' },
+  required: { color: Colors.errorRed, fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans },
 
   categoryItem: {
     paddingVertical: 14,
@@ -1157,7 +1159,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 4,
   },
-  categoryItemSelected: { backgroundColor: Colors.primaryOrange },
-  categoryItemText: { fontSize: 16, fontWeight: '400', color: Colors.textDark },
-  categoryItemTextSelected: { color: '#FFFFFF', fontWeight: '600' },
+  categoryItemSelected: { backgroundColor: Colors.terracotta },
+  categoryItemText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sans, color: Colors.asphalt },
+  categoryItemTextSelected: { color: Colors.white, fontFamily: Fonts.sansMedium },
 });

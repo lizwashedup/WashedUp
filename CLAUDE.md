@@ -1,27 +1,49 @@
-# WashedUp App — Claude Code Directives
+# WashedUp — Global Context for Claude Code
 
-## 1. The Core Vision
+## Product Vision
 
-WashedUp is a platform for a movement, designed to foster a curated, hightrust social graph for real-world connections. It is casual, low-barrier, and focused on getting people to do things together.
+WashedUp is a platform for finding people to do things with. It is not a dating app. It is not a professional network. It is low-barrier, casual, and warm. The tone is always inviting, never formal.
 
-## 2. The Golden Hour Design System
+## Forbidden Terminology
 
-This is the visual identity of the movement. It must be applied with **absolute consistency**. Any deviation is a bug.
+The word "host" and all its variants (hosting, hosted, isHost, hostRow, etc.) are forbidden in all UI copy, variable names, and style names. The person who creates a plan is the "creator" and they are "posting" a plan.
 
-- **Colors**: The single source of truth is `@/constants/Colors.ts`. **No hardcoded hex colors are ever allowed.** Use the exported constants (e.g., `Colors.terracotta`, `Colors.parchment`).
-- **Typography**: The single source of truth is `@/constants/Typography.ts`. **No hardcoded `fontFamily` or `fontSize` values are ever allowed.** Use the exported `Fonts` and `FontSizes` constants (e.g., `fontFamily: Fonts.sans`, `fontSize: FontSizes.bodyMD`).
+Database column names (host_id, host_message, creator_user_id) must never be changed.
 
-## 3. Key Terminology
+## The Golden Hour Design System
 
-- **"Your People"**: A user's personal, one-way list of other users they want to invite to plans. It is **not** mutual. It is **not** "friends."
-- **"Host"**: This word **does not exist** in WashedUp. The person who creates a plan is the "creator" or "posted by." They are not a "host." Remove all instances of "host," "hosting," etc.
+Every color in the app must come from constants/Colors.ts. Every font family, size, and weight must come from constants/Typography.ts. There are zero exceptions. No hardcoded hex values. No hardcoded fontFamily strings.
 
-## 4. Your Mandate
+Key values for reference:
 
-Your mandate is to be a meticulous, senior React Native engineer. You will:
+- Background: Colors.parchment (#F8F5F0)
+- Primary accent / buttons: Colors.terracotta (#D97746)
+- Primary text: Colors.asphalt (#1E1E1E)
+- Secondary text: Colors.textMedium (#666666)
+- Placeholder / inactive: Colors.textLight (#999999)
+- Card surface: Colors.cardBg (#FFFFFF)
+- Input background: Colors.inputBg (#F0EBE3)
+- Border / dividers: Colors.border (#E8E3DC)
+- Error: Colors.errorRed (#E53935)
+- White: Colors.white (#FFFFFF)
 
-1. **Adhere strictly to the design system.** Your primary job is to refactor every component to use the constants from `Colors.ts` and `Typography.ts`.
-2. **Fix all bugs as described.**
-3. **Implement the correct product logic** for navigation and features.
-4. **Do not change existing logic unless explicitly told to.** When refactoring styles, preserve all existing functionality.
-5. **Be precise and thorough.**
+Key typography values:
+
+- Fonts.sansBold — DM Sans Bold (buttons, labels, headings)
+- Fonts.sansMedium — DM Sans Medium (UI text, chips)
+- Fonts.sans — DM Sans Regular (body, meta)
+- Fonts.displayBold — Cormorant Garamond Bold (plan titles, editorial)
+- FontSizes.bodyLG = 16, bodyMD = 14, bodySM = 13, caption = 11
+
+## Navigation
+
+Tab bar order: Plans | Scene | Post | Chats | Your People
+
+Profile is NOT a tab. It is accessed from within the Your People screen.
+
+## General Rules
+
+- Never change database column names or RPC function names.
+- Never remove or change existing data fetching logic.
+- When in doubt, ask before making a change.
+- After every change, confirm what files you modified and summarize the changes.

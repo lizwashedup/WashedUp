@@ -22,7 +22,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
-import { MapView, Marker } from '../../components/MapView';
+import { MapView, Marker } from '../../components/MapView.native';
 import {
   ArrowLeft,
   Calendar,
@@ -1071,7 +1071,7 @@ export default function PlanDetailScreen() {
               <Text style={joinStyles.infoText}>You're part of the plan.</Text>
             </View>
 
-            <Text style={joinStyles.label}>Say hi to people that are going too! <Text style={joinStyles.required}>*required</Text></Text>
+            <Text style={joinStyles.label}>Say something to the group <Text style={joinStyles.required}>*required</Text></Text>
             <TextInput
               style={[joinStyles.input, !joinMessage.trim() && joinConfirmed && joinStyles.inputRequired]}
               placeholder="Hey everyone! Can't wait"

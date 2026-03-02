@@ -254,7 +254,7 @@ export default function YourPeopleScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
       await Share.share({
-        message: `Add me on WashedUp — @${h} washedup.app`,
+        message: `Add me on WashedUp — @${h}\nhttps://washedup.app/u/${h}`,
         title: 'Add me on WashedUp',
       });
     } catch {}

@@ -49,10 +49,10 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
     member_count: item.member_count ?? 0,
     status: item.status ?? 'forming',
     host_message: item.host_message ?? null,
-    creator: item.host_id ? {
-      id: item.host_id,
-      first_name: item.host_name ?? null,
-      avatar_url: item.host_photo ?? null,
+    creator: (item.host_id ?? item.creator_user_id) ? {
+      id: item.host_id ?? item.creator_user_id,
+      first_name: item.host_name ?? item.creator_name ?? null,
+      avatar_url: item.host_photo ?? item.creator_photo ?? null,
     } : null,
   }));
 }

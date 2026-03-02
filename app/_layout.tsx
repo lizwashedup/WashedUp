@@ -204,11 +204,6 @@ function RootLayoutNav() {
 
   return (
     <View style={{ flex: 1 }}>
-      {__DEV__ && (
-        <View style={{ backgroundColor: '#D97746', paddingVertical: 6, paddingHorizontal: 16, alignItems: 'center', zIndex: 9999 }}>
-          <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>GOLDEN HOUR V2 — NEW DESIGN</Text>
-        </View>
-      )}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="reset-password" options={{ headerShown: false }} />
@@ -217,8 +212,8 @@ function RootLayoutNav() {
         <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
       </Stack>
       {!authResolved && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.backgroundCream }}>
-          <ActivityIndicator size="large" color={Colors.primaryOrange} />
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.parchment }}>
+          <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
       )}
     </View>

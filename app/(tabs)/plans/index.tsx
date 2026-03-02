@@ -15,7 +15,7 @@ import { router, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { MapView, Marker } from '../../../components/MapView';
+import { MapView, Marker } from '../../../components/MapView.native';
 import { supabase } from '../../../lib/supabase';
 import { fetchPlans, Plan } from '../../../lib/fetchPlans';
 import { PlanCard } from '../../../components/plans/PlanCard';

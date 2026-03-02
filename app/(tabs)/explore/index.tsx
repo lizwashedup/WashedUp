@@ -18,7 +18,7 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { MapView } from '../../../components/MapView';
+import { MapView } from '../../../components/MapView.native';
 import { supabase } from '../../../lib/supabase';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { CATEGORY_OPTIONS } from '../../../constants/Categories';
