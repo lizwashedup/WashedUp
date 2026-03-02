@@ -31,7 +31,7 @@ import Colors from '../../../constants/Colors';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { Fonts } from '../../../constants/Typography';
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

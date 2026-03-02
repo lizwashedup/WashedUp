@@ -24,6 +24,7 @@ import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import Colors from '../../../constants/Colors';
+import { MAP_STYLE } from '../../../constants/MapStyle';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -364,7 +365,10 @@ export default function PlansScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Image source={require('../../../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
+        <View style={styles.logoRow}>
+          <Image source={require('../../../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
+          {__DEV__ && <View style={styles.designBadge}><Text style={styles.designBadgeText}>v2</Text></View>}
+        </View>
         <View style={styles.headerIcons}>
           <TouchableOpacity
             style={styles.iconButton}
@@ -456,6 +460,7 @@ export default function PlansScreen() {
           <MapView
             style={styles.map}
             initialRegion={LA_REGION}
+            customMapStyle={MAP_STYLE}
             showsUserLocation
             showsMyLocationButton={false}
           >
@@ -561,9 +566,25 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   logo: {
     width: 140,
     height: 32,
+  },
+  designBadge: {
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  designBadgeText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: Colors.white,
   },
   headerIcons: {
     flexDirection: 'row',

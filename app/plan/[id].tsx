@@ -44,7 +44,7 @@ import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { useBlock } from '../../hooks/useBlock';
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_WIDTH * (9 / 16);
@@ -718,7 +718,7 @@ export default function PlanDetailScreen() {
 
   const handleReportMenu = useCallback(() => {
     if (isHost || !plan?.host) return;
-    const hostName = plan.host.first_name ?? 'Host';
+    const hostName = plan.host?.first_name ?? 'Host';
     Alert.alert(
       'Options',
       undefined,
@@ -840,7 +840,7 @@ export default function PlanDetailScreen() {
         {/* A. Host Info Block */}
         <View style={styles.hostBlock}>
           {plan.host?.avatar_url ? (
-            <Image source={{ uri: plan.host.avatar_url }} style={styles.hostAvatarLarge} contentFit="cover" />
+            <Image source={{ uri: plan.host?.avatar_url ?? '' }} style={styles.hostAvatarLarge} contentFit="cover" />
           ) : (
             <View style={[styles.hostAvatarLarge, styles.hostAvatarPlaceholder]}>
               <Ionicons name="person-outline" size={32} color={Colors.textLight} />

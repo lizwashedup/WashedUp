@@ -24,6 +24,7 @@ import { supabase } from '../../../lib/supabase';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { CATEGORY_OPTIONS } from '../../../constants/Categories';
 import Colors from '../../../constants/Colors';
+import { MAP_STYLE } from '../../../constants/MapStyle';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -720,6 +721,7 @@ export default function SceneScreen() {
             <MapView
               style={{ flex: 1 }}
               initialRegion={LA_REGION}
+              customMapStyle={MAP_STYLE}
               showsUserLocation
               showsMyLocationButton={false}
             />
