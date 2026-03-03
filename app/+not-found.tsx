@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import Colors from '../constants/Colors';
 
 export default function NotFoundScreen() {
   const router = useRouter();
@@ -15,8 +16,8 @@ export default function NotFoundScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8F0' }}>
-        <ActivityIndicator size="large" color="#C4652A" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.parchment }}>
+        <ActivityIndicator size="large" color={Colors.terracotta} />
       </View>
     </>
   );

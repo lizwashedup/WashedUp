@@ -1705,7 +1705,7 @@ const joinStyles = StyleSheet.create({
     padding: 24,
   },
   sheet: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderRadius: 20,
     padding: 24,
     width: '100%',
@@ -1720,7 +1720,7 @@ const joinStyles = StyleSheet.create({
   },
   closeX: {
     fontSize: 18,
-    color: '#999999',
+    color: Colors.textLight,
     fontWeight: '600',
   },
   title: {

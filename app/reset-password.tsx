@@ -151,7 +151,7 @@ export default function ResetPasswordScreen() {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={Colors.white} />
               ) : (
                 <Text style={styles.primaryButtonText}>Update Password</Text>
               )}
