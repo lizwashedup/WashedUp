@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 
 export default function OnboardingLACheckScreen() {
   const routerBack = useRouter();
@@ -74,7 +75,7 @@ export default function OnboardingLACheckScreen() {
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 style={styles.backButton}
               >
-                <ChevronLeft size={28} color={Colors.textDark} />
+                <ChevronLeft size={28} color={Colors.asphalt} />
               </TouchableOpacity>
             </View>
 
@@ -150,10 +151,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 8,
   },
-  progressBar: { height: '100%', backgroundColor: Colors.primaryOrange, borderRadius: 2 },
+  progressBar: { height: '100%', backgroundColor: Colors.terracotta, borderRadius: 2 },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
   backButton: { padding: 4 },
-  heading: { fontSize: 22, fontWeight: '700', color: Colors.textDark },
+  heading: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   gap32: { height: 32 },
   gap24: { height: 24 },
   gap20: { height: 20 },
@@ -162,40 +163,40 @@ const styles = StyleSheet.create({
   primaryButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.primaryOrange,
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
-  primaryButtonText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
+  primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.white },
   secondaryButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  secondaryButtonText: { fontSize: 17, fontWeight: '600', color: Colors.textDark },
-  notLaText: { fontSize: 16, color: Colors.textDark, lineHeight: 24 },
-  label: { fontSize: 16, color: Colors.textDark, fontWeight: '500' },
+  secondaryButtonText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.displaySM, color: Colors.asphalt },
+  notLaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt, lineHeight: 24 },
+  label: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   input: {
     height: 52,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
     paddingLeft: 16,
     paddingRight: 16,
     paddingVertical: 0,
-    fontSize: 16,
-    fontWeight: '400',
-    color: Colors.textDark,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
     textAlign: 'left',
   },
 });

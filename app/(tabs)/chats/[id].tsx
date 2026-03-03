@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
+import Colors from '../../../constants/Colors';
 import { openUrl } from '../../../lib/url';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { useChat, ChatMessage } from '../../../hooks/useChat';
@@ -209,12 +210,12 @@ const bubbleStyles = StyleSheet.create({
   rowOther: { justifyContent: 'flex-start' },
   avatarSlot: { width: 28, marginRight: 8, alignSelf: 'flex-end' },
   avatar: { width: 28, height: 28, borderRadius: 14 },
-  avatarFallback: { backgroundColor: '#F0E6D3', alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { fontSize: 11, fontWeight: '700', color: '#C4652A' },
+  avatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
+  avatarInitial: { fontSize: 11, fontWeight: '700', color: Colors.terracotta },
   bubbleWrapper: { maxWidth: '75%', gap: 3 },
   wrapperOwn: { alignItems: 'flex-end' },
   wrapperOther: { alignItems: 'flex-start' },
-  senderName: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', marginBottom: 0 },
+  senderName: { fontSize: 13, fontWeight: '700', color: Colors.asphalt, marginBottom: 0 },
   nameTimeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -224,30 +225,30 @@ const bubbleStyles = StyleSheet.create({
   },
   nameTimestamp: {
     fontSize: 11,
-    color: '#B8A99A',
+    color: Colors.warmGray,
   },
   bubble: { paddingHorizontal: 13, paddingVertical: 9, overflow: 'hidden' },
-  bubbleOwn: { backgroundColor: '#C4652A' },
+  bubbleOwn: { backgroundColor: Colors.terracotta },
   bubbleOther: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
+    backgroundColor: Colors.white,
+    shadowColor: Colors.shadowBlack,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 1,
   },
-  messageText: { fontSize: 15, color: '#1A1A1A', lineHeight: 21 },
-  messageTextOwn: { color: '#FFFFFF' },
+  messageText: { fontSize: 15, color: Colors.asphalt, lineHeight: 21 },
+  messageTextOwn: { color: Colors.white },
   messageImage: { width: 220, height: 165, borderRadius: 8 },
-  caption: { fontSize: 13, color: '#666666', marginTop: 6, paddingHorizontal: 2 },
-  captionOwn: { color: 'rgba(255,255,255,0.85)' },
-  timestamp: { fontSize: 10, color: '#9B8B7A', marginLeft: 4 },
+  caption: { fontSize: 13, color: Colors.textMedium, marginTop: 6, paddingHorizontal: 2 },
+  captionOwn: { color: Colors.overlayWhiteLight },
+  timestamp: { fontSize: 10, color: Colors.warmGray, marginLeft: 4 },
   timestampOwn: { textAlign: 'right', marginRight: 4 },
   systemRow: { alignItems: 'center', marginVertical: 8, paddingHorizontal: 16 },
   systemText: {
     fontSize: 12,
-    color: '#9B8B7A',
-    backgroundColor: '#F0E6D3',
+    color: Colors.warmGray,
+    backgroundColor: Colors.inputBg,
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 10,
@@ -407,16 +408,16 @@ export default function ChatScreen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#FFF8F0' }}>
+    <View style={{ flex: 1, backgroundColor: Colors.parchment }}>
       {/* ── Header ── */}
-      <SafeAreaView edges={['top']} style={{ backgroundColor: '#FFFFFF' }}>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: Colors.white }}>
         <View style={chatStyles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
             style={chatStyles.backBtn}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+            <Ionicons name="chevron-back" size={24} color={Colors.asphalt} />
           </TouchableOpacity>
 
           <View style={chatStyles.headerCenter}>
@@ -431,7 +432,7 @@ export default function ChatScreen() {
             style={chatStyles.ellipsisBtn}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="ellipsis-horizontal" size={20} color="#9B8B7A" />
+            <Ionicons name="ellipsis-horizontal" size={20} color={Colors.warmGray} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -449,7 +450,7 @@ export default function ChatScreen() {
             onPress={() => openUrl(event.tickets_url!)}
           >
             <View style={chatStyles.ticketLeft}>
-              <Ionicons name="ticket-outline" size={16} color="#C4652A" />
+              <Ionicons name="ticket-outline" size={16} color={Colors.terracotta} />
               <Text style={chatStyles.ticketText}>Tickets available</Text>
             </View>
             <Text style={chatStyles.ticketCta}>Get Tickets</Text>
@@ -482,7 +483,7 @@ export default function ChatScreen() {
               {event.member_count > 5 && (
                 <Text style={chatStyles.moreMembers}>+{event.member_count - 5}</Text>
               )}
-              <Ionicons name="chevron-forward" size={14} color="#9B8B7A" style={{ marginLeft: 8 }} />
+              <Ionicons name="chevron-forward" size={14} color={Colors.warmGray} style={{ marginLeft: 8 }} />
             </TouchableOpacity>
           </View>
         )}
@@ -496,7 +497,7 @@ export default function ChatScreen() {
       >
         {loading ? (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-            <ActivityIndicator size="large" color="#C4652A" />
+            <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
         ) : (
           <FlatList
@@ -553,9 +554,9 @@ export default function ChatScreen() {
           <View style={[chatStyles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
             <TouchableOpacity onPress={handlePhotoPress} style={chatStyles.cameraBtn} disabled={uploading}>
               {uploading ? (
-                <ActivityIndicator size="small" color="#9B8B7A" />
+                <ActivityIndicator size="small" color={Colors.warmGray} />
               ) : (
-                <Ionicons name="camera-outline" size={24} color="#9B8B7A" />
+                <Ionicons name="camera-outline" size={24} color={Colors.warmGray} />
               )}
             </TouchableOpacity>
 
@@ -564,7 +565,7 @@ export default function ChatScreen() {
               value={inputText}
               onChangeText={setInputText}
               placeholder="Message..."
-              placeholderTextColor="#9B8B7A"
+              placeholderTextColor={Colors.warmGray}
               multiline
               maxLength={1000}
               returnKeyType="default"
@@ -575,7 +576,7 @@ export default function ChatScreen() {
               disabled={!inputText.trim() || uploading}
               style={[chatStyles.sendBtn, inputText.trim() ? chatStyles.sendBtnActive : chatStyles.sendBtnDisabled]}
             >
-              <Ionicons name="arrow-up" size={18} color="#FFFFFF" />
+              <Ionicons name="arrow-up" size={18} color={Colors.white} />
             </TouchableOpacity>
           </View>
         )}
@@ -602,7 +603,7 @@ export default function ChatScreen() {
             <Image source={{ uri: photoViewUrl }} style={chatStyles.photoFull} contentFit="contain" />
           )}
           <TouchableOpacity style={chatStyles.photoClose} onPress={() => setPhotoViewUrl(null)}>
-            <Ionicons name="close" size={24} color="#FFFFFF" />
+            <Ionicons name="close" size={24} color={Colors.white} />
           </TouchableOpacity>
         </Pressable>
       </Modal>
@@ -617,25 +618,25 @@ const chatStyles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
-    backgroundColor: '#FFFFFF',
+    borderBottomColor: Colors.inputBg,
+    backgroundColor: Colors.white,
     gap: 8,
   },
   backBtn: { padding: 2 },
   headerCenter: { flex: 1 },
-  headerTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
-  headerSub: { fontSize: 12, color: '#9B8B7A', marginTop: 1 },
+  headerTitle: { fontSize: 15, fontWeight: '700', color: Colors.asphalt },
+  headerSub: { fontSize: 12, color: Colors.warmGray, marginTop: 1 },
   ellipsisBtn: {
     padding: 4,
   },
   viewPlanBtn: {
     borderWidth: 1.5,
-    borderColor: '#C4652A',
+    borderColor: Colors.terracotta,
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
-  viewPlanText: { fontSize: 12, color: '#C4652A', fontWeight: '600' },
+  viewPlanText: { fontSize: 12, color: Colors.terracotta, fontWeight: '600' },
 
   ticketBanner: {
     flexDirection: 'row',
@@ -643,29 +644,29 @@ const chatStyles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderLeftWidth: 3,
-    borderLeftColor: '#C4652A',
+    borderLeftColor: Colors.terracotta,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
+    borderBottomColor: Colors.inputBg,
   },
   ticketLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ticketText: { fontSize: 13, color: '#1A1A1A', fontWeight: '500' },
-  ticketCta: { fontSize: 13, color: '#C4652A', fontWeight: '700' },
+  ticketText: { fontSize: 13, color: Colors.asphalt, fontWeight: '500' },
+  ticketCta: { fontSize: 13, color: Colors.terracotta, fontWeight: '700' },
 
   membersBar: {
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
-    backgroundColor: '#FFFFFF',
+    borderBottomColor: Colors.inputBg,
+    backgroundColor: Colors.white,
   },
   membersInner: { flexDirection: 'row', alignItems: 'center' },
-  memberAvatar: { borderWidth: 2, borderColor: '#FFFFFF', borderRadius: 16 },
+  memberAvatar: { borderWidth: 2, borderColor: Colors.white, borderRadius: 16 },
   memberAvatarImg: { width: 30, height: 30, borderRadius: 15 },
-  memberAvatarFallback: { backgroundColor: '#F0E6D3', alignItems: 'center', justifyContent: 'center' },
-  memberInitial: { fontSize: 11, fontWeight: '700', color: '#C4652A' },
-  moreMembers: { fontSize: 12, color: '#9B8B7A', marginLeft: 10, fontWeight: '600' },
+  memberAvatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
+  memberInitial: { fontSize: 11, fontWeight: '700', color: Colors.terracotta },
+  moreMembers: { fontSize: 12, color: Colors.warmGray, marginLeft: 10, fontWeight: '600' },
 
   messageList: { paddingVertical: 12 },
 
@@ -674,23 +675,23 @@ const chatStyles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 16,
     paddingTop: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderTopWidth: 1,
-    borderTopColor: '#F0E6D3',
+    borderTopColor: Colors.inputBg,
     gap: 10,
   },
   cameraBtn: { padding: 4, paddingBottom: 8 },
   input: {
     flex: 1,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     borderRadius: 22,
     paddingLeft: 16,
     paddingRight: 16,
     paddingVertical: 10,
     fontSize: 15,
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     maxHeight: 100,
     textAlign: 'left',
   },
@@ -702,22 +703,22 @@ const chatStyles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 2,
   },
-  sendBtnActive: { backgroundColor: '#C4652A' },
-  sendBtnDisabled: { backgroundColor: '#F0E6D3' },
+  sendBtnActive: { backgroundColor: Colors.terracotta },
+  sendBtnDisabled: { backgroundColor: Colors.inputBg },
 
   readOnlyBar: {
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 20,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderTopWidth: 1,
-    borderTopColor: '#F0E6D3',
+    borderTopColor: Colors.inputBg,
   },
-  readOnlyText: { fontSize: 13, color: '#9B8B7A', fontStyle: 'italic' },
+  readOnlyText: { fontSize: 13, color: Colors.warmGray, fontStyle: 'italic' },
 
   photoModal: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.95)',
+    backgroundColor: Colors.overlayDarker,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -729,7 +730,7 @@ const chatStyles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: Colors.overlayLight,
     alignItems: 'center',
     justifyContent: 'center',
   },

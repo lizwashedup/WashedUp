@@ -22,6 +22,43 @@ const brand = {
   // ── Semantic ─────────────────────────────────────────────────────────────
   successGreen: '#4CAF50',
   errorRed: '#E53935',
+  errorBgLight: '#FEE2E2',
+  cancelRed: '#DC2626',
+
+  // ── Empty states / accents ───────────────────────────────────────────────
+  emptyIconBg: '#FFF0E8',
+
+  // ── Overlays & shadows ────────────────────────────────────────────────────
+  overlayDark: 'rgba(0,0,0,0.5)',
+  overlayMedium: 'rgba(0,0,0,0.45)',
+  overlayDark40: 'rgba(0,0,0,0.4)',
+  overlayDark60: 'rgba(0,0,0,0.6)',
+  overlayDark25: 'rgba(0,0,0,0.25)',
+  overlayDarker: 'rgba(0,0,0,0.95)',
+  overlayLight: 'rgba(255,255,255,0.15)',
+  overlayWhite: 'rgba(255,255,255,0.6)',
+  overlayWhiteLight: 'rgba(255,255,255,0.85)',
+  overlayWhite90: 'rgba(255,255,255,0.9)',
+  shadowLight: 'rgba(0,0,0,0.2)',
+  shadowMedium: 'rgba(0,0,0,0.15)',
+  shadowBlack: '#000',
+  separatorLight: '#EEEEEE',
+  separatorDark: 'rgba(255,255,255,0.1)',
+  textDark80: 'rgba(0,0,0,0.8)',
+  codeHighlightLight: 'rgba(0,0,0,0.05)',
+  codeHighlightDark: 'rgba(255,255,255,0.05)',
+
+  // ── Category accents (chat list, etc.) ────────────────────────────────────
+  categoryMusic: '#7C5CBF',
+  categoryFilm: '#5C7CBF',
+  categoryNightlife: '#BF5C7C',
+  categoryFood: '#BF7C5C',
+  categoryOutdoors: '#5CBF7C',
+  categoryFitness: '#5CBFBF',
+  categoryArt: '#BF5CBF',
+  categoryComedy: '#D97746',
+  categorySports: '#5C7CBF',
+  categoryWellness: '#5CBF9C',
 
   // ── Legacy alias (keep so old references don't break immediately) ─────────
   primaryOrange: '#D97746',

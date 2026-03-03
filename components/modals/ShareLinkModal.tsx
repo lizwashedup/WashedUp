@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Share2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import Colors from '../../constants/Colors';
 
 const SHARE_EXAMPLES = [
   'Instagram Stories or DMs',
@@ -68,7 +69,7 @@ export function ShareLinkModal({
 
           <View style={styles.buttonRow}>
             <TouchableOpacity style={styles.shareButton} onPress={handleShare} activeOpacity={0.85}>
-              <Share2 size={18} color="#FFFFFF" strokeWidth={2} />
+              <Share2 size={18} color={Colors.white} strokeWidth={2} />
               <Text style={styles.shareButtonText}>Share</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.doneButton} onPress={onClose} activeOpacity={0.85}>
@@ -84,13 +85,13 @@ export function ShareLinkModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: Colors.overlayDark,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   modal: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderRadius: 16,
     padding: 24,
     width: '100%',
@@ -99,12 +100,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: '#666666',
+    color: Colors.textMedium,
     marginBottom: 16,
   },
   list: {
@@ -116,18 +117,18 @@ const styles = StyleSheet.create({
   },
   bullet: {
     fontSize: 14,
-    color: '#666666',
+    color: Colors.textMedium,
     marginRight: 8,
   },
   listItem: {
     flex: 1,
     fontSize: 14,
-    color: '#666666',
+    color: Colors.textMedium,
   },
   encouragement: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#C4652A',
+    color: Colors.terracotta,
     marginBottom: 20,
   },
   buttonRow: {
@@ -140,14 +141,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     paddingVertical: 14,
     borderRadius: 14,
   },
   shareButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: Colors.white,
   },
   doneButton: {
     flex: 1,
@@ -156,11 +157,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#C4652A',
+    borderColor: Colors.terracotta,
   },
   doneButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#C4652A',
+    color: Colors.terracotta,
   },
 });

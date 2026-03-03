@@ -956,7 +956,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displayLG,
     color: Colors.terracotta,
-    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowColor: Colors.shadowLight,
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
@@ -987,7 +987,7 @@ const styles = StyleSheet.create({
   photoPreviewImage: { width: '100%', height: '100%' },
   photoLoadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.6)',
+    backgroundColor: Colors.overlayWhite,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1001,7 +1001,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: 'rgba(0,0,0,0.15)',
+    shadowColor: Colors.shadowMedium,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
@@ -1015,7 +1015,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    shadowColor: 'rgba(0,0,0,0.15)',
+    shadowColor: Colors.shadowMedium,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
@@ -1124,7 +1124,7 @@ const styles = StyleSheet.create({
   // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: Colors.overlayDark,
     justifyContent: 'flex-end',
   },
   modalSheet: {

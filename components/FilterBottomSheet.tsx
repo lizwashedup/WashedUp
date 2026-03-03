@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Check } from 'lucide-react-native';
+import Colors from '../../constants/Colors';
 
 export interface FilterSheetOption {
   key: string;
@@ -67,7 +68,7 @@ export function FilterBottomSheet({
                   {opt.label}
                 </Text>
                 <View style={[styles.sheetCheck, active && styles.sheetCheckActive]}>
-                  {active && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
+                  {active && <Check size={13} color={Colors.white} strokeWidth={3} />}
                 </View>
               </TouchableOpacity>
             );
@@ -85,11 +86,11 @@ export function FilterBottomSheet({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: Colors.overlayMedium,
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
@@ -99,7 +100,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#E5E5E5',
+    backgroundColor: Colors.border,
     alignSelf: 'center',
     marginTop: 12,
     marginBottom: 20,
@@ -110,35 +111,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 4,
   },
-  sheetTitle: { fontSize: 18, fontWeight: '800', color: '#1A1A1A' },
-  sheetClear: { fontSize: 14, color: '#999999', fontWeight: '500' },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: Colors.asphalt },
+  sheetClear: { fontSize: 14, color: Colors.textLight, fontWeight: '500' },
   sheetRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F5',
+    borderBottomColor: Colors.border,
   },
-  sheetRowText: { fontSize: 16, color: '#1A1A1A', fontWeight: '500' },
-  sheetRowTextActive: { color: '#C4652A', fontWeight: '700' },
+  sheetRowText: { fontSize: 16, color: Colors.asphalt, fontWeight: '500' },
+  sheetRowTextActive: { color: Colors.terracotta, fontWeight: '700' },
   sheetCheck: {
     width: 24,
     height: 24,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#DDDDDD',
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sheetCheckActive: { backgroundColor: '#C4652A', borderColor: '#C4652A' },
+  sheetCheckActive: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
   sheetDone: {
     marginTop: 20,
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sheetDoneText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  sheetDoneText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
 });

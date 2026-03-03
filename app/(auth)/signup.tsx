@@ -21,7 +21,7 @@ import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
-import { Fonts } from '../../constants/Typography';
+import { Fonts, FontSizes } from '../../constants/Typography';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -242,7 +242,7 @@ export default function SignupScreen() {
                 disabled={loading || !agreedToTerms}
               >
                 {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color={Colors.white} />
                 ) : (
                   <Text style={styles.primaryButtonText}>Sign Up</Text>
                 )}
@@ -278,7 +278,7 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: Colors.backgroundCream,
+    backgroundColor: Colors.parchment,
   },
   keyboardView: {
     flex: 1,
@@ -297,7 +297,8 @@ const styles = StyleSheet.create({
     height: 56,
   },
   tagline: {
-    fontSize: 16,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
     color: Colors.textMedium,
     marginTop: 4,
     textAlign: 'center',
@@ -309,12 +310,13 @@ const styles = StyleSheet.create({
     paddingTop: 32,
   },
   formTitle: {
-    fontFamily: Fonts.display,
-    fontSize: 28,
-    color: Colors.textDark,
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayLG,
+    color: Colors.asphalt,
   },
   formSubtitle: {
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
     marginTop: 4,
   },
@@ -325,22 +327,22 @@ const styles = StyleSheet.create({
   gap8: { height: 8 },
   input: {
     height: 52,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
     paddingLeft: 16,
     paddingRight: 16,
     paddingVertical: 0,
-    fontSize: 16,
-    fontWeight: '400',
-    color: Colors.textDark,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
     textAlign: 'left',
   },
   inputFocused: {
-    borderColor: Colors.primaryOrange,
+    borderColor: Colors.terracotta,
     borderWidth: 1.5,
-    shadowColor: Colors.primaryOrange,
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
@@ -361,7 +363,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   helperText: {
-    fontSize: 12,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
     color: Colors.textLight,
   },
   agreementRow: {
@@ -382,13 +385,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxChecked: {
-    backgroundColor: Colors.primaryOrange,
-    borderColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
   },
   checkmark: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
+    color: Colors.white,
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
   },
   agreementTextWrap: {
     flex: 1,
@@ -397,24 +400,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   agreementText: {
-    fontSize: 14,
-    color: Colors.textDark,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
     lineHeight: 20,
   },
   agreementLink: {
-    fontSize: 14,
-    color: Colors.primaryOrange,
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
     textDecorationLine: 'underline',
-    fontWeight: '600',
     lineHeight: 20,
   },
   primaryButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: '#C4652A', // WashedUp orange — matches logo
+    backgroundColor: Colors.terracotta,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#C4652A',
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -424,13 +428,14 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   primaryButtonText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#FFFFFF',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.white,
   },
   errorText: {
     marginTop: 8,
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.errorRed,
   },
   errorPlaceholder: {
@@ -447,12 +452,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   signupPrompt: {
-    fontSize: 15,
-    color: Colors.textDark,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
   },
   signupLink: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.primaryOrange,
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
   },
 });

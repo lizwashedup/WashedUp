@@ -348,8 +348,8 @@ export default function ProfileScreen() {
 
           {deleteStep === 2 && (
             <>
-              <View style={[styles.deleteWarningIcon, { backgroundColor: '#FEE2E2' }]}>
-                <Ionicons name="trash-outline" size={40} color="#dc2626" />
+              <View style={[styles.deleteWarningIcon, { backgroundColor: Colors.errorBgLight }]}>
+                <Ionicons name="trash-outline" size={40} color={Colors.cancelRed} />
               </View>
               <Text style={styles.deleteTitle}>What you'll lose</Text>
               {[
@@ -359,7 +359,7 @@ export default function ProfileScreen() {
                 'Your saved wishlist',
               ].map((item, i) => (
                 <View key={i} style={styles.deleteListRow}>
-                  <Ionicons name="close-circle" size={18} color="#dc2626" />
+                  <Ionicons name="close-circle" size={18} color={Colors.cancelRed} />
                   <Text style={styles.deleteListText}>{item}</Text>
                 </View>
               ))}
@@ -384,7 +384,7 @@ export default function ProfileScreen() {
                 disabled={deleting || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
               >
                 {deleting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={Colors.white} />
                 ) : (
                   <Text style={styles.deleteFinalBtnText}>Permanently Delete Account</Text>
                 )}
@@ -438,7 +438,7 @@ export default function ProfileScreen() {
               </View>
             )}
             <View style={styles.editAvatarBadge}>
-              <Camera size={14} color="#FFFFFF" strokeWidth={2.5} />
+              <Camera size={14} color={Colors.white} strokeWidth={2.5} />
             </View>
           </TouchableOpacity>
           <Text style={styles.editPhotoHint}>Tap to change photo</Text>
@@ -519,7 +519,7 @@ export default function ProfileScreen() {
             activeOpacity={0.85}
           >
             {saving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={Colors.white} />
             ) : (
               <Text style={styles.editSaveBtnText}>Save Changes</Text>
             )}
@@ -756,7 +756,7 @@ const styles = StyleSheet.create({
   deleteAccountLink: {
     ...bodyMedium,
     flex: 1,
-    color: '#dc2626',
+    color: Colors.cancelRed,
   },
   logOutWrap: {
     paddingHorizontal: 20,
@@ -807,16 +807,17 @@ const styles = StyleSheet.create({
     gap: 10,
     alignSelf: 'stretch',
   },
-  deleteListText: { fontSize: 15, color: '#44403C', flex: 1 },
+  deleteListText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, flex: 1 },
   deleteInput: {
     alignSelf: 'stretch',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderWidth: 1.5,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    fontSize: 16,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
     textAlign: 'center',
     letterSpacing: 2,
@@ -833,7 +834,7 @@ const styles = StyleSheet.create({
   deleteCancelBtnText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.warmGray },
   deleteFinalBtn: {
     alignSelf: 'stretch',
-    backgroundColor: '#dc2626',
+    backgroundColor: Colors.cancelRed,
     paddingVertical: 16,
     borderRadius: 14,
     alignItems: 'center',

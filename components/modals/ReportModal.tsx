@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import Colors from '../../constants/Colors';
+import { Fonts, FontSizes } from '../../constants/Typography';
 
 const REPORT_REASONS = [
   'Inappropriate behavior',
@@ -99,7 +101,7 @@ export function ReportModal({
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             disabled={submitting}
           >
-            <Ionicons name="close" size={22} color="#1C1917" />
+            <Ionicons name="close" size={22} color={Colors.asphalt} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Report User</Text>
           {/* Spacer to keep title centered */}
@@ -135,7 +137,7 @@ export function ReportModal({
                   </Text>
                   <View style={[styles.check, isSelected && styles.checkSelected]}>
                     {isSelected && (
-                      <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                      <Ionicons name="checkmark" size={14} color={Colors.white} />
                     )}
                   </View>
                 </TouchableOpacity>
@@ -157,7 +159,7 @@ export function ReportModal({
             activeOpacity={0.9}
           >
             {submitting ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={Colors.white} />
             ) : (
               <Text style={styles.submitBtnText}>Submit Report</Text>
             )}
@@ -171,7 +173,7 @@ export function ReportModal({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
   },
 
   // Header
@@ -183,13 +185,13 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
-    backgroundColor: '#FFFFFF',
+    borderBottomColor: Colors.inputBg,
+    backgroundColor: Colors.white,
   },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#1C1917',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
   },
 
   // Body
@@ -200,25 +202,25 @@ const styles = StyleSheet.create({
     gap: 20,
   },
   subtitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1C1917',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.displaySM,
+    color: Colors.asphalt,
     textAlign: 'center',
     lineHeight: 26,
   },
   subtitleName: {
-    color: '#C4652A',
-    fontWeight: '700',
+    color: Colors.terracotta,
+    fontFamily: Fonts.sansBold,
   },
 
   // Reason list
   reasonList: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#F0E6D3',
-    shadowColor: '#1C1917',
+    borderColor: Colors.inputBg,
+    shadowColor: Colors.asphalt,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 6,
@@ -234,35 +236,36 @@ const styles = StyleSheet.create({
   },
   reasonRowBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
+    borderBottomColor: Colors.inputBg,
   },
   reasonText: {
     flex: 1,
-    fontSize: 15,
-    color: '#1C1917',
-    fontWeight: '500',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
   },
   reasonTextSelected: {
-    color: '#C4652A',
-    fontWeight: '600',
+    color: Colors.terracotta,
+    fontFamily: Fonts.sansBold,
   },
   check: {
     width: 24,
     height: 24,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#D0C4B5',
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkSelected: {
-    backgroundColor: '#C4652A',
-    borderColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
   },
 
   disclaimer: {
-    fontSize: 13,
-    color: '#9B8B7A',
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
     textAlign: 'center',
     lineHeight: 18,
   },
@@ -271,30 +274,30 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderTopWidth: 1,
-    borderTopColor: '#F0E6D3',
+    borderTopColor: Colors.inputBg,
   },
   submitBtn: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#C4652A',
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
   },
   submitBtnDisabled: {
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.inputBg,
     shadowOpacity: 0,
     elevation: 0,
   },
   submitBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.white,
   },
 });

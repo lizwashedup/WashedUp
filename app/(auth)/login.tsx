@@ -203,7 +203,7 @@ export default function LoginScreen() {
                 disabled={loading}
               >
                 {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color={Colors.white} />
                 ) : (
                   <Text style={styles.primaryButtonText}>Log In</Text>
                 )}
@@ -272,7 +272,7 @@ export default function LoginScreen() {
               disabled={resetLoading}
             >
               {resetLoading ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={Colors.white} />
               ) : (
                 <Text style={styles.primaryButtonText}>Send Reset Link</Text>
               )}
@@ -381,10 +381,10 @@ const styles = StyleSheet.create({
   primaryButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: '#C4652A', // WashedUp orange — matches logo
+    backgroundColor: Colors.terracotta,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#C4652A',
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: Colors.white,
   },
   errorText: {
     marginTop: 8,
@@ -448,7 +448,7 @@ const styles = StyleSheet.create({
 const modalStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: Colors.overlayDark,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,

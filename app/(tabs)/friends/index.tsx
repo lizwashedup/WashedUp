@@ -21,7 +21,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Users, QrCode, Share2, X } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { supabase } from '../../../lib/supabase';
-import { Fonts } from '../../../constants/Typography';
+import ProfileButton from '../../../components/ProfileButton';
+import Colors from '../../../constants/Colors';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -268,15 +270,16 @@ export default function YourPeopleScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Your People</Text>
+        <ProfileButton />
       </View>
 
       {/* Search bar */}
       <View style={styles.searchWrap}>
-        <Search size={18} color="#999999" style={styles.searchIcon} />
+        <Search size={18} color={Colors.textLight} style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search by name or @handle"
-          placeholderTextColor="#C8BEB5"
+          placeholderTextColor={Colors.textLight}
           value={searchQuery}
           onChangeText={setSearchQuery}
           autoCapitalize="none"
@@ -284,7 +287,7 @@ export default function YourPeopleScreen() {
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <X size={18} color="#999999" />
+            <X size={18} color={Colors.textLight} />
           </TouchableOpacity>
         )}
       </View>
@@ -293,7 +296,7 @@ export default function YourPeopleScreen() {
         /* Search results overlay */
         <View style={styles.searchResults}>
           {searchLoading ? (
-            <ActivityIndicator size="small" color="#C4652A" style={{ marginTop: 24 }} />
+            <ActivityIndicator size="small" color={Colors.terracotta} style={{ marginTop: 24 }} />
           ) : searchResults.length === 0 ? (
             <Text style={styles.emptySearchText}>No one found</Text>
           ) : (
@@ -343,11 +346,11 @@ export default function YourPeopleScreen() {
                 <Text style={styles.handleLabel}>@{myHandle}</Text>
                 <View style={styles.handleBtnRow}>
                   <TouchableOpacity style={styles.shareBtn} onPress={shareHandle}>
-                    <Share2 size={16} color="#FFFFFF" />
+                    <Share2 size={16} color={Colors.white} />
                     <Text style={styles.shareBtnText}>Share</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.qrBtn} onPress={() => setShowQr(true)}>
-                    <QrCode size={16} color="#C4652A" />
+                    <QrCode size={16} color={Colors.terracotta} />
                     <Text style={styles.qrBtnText}>QR Code</Text>
                   </TouchableOpacity>
                 </View>
@@ -360,7 +363,7 @@ export default function YourPeopleScreen() {
                   <TextInput
                     style={styles.handleInput}
                     placeholder="yourname"
-                    placeholderTextColor="#C8BEB5"
+                    placeholderTextColor={Colors.textLight}
                     value={handleInput}
                     onChangeText={(t) => setHandleInput(normalizeHandleInput(t))}
                     autoCapitalize="none"
@@ -369,7 +372,7 @@ export default function YourPeopleScreen() {
                   />
                 </View>
                 {checkingHandle ? (
-                  <ActivityIndicator size="small" color="#999999" style={styles.handleAvailability} />
+                  <ActivityIndicator size="small" color={Colors.textLight} style={styles.handleAvailability} />
                 ) : handleAvailable === true ? (
                   <Text style={styles.handleAvailable}>Available</Text>
                 ) : handleAvailable === false ? (
@@ -382,7 +385,7 @@ export default function YourPeopleScreen() {
                   disabled={savingHandle || checkingHandle || handleAvailable === false || handleAvailable === null || handleInput.length < 2}
                 >
                   {savingHandle ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <ActivityIndicator size="small" color={Colors.white} />
                   ) : (
                     <Text style={styles.saveHandleBtnText}>Save</Text>
                   )}
@@ -399,7 +402,7 @@ export default function YourPeopleScreen() {
 
           {friends.length === 0 ? (
             <View style={styles.emptyState}>
-              <Users size={48} color="#C4652A" />
+              <Users size={48} color={Colors.terracotta} />
               <Text style={[styles.emptyTitle, { textAlign: 'center' }]}>This is where you can add people you might want to invite first to your plans.</Text>
               <Text style={styles.emptySub}>
                 If you know anyone on WashedUp, or after your first plan add people you want to spend time with again!
@@ -442,7 +445,7 @@ export default function YourPeopleScreen() {
           <Pressable style={styles.qrModal} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.qrModalTitle}>Scan to add me</Text>
             {myHandle && (
-              <QRCode value={`https://washedup.app/u/${myHandle}`} size={180} backgroundColor="#FFFFFF" />
+              <QRCode value={`https://washedup.app/u/${myHandle}`} size={180} backgroundColor={Colors.white} />
             )}
             <TouchableOpacity style={styles.qrCloseBtn} onPress={() => setShowQr(false)}>
               <Text style={styles.qrCloseBtnText}>Done</Text>
@@ -457,7 +460,7 @@ export default function YourPeopleScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: Colors.parchment },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -467,10 +470,10 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: Fonts.display,
-    fontSize: 28,
-    color: '#C4652A',
-    textShadowColor: 'rgba(0,0,0,0.2)',
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayLG,
+    color: Colors.terracotta,
+    textShadowColor: Colors.shadowLight,
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
@@ -480,12 +483,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 20,
     marginBottom: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderRadius: 12,
     height: 44,
     paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
   },
   searchIcon: { position: 'absolute', left: 14 },
   searchInput: {
@@ -495,8 +498,8 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
     paddingRight: 8,
     paddingVertical: 0,
-    fontSize: 16,
-    color: '#1A1A1A',
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
     textAlign: 'left',
   },
 
@@ -509,96 +512,96 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
+    borderBottomColor: Colors.border,
   },
   searchRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   searchAvatar: { width: 40, height: 40, borderRadius: 20 },
   avatarFallback: {
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarInitial: { fontSize: 16, fontWeight: '700', color: '#C4652A' },
-  searchRowName: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
-  searchRowHandle: { fontSize: 13, color: '#888888', marginTop: 1 },
+  avatarInitial: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansBold, color: Colors.terracotta },
+  searchRowName: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
+  searchRowHandle: { fontSize: FontSizes.bodySM, color: Colors.textLight, marginTop: 1 },
   addBtn: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 8,
   },
-  addBtnText: { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
-  addedBtn: { backgroundColor: '#F0E6D3' },
-  addedBtnText: { fontSize: 13, color: '#888888' },
+  addBtnText: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sansMedium, color: Colors.white },
+  addedBtn: { backgroundColor: Colors.inputBg },
+  addedBtnText: { fontSize: FontSizes.bodySM, color: Colors.textLight },
 
-  emptySearchText: { fontSize: 15, color: '#888888', textAlign: 'center', marginTop: 24 },
+  emptySearchText: { fontSize: FontSizes.bodyLG, color: Colors.textLight, textAlign: 'center', marginTop: 24 },
 
   handleCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     marginHorizontal: 20,
     marginBottom: 20,
     borderRadius: 14,
     padding: 16,
   },
-  handleLabel: { fontSize: 18, fontWeight: '700', color: '#1A1A1A', marginBottom: 12 },
+  handleLabel: { fontSize: FontSizes.displaySM, fontFamily: Fonts.sansBold, color: Colors.asphalt, marginBottom: 12 },
   handleBtnRow: { flexDirection: 'row', gap: 10 },
   shareBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 10,
     height: 40,
     paddingHorizontal: 16,
   },
-  shareBtnText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+  shareBtnText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.white },
   qrBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderWidth: 1,
-    borderColor: '#C4652A',
+    borderColor: Colors.terracotta,
     borderRadius: 10,
     height: 40,
     paddingHorizontal: 16,
   },
-  qrBtnText: { fontSize: 14, fontWeight: '600', color: '#C4652A' },
-  handleSetLabel: { fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 },
+  qrBtnText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.terracotta },
+  handleSetLabel: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.asphalt, marginBottom: 8 },
   handleInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderWidth: 1.5,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
     borderRadius: 14,
     marginBottom: 8,
   },
-  handlePrefix: { fontSize: 16, color: '#888888', marginLeft: 16 },
+  handlePrefix: { fontSize: FontSizes.bodyLG, color: Colors.textLight, marginLeft: 16 },
   handleInput: {
     flex: 1,
     paddingVertical: 14,
     paddingLeft: 8,
     paddingRight: 16,
-    fontSize: 16,
-    color: '#1A1A1A',
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
     textAlign: 'left',
   },
   handleAvailability: { marginTop: 6, marginBottom: 4 },
-  handleAvailable: { fontSize: 12, color: '#16A34A', fontWeight: '600', marginTop: 6, marginBottom: 4 },
-  handleTaken: { fontSize: 12, color: '#DC2626', fontWeight: '600', marginTop: 6, marginBottom: 4 },
-  handleError: { fontSize: 13, color: '#E53935', marginBottom: 8 },
+  handleAvailable: { fontSize: FontSizes.caption, color: Colors.successGreen, fontFamily: Fonts.sansMedium, marginTop: 6, marginBottom: 4 },
+  handleTaken: { fontSize: FontSizes.caption, color: Colors.errorRed, fontFamily: Fonts.sansMedium, marginTop: 6, marginBottom: 4 },
+  handleError: { fontSize: FontSizes.bodySM, color: Colors.errorRed, marginBottom: 8 },
   saveHandleBtn: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
   },
-  saveHandleBtnText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+  saveHandleBtnText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.white },
 
   sectionHeader: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 8 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A' },
-  sectionCount: { fontSize: 14, color: '#888888' },
+  sectionTitle: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansBold, color: Colors.asphalt },
+  sectionCount: { fontSize: FontSizes.bodyMD, color: Colors.textLight },
 
   friendsList: { paddingBottom: 32 },
   friendRow: {
@@ -607,15 +610,15 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0E6D3',
+    borderBottomColor: Colors.border,
   },
   friendAvatar: { width: 44, height: 44, borderRadius: 22 },
   friendAvatarFallback: {},
-  friendAvatarInitial: { fontSize: 18, fontWeight: '700', color: '#C4652A' },
+  friendAvatarInitial: { fontSize: FontSizes.displaySM, fontFamily: Fonts.sansBold, color: Colors.terracotta },
   friendInfo: { flex: 1, marginLeft: 12 },
-  friendName: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
-  friendHandle: { fontSize: 13, color: '#888888', marginTop: 1 },
-  removeHint: { fontSize: 11, color: '#C8BEB5' },
+  friendName: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
+  friendHandle: { fontSize: FontSizes.bodySM, color: Colors.textLight, marginTop: 1 },
+  removeHint: { fontSize: FontSizes.caption, color: Colors.textLight },
 
   emptyState: {
     flex: 1,
@@ -624,23 +627,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     gap: 12,
   },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
-  emptySub: { fontSize: 15, color: '#888888', textAlign: 'center', lineHeight: 22 },
-  emptyHint: { fontSize: 14, color: '#C4652A', fontWeight: '500' },
+  emptyTitle: { fontSize: FontSizes.displaySM, fontFamily: Fonts.sansBold, color: Colors.asphalt },
+  emptySub: { fontSize: FontSizes.bodyLG, color: Colors.textLight, textAlign: 'center', lineHeight: 22 },
+  emptyHint: { fontSize: FontSizes.bodyMD, color: Colors.terracotta, fontFamily: Fonts.sansMedium },
 
   qrOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: Colors.overlayDark,
     justifyContent: 'center',
     alignItems: 'center',
   },
   qrModal: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
   },
-  qrModalTitle: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 16 },
+  qrModalTitle: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.asphalt, marginBottom: 16 },
   qrCloseBtn: { marginTop: 20, paddingVertical: 10, paddingHorizontal: 24 },
-  qrCloseBtnText: { fontSize: 15, fontWeight: '600', color: '#C4652A' },
+  qrCloseBtnText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.terracotta },
 });

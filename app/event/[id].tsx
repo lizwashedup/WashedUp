@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -150,7 +151,7 @@ export default function EventDetailScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#C4652A" />
+          <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
       </View>
     );
@@ -176,7 +177,7 @@ export default function EventDetailScreen() {
             style={[styles.circleButton, { top: insets.top + 8, left: 16 }]}
             onPress={() => router.back()}
           >
-            <ArrowLeft size={20} color="#1A1A1A" strokeWidth={2} />
+            <ArrowLeft size={20} color={Colors.asphalt} strokeWidth={2} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -191,7 +192,7 @@ export default function EventDetailScreen() {
               } catch {}
             }}
           >
-            <Share2 size={18} color="#1A1A1A" strokeWidth={2} />
+            <Share2 size={18} color={Colors.asphalt} strokeWidth={2} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -203,8 +204,8 @@ export default function EventDetailScreen() {
           >
             <Heart
               size={18}
-              color={isWishlisted ? '#E53935' : '#1A1A1A'}
-              fill={isWishlisted ? '#E53935' : 'transparent'}
+              color={isWishlisted ? Colors.errorRed : Colors.asphalt}
+              fill={isWishlisted ? Colors.errorRed : 'transparent'}
               strokeWidth={2}
             />
           </TouchableOpacity>
@@ -212,7 +213,7 @@ export default function EventDetailScreen() {
 
         <View style={styles.content}>
           {event.category && (
-            <View style={[styles.detailCategoryPill, { backgroundColor: '#C4652A' }]}>
+            <View style={[styles.detailCategoryPill, { backgroundColor: Colors.terracotta }]}>
               <Text style={styles.detailCategoryText}>{event.category}</Text>
             </View>
           )}
@@ -220,13 +221,13 @@ export default function EventDetailScreen() {
           <Text style={styles.title}>{event.title}</Text>
 
           <View style={styles.metaRow}>
-            <Calendar size={16} color="#9B8B7A" strokeWidth={2} />
+            <Calendar size={16} color={Colors.warmGray} strokeWidth={2} />
             <Text style={styles.metaText}>{formatFullDate(event.event_date, event.start_time)}</Text>
           </View>
 
           {event.venue && (
             <View style={styles.metaRow}>
-              <MapPin size={16} color="#9B8B7A" strokeWidth={2} />
+              <MapPin size={16} color={Colors.warmGray} strokeWidth={2} />
               <Text style={styles.metaText}>
                 {event.venue}{event.venue_address ? ` · ${event.venue_address}` : ''}
               </Text>
@@ -235,7 +236,7 @@ export default function EventDetailScreen() {
 
           {event.ticket_price && (
             <View style={styles.metaRow}>
-              <Ticket size={16} color="#9B8B7A" strokeWidth={2} />
+              <Ticket size={16} color={Colors.warmGray} strokeWidth={2} />
               <Text style={styles.metaText}>{event.ticket_price}</Text>
             </View>
           )}
@@ -252,13 +253,13 @@ export default function EventDetailScreen() {
               onPress={() => openUrl(event.external_url!)}
             >
               <Text style={styles.ticketLinkText}>Get Tickets</Text>
-              <ChevronRight size={16} color="#C4652A" strokeWidth={2} />
+              <ChevronRight size={16} color={Colors.terracotta} strokeWidth={2} />
             </TouchableOpacity>
           )}
 
           <View style={styles.plansSection}>
             <View style={styles.plansSectionHeader}>
-              <Users size={18} color="#1A1A1A" strokeWidth={2} />
+              <Users size={18} color={Colors.asphalt} strokeWidth={2} />
               <Text style={styles.plansSectionTitle}>People Going With WashedUp</Text>
             </View>
 
@@ -276,8 +277,8 @@ export default function EventDetailScreen() {
                     {plan.host_photo ? (
                       <Image source={{ uri: plan.host_photo }} style={styles.planCreatorAvatar} contentFit="cover" />
                     ) : (
-                      <View style={[styles.planCreatorAvatar, { backgroundColor: '#F0E6D3', alignItems: 'center', justifyContent: 'center' }]}>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#C4652A' }}>
+                      <View style={[styles.planCreatorAvatar, { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' }]}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.terracotta }}>
                           {plan.host_name?.[0]?.toUpperCase() ?? '?'}
                         </Text>
                       </View>
@@ -291,11 +292,11 @@ export default function EventDetailScreen() {
                     <View style={{ flex: 1 }} />
                     <View style={[
                       styles.planJoinBtn,
-                      plan.status === 'full' && { backgroundColor: '#E5E5E5' }
+                      plan.status === 'full' && { backgroundColor: Colors.border }
                     ]}>
                       <Text style={[
                         styles.planJoinBtnText,
-                        plan.status === 'full' && { color: '#999' }
+                        plan.status === 'full' && { color: Colors.textLight }
                       ]}>
                         {plan.status === 'full' ? 'Full' : 'Join'}
                       </Text>
@@ -332,7 +333,7 @@ export default function EventDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: Colors.parchment },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   heroContainer: { width: SCREEN_WIDTH, height: 280, position: 'relative' },
   circleButton: {
@@ -340,10 +341,10 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: Colors.overlayWhite90,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
+    shadowColor: Colors.shadowBlack,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -351,52 +352,52 @@ const styles = StyleSheet.create({
   },
   content: { padding: 20, gap: 12 },
   detailCategoryPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  detailCategoryText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF', textTransform: 'capitalize' },
+  detailCategoryText: { fontSize: 11, fontWeight: '700', color: Colors.white, textTransform: 'capitalize' },
   title: {
     fontFamily: Fonts.display,
     fontSize: 28,
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     lineHeight: 34,
   },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  metaText: { fontSize: 14, color: '#9B8B7A', flex: 1, lineHeight: 20 },
-  descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0E6D3' },
-  descriptionText: { fontSize: 15, color: '#666666', lineHeight: 22 },
+  metaText: { fontSize: 14, color: Colors.warmGray, flex: 1, lineHeight: 20 },
+  descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg },
+  descriptionText: { fontSize: 15, color: Colors.textMedium, lineHeight: 22 },
   ticketLink: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingVertical: 8 },
-  ticketLinkText: { fontSize: 15, fontWeight: '700', color: '#C4652A' },
-  plansSection: { marginTop: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: '#F0E6D3', gap: 12 },
+  ticketLinkText: { fontSize: 15, fontWeight: '700', color: Colors.terracotta },
+  plansSection: { marginTop: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
   plansSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  plansSectionTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A1A' },
-  noPlansText: { fontSize: 14, color: '#9B8B7A', fontStyle: 'italic' },
+  plansSectionTitle: { fontSize: 18, fontWeight: '700', color: Colors.asphalt },
+  noPlansText: { fontSize: 14, color: Colors.warmGray, fontStyle: 'italic' },
   planCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderRadius: 12,
     padding: 14,
     gap: 6,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
   },
   planCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   planCreatorAvatar: { width: 28, height: 28, borderRadius: 14, overflow: 'hidden' },
-  planCreatorName: { fontSize: 13, fontWeight: '600', color: '#1A1A1A' },
-  planVibePill: { backgroundColor: '#F0E6D3', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  planVibeText: { fontSize: 10, fontWeight: '600', color: '#9B8B7A', textTransform: 'capitalize' },
-  planJoinBtn: { backgroundColor: '#C4652A', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8 },
-  planJoinBtnText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
-  planTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-  planMeta: { fontSize: 12, color: '#9B8B7A' },
+  planCreatorName: { fontSize: 13, fontWeight: '600', color: Colors.asphalt },
+  planVibePill: { backgroundColor: Colors.inputBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  planVibeText: { fontSize: 10, fontWeight: '600', color: Colors.warmGray, textTransform: 'capitalize' },
+  planJoinBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8 },
+  planJoinBtnText: { fontSize: 13, fontWeight: '700', color: Colors.white },
+  planTitle: { fontSize: 15, fontWeight: '600', color: Colors.asphalt },
+  planMeta: { fontSize: 12, color: Colors.warmGray },
   stickyBar: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderTopWidth: 1,
-    borderTopColor: '#F0E6D3',
+    borderTopColor: Colors.inputBg,
   },
   postPlanButton: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
   },
-  postPlanButtonText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  postPlanButtonText: { fontSize: 16, fontWeight: '700', color: Colors.white },
 });

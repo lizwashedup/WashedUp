@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   },
   pillSelected: { backgroundColor: Colors.primaryOrange, borderColor: Colors.primaryOrange },
   pillText: { fontSize: 16, color: Colors.textDark },
-  pillTextSelected: { color: '#FFFFFF', fontWeight: '600' },
+  pillTextSelected: { color: Colors.white, fontWeight: '600' },
   spacer: { flex: 1 },
   primaryButton: {
     height: 52,
@@ -309,10 +309,10 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
+  primaryButtonText: { fontSize: 17, fontWeight: '700', color: Colors.white },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: Colors.overlayDark,
     justifyContent: 'flex-end',
   },
   modalContent: {
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
   },
   pickerItemSelected: { backgroundColor: Colors.primaryOrange, borderRadius: 8 },
   pickerItemText: { fontSize: 16, color: Colors.textDark },
-  pickerItemTextSelected: { color: '#FFFFFF' },
+  pickerItemTextSelected: { color: Colors.white },
   modalButton: {
     height: 52,
     borderRadius: 14,

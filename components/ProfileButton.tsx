@@ -6,6 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { User } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
+import Colors from '../constants/Colors';
 
 export const PROFILE_PHOTO_KEY = ['profile-photo'] as const;
 
@@ -69,7 +70,7 @@ export default function ProfileButton() {
             contentFit="cover"
           />
         ) : (
-          <User size={20} color="#1A1A1A" strokeWidth={2} />
+          <User size={20} color={Colors.asphalt} strokeWidth={2} />
         )}
       </View>
       <Text style={styles.label}>Profile</Text>
@@ -86,9 +87,9 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -101,6 +102,6 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 9,
     fontWeight: '600',
-    color: '#999999',
+    color: Colors.textLight,
   },
 });

@@ -10,6 +10,7 @@ import * as Notifications from 'expo-notifications';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 
 const VIBE_TAGS = [
   'Music', 'Art', 'Tech', 'Food', 'Fitness', 'Nightlife',
@@ -79,7 +80,7 @@ export default function OnboardingVibesScreen() {
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={styles.backButton}
           >
-            <ChevronLeft size={28} color={Colors.textDark} />
+            <ChevronLeft size={28} color={Colors.asphalt} />
           </TouchableOpacity>
         </View>
 
@@ -124,7 +125,7 @@ export default function OnboardingVibesScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.backgroundCream },
+  safe: { flex: 1, backgroundColor: Colors.parchment },
   container: { flex: 1, paddingHorizontal: 24 },
   progressWrap: {
     height: 4,
@@ -133,7 +134,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 8,
   },
-  progressBar: { height: '100%', backgroundColor: Colors.primaryOrange, borderRadius: 2 },
+  progressBar: { height: '100%', backgroundColor: Colors.terracotta, borderRadius: 2 },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
   backButton: { padding: 4 },
   heading: { fontSize: 22, fontWeight: '700', color: Colors.textDark },
@@ -148,15 +149,15 @@ const styles = StyleSheet.create({
     width: '31%',
     paddingVertical: 14,
     paddingHorizontal: 12,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
   },
-  pillSelected: { backgroundColor: Colors.primaryOrange, borderColor: Colors.primaryOrange },
-  pillText: { fontSize: 16, color: Colors.textDark },
-  pillTextSelected: { color: '#FFFFFF', fontWeight: '600' },
-  countText: { fontSize: 14, color: Colors.textLight, marginTop: 16 },
+  pillSelected: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
+  pillText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
+  pillTextSelected: { color: Colors.white, fontFamily: Fonts.sansBold },
+  countText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textLight, marginTop: 16 },
   spacer: { flex: 1 },
   primaryButton: {
     height: 52,
@@ -171,5 +172,5 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
+  primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.white },
 });

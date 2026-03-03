@@ -1,48 +1,45 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  Share,
-  ActivityIndicator,
-  Dimensions,
-  Linking,
-  Platform,
-  Modal,
-  TextInput,
-  Pressable,
-  Keyboard,
-} from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Image } from 'expo-image';
-import * as Haptics from 'expo-haptics';
-import * as Location from 'expo-location';
-import { MapView, Marker } from '../../components/MapView.native';
-import {
-  ArrowLeft,
-  Calendar,
-  MapPin,
-  Users,
-  Heart,
-  Share2,
-  MessageCircle,
-  ChevronRight,
-  MoreHorizontal,
-} from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
+import * as Location from 'expo-location';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import {
+    ArrowLeft,
+    Calendar,
+    Heart,
+    MapPin,
+    MessageCircle,
+    MoreHorizontal,
+    Users
+} from 'lucide-react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Keyboard,
+    Linking,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
-import { supabase } from '../../lib/supabase';
-import { openUrl } from '../../lib/url';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
+import Colors from '../../constants/Colors';
+import { Fonts, FontSizes } from '../../constants/Typography';
 import { useBlock } from '../../hooks/useBlock';
+import { supabase } from '../../lib/supabase';
+import { openUrl } from '../../lib/url';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
 
@@ -989,7 +986,7 @@ export default function PlanDetailScreen() {
                 style={styles.openChatButton}
                 onPress={() => router.push(`/(tabs)/chats/${plan.id}` as any)}
               >
-                <MessageCircle size={18} color="#FFFFFF" strokeWidth={2} />
+                <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
                 <Text style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
@@ -1004,7 +1001,7 @@ export default function PlanDetailScreen() {
                 style={styles.openChatButton}
                 onPress={() => router.push(`/(tabs)/chats/${plan.id}` as any)}
               >
-                <MessageCircle size={18} color="#FFFFFF" strokeWidth={2} />
+                <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
                 <Text style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
@@ -1025,7 +1022,7 @@ export default function PlanDetailScreen() {
             activeOpacity={0.9}
           >
             {waitlistLoading ? (
-              <ActivityIndicator size="small" color={isOnWaitlist ? '#FFFFFF' : '#C4652A'} />
+              <ActivityIndicator size="small" color={isOnWaitlist ? Colors.white : Colors.terracotta} />
             ) : (
               <Text style={[
                 styles.waitlistButtonText,
@@ -1075,7 +1072,7 @@ export default function PlanDetailScreen() {
             <TextInput
               style={[joinStyles.input, !joinMessage.trim() && joinConfirmed && joinStyles.inputRequired]}
               placeholder="Hey everyone! Can't wait"
-              placeholderTextColor="#999999"
+              placeholderTextColor={Colors.textLight}
               value={joinMessage}
               onChangeText={setJoinMessage}
               multiline
@@ -1101,7 +1098,7 @@ export default function PlanDetailScreen() {
               activeOpacity={0.85}
             >
               {joinMutation.isPending ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={Colors.white} />
               ) : (
                 <Text style={joinStyles.joinBtnText}>Join</Text>
               )}
@@ -1181,7 +1178,7 @@ export default function PlanDetailScreen() {
                 onChangeText={setEditTitle}
                 maxLength={80}
                 placeholder="Plan title"
-                placeholderTextColor="#999"
+                placeholderTextColor={Colors.textLight}
               />
 
               {/* Description */}
@@ -1193,7 +1190,7 @@ export default function PlanDetailScreen() {
                 multiline
                 maxLength={500}
                 placeholder="What's the plan? Dress code, what to expect..."
-                placeholderTextColor="#999"
+                placeholderTextColor={Colors.textLight}
               />
 
               {/* Creator note */}
@@ -1205,7 +1202,7 @@ export default function PlanDetailScreen() {
                 multiline
                 maxLength={150}
                 placeholder="A personal note to people joining"
-                placeholderTextColor="#999"
+                placeholderTextColor={Colors.textLight}
               />
               <Text style={manageStyles.hint}>Min 10 characters · Max 150</Text>
 
@@ -1235,7 +1232,7 @@ export default function PlanDetailScreen() {
                   }}
                   styles={managePlacesStyles}
                   textInputProps={{
-                    placeholderTextColor: '#999',
+                    placeholderTextColor: Colors.textLight,
                   }}
                   enablePoweredByContainer={false}
                   debounce={300}
@@ -1251,7 +1248,7 @@ export default function PlanDetailScreen() {
                 value={editTicketUrl}
                 onChangeText={setEditTicketUrl}
                 placeholder="https://..."
-                placeholderTextColor="#999"
+                placeholderTextColor={Colors.textLight}
                 autoCapitalize="none"
                 keyboardType="url"
               />
@@ -1339,7 +1336,7 @@ export default function PlanDetailScreen() {
                 activeOpacity={0.85}
               >
                 {editSaving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={Colors.white} />
                 ) : (
                   <Text style={manageStyles.saveBtnText}>Save Changes</Text>
                 )}
@@ -1702,7 +1699,7 @@ const styles = StyleSheet.create({
 const joinStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: Colors.overlayDark,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -1729,17 +1726,17 @@ const joinStyles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     marginBottom: 4,
     paddingRight: 32,
   },
   subtitle: {
     fontSize: 14,
-    color: '#999999',
+    color: Colors.textLight,
     marginBottom: 20,
   },
   infoBox: {
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
@@ -1748,20 +1745,20 @@ const joinStyles = StyleSheet.create({
   infoTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     textAlign: 'center',
     marginBottom: 4,
   },
   infoText: {
     fontSize: 13,
-    color: '#666666',
+    color: Colors.textMedium,
     textAlign: 'center',
     lineHeight: 18,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     marginBottom: 8,
   },
   required: {
@@ -1770,13 +1767,13 @@ const joinStyles = StyleSheet.create({
     color: Colors.terracotta,
   },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderWidth: 1.5,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     borderRadius: 12,
     padding: 14,
     fontSize: 15,
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     minHeight: 80,
     textAlignVertical: 'top',
   },
@@ -1785,7 +1782,7 @@ const joinStyles = StyleSheet.create({
   },
   hint: {
     fontSize: 12,
-    color: '#999999',
+    color: Colors.textLight,
     marginTop: 6,
     marginBottom: 20,
   },
@@ -1800,7 +1797,7 @@ const joinStyles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 1.5,
-    borderColor: '#DDDDDD',
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1809,14 +1806,14 @@ const joinStyles = StyleSheet.create({
     borderColor: Colors.terracotta,
   },
   checkmark: {
-    color: '#FFFFFF',
+    color: Colors.white,
     fontSize: 13,
     fontWeight: '700',
   },
   checkLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: Colors.asphalt,
   },
   joinBtn: {
     backgroundColor: Colors.terracotta,
@@ -1828,7 +1825,7 @@ const joinStyles = StyleSheet.create({
     opacity: 0.35,
   },
   joinBtnText: {
-    color: '#FFFFFF',
+    color: Colors.white,
     fontSize: 17,
     fontWeight: '700',
   },
@@ -1836,7 +1833,7 @@ const joinStyles = StyleSheet.create({
 
 const ticketStyles = StyleSheet.create({
   sheet: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderRadius: 20,
     padding: 28,
     width: '100%',
@@ -1850,13 +1847,13 @@ const ticketStyles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: '#666666',
+    color: Colors.textMedium,
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 24,
@@ -1870,7 +1867,7 @@ const ticketStyles = StyleSheet.create({
     marginBottom: 10,
   },
   primaryBtnText: {
-    color: '#FFFFFF',
+    color: Colors.white,
     fontSize: 17,
     fontWeight: '700',
   },
@@ -1880,7 +1877,7 @@ const ticketStyles = StyleSheet.create({
     width: '100%',
   },
   secondaryBtnText: {
-    color: '#999999',
+    color: Colors.textLight,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -1890,38 +1887,38 @@ const managePlacesStyles = {
   container: { flex: 0 },
   textInputContainer: { backgroundColor: 'transparent' },
   textInput: {
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     borderRadius: 12,
     paddingHorizontal: 14,
     fontSize: 15,
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     height: 46,
     marginBottom: 0,
   },
   listView: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     borderRadius: 12,
     marginTop: 4,
     overflow: 'hidden' as const,
   },
-  row: { paddingHorizontal: 14, paddingVertical: 12, backgroundColor: '#FFFFFF' },
-  separator: { height: 1, backgroundColor: '#F0E6D3', marginHorizontal: 14 },
-  description: { color: '#1A1A1A', fontSize: 14 },
+  row: { paddingHorizontal: 14, paddingVertical: 12, backgroundColor: Colors.white },
+  separator: { height: 1, backgroundColor: Colors.inputBg, marginHorizontal: 14 },
+  description: { color: Colors.asphalt, fontSize: 14 },
   poweredContainer: { display: 'none' as const },
 };
 
 const manageStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: Colors.overlayDark,
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 24,
@@ -1937,31 +1934,31 @@ const manageStyles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: Colors.asphalt,
   },
   closeX: {
     fontSize: 18,
-    color: '#999999',
+    color: Colors.textLight,
     fontWeight: '600',
   },
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#9B8B7A',
+    color: Colors.warmGray,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 6,
     marginTop: 16,
   },
   input: {
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
-    color: '#1A1A1A',
+    color: Colors.asphalt,
   },
   textArea: {
     minHeight: 80,
@@ -1973,7 +1970,7 @@ const manageStyles = StyleSheet.create({
   },
   hint: {
     fontSize: 13,
-    color: '#999999',
+    color: Colors.textLight,
     marginTop: 4,
   },
   pillWrap: {
@@ -1984,22 +1981,22 @@ const manageStyles = StyleSheet.create({
   pill: {
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     borderRadius: 20,
   },
   pillSelected: {
-    backgroundColor: '#C4652A',
-    borderColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
   },
   pillText: {
     fontSize: 14,
-    color: '#1A1A1A',
+    color: Colors.asphalt,
     fontWeight: '500',
   },
   pillTextSelected: {
-    color: '#FFFFFF',
+    color: Colors.white,
     fontWeight: '600',
   },
   genderRow: {
@@ -2010,9 +2007,9 @@ const manageStyles = StyleSheet.create({
   genderPill: {
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     borderRadius: 14,
     alignItems: 'center',
   },
@@ -2024,19 +2021,19 @@ const manageStyles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.parchment,
     borderWidth: 1,
-    borderColor: '#F0E6D3',
+    borderColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepperBtnDisabled: { opacity: 0.35 },
-  stepperBtnText: { fontSize: 22, color: '#1A1A1A', fontWeight: '300' },
+  stepperBtnText: { fontSize: 22, color: Colors.asphalt, fontWeight: '300' },
   stepperValue: { flex: 1, alignItems: 'center' },
-  stepperValueText: { fontSize: 28, fontWeight: '700', color: '#C4652A' },
-  stepperValueSub: { fontSize: 12, color: '#999999', marginTop: -2 },
+  stepperValueText: { fontSize: 28, fontWeight: '700', color: Colors.terracotta },
+  stepperValueSub: { fontSize: 12, color: Colors.textLight, marginTop: -2 },
   saveBtn: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
@@ -2045,11 +2042,11 @@ const manageStyles = StyleSheet.create({
   saveBtnDisabled: {
     opacity: 0.4,
   },
-  saveBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  saveBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
   cancelBtn: {
     alignItems: 'center',
     paddingVertical: 14,
     marginTop: 8,
   },
-  cancelBtnText: { color: '#DC2626', fontSize: 14, fontWeight: '600' },
+  cancelBtnText: { color: Colors.cancelRed, fontSize: 14, fontWeight: '600' },
 });

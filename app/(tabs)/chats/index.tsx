@@ -14,13 +14,21 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
-import { Fonts } from '../../../constants/Typography';
+import Colors from '../../../constants/Colors';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 
 const CATEGORY_COLORS: Record<string, string> = {
-  music: '#7C5CBF', film: '#5C7CBF', nightlife: '#BF5C7C',
-  food: '#BF7C5C', outdoors: '#5CBF7C', fitness: '#5CBFBF',
-  art: '#BF5CBF', comedy: '#C4652A', sports: '#5C7CBF',
-  wellness: '#5CBF9C', default: '#C4652A',
+  music: Colors.categoryMusic,
+  film: Colors.categoryFilm,
+  nightlife: Colors.categoryNightlife,
+  food: Colors.categoryFood,
+  outdoors: Colors.categoryOutdoors,
+  fitness: Colors.categoryFitness,
+  art: Colors.categoryArt,
+  comedy: Colors.terracotta,
+  sports: Colors.categorySports,
+  wellness: Colors.categoryWellness,
+  default: Colors.terracotta,
 };
 
 function formatTime(dateString: string): string {
@@ -117,7 +125,7 @@ export default function ChatsScreen() {
           <Text style={styles.headerTitle}>Chats</Text>
         </View>
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#C4652A" />
+          <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
       </SafeAreaView>
     );
@@ -132,7 +140,7 @@ export default function ChatsScreen() {
       {chats.length === 0 ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyIcon}>
-            <Ionicons name="chatbubbles-outline" size={40} color="#C4652A" />
+            <Ionicons name="chatbubbles-outline" size={40} color={Colors.terracotta} />
           </View>
           <Text style={styles.emptyTitle}>No chats yet</Text>
           <Text style={styles.emptySubtitle}>
@@ -150,7 +158,7 @@ export default function ChatsScreen() {
           data={chats}
           keyExtractor={item => item.eventId}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#C4652A" />
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.terracotta} />
           }
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -176,7 +184,7 @@ export default function ChatsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  container: { flex: 1, backgroundColor: Colors.parchment },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -188,8 +196,8 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontFamily: Fonts.display,
     fontSize: 28,
-    color: '#C4652A',
-    textShadowColor: 'rgba(0,0,0,0.2)',
+    color: Colors.terracotta,
+    textShadowColor: Colors.shadowLight,
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
@@ -199,7 +207,7 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#9B8B7A',
+    color: Colors.warmGray,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     paddingHorizontal: 20,
@@ -212,7 +220,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 14,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     gap: 12,
   },
   rowPast: { opacity: 0.55 },
@@ -224,7 +232,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.inputBg,
   },
   unreadDot: {
     position: 'absolute',
@@ -233,19 +241,19 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: Colors.white,
   },
 
   rowContent: { flex: 1, gap: 3 },
   rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  planTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', flex: 1, marginRight: 8 },
-  textPast: { color: '#9B8B7A' },
+  planTitle: { fontSize: 15, fontWeight: '700', color: Colors.asphalt, flex: 1, marginRight: 8 },
+  textPast: { color: Colors.warmGray },
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  timestamp: { fontSize: 12, color: '#9B8B7A' },
+  timestamp: { fontSize: 12, color: Colors.warmGray },
   badge: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     borderRadius: 10,
     minWidth: 20,
     height: 20,
@@ -253,18 +261,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 5,
   },
-  badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  badgeText: { color: Colors.white, fontSize: 11, fontWeight: '700' },
   rowBottom: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  preview: { fontSize: 13, color: '#9B8B7A', flex: 1 },
+  preview: { fontSize: 13, color: Colors.warmGray, flex: 1 },
   readOnlyPill: {
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.inputBg,
     borderRadius: 8,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
-  readOnlyText: { fontSize: 11, color: '#9B8B7A', fontStyle: 'italic' },
-  memberCount: { fontSize: 12, color: '#C4652A', fontWeight: '600' },
-  separator: { height: 1, backgroundColor: '#F0E6D3', marginLeft: 84 },
+  readOnlyText: { fontSize: 11, color: Colors.warmGray, fontStyle: 'italic' },
+  memberCount: { fontSize: 12, color: Colors.terracotta, fontWeight: '600' },
+  separator: { height: 1, backgroundColor: Colors.inputBg, marginLeft: 84 },
 
   emptyState: {
     flex: 1,
@@ -277,19 +285,19 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#FFF0E8',
+    backgroundColor: Colors.emptyIconBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
-  emptyTitle: { fontSize: 20, fontWeight: '700', color: '#1A1A1A' },
-  emptySubtitle: { fontSize: 15, color: '#9B8B7A', textAlign: 'center', lineHeight: 22 },
+  emptyTitle: { fontSize: 20, fontWeight: '700', color: Colors.asphalt },
+  emptySubtitle: { fontSize: 15, color: Colors.warmGray, textAlign: 'center', lineHeight: 22 },
   emptyButton: {
-    backgroundColor: '#C4652A',
+    backgroundColor: Colors.terracotta,
     paddingHorizontal: 28,
     paddingVertical: 13,
     borderRadius: 14,
     marginTop: 8,
   },
-  emptyButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  emptyButtonText: { color: Colors.white, fontSize: 15, fontWeight: '700' },
 });

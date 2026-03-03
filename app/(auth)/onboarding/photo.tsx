@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { supabase } from '../../../lib/supabase';
@@ -163,7 +164,7 @@ export default function OnboardingPhotoScreen() {
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={styles.backButton}
           >
-            <ChevronLeft size={28} color={Colors.textDark} />
+            <ChevronLeft size={28} color={Colors.asphalt} />
           </TouchableOpacity>
         </View>
 
@@ -210,7 +211,7 @@ export default function OnboardingPhotoScreen() {
             onPress={pickImage}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <RefreshCw size={14} color={Colors.primaryOrange} />
+            <RefreshCw size={14} color={Colors.terracotta} />
             <Text style={styles.retakeText}>Choose a different photo</Text>
           </TouchableOpacity>
         )}
@@ -229,7 +230,7 @@ export default function OnboardingPhotoScreen() {
           disabled={!imageUri || loading}
         >
           {loading ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={Colors.white} />
           ) : (
             <Text style={styles.primaryButtonText}>Continue →</Text>
           )}
@@ -240,7 +241,7 @@ export default function OnboardingPhotoScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.backgroundCream },
+  safe: { flex: 1, backgroundColor: Colors.parchment },
   container: { flex: 1, paddingHorizontal: 24 },
 
   progressWrap: {
@@ -250,13 +251,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 8,
   },
-  progressBar: { height: '100%', backgroundColor: Colors.primaryOrange, borderRadius: 2 },
+  progressBar: { height: '100%', backgroundColor: Colors.terracotta, borderRadius: 2 },
 
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
   backButton: { padding: 4 },
 
-  heading: { fontSize: 22, fontWeight: '700', color: Colors.textDark },
-  subtext: { fontSize: 14, color: Colors.textMedium, marginTop: 6, lineHeight: 20 },
+  heading: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
+  subtext: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: 6, lineHeight: 20 },
 
   gap32: { height: 32 },
   gap12: { height: 12 },
@@ -269,7 +270,7 @@ const styles = StyleSheet.create({
     width: AVATAR_SIZE,
     height: AVATAR_SIZE,
     borderRadius: AVATAR_SIZE / 2,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1.5,
     borderColor: Colors.border,
     justifyContent: 'center',
@@ -284,15 +285,16 @@ const styles = StyleSheet.create({
     height: AVATAR_SIZE + 6,
     borderRadius: (AVATAR_SIZE + 6) / 2,
     borderWidth: 3,
-    borderColor: Colors.primaryOrange,
+    borderColor: Colors.terracotta,
   },
   avatarImage: { width: '100%', height: '100%' },
   avatarEmpty: { alignItems: 'center', gap: 8 },
-  avatarHint: { fontSize: 13, color: Colors.textLight, fontWeight: '500' },
+  avatarHint: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textLight },
 
   cropHint: {
     textAlign: 'center',
-    fontSize: 13,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
     color: Colors.textLight,
     marginTop: 14,
     lineHeight: 19,
@@ -306,9 +308,9 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   retakeText: {
-    fontSize: 14,
-    color: Colors.primaryOrange,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
   },
 
   spacer: { flex: 1 },
@@ -316,10 +318,10 @@ const styles = StyleSheet.create({
   primaryButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.primaryOrange,
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -327,5 +329,5 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   primaryButtonDisabled: { opacity: 0.45 },
-  primaryButtonText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
+  primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.white },
 });
