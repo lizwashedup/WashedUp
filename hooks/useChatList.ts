@@ -21,6 +21,7 @@ export function useChatList() {
 
   const fetchChats = useCallback(async () => {
     setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
@@ -39,7 +40,7 @@ export function useChatList() {
 
     const eligible = memberships.filter((m: any) => {
       const e = m.events;
-      return e && e.member_count >= 2;
+      return e && (e.member_count >= 2 || e.status === 'cancelled');
     });
 
     if (eligible.length === 0) {
@@ -122,7 +123,9 @@ export function useChatList() {
       .sort((a, b) => b.start_time.localeCompare(a.start_time));
 
     setChats([...active, ...past]);
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

@@ -512,7 +512,7 @@ export default function YourPeopleScreen() {
       setShowInvites(false);
       router.push(`/plan/${eventId}`);
     }
-  }, [refetchInvites, router, queryClient]);
+  }, [refetchInvites, refetchOldInvites, router, queryClient]);
 
   const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -528,7 +528,7 @@ export default function YourPeopleScreen() {
         router.push(`/plan/${eventId}`);
       }
     }
-  }, [refetchNotifs, router, queryClient]);
+  }, [refetchNotifs, refetchOldNotifs, router, queryClient]);
 
   const isSearching = searchQuery.length > 0;
   const myHandle = myProfile?.handle ?? null;

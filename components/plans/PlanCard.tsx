@@ -68,11 +68,11 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (plan.creator.profile_photo_url) {
+    if (plan.creator?.profile_photo_url) {
       Image.prefetch(plan.creator.profile_photo_url).catch(() => {});
     }
     router.push(`/plan/${plan.id}`);
-  }, [plan.id, plan.creator.profile_photo_url, router]);
+  }, [plan.id, plan.creator?.profile_photo_url, router]);
 
   const handleShare = useCallback((e: any) => {
     e.stopPropagation();
@@ -89,13 +89,13 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   const isFull = going >= totalCapacity;
   const oneSpotLeft = spotsLeft === 1;
 
-  const planCount = plan.creator.plans_posted;
+  const planCount = plan.creator?.plans_posted ?? 0;
   const creatorLine2 = planCount === 1 ? 'First plan' : '';
 
   const locationDisplay = plan.location_text && !plan.location_text.startsWith('http')
     ? plan.location_text
     : null;
-  const creatorLine1 = `Posted by ${plan.creator.first_name_display}`;
+  const creatorLine1 = `Posted by ${plan.creator?.first_name_display ?? 'Creator'}`;
 
   const creatorNote = plan.host_message
     ? `"${plan.host_message}"`
@@ -114,7 +114,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
       {/* A. Creator Info */}
       <View style={styles.creatorRow}>
         <View style={styles.creatorLeft}>
-          {plan.creator.profile_photo_url ? (
+          {plan.creator?.profile_photo_url ? (
             <Image
               source={{ uri: plan.creator.profile_photo_url }}
               style={styles.creatorAvatar}

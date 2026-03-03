@@ -268,13 +268,15 @@ export default function LoginScreen() {
               <View style={styles.gap16} />
 
               {appleAvailable && (
-                <AppleAuthentication.AppleAuthenticationButton
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                  cornerRadius={14}
-                  style={styles.appleButton}
-                  onPress={handleAppleSignIn}
-                />
+                <View pointerEvents={socialLoading ? 'none' : 'auto'} style={socialLoading ? { opacity: 0.5 } : undefined}>
+                  <AppleAuthentication.AppleAuthenticationButton
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                    cornerRadius={14}
+                    style={styles.appleButton}
+                    onPress={handleAppleSignIn}
+                  />
+                </View>
               )}
 
               {showGoogle && (

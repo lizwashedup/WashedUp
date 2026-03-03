@@ -36,7 +36,8 @@ export default function OnboardingLACheckScreen() {
         supabase.auth.signOut();
         return;
       }
-      await supabase.from('profiles').update({ city: 'Los Angeles' }).eq('id', user.id);
+      const { error } = await supabase.from('profiles').update({ city: 'Los Angeles' }).eq('id', user.id);
+      if (error) { Alert.alert('Something went wrong', 'Could not save. Please try again.'); return; }
       router.push('/onboarding/photo');
     } finally {
       setLoading(false);
@@ -58,7 +59,8 @@ export default function OnboardingLACheckScreen() {
         supabase.auth.signOut();
         return;
       }
-      await supabase.from('profiles').update({ city: city.trim() || 'Other' }).eq('id', user.id);
+      const { error } = await supabase.from('profiles').update({ city: city.trim() || 'Other' }).eq('id', user.id);
+      if (error) { Alert.alert('Something went wrong', 'Could not save. Please try again.'); return; }
       router.push('/onboarding/photo');
     } finally {
       setLoading(false);

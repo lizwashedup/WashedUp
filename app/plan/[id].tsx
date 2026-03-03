@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
     ArrowLeft,
     Calendar,
@@ -421,19 +421,21 @@ export default function PlanDetailScreen() {
       .then(({ data }) => setIsOnWaitlist(!!data));
   }, [currentUserId, id]);
 
-  // Pending invite check
+  // Pending invite check — re-runs on every focus so it stays fresh after accept/decline
   const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!currentUserId || !id) return;
-    supabase
-      .from('plan_invites')
-      .select('id')
-      .eq('event_id', id)
-      .eq('recipient_id', currentUserId)
-      .eq('status', 'pending')
-      .maybeSingle()
-      .then(({ data }) => setPendingInviteId(data?.id ?? null));
-  }, [currentUserId, id]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!currentUserId || !id) return;
+      supabase
+        .from('plan_invites')
+        .select('id')
+        .eq('event_id', id)
+        .eq('recipient_id', currentUserId)
+        .eq('status', 'pending')
+        .maybeSingle()
+        .then(({ data }) => setPendingInviteId(data?.id ?? null));
+    }, [currentUserId, id])
+  );
 
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_id === currentUserId;

@@ -86,7 +86,7 @@ export default function ProfileButton() {
     <View style={styles.wrapper}>
       <TouchableOpacity
         style={styles.envelopeBtn}
-        onPress={() => router.push('/(tabs)/friends?openInbox=1' as any)}
+        onPress={() => router.navigate('/(tabs)/friends?openInbox=1' as any)}
         accessibilityLabel="Inbox"
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >

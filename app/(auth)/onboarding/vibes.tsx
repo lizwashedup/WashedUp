@@ -50,13 +50,17 @@ export default function OnboardingVibesScreen() {
         return;
       }
       const tags = Object.keys(selected).filter(k => selected[k]);
-      await supabase
+      const { error: updateError } = await supabase
         .from('profiles')
         .update({
           vibe_tags: tags,
           onboarding_status: 'complete',
         })
         .eq('id', user.id);
+      if (updateError) {
+        Alert.alert('Something went wrong', 'Could not save your vibes. Please try again.');
+        return;
+      }
 
       // Invalidate and refetch profile-photo so it shows when user lands on Plans
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });

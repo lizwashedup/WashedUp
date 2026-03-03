@@ -66,8 +66,10 @@ export async function signInWithGoogle() {
 
   await GoogleSignin.hasPlayServices();
   const response = await GoogleSignin.signIn();
-  const idToken = response.data?.idToken;
 
+  if (response.type === 'cancelled') return null;
+
+  const idToken = response.data?.idToken;
   if (!idToken) {
     throw new Error('No ID token returned from Google.');
   }

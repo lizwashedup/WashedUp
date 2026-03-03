@@ -416,6 +416,7 @@ export default function PostScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         Alert.alert('Error', 'Please sign in again.');
+        setLoading(false);
         return;
       }
 

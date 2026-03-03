@@ -570,7 +570,7 @@ export default function SceneScreen() {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['explore-wishlists'] });
+      queryClient.invalidateQueries({ queryKey: ['explore-wishlists', userId] });
     },
   });
 
