@@ -202,11 +202,24 @@ export default function EventDetailScreen() {
     },
   });
 
-  if (isLoading || !event) {
+  if (isLoading) {
     return (
       <View style={styles.container}>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
+        </View>
+      </View>
+    );
+  }
+
+  if (!event) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={{ fontFamily: 'DMSans_500Medium', fontSize: 16, color: '#666', textAlign: 'center' }}>Event not found</Text>
+          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 }}>
+            <Text style={{ fontFamily: 'DMSans_700Bold', fontSize: 14, color: '#fff' }}>Go Back</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );

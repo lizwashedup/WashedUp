@@ -151,17 +151,22 @@ export default function PostScreen() {
   const years = [currentYear, currentYear + 1];
 
   const [userGender, setUserGender] = useState<string | null>(null);
+  const [screenReady, setScreenReady] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('gender')
-        .eq('id', user.id)
-        .single();
-      if (profile?.gender) setUserGender(profile.gender);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('gender')
+          .eq('id', user.id)
+          .single();
+        if (profile?.gender) setUserGender(profile.gender);
+      } finally {
+        setScreenReady(true);
+      }
     })();
   }, []);
 
@@ -497,6 +502,17 @@ export default function PostScreen() {
   };
 
   // ─── Render ───────────────────────────────────────────────────────────────────
+
+  if (!screenReady) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <StatusBar style="dark" />
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={Colors.terracotta} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -1077,6 +1093,7 @@ const placesStyles = {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.parchment },
+  centered: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const },
   flex: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 24 },
 

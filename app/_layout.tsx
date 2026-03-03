@@ -202,18 +202,23 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         return;
       }
 
-      const { data } = await supabase
-        .from('profiles')
-        .select('onboarding_status')
-        .eq('id', session.user.id)
-        .single();
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('onboarding_status')
+          .eq('id', session.user.id)
+          .single();
 
-      const dest = data?.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
-      const now = Date.now();
-      if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) return;
-      lastNavRef.current = { dest, ts: now };
-      setAuthedUserId(session.user.id);
-      router.replace(dest as any);
+        const dest = data?.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
+        const now = Date.now();
+        if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) return;
+        lastNavRef.current = { dest, ts: now };
+        setAuthedUserId(session.user.id);
+        router.replace(dest as any);
+      } catch {
+        setAuthedUserId(session.user.id);
+        router.replace('/onboarding/basics' as any);
+      }
     });
 
     return () => {

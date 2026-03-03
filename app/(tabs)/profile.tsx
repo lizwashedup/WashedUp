@@ -168,7 +168,7 @@ export default function ProfileScreen() {
       aspect: [1, 1],
       quality: 1,
     });
-    if (result.canceled) return;
+    if (result.canceled || !result.assets?.[0]) return;
     await processEditPhoto(result.assets[0].uri);
   };
 
@@ -183,7 +183,7 @@ export default function ProfileScreen() {
       aspect: [1, 1],
       quality: 1,
     });
-    if (result.canceled) return;
+    if (result.canceled || !result.assets?.[0]) return;
     await processEditPhoto(result.assets[0].uri);
   };
 

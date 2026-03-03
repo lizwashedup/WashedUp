@@ -334,11 +334,20 @@ export default function ChatScreen() {
   const { messages, loading, currentUserId, sendMessage, toggleReaction } = useChat(id);
   const { blockUser } = useBlock();
 
-  const { data: event } = useQuery({
+  const { data: event, isError: eventError } = useQuery({
     queryKey: ['event-info', id],
     queryFn: () => fetchEventInfo(id),
+    enabled: !!id,
     staleTime: 60_000,
   });
+
+  if (!id) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.centered}><Text style={styles.emptyText}>Chat not found</Text></View>
+      </SafeAreaView>
+    );
+  }
 
   useEffect(() => {
     if (messages.length > 0) {

@@ -53,7 +53,7 @@ export default function OnboardingPhotoScreen() {
       aspect: [1, 1],
       quality: 1,
     });
-    if (result.canceled) return;
+    if (result.canceled || !result.assets?.[0]) return;
     await processPickedImage(result.assets[0].uri);
   };
 
@@ -72,7 +72,7 @@ export default function OnboardingPhotoScreen() {
       aspect: [1, 1],
       quality: 1,
     });
-    if (result.canceled) return;
+    if (result.canceled || !result.assets?.[0]) return;
     await processPickedImage(result.assets[0].uri);
   };
 
