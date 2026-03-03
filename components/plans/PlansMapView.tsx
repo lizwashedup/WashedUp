@@ -73,9 +73,9 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
 
   const handleMarkerPress = useCallback((plan: Plan) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedPlan(prev => {
+    setSelectedPlan((prev) => {
       if (prev?.id === plan.id) {
-        onPlanPress(plan.id);
+        setTimeout(() => onPlanPress(plan.id), 0);
         return prev;
       }
       return plan;
@@ -116,13 +116,15 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
               key={plan.id}
               coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
               onPress={() => handleMarkerPress(plan)}
+              tracksViewChanges={false}
+              stopPropagation
             >
-              <View style={[styles.pin, { backgroundColor: catColor }, isSelected && styles.pinSelected]}>
+              <View style={[styles.pin, { backgroundColor: catColor }, isSelected && styles.pinSelected]} pointerEvents="none">
                 <Text style={styles.pinText} numberOfLines={1}>
                   {plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title}
                 </Text>
               </View>
-              <View style={[styles.pinArrow, { borderTopColor: catColor }]} />
+              <View style={[styles.pinArrow, { borderTopColor: catColor }]} pointerEvents="none" />
             </Marker>
           );
         })}

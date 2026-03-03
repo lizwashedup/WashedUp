@@ -94,7 +94,7 @@ export function useChatList() {
 
     const previews: ChatPreview[] = eligible.map((m: any) => {
       const event = m.events;
-      const isPast = new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
+      const isPast = event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
       const lastMsg = lastMsgMap[event.id];
 
       return {

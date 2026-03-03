@@ -73,11 +73,17 @@ Deno.serve(async (req) => {
     const token = tokenMap.get(notif.user_id);
     if (!token) continue;
 
+    const pushData: Record<string, unknown> = { type: notif.type };
+    if (notif.event_id) {
+      pushData.eventId = notif.event_id;
+      pushData.chatId = notif.event_id;
+    }
+
     messages.push({
       to: token,
       title: notif.title,
       body: notif.body ?? '',
-      data: notif.event_id ? { eventId: notif.event_id, type: notif.type } : { type: notif.type },
+      data: pushData,
       sound: 'default',
     });
     notifIdsToMark.push(notif.id);

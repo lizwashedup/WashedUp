@@ -16,13 +16,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, Users, QrCode, Share2, X, MoreHorizontal, Send, Mail, Check, XCircle, Bell, Clock, Megaphone } from 'lucide-react-native';
+import { Search, Users, UserPlus, QrCode, Share2, X, MoreHorizontal, Send, Mail, Check, XCircle, Bell, Clock, Megaphone, ChevronDown, ChevronRight } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { supabase } from '../../../lib/supabase';
-import ProfileButton from '../../../components/ProfileButton';
+import ProfileButton, { INBOX_COUNT_KEY } from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 import Colors from '../../../constants/Colors';
@@ -335,7 +335,7 @@ export default function YourPeopleScreen() {
       Alert.alert('No active plans', 'Post a plan first, then invite your people.');
       return;
     }
-    loadSentInvites(friend.id);
+    loadSentInvites(friend.friend_id);
     setInviteTarget(friend);
   }, [myActivePlans, loadSentInvites]);
 
@@ -346,7 +346,7 @@ export default function YourPeopleScreen() {
     const name = target.first_name_display ?? 'your friend';
     try {
       const { error } = await supabase.from('plan_invites').insert({
-        event_id: plan.id, sender_id: userId, recipient_id: target.id, status: 'pending',
+        event_id: plan.id, sender_id: userId, recipient_id: target.friend_id, status: 'pending',
       });
       if (error) {
         if (error.code === '23505') {
@@ -398,7 +398,15 @@ export default function YourPeopleScreen() {
 
   // Invite inbox
   const router = useRouter();
+  const params = useLocalSearchParams<{ openInbox?: string }>();
   const [showInvites, setShowInvites] = useState(false);
+
+  React.useEffect(() => {
+    if (params.openInbox === '1') {
+      setShowInvites(true);
+      router.setParams({ openInbox: undefined } as any);
+    }
+  }, [params.openInbox]);
   const { data: pendingInvites = [], refetch: refetchInvites } = useQuery({
     queryKey: ['pending-invites', userId],
     queryFn: async () => {
@@ -446,27 +454,81 @@ export default function YourPeopleScreen() {
     retry: 2,
   });
 
+  // Old / read invites
+  const { data: oldInvites = [], refetch: refetchOldInvites } = useQuery({
+    queryKey: ['old-invites', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      try {
+        const { data } = await supabase
+          .from('plan_invites')
+          .select(`
+            id, event_id, sender_id, status, created_at, updated_at,
+            events (id, title, start_time, status),
+            profiles!plan_invites_sender_id_fkey (first_name_display, profile_photo_url)
+          `)
+          .eq('recipient_id', userId)
+          .in('status', ['accepted', 'declined'])
+          .order('updated_at', { ascending: false })
+          .limit(20);
+        return data ?? [];
+      } catch { return []; }
+    },
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+
+  // Old / read notifications
+  const { data: oldNotifications = [], refetch: refetchOldNotifs } = useQuery({
+    queryKey: ['old-notifications', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      try {
+        const { data } = await supabase
+          .from('app_notifications')
+          .select('id, type, title, body, event_id, status, created_at')
+          .eq('user_id', userId)
+          .in('status', ['read', 'acted', 'expired'])
+          .order('created_at', { ascending: false })
+          .limit(20);
+        return data ?? [];
+      } catch { return []; }
+    },
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+
   const totalInboxCount = pendingInvites.length + appNotifications.length;
+  const totalOldCount = oldInvites.length + oldNotifications.length;
+  const [oldExpanded, setOldExpanded] = useState(false);
 
   const respondToInvite = useCallback(async (inviteId: string, action: 'accepted' | 'declined', eventId?: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await supabase.from('plan_invites').update({ status: action, updated_at: new Date().toISOString() }).eq('id', inviteId);
     refetchInvites();
+    refetchOldInvites();
+    queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
     if (action === 'accepted' && eventId) {
       setShowInvites(false);
       router.push(`/plan/${eventId}`);
     }
-  }, [refetchInvites, router]);
+  }, [refetchInvites, router, queryClient]);
 
-  const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string) => {
+  const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
     refetchNotifs();
+    refetchOldNotifs();
+    queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
     if (action === 'acted' && eventId) {
       setShowInvites(false);
-      router.push(`/plan/${eventId}`);
+      if (notifType === 'member_joined' || notifType === 'invite_accepted') {
+        router.push(`/(tabs)/chats/${eventId}` as any);
+      } else {
+        router.push(`/plan/${eventId}`);
+      }
     }
-  }, [refetchNotifs, router]);
+  }, [refetchNotifs, router, queryClient]);
 
   const isSearching = searchQuery.length > 0;
   const myHandle = myProfile?.handle ?? null;
@@ -495,17 +557,7 @@ export default function YourPeopleScreen() {
         <Text style={styles.headerTitle}>
           <Text style={styles.headerTitleItalic}>Your</Text> People
         </Text>
-        <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.inviteInboxBtn} onPress={() => setShowInvites(true)}>
-            <Mail size={22} color={Colors.asphalt} />
-            {totalInboxCount > 0 && (
-              <View style={styles.inviteBadge}>
-                <Text style={styles.inviteBadgeText}>{totalInboxCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          <ProfileButton />
-        </View>
+        <ProfileButton />
       </View>
 
       {/* Search bar */}
@@ -710,7 +762,7 @@ export default function YourPeopleScreen() {
               <View style={{ alignItems: 'center', paddingVertical: 32 }}>
                 <Bell size={36} color={Colors.textLight} />
                 <Text style={[styles.invitePlanMeta, { marginTop: 12, textAlign: 'center' }]}>
-                  Invites, waitlist notifications, and fun updates will show up here
+                  {'Invites, waitlist notifications\n& fun updates will show up here'}
                 </Text>
               </View>
             ) : (
@@ -719,9 +771,16 @@ export default function YourPeopleScreen() {
                 {pendingInvites.map((inv: any) => {
                   const sender = inv.profiles;
                   const plan = inv.events;
-                  const isFull = plan.member_count >= plan.max_invites;
                   return (
-                    <View key={`inv-${inv.id}`} style={styles.inboxRow}>
+                    <TouchableOpacity
+                      key={`inv-${inv.id}`}
+                      style={styles.inboxRow}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        setShowInvites(false);
+                        router.push(`/plan/${inv.event_id}` as any);
+                      }}
+                    >
                       {sender?.profile_photo_url ? (
                         <Image source={{ uri: sender.profile_photo_url }} style={styles.inboxAvatar} contentFit="cover" />
                       ) : (
@@ -740,22 +799,10 @@ export default function YourPeopleScreen() {
                           </Text>
                         )}
                       </View>
-                      <View style={styles.inboxActions}>
-                        <TouchableOpacity
-                          style={[styles.inboxAcceptBtn, isFull && { opacity: 0.4 }]}
-                          onPress={() => respondToInvite(inv.id, 'accepted', inv.event_id)}
-                          disabled={isFull}
-                        >
-                          <Check size={16} color={Colors.white} />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.inboxDeclineBtn}
-                          onPress={() => respondToInvite(inv.id, 'declined')}
-                        >
-                          <XCircle size={16} color={Colors.textLight} />
-                        </TouchableOpacity>
+                      <View style={styles.inboxViewBtn}>
+                        <Text style={styles.inboxViewBtnText}>View</Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   );
                 })}
 
@@ -763,8 +810,11 @@ export default function YourPeopleScreen() {
                 {appNotifications.map((notif: any) => {
                   const icon = notif.type === 'waitlist_spot' ? <Clock size={16} color={Colors.terracotta} />
                     : notif.type === 'broadcast' ? <Megaphone size={16} color={Colors.terracotta} />
+                    : notif.type === 'member_joined' ? <UserPlus size={16} color={Colors.terracotta} />
+                    : notif.type === 'plan_invite' ? <Mail size={16} color={Colors.terracotta} />
+                    : notif.type === 'invite_accepted' ? <Check size={16} color={Colors.terracotta} />
                     : <Bell size={16} color={Colors.terracotta} />;
-                  const hasAction = notif.type === 'waitlist_spot' && notif.event_id;
+                  const hasAction = (notif.type === 'waitlist_spot' || notif.type === 'member_joined' || notif.type === 'plan_invite' || notif.type === 'invite_accepted') && notif.event_id;
                   const timeLeft = notif.expires_at
                     ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
                     : null;
@@ -786,14 +836,14 @@ export default function YourPeopleScreen() {
                         {hasAction && (
                           <TouchableOpacity
                             style={styles.inboxAcceptBtn}
-                            onPress={() => handleNotifAction(notif.id, 'acted', notif.event_id)}
+                            onPress={() => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type)}
                           >
                             <Check size={16} color={Colors.white} />
                           </TouchableOpacity>
                         )}
                         <TouchableOpacity
                           style={styles.inboxDeclineBtn}
-                          onPress={() => handleNotifAction(notif.id, 'read')}
+                          onPress={() => handleNotifAction(notif.id, 'read', undefined, notif.type)}
                         >
                           <XCircle size={16} color={Colors.textLight} />
                         </TouchableOpacity>
@@ -801,6 +851,78 @@ export default function YourPeopleScreen() {
                     </View>
                   );
                 })}
+
+                {/* Old Messages */}
+                {totalOldCount > 0 && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.oldMessagesHeader}
+                      onPress={() => setOldExpanded((v) => !v)}
+                      activeOpacity={0.7}
+                    >
+                      {oldExpanded
+                        ? <ChevronDown size={16} color={Colors.textLight} />
+                        : <ChevronRight size={16} color={Colors.textLight} />
+                      }
+                      <Text style={styles.oldMessagesTitle}>
+                        Old messages ({totalOldCount})
+                      </Text>
+                    </TouchableOpacity>
+
+                    {oldExpanded && (
+                      <>
+                        {oldInvites.map((inv: any) => {
+                          const sender = inv.profiles;
+                          const plan = inv.events;
+                          const statusLabel = inv.status === 'accepted' ? 'Accepted' : 'Declined';
+                          return (
+                            <View key={`old-inv-${inv.id}`} style={[styles.inboxRow, { opacity: 0.6 }]}>
+                              {sender?.profile_photo_url ? (
+                                <Image source={{ uri: sender.profile_photo_url }} style={styles.inboxAvatar} contentFit="cover" />
+                              ) : (
+                                <View style={[styles.inboxAvatar, styles.inboxAvatarFallback]}>
+                                  <Send size={16} color={Colors.textLight} />
+                                </View>
+                              )}
+                              <View style={{ flex: 1, marginLeft: 10 }}>
+                                <Text style={styles.invitePlanTitle} numberOfLines={1}>
+                                  {sender?.first_name_display ?? 'Someone'} invited you
+                                </Text>
+                                <Text style={styles.inboxPlanName} numberOfLines={1}>{plan?.title ?? 'a plan'}</Text>
+                              </View>
+                              <Text style={[styles.oldStatusLabel, inv.status === 'accepted' ? styles.oldStatusAccepted : styles.oldStatusDeclined]}>
+                                {statusLabel}
+                              </Text>
+                            </View>
+                          );
+                        })}
+
+                        {oldNotifications.map((notif: any) => {
+                          const oldIcon = notif.type === 'invite_accepted' ? <Check size={16} color={Colors.textLight} />
+                            : notif.type === 'member_joined' ? <UserPlus size={16} color={Colors.textLight} />
+                            : notif.type === 'waitlist_spot' ? <Clock size={16} color={Colors.textLight} />
+                            : notif.type === 'broadcast' ? <Megaphone size={16} color={Colors.textLight} />
+                            : <Bell size={16} color={Colors.textLight} />;
+                          const statusLabel = notif.status === 'expired' ? 'Expired' : 'Read';
+                          return (
+                            <View key={`old-notif-${notif.id}`} style={[styles.inboxRow, { opacity: 0.6 }]}>
+                              <View style={[styles.inboxAvatar, styles.inboxAvatarFallback]}>
+                                {oldIcon}
+                              </View>
+                              <View style={{ flex: 1, marginLeft: 10 }}>
+                                <Text style={styles.invitePlanTitle} numberOfLines={1}>{notif.title}</Text>
+                                {notif.body && <Text style={styles.inboxPlanName} numberOfLines={2}>{notif.body}</Text>}
+                              </View>
+                              <Text style={[styles.oldStatusLabel, notif.status === 'expired' ? styles.oldStatusDeclined : styles.oldStatusRead]}>
+                                {statusLabel}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </>
+                    )}
+                  </>
+                )}
               </ScrollView>
             )}
             <TouchableOpacity style={styles.qrCloseBtn} onPress={() => setShowInvites(false)}>
@@ -1196,6 +1318,51 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  inboxViewBtn: {
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 14,
+  },
+  inboxViewBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.white,
+  },
+  oldMessagesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  oldMessagesTitle: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
+  },
+  oldStatusLabel: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  oldStatusAccepted: {
+    backgroundColor: `${Colors.terracotta}18`,
+    color: Colors.terracotta,
+  },
+  oldStatusDeclined: {
+    backgroundColor: `${Colors.textLight}18`,
+    color: Colors.textLight,
+  },
+  oldStatusRead: {
+    backgroundColor: `${Colors.textMedium}14`,
+    color: Colors.textMedium,
   },
 
   emptyState: {

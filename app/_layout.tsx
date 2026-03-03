@@ -82,12 +82,17 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     }
   }, [authResolved, onReady]);
 
-  // Notification tap handler — deep-links into the relevant chat when user taps a notification
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as Record<string, any>;
-      if (data?.chatId) {
+      const type = data?.type as string | undefined;
+
+      if (type === 'plan_invite' && data?.eventId) {
+        router.push(`/plan/${data.eventId}` as any);
+      } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
+      } else if (data?.eventId) {
+        router.push(`/(tabs)/chats/${data.eventId}` as any);
       }
     });
     return () => sub.remove();

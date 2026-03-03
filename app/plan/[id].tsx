@@ -38,6 +38,7 @@ import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP, MIN_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { BrandedAlert } from '../../components/BrandedAlert';
 import { checkContent } from '../../lib/contentFilter';
 import { useBlock } from '../../hooks/useBlock';
 import { supabase } from '../../lib/supabase';
@@ -319,6 +320,12 @@ export default function PlanDetailScreen() {
   const [shareAfterJoinVisible, setShareAfterJoinVisible] = useState(false);
   const [isOnWaitlist, setIsOnWaitlist] = useState(false);
   const [waitlistLoading, setWaitlistLoading] = useState(false);
+  const [brandedAlert, setBrandedAlert] = useState<{
+    visible: boolean;
+    title: string;
+    message?: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({ visible: false, title: '' });
 
   const { blockUser } = useBlock();
 
@@ -412,6 +419,20 @@ export default function PlanDetailScreen() {
       .eq('user_id', currentUserId)
       .maybeSingle()
       .then(({ data }) => setIsOnWaitlist(!!data));
+  }, [currentUserId, id]);
+
+  // Pending invite check
+  const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!currentUserId || !id) return;
+    supabase
+      .from('plan_invites')
+      .select('id')
+      .eq('event_id', id)
+      .eq('recipient_id', currentUserId)
+      .eq('status', 'pending')
+      .maybeSingle()
+      .then(({ data }) => setPendingInviteId(data?.id ?? null));
   }, [currentUserId, id]);
 
   const isMember = members.some((m) => m.user_id === currentUserId);
@@ -524,7 +545,7 @@ export default function PlanDetailScreen() {
       setShareAfterJoinVisible(true);
     },
     onError: (error: any) => {
-      Alert.alert('Oops', error.message ?? 'Something went wrong.');
+      setBrandedAlert({ visible: true, title: 'Oops', message: error.message ?? 'Something went wrong.' });
     },
   });
 
@@ -555,23 +576,24 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
     },
     onError: (error: any) => {
-      Alert.alert('Oops', error.message ?? 'Something went wrong.');
+      setBrandedAlert({ visible: true, title: 'Oops', message: error.message ?? 'Something went wrong.' });
     },
   });
 
   const handleLeave = () => {
-    Alert.alert(
-      "Can't make it?",
-      'Your spot will open for someone else. The group will be notified.',
-      [
-        { text: 'Cancel', style: 'cancel' },
+    setBrandedAlert({
+      visible: true,
+      title: "Can't make it?",
+      message: 'Your spot will open for someone else. The group will be notified.',
+      buttons: [
+        { text: 'Stay', style: 'cancel' },
         {
           text: 'Leave Plan',
           style: 'destructive',
           onPress: () => leaveMutation.mutate(),
         },
       ],
-    );
+    });
   };
 
   // ─── Manage Plan ─────────────────────────────────────────────────────────────
@@ -600,7 +622,7 @@ export default function PlanDetailScreen() {
     const fieldsToCheck = [editTitle, editDescription, editCreatorMessage].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
     if (!filter.ok) {
-      Alert.alert('Content not allowed', filter.reason ?? 'Please revise your plan and try again.');
+      setBrandedAlert({ visible: true, title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
       return;
     }
 
@@ -635,17 +657,18 @@ export default function PlanDetailScreen() {
       const msg = rawMsg.includes('events_host_message_length')
         ? 'Message must be at least 10 characters.'
         : rawMsg || 'Could not save changes.';
-      Alert.alert('Error', msg);
+      setBrandedAlert({ visible: true, title: 'Error', message: msg });
     } finally {
       setEditSaving(false);
     }
   };
 
   const handleCancelPlan = () => {
-    Alert.alert(
-      'Cancel this plan?',
-      'This will cancel the plan for everyone. Members will be notified in the group chat.',
-      [
+    setBrandedAlert({
+      visible: true,
+      title: 'Cancel this plan?',
+      message: 'This will cancel the plan for everyone. Members will be notified in the group chat.',
+      buttons: [
         { text: 'Keep Plan', style: 'cancel' },
         {
           text: 'Cancel Plan',
@@ -672,12 +695,12 @@ export default function PlanDetailScreen() {
               queryClient.invalidateQueries({ queryKey: ['my-plans'] });
               router.back();
             } catch (e: any) {
-              Alert.alert('Error', e.message ?? 'Could not cancel plan.');
+              setBrandedAlert({ visible: true, title: 'Error', message: e.message ?? 'Could not cancel plan.' });
             }
           },
         },
       ],
-    );
+    });
   };
 
   // ─── Wishlist ────────────────────────────────────────────────────────────────
@@ -715,13 +738,14 @@ export default function PlanDetailScreen() {
           .from('event_waitlist')
           .insert({ event_id: id, user_id: currentUserId });
         setIsOnWaitlist(true);
-        Alert.alert(
-          "You're on the waitlist",
-          "We'll notify you if a spot opens up.",
-        );
+        setBrandedAlert({
+          visible: true,
+          title: "You're on the waitlist",
+          message: "We'll notify you if a spot opens up.",
+        });
       }
     } catch {
-      Alert.alert('Error', 'Please try again.');
+      setBrandedAlert({ visible: true, title: 'Error', message: 'Please try again.' });
     } finally {
       setWaitlistLoading(false);
     }
@@ -959,29 +983,17 @@ export default function PlanDetailScreen() {
           )}
         </View>
 
-        {/* G. CTA Block */}
-        <View style={styles.ctaBlock}>
-          {!isCreator && !isMember && isEligible && !isFull && (
-            <>
-              <TouchableOpacity
-                style={styles.ctaButton}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  setJoinModalVisible(true);
-                }}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.ctaButtonText}>Let's Go → Join this plan</Text>
-              </TouchableOpacity>
-              {spotsLeft > 0 && spotsLeft <= 2 && (
-                <Text style={styles.ctaInfo}>
-                  {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left — group closes soon
-                </Text>
-              )}
-              <Text style={styles.ctaSub}>A group chat opens the moment you join</Text>
-            </>
-          )}
-        </View>
+        {/* G. CTA hints (button is in sticky bar) */}
+        {!isCreator && !isMember && isEligible && !isFull && (
+          <View style={styles.ctaBlock}>
+            {spotsLeft > 0 && spotsLeft <= 2 && (
+              <Text style={styles.ctaInfo}>
+                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left — group closes soon
+              </Text>
+            )}
+            <Text style={styles.ctaSub}>A group chat opens the moment you join</Text>
+          </View>
+        )}
       </ScrollView>
 
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
@@ -1057,6 +1069,47 @@ export default function PlanDetailScreen() {
               </Text>
             )}
           </TouchableOpacity>
+        ) : pendingInviteId ? (
+          <View style={styles.inviteActions}>
+            <TouchableOpacity
+              style={styles.declineInviteButton}
+              onPress={async () => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                await supabase
+                  .from('plan_invites')
+                  .update({ status: 'declined', updated_at: new Date().toISOString() })
+                  .eq('id', pendingInviteId);
+                setPendingInviteId(null);
+                queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
+                queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
+                setBrandedAlert({
+                  visible: true,
+                  title: 'No worries',
+                  message: "Maybe next time! We won't tell them.",
+                });
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.declineInviteText}>Can't make it</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.acceptInviteButton}
+              onPress={async () => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                await supabase
+                  .from('plan_invites')
+                  .update({ status: 'accepted', updated_at: new Date().toISOString() })
+                  .eq('id', pendingInviteId);
+                setPendingInviteId(null);
+                queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
+                queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
+                setJoinModalVisible(true);
+              }}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.acceptInviteText}>Accept Invite</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <TouchableOpacity
             style={styles.joinButton}
@@ -1064,8 +1117,9 @@ export default function PlanDetailScreen() {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               setJoinModalVisible(true);
             }}
+            activeOpacity={0.9}
           >
-            <Text style={styles.joinButtonText}>Join Plan</Text>
+            <Text style={styles.joinButtonText}>Let's Go →</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -1194,6 +1248,7 @@ export default function PlanDetailScreen() {
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
               contentContainerStyle={{ paddingBottom: 24 }}
+              scrollIndicatorInsets={{ right: 2 }}
             >
               {/* Title */}
               <Text style={manageStyles.label}>Title</Text>
@@ -1320,34 +1375,34 @@ export default function PlanDetailScreen() {
                 })}
               </View>
 
-              {/* Group size */}
-              <Text style={manageStyles.label}>Group size</Text>
+              {/* How many to invite */}
+              <Text style={manageStyles.label}>How many to invite</Text>
               <View style={manageStyles.stepperRow}>
                 <TouchableOpacity
-                  style={[manageStyles.stepperBtn, editGroupSize <= MIN_GROUP && manageStyles.stepperBtnDisabled]}
+                  style={[manageStyles.stepperBtn, editGroupSize <= (MIN_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
-                    if (editGroupSize > MIN_GROUP) {
+                    if (editGroupSize > (MIN_GROUP - 1)) {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       setEditGroupSize((g) => g - 1);
                     }
                   }}
-                  disabled={editGroupSize <= MIN_GROUP}
+                  disabled={editGroupSize <= (MIN_GROUP - 1)}
                 >
                   <Text style={manageStyles.stepperBtnText}>−</Text>
                 </TouchableOpacity>
                 <View style={manageStyles.stepperValue}>
                   <Text style={manageStyles.stepperValueText}>{editGroupSize}</Text>
-                  <Text style={manageStyles.stepperValueSub}>people</Text>
+                  <Text style={manageStyles.stepperValueSub}>people + you</Text>
                 </View>
                 <TouchableOpacity
-                  style={[manageStyles.stepperBtn, editGroupSize >= MAX_GROUP && manageStyles.stepperBtnDisabled]}
+                  style={[manageStyles.stepperBtn, editGroupSize >= (MAX_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
-                    if (editGroupSize < MAX_GROUP) {
+                    if (editGroupSize < (MAX_GROUP - 1)) {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       setEditGroupSize((g) => g + 1);
                     }
                   }}
-                  disabled={editGroupSize >= MAX_GROUP}
+                  disabled={editGroupSize >= (MAX_GROUP - 1)}
                 >
                   <Text style={manageStyles.stepperBtnText}>+</Text>
                 </TouchableOpacity>
@@ -1389,6 +1444,14 @@ export default function PlanDetailScreen() {
           eventId={plan.id}
         />
       )}
+
+      <BrandedAlert
+        visible={brandedAlert.visible}
+        title={brandedAlert.title}
+        message={brandedAlert.message}
+        buttons={brandedAlert.buttons}
+        onClose={() => setBrandedAlert((a) => ({ ...a, visible: false }))}
+      />
     </SafeAreaView>
   );
 }
@@ -1653,6 +1716,38 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   joinButtonText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM },
+  inviteActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  declineInviteButton: {
+    flex: 1,
+    backgroundColor: Colors.parchment,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  declineInviteText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+  },
+  acceptInviteButton: {
+    flex: 1.5,
+    backgroundColor: Colors.terracotta,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  acceptInviteText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.white,
+  },
   memberActions: {
     flexDirection: 'row',
     alignItems: 'center',

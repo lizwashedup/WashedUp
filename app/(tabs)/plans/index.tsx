@@ -19,6 +19,7 @@ import { fetchPlans, Plan } from '../../../lib/fetchPlans';
 import { PlanCard } from '../../../components/plans/PlanCard';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import ProfileButton from '../../../components/ProfileButton';
+import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
 import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import Colors from '../../../constants/Colors';
@@ -553,19 +554,21 @@ export default function PlansScreen() {
             <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
         ) : (
-          <Suspense fallback={
-            <View style={styles.centered}>
-              <ActivityIndicator size="large" color={Colors.terracotta} />
-            </View>
-          }>
-            <LazyPlansMapView
-              plans={mapPlans}
-              wishlistedSet={wishlistedSet}
-              onPlanPress={(id) => router.push(`/plan/${id}`)}
-              onClose={() => setMapView(false)}
-              onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
-            />
-          </Suspense>
+          <MapErrorBoundary onClose={() => setMapView(false)}>
+            <Suspense fallback={
+              <View style={styles.centered}>
+                <ActivityIndicator size="large" color={Colors.terracotta} />
+              </View>
+            }>
+              <LazyPlansMapView
+                plans={mapPlans}
+                wishlistedSet={wishlistedSet}
+                onPlanPress={(id) => router.push(`/plan/${id}`)}
+                onClose={() => setMapView(false)}
+                onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+              />
+            </Suspense>
+          </MapErrorBoundary>
         )
       ) : activeTab === 'plans' ? (
         <>

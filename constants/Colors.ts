@@ -34,6 +34,7 @@ const brand = {
   overlayDark40: 'rgba(0,0,0,0.4)',
   overlayDark60: 'rgba(0,0,0,0.6)',
   overlayDark25: 'rgba(0,0,0,0.25)',
+  overlayWarm: 'rgba(217,119,70,0.18)',
   overlayDarker: 'rgba(0,0,0,0.95)',
   overlayLight: 'rgba(255,255,255,0.15)',
   overlayWhite: 'rgba(255,255,255,0.6)',

@@ -468,7 +468,7 @@ export default function PostScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setPostedPlanId(insertedEvent?.id ?? null);
       setPostedPlanTitle(title.trim());
-      setPostedSpotsLeft(groupSize - 1);
+      setPostedSpotsLeft(groupSize);
       setPostedGenderLabel(
         genderPref === 'women_only' ? 'Women only' :
         genderPref === 'men_only' ? 'Men only' :
@@ -787,40 +787,40 @@ export default function PostScreen() {
             <Text style={styles.stepperHint}>Min {MSG_MIN} characters · Max {MSG_LIMIT}</Text>
           </View>
 
-          {/* ── Group size ── */}
+          {/* ── How many to invite ── */}
           <View style={styles.field}>
-            <Text style={styles.label}>How many people?</Text>
+            <Text style={styles.label}>How many to invite</Text>
             <View style={styles.stepperRow}>
               <TouchableOpacity
-                style={[styles.stepperBtn, groupSize <= MIN_GROUP && styles.stepperBtnDisabled]}
+                style={[styles.stepperBtn, groupSize <= (MIN_GROUP - 1) && styles.stepperBtnDisabled]}
                 onPress={() => {
-                  if (groupSize > MIN_GROUP) {
+                  if (groupSize > (MIN_GROUP - 1)) {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     setGroupSize(g => g - 1);
                   }
                 }}
-                disabled={groupSize <= MIN_GROUP}
+                disabled={groupSize <= (MIN_GROUP - 1)}
               >
                 <Text style={styles.stepperBtnText}>−</Text>
               </TouchableOpacity>
               <View style={styles.stepperValue}>
                 <Text style={styles.stepperValueText}>{groupSize}</Text>
-                <Text style={styles.stepperValueSub}>people</Text>
+                <Text style={styles.stepperValueSub}>people + you</Text>
               </View>
               <TouchableOpacity
-                style={[styles.stepperBtn, groupSize >= MAX_GROUP && styles.stepperBtnDisabled]}
+                style={[styles.stepperBtn, groupSize >= (MAX_GROUP - 1) && styles.stepperBtnDisabled]}
                 onPress={() => {
-                  if (groupSize < MAX_GROUP) {
+                  if (groupSize < (MAX_GROUP - 1)) {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     setGroupSize(g => g + 1);
                   }
                 }}
-                disabled={groupSize >= MAX_GROUP}
+                disabled={groupSize >= (MAX_GROUP - 1)}
               >
                 <Text style={styles.stepperBtnText}>+</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.stepperHint}>Including you · Min {MIN_GROUP} · Max {MAX_GROUP}</Text>
+            <Text style={styles.stepperHint}>You + {groupSize} = {groupSize + 1} total</Text>
           </View>
 
           {/* Bottom spacer so content isn't hidden behind sticky button */}

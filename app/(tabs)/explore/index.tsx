@@ -25,6 +25,7 @@ const LazyMapView = lazy(() =>
   import('../../../components/MapView.native').then((m) => ({ default: m.MapView })),
 );
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
+import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
 import ProfileButton from '../../../components/ProfileButton';
 import { CATEGORY_OPTIONS } from '../../../constants/Categories';
 import Colors from '../../../constants/Colors';
@@ -232,11 +233,8 @@ const SceneCard = React.memo(function SceneCard({
           </View>
         )}
 
-        {/* Top right: Price badge + Share + Heart */}
+        {/* Top right: Share + Heart */}
         <View style={cardStyles.topRightActions}>
-          <View style={[cardStyles.priceBadge, isFree ? cardStyles.priceBadgeFree : cardStyles.priceBadgeTickets]}>
-            <Text style={[cardStyles.priceBadgeText, isFree ? cardStyles.priceBadgeTextFree : cardStyles.priceBadgeTextTickets]}>{priceLabel}</Text>
-          </View>
           <TouchableOpacity style={cardStyles.iconButton} onPress={handleShare} hitSlop={10}>
             <Ionicons name="share-outline" size={18} color={Colors.white} />
           </TouchableOpacity>
@@ -272,7 +270,7 @@ const SceneCard = React.memo(function SceneCard({
             activeOpacity={0.9}
           >
             <Text style={[cardStyles.ctaButtonTextSmall, isFree && cardStyles.ctaButtonTextFree]}>
-              {isFree ? 'RSVP Free ↗' : 'Get Tickets ↗'}
+              {isFree ? 'Free ↗' : 'Get Tickets ↗'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -309,7 +307,7 @@ const SceneCard = React.memo(function SceneCard({
             <Text style={cardStyles.socialProofText}>
               {event.plans_count} WashedUp {event.plans_count === 1 ? 'group' : 'groups'} going
             </Text>
-            <Text style={cardStyles.socialProofLink}>Find others →</Text>
+            <Text style={cardStyles.socialProofLink}>Let's Go →</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -329,27 +327,28 @@ const cardStyles = StyleSheet.create({
   image: { width: '100%', height: '100%' },
   imageOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: Colors.overlayDark25,
+    backgroundColor: Colors.overlayWarm,
   },
   priceBadge: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 36,
   },
   priceBadgeFree: {
-    backgroundColor: Colors.asphalt,
+    backgroundColor: Colors.white,
   },
   priceBadgeTickets: {
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: Colors.terracotta,
+    backgroundColor: Colors.white,
   },
   priceBadgeText: {
-    fontFamily: Fonts.sansMedium,
+    fontFamily: Fonts.sansBold,
     fontSize: FontSizes.caption,
   },
   priceBadgeTextFree: {
-    color: Colors.white,
+    color: Colors.successGreen,
   },
   priceBadgeTextTickets: {
     color: Colors.terracotta,
@@ -389,6 +388,7 @@ const cardStyles = StyleSheet.create({
     top: 12,
     right: 12,
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
   iconButton: {
@@ -466,22 +466,19 @@ const cardStyles = StyleSheet.create({
     color: Colors.terracotta,
   },
   ctaButtonSmall: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 14,
     flexShrink: 0,
-    borderWidth: 2,
-    borderColor: Colors.terracotta,
-    backgroundColor: 'transparent',
+    backgroundColor: Colors.terracotta,
   },
   ctaButtonFree: {
     backgroundColor: Colors.asphalt,
-    borderColor: Colors.asphalt,
   },
   ctaButtonTextSmall: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodySM,
-    color: Colors.terracotta,
+    color: Colors.white,
   },
   ctaButtonTextFree: {
     fontFamily: Fonts.sansBold,
@@ -709,19 +706,21 @@ export default function SceneScreen() {
               <ActivityIndicator size="large" color={Colors.terracotta} />
             </View>
           ) : mapView ? (
-            <Suspense fallback={
-              <View style={styles.centered}>
-                <ActivityIndicator size="large" color={Colors.terracotta} />
-              </View>
-            }>
-              <LazyMapView
-                style={{ flex: 1 }}
-                initialRegion={LA_REGION}
-                customMapStyle={MAP_STYLE}
-                showsUserLocation
-                showsMyLocationButton={false}
-              />
-            </Suspense>
+            <MapErrorBoundary onClose={() => setMapView(false)}>
+              <Suspense fallback={
+                <View style={styles.centered}>
+                  <ActivityIndicator size="large" color={Colors.terracotta} />
+                </View>
+              }>
+                <LazyMapView
+                  style={{ flex: 1 }}
+                  initialRegion={LA_REGION}
+                  customMapStyle={MAP_STYLE}
+                  showsUserLocation
+                  showsMyLocationButton={false}
+                />
+              </Suspense>
+            </MapErrorBoundary>
           ) : filteredEvents.length === 0 ? (
             <View style={styles.centered}>
               {heartFilter ? (

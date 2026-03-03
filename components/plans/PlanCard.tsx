@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   ctaButtonJoined: {
-    backgroundColor: Colors.asphalt,
+    backgroundColor: Colors.terracotta,
   },
   ctaButtonWaitlist: {
     backgroundColor: 'transparent',
