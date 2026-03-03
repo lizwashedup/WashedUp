@@ -31,8 +31,8 @@ function toPlanCardPlan(plan: Plan) {
     creator: {
       first_name_display: plan.creator?.first_name ?? 'Creator',
       profile_photo_url: plan.creator?.avatar_url ?? null,
+      plans_posted: plan.creator?.plans_posted ?? undefined,
     },
-    attendees: [],
   };
 }
 
@@ -123,10 +123,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.displaySM,
+    fontFamily: Fonts.display,
+    fontSize: FontSizes.displayLG,
     color: Colors.asphalt,
-    letterSpacing: -0.3,
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { padding: 20, gap: 16 },

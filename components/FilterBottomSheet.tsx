@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,17 @@ import {
   Pressable,
   TouchableOpacity,
   StyleSheet,
+  Animated,
+  PanResponder,
+  Dimensions,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Check } from 'lucide-react-native';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const DISMISS_THRESHOLD = 80;
 
 export interface FilterSheetOption {
   key: string;
@@ -40,10 +46,62 @@ export function FilterBottomSheet({
   onClose,
   onClear,
 }: FilterBottomSheetProps) {
+  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      translateY.setValue(SCREEN_HEIGHT);
+      overlayOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(translateY, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(overlayOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 8 && Math.abs(gs.dy) > Math.abs(gs.dx),
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy > 0) translateY.setValue(gs.dy);
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > DISMISS_THRESHOLD || gs.vy > 0.5) {
+          dismissSheet();
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 8,
+          }).start();
+        }
+      },
+    }),
+  ).current;
+
+  const dismissSheet = () => {
+    Animated.parallel([
+      Animated.timing(translateY, { toValue: SCREEN_HEIGHT, duration: 250, useNativeDriver: true }),
+      Animated.timing(overlayOpacity, { toValue: 0, duration: 250, useNativeDriver: true }),
+    ]).start(() => {
+      onClose();
+    });
+  };
+
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.sheet} onStartShouldSetResponder={() => true}>
+    <Modal visible transparent animationType="none" onRequestClose={dismissSheet}>
+      <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={dismissSheet} />
+      </Animated.View>
+      <Animated.View
+        style={[styles.sheet, { transform: [{ translateY }] }]}
+        {...panResponder.panHandlers}
+      >
+        <Pressable onStartShouldSetResponder={() => true}>
           <View style={styles.sheetHandle} />
 
           <View style={styles.sheetHeader}>
@@ -75,22 +133,25 @@ export function FilterBottomSheet({
             );
           })}
 
-          <TouchableOpacity style={styles.sheetDone} onPress={onClose}>
+          <TouchableOpacity style={styles.sheetDone} onPress={dismissSheet}>
             <Text style={styles.sheetDoneText}>Done</Text>
           </TouchableOpacity>
         </Pressable>
-      </Pressable>
+      </Animated.View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: Colors.overlayMedium,
-    justifyContent: 'flex-end',
   },
   sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: Colors.white,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

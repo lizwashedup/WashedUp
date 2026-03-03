@@ -27,6 +27,7 @@ export default function TabLayout() {
           paddingBottom: 28,
           paddingTop: 8,
         },
+        tabBarVariant: 'uikit',
         tabBarLabelStyle: {
           fontFamily: Fonts.sansMedium,
           fontSize: FontSizes.caption,
@@ -38,11 +39,12 @@ export default function TabLayout() {
         options={{
           title: 'Plans',
           tabBarLabel: 'Plans',
-          tabBarIcon: ({ focused }) => (
+          tabBarIcon: ({ color }) => (
             <Image
-              source={require('../../assets/w-icon.png')}
-              style={{ width: 28, height: 28, opacity: focused ? 1 : 0.4 }}
+              source={require('../../assets/wave-icon.png')}
+              style={{ width: 36, height: 36 }}
               contentFit="contain"
+              tintColor={color}
             />
           ),
         }}
@@ -75,13 +77,16 @@ export default function TabLayout() {
         name="friends/index"
         options={{
           title: 'Your People',
-          tabBarLabel: 'Your People',
+          tabBarLabel: 'People',
           tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
-        options={{ href: null }}
+        options={{
+          href: null,
+          tabBarItemStyle: { display: 'none' },
+        }}
       />
       <Tabs.Screen
         name="chats/[id]"
@@ -100,6 +105,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: -20,
+    overflow: 'hidden',
     shadowColor: Colors.asphalt,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,

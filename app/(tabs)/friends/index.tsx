@@ -6,22 +6,25 @@ import {
   TouchableOpacity,
   StyleSheet,
   FlatList,
+  ScrollView,
   ActivityIndicator,
   Alert,
-  Keyboard,
   Share,
   Modal,
   Pressable,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, Users, QrCode, Share2, X } from 'lucide-react-native';
+import { Search, Users, QrCode, Share2, X, MoreHorizontal, Send, Mail, Check, XCircle, Bell, Clock, Megaphone } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { supabase } from '../../../lib/supabase';
 import ProfileButton from '../../../components/ProfileButton';
+import { ReportModal } from '../../../components/modals/ReportModal';
+import { useBlock } from '../../../hooks/useBlock';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
@@ -100,7 +103,7 @@ export default function YourPeopleScreen() {
   }, [handleInput]);
 
   // Current user
-  const { data: userId } = useQuery({
+  const { data: userId, isLoading: userLoading } = useQuery({
     queryKey: ['auth-user'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -108,20 +111,22 @@ export default function YourPeopleScreen() {
     },
   });
 
-  // My profile (for handle)
-  const { data: myProfile, refetch: refetchProfile } = useQuery({
+  // My profile (for handle + blocked users)
+  const { data: myProfile, isLoading: profileLoading, refetch: refetchProfile } = useQuery({
     queryKey: ['my-profile', userId],
     queryFn: async () => {
       if (!userId) return null;
       const { data } = await supabase
         .from('profiles')
-        .select('id, handle')
+        .select('id, handle, blocked_users')
         .eq('id', userId)
         .single();
-      return data as { id: string; handle: string | null } | null;
+      return data as { id: string; handle: string | null; blocked_users: string[] | null } | null;
     },
     enabled: !!userId,
   });
+
+  const blockedSet = useMemo(() => new Set(myProfile?.blocked_users ?? []), [myProfile?.blocked_users]);
 
   // Friends list
   const { data: friends = [], refetch: refetchFriends } = useQuery({
@@ -155,28 +160,33 @@ export default function YourPeopleScreen() {
   // Friend IDs set for O(1) lookup
   const friendIds = useMemo(() => new Set(friends.map((f) => f.friend_id)), [friends]);
 
-  // Search results
+  // Search results — handle-only for privacy (people must share their handle intentionally)
+  const cleanQuery = debouncedQuery.replace(/^@/, '').toLowerCase();
   const { data: searchResults = [], isLoading: searchLoading } = useQuery({
-    queryKey: ['profile-search', debouncedQuery, userId],
+    queryKey: ['profile-search', cleanQuery, userId],
     queryFn: async (): Promise<SearchResult[]> => {
-      if (!userId || debouncedQuery.length < 1) return [];
-      const pattern = `%${debouncedQuery}%`;
+      if (!userId || cleanQuery.length < 2) return [];
       const { data, error } = await supabase
         .from('profiles_public')
         .select('id, first_name_display, profile_photo_url, handle')
-        .or(`first_name_display.ilike.${encodeURIComponent(pattern)},handle.ilike.${encodeURIComponent(pattern)}`)
+        .ilike('handle', `%${cleanQuery}%`)
         .neq('id', userId)
         .limit(20);
       if (error) return [];
-      return (data ?? []) as SearchResult[];
+      const results = (data ?? []) as SearchResult[];
+      return results.filter((r) => !blockedSet.has(r.id));
     },
-    enabled: !!userId && debouncedQuery.length >= 1,
+    enabled: !!userId && cleanQuery.length >= 2,
   });
 
   useFocusEffect(
     useCallback(() => {
       refetchFriends();
       refetchProfile();
+      return () => {
+        setSearchQuery('');
+        Keyboard.dismiss();
+      };
     }, [refetchFriends, refetchProfile]),
   );
 
@@ -262,15 +272,240 @@ export default function YourPeopleScreen() {
     } catch {}
   }, [myProfile?.handle]);
 
+  // Invite to plan
+  const [inviteTarget, setInviteTarget] = useState<Friend | null>(null);
+  const { data: myActivePlans = [] } = useQuery({
+    queryKey: ['my-active-plans', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      try {
+        const { data: memberships } = await supabase
+          .from('event_members')
+          .select('event_id, events (id, title, start_time, status, max_invites, member_count)')
+          .eq('user_id', userId)
+          .eq('status', 'joined');
+        const plans = (memberships ?? [])
+          .map((m: any) => m.events)
+          .filter((e: any) => e && ['forming', 'active', 'full'].includes(e.status));
+        const seen = new Set<string>();
+        return plans.filter((e: any) => {
+          if (seen.has(e.id)) return false;
+          seen.add(e.id);
+          return true;
+        });
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!userId,
+    staleTime: 30_000,
+    retry: 2,
+    retryDelay: 1000,
+  });
+
+  const [sentInviteIds, setSentInviteIds] = useState<Set<string>>(new Set());
+  const [attendingIds, setAttendingIds] = useState<Set<string>>(new Set());
+
+  const loadSentInvites = useCallback(async (recipientId: string) => {
+    if (!userId) return;
+    try {
+      const [inviteRes, memberRes] = await Promise.all([
+        supabase
+          .from('plan_invites')
+          .select('event_id')
+          .eq('sender_id', userId)
+          .eq('recipient_id', recipientId),
+        supabase
+          .from('event_members')
+          .select('event_id')
+          .eq('user_id', recipientId)
+          .eq('status', 'joined'),
+      ]);
+      setSentInviteIds(new Set((inviteRes.data ?? []).map((r: any) => r.event_id)));
+      setAttendingIds(new Set((memberRes.data ?? []).map((r: any) => r.event_id)));
+    } catch {
+      setSentInviteIds(new Set());
+      setAttendingIds(new Set());
+    }
+  }, [userId]);
+
+  const handleInvite = useCallback((friend: Friend) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (myActivePlans.length === 0) {
+      Alert.alert('No active plans', 'Post a plan first, then invite your people.');
+      return;
+    }
+    loadSentInvites(friend.id);
+    setInviteTarget(friend);
+  }, [myActivePlans, loadSentInvites]);
+
+  const sendInviteLink = useCallback(async (plan: any) => {
+    const target = inviteTarget;
+    if (!target || !userId) { setInviteTarget(null); return; }
+    setInviteTarget(null);
+    const name = target.first_name_display ?? 'your friend';
+    try {
+      const { error } = await supabase.from('plan_invites').insert({
+        event_id: plan.id, sender_id: userId, recipient_id: target.id, status: 'pending',
+      });
+      if (error) {
+        if (error.code === '23505') {
+          Alert.alert('Already invited', `You already invited ${name} to "${plan.title}".`);
+          return;
+        }
+        throw error;
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Invite sent!',
+        `You invited ${name} to "${plan.title}"`,
+        [{ text: 'OK' }],
+      );
+    } catch (e: any) {
+      Alert.alert('Could not send invite', e?.message ?? 'Something went wrong. Try again.');
+    }
+  }, [inviteTarget, userId]);
+
+  const { blockUser } = useBlock();
+  const [showReport, setShowReport] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+
+  const handleUserMenu = useCallback((targetId: string, targetName: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert(
+      targetName,
+      undefined,
+      [
+        {
+          text: `Report ${targetName}`,
+          onPress: () => {
+            setReportTarget({ id: targetId, name: targetName });
+            setShowReport(true);
+          },
+        },
+        {
+          text: `Block ${targetName}`,
+          style: 'destructive',
+          onPress: () => blockUser(targetId, targetName, () => {
+            queryClient.invalidateQueries({ queryKey: ['profile-search'] });
+            queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+          }),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }, [blockUser, userId, queryClient]);
+
+  // Invite inbox
+  const router = useRouter();
+  const [showInvites, setShowInvites] = useState(false);
+  const { data: pendingInvites = [], refetch: refetchInvites } = useQuery({
+    queryKey: ['pending-invites', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      try {
+        const { data } = await supabase
+          .from('plan_invites')
+          .select(`
+            id, event_id, sender_id, status, created_at,
+            events (id, title, start_time, status, member_count, max_invites),
+            profiles!plan_invites_sender_id_fkey (first_name_display, profile_photo_url)
+          `)
+          .eq('recipient_id', userId)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false });
+        return (data ?? []).filter((inv: any) => inv.events && ['forming', 'active', 'full'].includes(inv.events.status));
+      } catch { return []; }
+    },
+    enabled: !!userId,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    retry: 2,
+  });
+
+  // App notifications (waitlist spots, broadcasts, reminders)
+  const { data: appNotifications = [], refetch: refetchNotifs } = useQuery({
+    queryKey: ['app-notifications', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      try {
+        await supabase.rpc('expire_stale_notifications').catch(() => {});
+        const { data } = await supabase
+          .from('app_notifications')
+          .select('id, type, title, body, event_id, status, expires_at, created_at')
+          .eq('user_id', userId)
+          .eq('status', 'unread')
+          .order('created_at', { ascending: false })
+          .limit(30);
+        return data ?? [];
+      } catch { return []; }
+    },
+    enabled: !!userId,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    retry: 2,
+  });
+
+  const totalInboxCount = pendingInvites.length + appNotifications.length;
+
+  const respondToInvite = useCallback(async (inviteId: string, action: 'accepted' | 'declined', eventId?: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await supabase.from('plan_invites').update({ status: action, updated_at: new Date().toISOString() }).eq('id', inviteId);
+    refetchInvites();
+    if (action === 'accepted' && eventId) {
+      setShowInvites(false);
+      router.push(`/plan/${eventId}`);
+    }
+  }, [refetchInvites, router]);
+
+  const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
+    refetchNotifs();
+    if (action === 'acted' && eventId) {
+      setShowInvites(false);
+      router.push(`/plan/${eventId}`);
+    }
+  }, [refetchNotifs, router]);
+
   const isSearching = searchQuery.length > 0;
   const myHandle = myProfile?.handle ?? null;
+  const initialLoading = userLoading || (!!userId && profileLoading);
+
+  if (initialLoading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>
+            <Text style={styles.headerTitleItalic}>Your</Text> People
+          </Text>
+          <ProfileButton />
+        </View>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={Colors.terracotta} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Your People</Text>
-        <ProfileButton />
+        <Text style={styles.headerTitle}>
+          <Text style={styles.headerTitleItalic}>Your</Text> People
+        </Text>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.inviteInboxBtn} onPress={() => setShowInvites(true)}>
+            <Mail size={22} color={Colors.asphalt} />
+            {totalInboxCount > 0 && (
+              <View style={styles.inviteBadge}>
+                <Text style={styles.inviteBadgeText}>{totalInboxCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <ProfileButton />
+        </View>
       </View>
 
       {/* Search bar */}
@@ -278,7 +513,7 @@ export default function YourPeopleScreen() {
         <Search size={18} color={Colors.textLight} style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by name or @handle"
+          placeholder="Search by @handle"
           placeholderTextColor={Colors.textLight}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -291,6 +526,9 @@ export default function YourPeopleScreen() {
           </TouchableOpacity>
         )}
       </View>
+      {!isSearching && (
+        <Text style={styles.searchHint}>People can only find you by your @handle</Text>
+      )}
 
       {isSearching ? (
         /* Search results overlay */
@@ -298,7 +536,7 @@ export default function YourPeopleScreen() {
           {searchLoading ? (
             <ActivityIndicator size="small" color={Colors.terracotta} style={{ marginTop: 24 }} />
           ) : searchResults.length === 0 ? (
-            <Text style={styles.emptySearchText}>No one found</Text>
+            <Text style={styles.emptySearchText}>{cleanQuery.length < 2 ? 'Type at least 2 characters' : 'No handle found'}</Text>
           ) : (
             <FlatList
               data={searchResults}
@@ -322,15 +560,24 @@ export default function YourPeopleScreen() {
                         {item.handle && <Text style={styles.searchRowHandle}>@{item.handle}</Text>}
                       </View>
                     </View>
-                    <TouchableOpacity
-                      style={[styles.addBtn, isFriend && styles.addedBtn]}
-                      onPress={() => !isFriend && addFriend.mutate(item.id)}
-                      disabled={isFriend}
-                    >
-                      <Text style={[styles.addBtnText, isFriend && styles.addedBtnText]}>
-                        {isFriend ? 'Added ✓' : 'Add'}
-                      </Text>
-                    </TouchableOpacity>
+                    <View style={styles.searchRowActions}>
+                      <TouchableOpacity
+                        style={[styles.addBtn, isFriend && styles.addedBtn]}
+                        onPress={() => !isFriend && addFriend.mutate(item.id)}
+                        disabled={isFriend}
+                      >
+                        <Text style={[styles.addBtnText, isFriend && styles.addedBtnText]}>
+                          {isFriend ? 'Added ✓' : 'Add'}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleUserMenu(item.id, item.first_name_display ?? 'this person')}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.menuBtn}
+                      >
+                        <MoreHorizontal size={18} color={Colors.textLight} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 );
               }}
@@ -403,10 +650,8 @@ export default function YourPeopleScreen() {
           {friends.length === 0 ? (
             <View style={styles.emptyState}>
               <Users size={48} color={Colors.terracotta} />
-              <Text style={[styles.emptyTitle, { textAlign: 'center' }]}>This is where you can add people you might want to invite first to your plans.</Text>
-              <Text style={styles.emptySub}>
-                If you know anyone on WashedUp, or after your first plan add people you want to spend time with again!
-              </Text>
+              <Text style={[styles.emptyTitle, { textAlign: 'center' }]}>Add people here to invite them to your plans.</Text>
+              <Text style={styles.emptyHint}>Search by @handle to find people</Text>
             </View>
           ) : (
             <FlatList
@@ -431,13 +676,187 @@ export default function YourPeopleScreen() {
                     <Text style={styles.friendName}>{item.first_name_display ?? 'Unknown'}</Text>
                     {item.handle && <Text style={styles.friendHandle}>@{item.handle}</Text>}
                   </View>
-                  <Text style={styles.removeHint}>Long-press to remove</Text>
+                  <TouchableOpacity
+                    style={styles.inviteBtn}
+                    onPress={() => handleInvite(item)}
+                    activeOpacity={0.8}
+                  >
+                    <Send size={14} color={Colors.terracotta} />
+                    <Text style={styles.inviteBtnText}>Invite</Text>
+                  </TouchableOpacity>
                 </TouchableOpacity>
               )}
             />
           )}
         </>
       )}
+
+      {/* Report Modal */}
+      {reportTarget && (
+        <ReportModal
+          visible={showReport}
+          onClose={() => { setShowReport(false); setReportTarget(null); }}
+          reportedUserId={reportTarget.id}
+          reportedUserName={reportTarget.name}
+        />
+      )}
+
+      {/* Unified Inbox */}
+      <Modal visible={showInvites} transparent animationType="fade">
+        <Pressable style={styles.qrOverlay} onPress={() => setShowInvites(false)}>
+          <Pressable style={styles.inviteSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.inviteSheetTitle}>Invites and Fun Stuff</Text>
+            {totalInboxCount === 0 ? (
+              <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                <Bell size={36} color={Colors.textLight} />
+                <Text style={[styles.invitePlanMeta, { marginTop: 12, textAlign: 'center' }]}>
+                  Invites, waitlist notifications, and fun updates will show up here
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={styles.invitePlanList} bounces={false}>
+                {/* Plan invites */}
+                {pendingInvites.map((inv: any) => {
+                  const sender = inv.profiles;
+                  const plan = inv.events;
+                  const isFull = plan.member_count >= plan.max_invites;
+                  return (
+                    <View key={`inv-${inv.id}`} style={styles.inboxRow}>
+                      {sender?.profile_photo_url ? (
+                        <Image source={{ uri: sender.profile_photo_url }} style={styles.inboxAvatar} contentFit="cover" />
+                      ) : (
+                        <View style={[styles.inboxAvatar, styles.inboxAvatarFallback]}>
+                          <Send size={16} color={Colors.terracotta} />
+                        </View>
+                      )}
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.invitePlanTitle} numberOfLines={1}>
+                          {sender?.first_name_display ?? 'Someone'} invited you
+                        </Text>
+                        <Text style={styles.inboxPlanName} numberOfLines={1}>{plan.title}</Text>
+                        {plan.start_time && (
+                          <Text style={styles.invitePlanMeta}>
+                            {new Date(plan.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.inboxActions}>
+                        <TouchableOpacity
+                          style={[styles.inboxAcceptBtn, isFull && { opacity: 0.4 }]}
+                          onPress={() => respondToInvite(inv.id, 'accepted', inv.event_id)}
+                          disabled={isFull}
+                        >
+                          <Check size={16} color={Colors.white} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.inboxDeclineBtn}
+                          onPress={() => respondToInvite(inv.id, 'declined')}
+                        >
+                          <XCircle size={16} color={Colors.textLight} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+
+                {/* App notifications */}
+                {appNotifications.map((notif: any) => {
+                  const icon = notif.type === 'waitlist_spot' ? <Clock size={16} color={Colors.terracotta} />
+                    : notif.type === 'broadcast' ? <Megaphone size={16} color={Colors.terracotta} />
+                    : <Bell size={16} color={Colors.terracotta} />;
+                  const hasAction = notif.type === 'waitlist_spot' && notif.event_id;
+                  const timeLeft = notif.expires_at
+                    ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
+                    : null;
+                  return (
+                    <View key={`notif-${notif.id}`} style={styles.inboxRow}>
+                      <View style={[styles.inboxAvatar, styles.inboxAvatarFallback]}>
+                        {icon}
+                      </View>
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.invitePlanTitle} numberOfLines={1}>{notif.title}</Text>
+                        {notif.body && <Text style={styles.inboxPlanName} numberOfLines={2}>{notif.body}</Text>}
+                        {timeLeft !== null && timeLeft > 0 && (
+                          <Text style={styles.inboxExpiry}>
+                            {timeLeft < 1 ? 'Expires soon' : `${timeLeft}h left to respond`}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.inboxActions}>
+                        {hasAction && (
+                          <TouchableOpacity
+                            style={styles.inboxAcceptBtn}
+                            onPress={() => handleNotifAction(notif.id, 'acted', notif.event_id)}
+                          >
+                            <Check size={16} color={Colors.white} />
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          style={styles.inboxDeclineBtn}
+                          onPress={() => handleNotifAction(notif.id, 'read')}
+                        >
+                          <XCircle size={16} color={Colors.textLight} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+            <TouchableOpacity style={styles.qrCloseBtn} onPress={() => setShowInvites(false)}>
+              <Text style={styles.qrCloseBtnText}>Done</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Invite Plan Picker */}
+      <Modal visible={!!inviteTarget} transparent animationType="fade">
+        <Pressable style={styles.qrOverlay} onPress={() => setInviteTarget(null)}>
+          <Pressable style={styles.inviteSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.inviteSheetTitle}>
+              Invite {inviteTarget?.first_name_display ?? ''} to a plan
+            </Text>
+            <ScrollView style={styles.invitePlanList} bounces={false}>
+              {myActivePlans.map((plan: any) => {
+                const isFull = plan.member_count >= plan.max_invites;
+                const alreadySent = sentInviteIds.has(plan.id);
+                const alreadyAttending = attendingIds.has(plan.id);
+                const disabled = isFull || alreadySent || alreadyAttending;
+                return (
+                  <TouchableOpacity
+                    key={plan.id}
+                    style={[styles.invitePlanRow, disabled && styles.invitePlanRowFull]}
+                    onPress={() => !disabled && sendInviteLink(plan)}
+                    activeOpacity={disabled ? 1 : 0.7}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.invitePlanTitle} numberOfLines={1}>{plan.title}</Text>
+                      {plan.start_time && (
+                        <Text style={styles.invitePlanMeta}>
+                          {new Date(plan.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                        </Text>
+                      )}
+                    </View>
+                    {alreadyAttending ? (
+                      <Text style={styles.invitePlanAttendingLabel}>Attending</Text>
+                    ) : alreadySent ? (
+                      <Text style={styles.invitePlanSentLabel}>Invited</Text>
+                    ) : isFull ? (
+                      <Text style={styles.invitePlanFullLabel}>Full</Text>
+                    ) : (
+                      <Send size={16} color={Colors.terracotta} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity style={styles.qrCloseBtn} onPress={() => setInviteTarget(null)}>
+              <Text style={styles.qrCloseBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* QR Modal */}
       <Modal visible={showQr} transparent animationType="fade">
@@ -461,6 +880,7 @@ export default function YourPeopleScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
+  centered: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -470,12 +890,12 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: Fonts.displayBold,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.terracotta,
-    textShadowColor: Colors.shadowLight,
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: Colors.asphalt,
+  },
+  headerTitleItalic: {
+    fontFamily: Fonts.displayItalic,
   },
 
   searchWrap: {
@@ -524,6 +944,8 @@ const styles = StyleSheet.create({
   avatarInitial: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansBold, color: Colors.terracotta },
   searchRowName: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
   searchRowHandle: { fontSize: FontSizes.bodySM, color: Colors.textLight, marginTop: 1 },
+  searchRowActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  menuBtn: { padding: 4 },
   addBtn: {
     backgroundColor: Colors.terracotta,
     paddingHorizontal: 14,
@@ -567,7 +989,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   qrBtnText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.terracotta },
-  handleSetLabel: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.asphalt, marginBottom: 8 },
+  handleSetLabel: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.textLight, marginBottom: 8 },
   handleInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -618,7 +1040,163 @@ const styles = StyleSheet.create({
   friendInfo: { flex: 1, marginLeft: 12 },
   friendName: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
   friendHandle: { fontSize: FontSizes.bodySM, color: Colors.textLight, marginTop: 1 },
-  removeHint: { fontSize: FontSizes.caption, color: Colors.textLight },
+  inviteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    borderRadius: 10,
+  },
+  inviteBtnText: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sansMedium, color: Colors.terracotta },
+  searchHint: {
+    fontSize: FontSizes.caption,
+    fontFamily: Fonts.sans,
+    color: Colors.textLight,
+    textAlign: 'center',
+    marginBottom: 8,
+    marginTop: -4,
+  },
+  inviteSheet: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 20,
+    width: '85%',
+    maxHeight: '60%',
+  },
+  inviteSheetTitle: {
+    fontSize: FontSizes.bodyLG,
+    fontFamily: Fonts.sansBold,
+    color: Colors.asphalt,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  invitePlanList: { maxHeight: 300 },
+  invitePlanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  invitePlanRowFull: { opacity: 0.45 },
+  invitePlanTitle: {
+    fontSize: FontSizes.bodyMD,
+    fontFamily: Fonts.sansMedium,
+    color: Colors.asphalt,
+  },
+  invitePlanMeta: {
+    fontSize: FontSizes.caption,
+    fontFamily: Fonts.sans,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
+  invitePlanFullLabel: {
+    fontSize: FontSizes.caption,
+    fontFamily: Fonts.sansMedium,
+    color: Colors.textLight,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  invitePlanSentLabel: {
+    fontSize: FontSizes.caption,
+    fontFamily: Fonts.sansMedium,
+    color: Colors.terracotta,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: Colors.parchment,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  invitePlanAttendingLabel: {
+    fontSize: FontSizes.caption,
+    fontFamily: Fonts.sansMedium,
+    color: Colors.successGreen,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  inviteInboxBtn: {
+    position: 'relative',
+    padding: 4,
+  },
+  inviteBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    backgroundColor: Colors.terracotta,
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  inviteBadgeText: {
+    fontSize: 10,
+    fontFamily: Fonts.sansBold,
+    color: Colors.white,
+  },
+  inboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  inboxAvatar: { width: 36, height: 36, borderRadius: 18 },
+  inboxAvatarFallback: {
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  inboxExpiry: {
+    fontSize: FontSizes.caption,
+    fontFamily: Fonts.sansMedium,
+    color: Colors.errorRed,
+    marginTop: 2,
+  },
+  inboxPlanName: {
+    fontSize: FontSizes.bodySM,
+    fontFamily: Fonts.sansBold,
+    color: Colors.terracotta,
+    marginTop: 1,
+  },
+  inboxActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 8,
+  },
+  inboxAcceptBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.terracotta,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inboxDeclineBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   emptyState: {
     flex: 1,
@@ -627,8 +1205,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     gap: 12,
   },
-  emptyTitle: { fontSize: FontSizes.displaySM, fontFamily: Fonts.sansBold, color: Colors.asphalt },
-  emptySub: { fontSize: FontSizes.bodyLG, color: Colors.textLight, textAlign: 'center', lineHeight: 22 },
+  emptyTitle: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.textMedium },
   emptyHint: { fontSize: FontSizes.bodyMD, color: Colors.terracotta, fontFamily: Fonts.sansMedium },
 
   qrOverlay: {

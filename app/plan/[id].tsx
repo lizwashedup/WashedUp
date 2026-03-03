@@ -36,12 +36,14 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import Colors from '../../constants/Colors';
+import { capDisplayCount, MAX_GROUP, MIN_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { checkContent } from '../../lib/contentFilter';
 import { useBlock } from '../../hooks/useBlock';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
+const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_WIDTH * (9 / 16);
@@ -51,9 +53,6 @@ const MANAGE_CATEGORIES = [
   'Food', 'Gaming', 'Music', 'Nightlife', 'Outdoors',
   'Sports', 'Tech', 'Wellness', 'Other',
 ] as const;
-
-const MIN_GROUP = 3;
-const MAX_GROUP = 8;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,7 +73,7 @@ interface PlanDetail {
   target_age_min: number | null;
   target_age_max: number | null;
   status: string;
-  host_id: string;
+  creator_id: string;
   tickets_url: string | null;
   creator: {
     id: string;
@@ -145,15 +144,6 @@ function formatGenderLabel(gender_rule: string | null): string | null {
   return null;
 }
 
-function getCategoryEmoji(category: string | null): string {
-  const map: Record<string, string> = {
-    food: '🍜', music: '🎵', nightlife: '🌙', outdoors: '🌿',
-    fitness: '💪', film: '🎬', art: '🎨', comedy: '😂',
-    sports: '⚽', wellness: '🧘',
-  };
-  return category ? (map[category.toLowerCase()] ?? '✨') : '✨';
-}
-
 function openDirections(locationText: string) {
   const encoded = encodeURIComponent(locationText);
   const url = Platform.OS === 'ios'
@@ -219,7 +209,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     target_age_min: row.target_age_min ?? null,
     target_age_max: row.target_age_max ?? null,
     status: row.status,
-    host_id: row.creator_user_id ?? null,
+    creator_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
     member_count: row.member_count ?? 0,
     creator,
@@ -227,11 +217,18 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
 }
 
 async function fetchMembers(planId: string): Promise<Member[]> {
-  // Preferred path: RPC returns member profiles, requires caller to be a member
   const { data: rpcData, error: rpcError } = await supabase
-    .rpc('get_event_members_reveal', { event_id: planId });
+    .rpc('get_event_members_reveal', { p_event_id: planId });
 
-  if (!rpcError && rpcData) return rpcData as Member[];
+  if (!rpcError && rpcData && Array.isArray(rpcData)) {
+    return rpcData.map((row: any) => ({
+      id: row.id,
+      user_id: row.user_id,
+      first_name: row.first_name ?? row.first_name_display ?? null,
+      avatar_url: row.avatar_url ?? row.profile_photo_url ?? null,
+      joined_at: row.joined_at ?? '',
+    }));
+  }
 
   // Fallback: get member user_ids, then query profiles_public view (no PII, publicly readable)
   const { data: memberRows, error: memberError } = await supabase
@@ -271,7 +268,12 @@ async function fetchMembers(planId: string): Promise<Member[]> {
 const MemberAvatar = React.memo(({ member }: { member: Member }) => (
   <View style={styles.memberAvatarWrapper}>
     {member.avatar_url ? (
-      <Image source={{ uri: member.avatar_url }} style={styles.memberAvatar} contentFit="cover" />
+      <Image
+        source={{ uri: member.avatar_url }}
+        style={styles.memberAvatar}
+        contentFit="cover"
+        transition={200}
+      />
     ) : (
       <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
         <Text style={styles.memberAvatarInitial}>
@@ -378,6 +380,16 @@ export default function PlanDetailScreen() {
       });
   }, [plan]);
 
+  // Prefetch avatar images so they load faster when displayed
+  useEffect(() => {
+    const urls: string[] = [];
+    if (plan?.creator?.avatar_url) urls.push(plan.creator.avatar_url);
+    members.forEach((m) => { if (m.avatar_url) urls.push(m.avatar_url); });
+    if (urls.length > 0) {
+      Image.prefetch(urls).catch(() => {});
+    }
+  }, [plan?.creator?.avatar_url, members]);
+
   // Wishlist check
   useEffect(() => {
     if (!currentUserId || !id) return;
@@ -403,10 +415,12 @@ export default function PlanDetailScreen() {
   }, [currentUserId, id]);
 
   const isMember = members.some((m) => m.user_id === currentUserId);
-  const isCreator = plan?.host_id === currentUserId;
-  const maxSpots = plan?.max_invites ?? 8;
-  const isFull = plan ? plan.member_count >= maxSpots : false;
-  const spotsLeft = plan ? maxSpots - plan.member_count : 0;
+  const isCreator = plan?.creator_id === currentUserId;
+  // Use actual member count when available — member_count can be out of sync
+  const displayMemberCount = members.length > 0 ? capDisplayCount(members.length) : capDisplayCount(plan?.member_count ?? 0);
+  const totalCapacity = Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
+  const isFull = plan ? displayMemberCount >= totalCapacity : false;
+  const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
 
   const manageGenderOptions = useMemo(() => {
     const opts: { label: string; value: string }[] = [
@@ -582,6 +596,14 @@ export default function PlanDetailScreen() {
 
   const handleSaveEdit = async () => {
     if (!plan || !currentUserId || editSaving) return;
+
+    const fieldsToCheck = [editTitle, editDescription, editCreatorMessage].filter(Boolean).join(' ');
+    const filter = checkContent(fieldsToCheck);
+    if (!filter.ok) {
+      Alert.alert('Content not allowed', filter.reason ?? 'Please revise your plan and try again.');
+      return;
+    }
+
     setEditSaving(true);
     try {
       const { error } = await supabase
@@ -776,8 +798,6 @@ export default function PlanDetailScreen() {
 
   const creatorMeta = [
       plan.location_text,
-      '4 plans posted',
-      'Joined Jan 2025',
     ].filter(Boolean).join(' • ');
 
   const categoryTags = [
@@ -785,7 +805,7 @@ export default function PlanDetailScreen() {
       genderLabel,
     ].filter(Boolean);
 
-  const groupSizeLabel = maxSpots <= 4 ? 'Small group • intimate' : maxSpots <= 6 ? 'Cozy group' : 'Larger group';
+  const groupSizeLabel = totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -841,7 +861,13 @@ export default function PlanDetailScreen() {
         {/* A. Creator Info */}
         <View style={styles.creatorBlock}>
           {plan.creator?.avatar_url ? (
-            <Image source={{ uri: plan.creator?.avatar_url ?? '' }} style={styles.creatorAvatarLarge} contentFit="cover" />
+            <Image
+              source={{ uri: plan.creator?.avatar_url ?? '' }}
+              style={styles.creatorAvatarLarge}
+              contentFit="cover"
+              transition={200}
+              priority="high"
+            />
           ) : (
             <View style={[styles.creatorAvatarLarge, styles.creatorAvatarPlaceholder]}>
               <Ionicons name="person-outline" size={32} color={Colors.textLight} />
@@ -913,7 +939,7 @@ export default function PlanDetailScreen() {
             <Users size={18} color={Colors.terracotta} strokeWidth={2} />
             <View style={styles.logisticsContent}>
               <Text style={styles.logisticsMain}>
-                {plan.member_count} of {maxSpots} spots filled
+                {displayMemberCount} of {totalCapacity} spots filled
               </Text>
               <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
             </View>
@@ -926,11 +952,6 @@ export default function PlanDetailScreen() {
           {visibleMembers.map((member) => (
             <MemberAvatar key={member.id} member={member} />
           ))}
-          {!isMember && !isCreator && (
-            <View style={styles.youPlaceholder}>
-              <Text style={styles.youPlaceholderText}>You?</Text>
-            </View>
-          )}
           {overflowCount > 0 && (
             <View style={[styles.memberAvatar, styles.memberAvatarOverflow]}>
               <Text style={styles.memberAvatarOverflowText}>+{overflowCount}</Text>
@@ -1574,22 +1595,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   memberAvatarOverflowText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  youPlaceholder: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: -8,
-  },
-  youPlaceholderText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textLight,
-  },
   ctaBlock: {
     marginTop: 8,
   },

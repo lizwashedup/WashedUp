@@ -13,7 +13,9 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { ChevronDown, ChevronRight } from 'lucide-react-native';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
+import ProfileButton from '../../../components/ProfileButton';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
@@ -44,6 +46,20 @@ function formatTime(dateString: string): string {
   if (diffHours < 24) return `${diffHours}h`;
   if (diffDays < 7) return `${diffDays}d`;
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatEventDate(dateString: string): string {
+  const d = new Date(dateString);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+  const dateStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  if (dateStart.getTime() === todayStart.getTime()) return `Today at ${timeStr}`;
+  if (dateStart.getTime() === tomorrowStart.getTime()) return `Tomorrow at ${timeStr}`;
+  const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return `${dayStr} at ${timeStr}`;
 }
 
 function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) {
@@ -92,7 +108,7 @@ function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) 
           )}
         </View>
 
-        <Text style={styles.memberCount}>{chat.member_count} people</Text>
+        <Text style={styles.memberCount}>{formatEventDate(chat.start_time)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -102,6 +118,7 @@ export default function ChatsScreen() {
   const router = useRouter();
   const { chats, loading, refetch } = useChatList();
   const [refreshing, setRefreshing] = React.useState(false);
+  const [pastExpanded, setPastExpanded] = React.useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -123,6 +140,7 @@ export default function ChatsScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Chats</Text>
+          <ProfileButton />
         </View>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
@@ -135,6 +153,7 @@ export default function ChatsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
+        <ProfileButton />
       </View>
 
       {chats.length === 0 ? (
@@ -155,7 +174,7 @@ export default function ChatsScreen() {
         </View>
       ) : (
         <FlatList
-          data={chats}
+          data={activeChats}
           keyExtractor={item => item.eventId}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.terracotta} />
@@ -163,20 +182,38 @@ export default function ChatsScreen() {
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListHeaderComponent={activeChats.length > 0 ? <Text style={styles.sectionLabel}>Active</Text> : null}
-          renderItem={({ item, index }) => {
-            const isFirstPast = item.is_past && (index === 0 || !chats[index - 1].is_past);
-            return (
-              <>
-                {isFirstPast && (
-                  <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Past Plans</Text>
-                )}
-                <ChatRow
-                  chat={item}
-                  onPress={() => router.push(`/(tabs)/chats/${item.eventId}` as any)}
-                />
-              </>
-            );
-          }}
+          renderItem={({ item }) => (
+            <ChatRow
+              chat={item}
+              onPress={() => router.push(`/(tabs)/chats/${item.eventId}` as any)}
+            />
+          )}
+          ListFooterComponent={pastChats.length > 0 ? (
+            <View>
+              <TouchableOpacity
+                style={styles.pastHeader}
+                onPress={() => setPastExpanded(prev => !prev)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.sectionLabel}>Past Plans</Text>
+                <View style={styles.pastChevron}>
+                  {pastExpanded
+                    ? <ChevronDown size={16} color={Colors.warmGray} />
+                    : <ChevronRight size={16} color={Colors.warmGray} />}
+                  <Text style={styles.pastCount}>{pastChats.length}</Text>
+                </View>
+              </TouchableOpacity>
+              {pastExpanded && pastChats.map((chat, i) => (
+                <React.Fragment key={chat.eventId}>
+                  {i > 0 && <View style={styles.separator} />}
+                  <ChatRow
+                    chat={chat}
+                    onPress={() => router.push(`/(tabs)/chats/${chat.eventId}` as any)}
+                  />
+                </React.Fragment>
+              ))}
+            </View>
+          ) : null}
         />
       )}
     </SafeAreaView>
@@ -196,10 +233,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.terracotta,
-    textShadowColor: Colors.shadowLight,
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: Colors.asphalt,
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingBottom: 32 },
@@ -213,6 +247,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 8,
+  },
+  pastHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 20,
+    marginTop: 8,
+  },
+  pastChevron: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  pastCount: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
   },
 
   row: {

@@ -7,25 +7,25 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
-  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { ChevronDown, ChevronRight, Heart, Map, LayoutList } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 import { fetchPlans, Plan } from '../../../lib/fetchPlans';
 import { PlanCard } from '../../../components/plans/PlanCard';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
+import ProfileButton from '../../../components/ProfileButton';
 import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
 // Lazy-load map to avoid crash on Expo Go / environments where react-native-maps fails
-const LazyPlansMapView = lazy(() => import('./PlansMapView'));
+const LazyPlansMapView = lazy(() => import('../../../components/plans/PlansMapView'));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,7 +54,6 @@ interface PlanCardPlan {
     member_since?: string;
     plans_posted?: number;
   };
-  attendees: { profile_photo_url: string | null }[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -72,8 +71,8 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
     creator: {
       first_name_display: plan.creator?.first_name ?? 'Creator',
       profile_photo_url: plan.creator?.avatar_url ?? null,
+      plans_posted: plan.creator?.plans_posted ?? undefined,
     },
-    attendees: [],
   };
 }
 
@@ -151,6 +150,7 @@ export default function PlansScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>('plans');
   const [mapView, setMapView] = useState(false);
   const [heartFilter, setHeartFilter] = useState(false);
+  const [pastExpanded, setPastExpanded] = useState(false);
   const navigation = useNavigation();
 
   React.useEffect(() => {
@@ -162,6 +162,7 @@ export default function PlansScreen() {
   }, [navigation, mapView, activeTab]);
 
   const [whenSheetOpen, setWhenSheetOpen] = useState(false);
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [whenFilter, setWhenFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<CategoryOption[]>([]);
 
@@ -204,9 +205,12 @@ export default function PlansScreen() {
     queryFn: () => fetchPlans(userId!),
     enabled: !!userId,
     staleTime: 60_000,
-    retry: 1,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    refetchOnMount: 'always',
   });
 
+  const queryClient = useQueryClient();
   const { data: wishlistIds = [] } = useQuery<string[]>({
     queryKey: ['wishlists', userId],
     queryFn: async () => {
@@ -216,6 +220,20 @@ export default function PlansScreen() {
     },
     enabled: !!userId,
     staleTime: 30_000,
+  });
+
+  const wishlistMutation = useMutation({
+    mutationFn: async ({ eventId, current }: { eventId: string; current: boolean }) => {
+      if (!userId) return;
+      if (current) {
+        await supabase.from('wishlists').delete().eq('user_id', userId).eq('event_id', eventId);
+      } else {
+        await supabase.from('wishlists').insert({ user_id: userId, event_id: eventId });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
+    },
   });
 
   const { data: myPlans = [], isLoading: myPlansLoading } = useQuery<Plan[]>({
@@ -242,11 +260,11 @@ export default function PlansScreen() {
         .from('events')
         .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message')
         .eq('creator_user_id', userId)
-        .in('status', ['forming', 'active', 'full']);
+        .in('status', ['forming', 'active', 'full', 'completed']);
 
       const joinedEvents = (memberships ?? [])
         .map((m: any) => m.events)
-        .filter((e: any) => e && ['forming', 'active', 'full'].includes(e.status));
+        .filter((e: any) => e && ['forming', 'active', 'full', 'completed'].includes(e.status));
 
       const seen: Record<string, boolean> = {};
       const allEvents: any[] = [];
@@ -270,6 +288,17 @@ export default function PlansScreen() {
         (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
       }
 
+      const eventIds = allEvents.map((e: any) => e.id);
+      const { data: memberRows } = await supabase
+        .from('event_members')
+        .select('event_id')
+        .in('event_id', eventIds)
+        .eq('status', 'joined');
+      const countByEvent: Record<string, number> = {};
+      (memberRows ?? []).forEach((r: { event_id: string }) => {
+        countByEvent[r.event_id] = (countByEvent[r.event_id] ?? 0) + 1;
+      });
+
       return allEvents.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
         return {
@@ -286,7 +315,7 @@ export default function PlansScreen() {
           gender_rule: e.gender_rule ?? null,
           max_invites: e.max_invites ?? null,
           min_invites: e.min_invites ?? null,
-          member_count: e.member_count ?? 0,
+          member_count: countByEvent[e.id] ?? e.member_count ?? 0,
           status: e.status ?? 'forming',
           host_message: e.host_message ?? null,
           creator: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
@@ -309,6 +338,28 @@ export default function PlansScreen() {
     myPlans.forEach((p: Plan) => { lookup[p.id] = true; });
     return lookup;
   }, [myPlans]);
+
+  const myPlansUpcoming = useMemo(
+    () => myPlans
+      .filter((p) => ['forming', 'active', 'full'].includes(p.status))
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
+    [myPlans],
+  );
+
+  const myPlansPast = useMemo(
+    () => myPlans
+      .filter((p) => p.status === 'completed')
+      .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
+      .slice(0, 20),
+    [myPlans],
+  );
+
+  const myPlansSections = useMemo(() => {
+    const s: { title: string; data: Plan[] }[] = [];
+    if (myPlansUpcoming.length > 0) s.push({ title: 'Upcoming', data: myPlansUpcoming });
+    if (myPlansPast.length > 0) s.push({ title: 'Past', data: pastExpanded ? myPlansPast : [] });
+    return s;
+  }, [myPlansUpcoming, myPlansPast, pastExpanded]);
 
   const displayPlans = useMemo(() => {
     if (!heartFilter) return allPlans;
@@ -335,7 +386,13 @@ export default function PlansScreen() {
       : `When · ${whenFilter.length}`;
 
   const whenActive = whenFilter.length > 0;
-  const categoryActive = (key: string) => categoryFilter.some((c) => c.toLowerCase() === key.toLowerCase());
+  const categoryActive = categoryFilter.length > 0;
+  const categoryLabel =
+    categoryFilter.length === 0
+      ? 'Category'
+      : categoryFilter.length === 1
+        ? categoryFilter[0]
+        : `Category · ${categoryFilter.length}`;
 
   const mapPlans = useMemo(() => {
     if (activeTab === 'myplans') return myPlans;
@@ -344,18 +401,28 @@ export default function PlansScreen() {
 
   const mapLoading = activeTab === 'myplans' ? myPlansLoading : isLoading;
 
-  const toggleCategory = useCallback((cat: CategoryOption) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setCategoryFilter((prev) =>
-      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat],
-    );
-  }, []);
-
   const renderSectionHeader = useCallback(
-    ({ section }: { section: { title: string } }) => (
-      <Text style={styles.sectionHeader}>{section.title}</Text>
-    ),
-    [],
+    ({ section }: { section: { title: string } }) => {
+      if (section.title === 'Past') {
+        return (
+          <TouchableOpacity
+            style={styles.pastSectionHeader}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPastExpanded((v) => !v); }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sectionHeader}>{section.title}</Text>
+            <View style={styles.pastChevronRow}>
+              <Text style={styles.pastCount}>{myPlansPast.length}</Text>
+              {pastExpanded
+                ? <ChevronDown size={16} color={Colors.textLight} />
+                : <ChevronRight size={16} color={Colors.textLight} />}
+            </View>
+          </TouchableOpacity>
+        );
+      }
+      return <Text style={styles.sectionHeader}>{section.title}</Text>;
+    },
+    [pastExpanded, myPlansPast.length],
   );
 
   const renderItem = useCallback(
@@ -364,10 +431,13 @@ export default function PlansScreen() {
         <PlanCard
           plan={toPlanCardPlan(item)}
           isMember={!!memberIdSet[item.id]}
+          isWishlisted={!!wishlistedSet[item.id]}
+          onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+          isPast={item.status === 'completed'}
         />
       </View>
     ),
-    [memberIdSet],
+    [memberIdSet, wishlistedSet, wishlistMutation],
   );
 
   const listEmpty = sections.length === 0;
@@ -381,38 +451,16 @@ export default function PlansScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+      {/* Header — logo + ProfileButton (Plans branding) */}
       <View style={styles.header}>
         <View style={styles.logoRow}>
           <Image source={require('../../../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
-          {__DEV__ && <View style={styles.designBadge}><Text style={styles.designBadgeText}>v2</Text></View>}
         </View>
-        <View style={styles.headerIcons}>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setMapView((v) => !v);
-            }}
-            accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
-          >
-            {mapView ? (
-              <Ionicons name="list" size={22} color={Colors.asphalt} />
-            ) : (
-              <Ionicons name="map-outline" size={22} color={Colors.asphalt} />
-            )}
-          </TouchableOpacity>
-        </View>
+        <ProfileButton />
       </View>
 
-      {/* Filter Chips */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipsScroll}
-        style={styles.chipsScrollView}
-      >
-        {/* Primary: All Plans / My Plans */}
+      {/* Row 1: All Plans | My Plans */}
+      <View style={styles.primaryChipsRow}>
         <View style={styles.primaryChips}>
           {(['plans', 'myplans'] as const).map((tab) => (
             <TouchableOpacity
@@ -424,41 +472,79 @@ export default function PlansScreen() {
                 if (tab !== 'plans') setMapView(false);
               }}
             >
-              <Text style={[styles.primaryChipText, activeTab === tab && styles.primaryChipTextActive]}>
+              <Text
+                style={[styles.primaryChipText, activeTab === tab && styles.primaryChipTextActive]}
+                numberOfLines={1}
+                allowFontScaling={false}
+              >
                 {tab === 'plans' ? 'All Plans' : 'My Plans'}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
+      </View>
 
-        {/* Secondary: When (terracotta) + Categories */}
-        {activeTab === 'plans' && (
-          <>
-            <TouchableOpacity
-              style={[styles.whenChip, whenActive && styles.whenChipActive]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setWhenSheetOpen(true);
-              }}
-            >
-              <Text style={[styles.whenChipText, whenActive && styles.whenChipTextActive]} numberOfLines={1}>
-                {whenLabel}
-              </Text>
-            </TouchableOpacity>
-            {CATEGORY_OPTIONS.map((cat) => (
-              <TouchableOpacity
-                key={cat}
-                style={[styles.categoryChip, categoryActive(cat) && styles.categoryChipActive]}
-                onPress={() => toggleCategory(cat)}
-              >
-                <Text style={[styles.categoryChipText, categoryActive(cat) && styles.categoryChipTextActive]}>
-                  {cat}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </>
-        )}
-      </ScrollView>
+      {/* Row 2: When, Category, Heart, Map — same layout as Scene tab */}
+      {activeTab === 'plans' && (
+        <View style={styles.filterRow}>
+          <TouchableOpacity
+            style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setWhenSheetOpen(true);
+            }}
+          >
+            <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
+              {whenLabel}
+            </Text>
+            <ChevronDown size={13} color={whenActive ? Colors.white : Colors.asphalt} strokeWidth={2.5} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setCategorySheetOpen(true);
+            }}
+          >
+            <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
+              {categoryLabel}
+            </Text>
+            <ChevronDown size={13} color={categoryActive ? Colors.white : Colors.asphalt} strokeWidth={2.5} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.heartFilterPill, heartFilter && styles.heartFilterPillActive]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setHeartFilter((v) => !v);
+            }}
+          >
+            <Heart
+              size={16}
+              color={heartFilter ? Colors.white : Colors.asphalt}
+              fill={heartFilter ? Colors.white : 'transparent'}
+              strokeWidth={2}
+            />
+          </TouchableOpacity>
+          <View style={styles.filterSpacer} />
+          <TouchableOpacity
+            style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setMapView((v) => !v);
+            }}
+            accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
+          >
+            {mapView ? (
+              <LayoutList size={14} color={Colors.white} strokeWidth={2} />
+            ) : (
+              <Map size={14} color={Colors.asphalt} strokeWidth={2} />
+            )}
+            <Text style={[styles.mapToggleLabel, mapView && styles.mapToggleLabelActive]}>
+              {mapView ? 'List' : 'Map'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Map view — lazy-loaded to avoid crash when react-native-maps fails (e.g. Expo Go) */}
       {mapView ? (
@@ -476,6 +562,8 @@ export default function PlansScreen() {
               plans={mapPlans}
               wishlistedSet={wishlistedSet}
               onPlanPress={(id) => router.push(`/plan/${id}`)}
+              onClose={() => setMapView(false)}
+              onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
             />
           </Suspense>
         )
@@ -517,7 +605,7 @@ export default function PlansScreen() {
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
               renderSectionHeader={renderSectionHeader}
-              stickySectionHeadersEnabled
+              stickySectionHeadersEnabled={false}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
               refreshControl={
@@ -532,7 +620,7 @@ export default function PlansScreen() {
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={Colors.terracotta} />
             </View>
-          ) : myPlans.length === 0 ? (
+          ) : myPlansSections.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>You haven't joined any plans yet.</Text>
               <TouchableOpacity style={styles.emptyButton} onPress={() => setActiveTab('plans')}>
@@ -541,10 +629,11 @@ export default function PlansScreen() {
             </View>
           ) : (
             <SectionList
-              sections={[{ title: 'My Plans', data: myPlans }]}
+              sections={myPlansSections}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
               renderSectionHeader={renderSectionHeader}
+              stickySectionHeadersEnabled={false}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
             />
@@ -560,6 +649,20 @@ export default function PlansScreen() {
         onToggle={(key) => setWhenFilter((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))}
         onClose={() => setWhenSheetOpen(false)}
         onClear={() => setWhenFilter([])}
+      />
+
+      <FilterBottomSheet
+        visible={categorySheetOpen}
+        title="Category"
+        options={CATEGORY_OPTIONS.map((c) => ({ key: c, label: c }))}
+        selected={categoryFilter}
+        onToggle={(key) =>
+          setCategoryFilter((prev) =>
+            prev.includes(key as CategoryOption) ? prev.filter((c) => c !== key) : [...prev, key as CategoryOption],
+          )
+        }
+        onClose={() => setCategorySheetOpen(false)}
+        onClear={() => setCategoryFilter([])}
       />
 
     </SafeAreaView>
@@ -587,17 +690,6 @@ const styles = StyleSheet.create({
     width: 140,
     height: 32,
   },
-  designBadge: {
-    backgroundColor: Colors.terracotta,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  designBadgeText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.micro,
-    color: Colors.white,
-  },
   headerIcons: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -613,15 +705,81 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chipsScrollView: {
-    maxHeight: 52,
+  primaryChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
   },
-  chipsScroll: {
+  filterRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    paddingBottom: 16,
     gap: 10,
+    marginBottom: 20,
     alignItems: 'center',
+  },
+  filterSpacer: { flexGrow: 1, flexShrink: 0, minWidth: 4 },
+  dropdownPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  dropdownPillActive: {
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
+  },
+  dropdownText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  dropdownTextActive: {
+    color: Colors.white,
+  },
+  heartFilterPill: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heartFilterPillActive: {
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
+  },
+  mapTogglePill: {
+    flexShrink: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 18,
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  mapTogglePillActive: {
+    backgroundColor: Colors.asphalt,
+    borderColor: Colors.asphalt,
+  },
+  mapToggleLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.micro,
+    color: Colors.asphalt,
+  },
+  mapToggleLabelActive: {
+    color: Colors.white,
   },
   primaryChips: {
     flexDirection: 'row',
@@ -629,11 +787,13 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: Colors.border,
     padding: 4,
+    flexShrink: 0,
   },
   primaryChip: {
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderRadius: 20,
+    minWidth: 110,
   },
   primaryChipActive: {
     backgroundColor: Colors.asphalt,
@@ -646,53 +806,34 @@ const styles = StyleSheet.create({
   primaryChipTextActive: {
     color: Colors.white,
   },
-  whenChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-    backgroundColor: Colors.terracotta,
-  },
-  whenChipActive: {
-    backgroundColor: Colors.asphalt,
-  },
-  whenChipText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.white,
-  },
-  whenChipTextActive: {
-    color: Colors.white,
-  },
-  categoryChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  categoryChipActive: {
-    backgroundColor: Colors.asphalt,
-    borderColor: Colors.asphalt,
-  },
-  categoryChipText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  categoryChipTextActive: {
-    color: Colors.white,
-  },
   listContent: {
     paddingHorizontal: 20,
     paddingBottom: 32,
   },
   sectionHeader: {
-    fontFamily: Fonts.displayBold,
-    fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    textTransform: 'uppercase',
     marginTop: 24,
     marginBottom: 12,
+  },
+  pastSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  pastChevronRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  pastCount: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
   },
   cardWrap: {
     marginBottom: 16,

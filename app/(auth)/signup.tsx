@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,16 +10,19 @@ import {
   Platform,
   StyleSheet,
   ActivityIndicator,
+  Alert,
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
+import { signInWithApple, signInWithGoogle, isAppleAuthAvailable, isGoogleAuthConfigured } from '../../lib/socialAuth';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
@@ -83,14 +86,28 @@ export default function SignupScreen() {
         setError(signUpError.message === 'User already registered' ? 'An account with this email already exists.' : signUpError.message);
         return;
       }
+
       const user = authData?.user;
       if (user) {
-        await supabase
-          .from('profiles')
-          .update({ first_name_display: trimmedFirst })
-          .eq('id', user.id);
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const { error: nameErr } = await supabase
+            .from('profiles')
+            .update({ first_name_display: trimmedFirst })
+            .eq('id', user.id);
+          if (!nameErr) break;
+          if (attempt === 0) await new Promise(r => setTimeout(r, 800));
+        }
       }
-      // Root layout will redirect to onboarding/basics when session exists and onboarding not complete
+
+      if (!authData?.session) {
+        Alert.alert(
+          'Check your email',
+          'We sent you a confirmation link. Please verify your email to continue.',
+        );
+      }
+      // Auth listener in root layout handles navigation when session exists
+    } catch (e: any) {
+      setError(e?.message ?? 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -107,6 +124,41 @@ export default function SignupScreen() {
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<'apple' | 'google' | null>(null);
+  const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
+  const showGoogle = isGoogleAuthConfigured();
+
+  useEffect(() => {
+    isAppleAuthAvailable().then(setAppleAvailable);
+  }, []);
+
+  const handleAppleSignIn = async () => {
+    setError(null);
+    setSocialLoading('apple');
+    try {
+      await signInWithApple();
+    } catch (e: any) {
+      if (e?.code !== 'ERR_REQUEST_CANCELED') {
+        setError(e?.message ?? 'Apple sign-in failed. Please try again.');
+      }
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setSocialLoading('google');
+    try {
+      await signInWithGoogle();
+    } catch (e: any) {
+      if (e?.code !== 'SIGN_IN_CANCELLED') {
+        setError(e?.message ?? 'Google sign-in failed. Please try again.');
+      }
+    } finally {
+      setSocialLoading(null);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -167,6 +219,7 @@ export default function SignupScreen() {
                 onFocus={() => setEmailFocused(true)}
                 onBlur={() => setEmailFocused(false)}
                 keyboardType="email-address"
+                textContentType="emailAddress"
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="next"
@@ -225,7 +278,11 @@ export default function SignupScreen() {
                   <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/terms'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
                     <Text style={styles.agreementLink}>Terms of Service</Text>
                   </TouchableOpacity>
-                  <Text style={styles.agreementText}> and </Text>
+                  <Text style={styles.agreementText}>, </Text>
+                  <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/privacy'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+                    <Text style={styles.agreementLink}>Privacy Policy</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.agreementText}>, and </Text>
                   <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/guidelines'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
                     <Text style={styles.agreementLink}>Community Guidelines</Text>
                   </TouchableOpacity>
@@ -260,6 +317,45 @@ export default function SignupScreen() {
               entering={FadeIn.duration(400).delay(200)}
               style={styles.bottomSection}
             >
+              <View style={styles.orRow}>
+                <View style={styles.orLine} />
+                <View style={styles.orChip}>
+                  <Text style={styles.orText}>or</Text>
+                </View>
+                <View style={styles.orLine} />
+              </View>
+              <View style={styles.gap16} />
+
+              {appleAvailable && (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={14}
+                  style={styles.appleButton}
+                  onPress={handleAppleSignIn}
+                />
+              )}
+
+              {showGoogle && (
+                <>
+                  <View style={styles.gap12} />
+                  <TouchableOpacity
+                    style={styles.googleButton}
+                    onPress={handleGoogleSignIn}
+                    onPressIn={triggerHaptic}
+                    activeOpacity={0.9}
+                    disabled={!!socialLoading}
+                  >
+                    {socialLoading === 'google' ? (
+                      <ActivityIndicator color={Colors.asphalt} />
+                    ) : (
+                      <Text style={styles.googleButtonText}>Continue with Google</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+
+              <View style={styles.gap16} />
               <View style={styles.signupRow}>
                 <Text style={styles.signupPrompt}>Already have an account? </Text>
                 <TouchableOpacity onPress={handleLogInPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -460,5 +556,43 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyMD,
     color: Colors.terracotta,
+  },
+  orRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  orLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  orChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    backgroundColor: Colors.cardBg,
+  },
+  orText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+  },
+  appleButton: {
+    height: 52,
+    width: '100%',
+  },
+  googleButton: {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  googleButtonText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
   },
 });

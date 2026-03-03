@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
@@ -44,7 +44,11 @@ export default function OnboardingVibesScreen() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        Alert.alert('Session expired', 'Please sign in again.');
+        supabase.auth.signOut();
+        return;
+      }
       const tags = Object.keys(selected).filter(k => selected[k]);
       await supabase
         .from('profiles')

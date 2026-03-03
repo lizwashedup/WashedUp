@@ -27,6 +27,8 @@ import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { PROFILE_PHOTO_KEY } from '../../components/ProfileButton';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
+import { isAdmin } from '../../constants/Admin';
+import { checkContent } from '../../lib/contentFilter';
 
 // Uses correct column names from profiles table: first_name_display, profile_photo_url, handle
 interface Profile {
@@ -84,37 +86,45 @@ export default function ProfileScreen() {
     }
     const t = setTimeout(async () => {
       setCheckingHandle(true);
-      const { data } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('handle', clean)
-        .neq('id', profile?.id ?? '')
-        .maybeSingle();
-      setHandleAvailable(!data);
-      setCheckingHandle(false);
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('handle', clean)
+          .neq('id', profile?.id ?? '')
+          .maybeSingle();
+        if (error) throw error;
+        setHandleAvailable(!data);
+      } catch {
+        setHandleAvailable(true);
+      } finally {
+        setCheckingHandle(false);
+      }
     }, 500);
     return () => clearTimeout(t);
   }, [editHandle, profile?.handle, profile?.id, showEditFlow]);
 
   const fetchProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, first_name_display, profile_photo_url, bio, city, gender, handle')
-      .eq('id', user.id)
-      .single();
-    if (data) {
-      setProfile({
-        id: data.id,
-        first_name: (data as any).first_name_display ?? null,
-        avatar_url: (data as any).profile_photo_url ?? null,
-        bio: data.bio ?? null,
-        city: data.city ?? null,
-        gender: data.gender ?? null,
-        handle: (data as any).handle ?? null,
-      });
-    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, first_name_display, profile_photo_url, bio, city, gender, handle')
+        .eq('id', user.id)
+        .single();
+      if (data) {
+        setProfile({
+          id: data.id,
+          first_name: (data as any).first_name_display ?? null,
+          avatar_url: (data as any).profile_photo_url ?? null,
+          bio: data.bio ?? null,
+          city: data.city ?? null,
+          gender: data.gender ?? null,
+          handle: (data as any).handle ?? null,
+        });
+      }
+    } catch {}
     setLoading(false);
   };
 
@@ -208,6 +218,13 @@ export default function ProfileScreen() {
       Alert.alert('Name required', 'Please enter a display name.');
       return;
     }
+
+    const filter = checkContent([trimmedName, editBio].filter(Boolean).join(' '));
+    if (!filter.ok) {
+      Alert.alert('Content not allowed', filter.reason ?? 'Please revise your profile and try again.');
+      return;
+    }
+
     setSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -239,7 +256,7 @@ export default function ProfileScreen() {
 
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
       setProfile((prev) =>
-        prev ? { ...prev, first_name: trimmedName, bio: editBio.trim() || null, avatar_url: newPhotoUrl } : prev,
+        prev ? { ...prev, first_name: trimmedName, bio: editBio.trim() || null, avatar_url: newPhotoUrl, handle: handleVal } : prev,
       );
       setShowEditFlow(false);
     } catch (err: any) {
@@ -632,6 +649,25 @@ export default function ProfileScreen() {
           {supportRows.map((row, i) => renderSettingsRow(row, i === supportRows.length - 1))}
         </View>
 
+        {/* Admin */}
+        {isAdmin(profile?.id ?? null) && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Admin</Text>
+            </View>
+            <View style={styles.settingsGroup}>
+              <TouchableOpacity
+                style={styles.settingsRow}
+                onPress={() => router.push('/admin/events')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.settingsLabel}>Manage Scene Events</Text>
+                <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
         {/* Account */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Account</Text>
@@ -678,7 +714,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.terracotta,
+    color: Colors.asphalt,
   },
 
   // Profile section — avatar 100px, display name displaySmall, handle bodySmall

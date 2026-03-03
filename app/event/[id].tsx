@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Linking,
+  Alert,
   Dimensions,
   Share,
 } from 'react-native';
@@ -15,10 +15,13 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
-import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight } from 'lucide-react-native';
+import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight, MoreHorizontal } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import { ReportModal } from '../../components/modals/ReportModal';
+import { useBlock } from '../../hooks/useBlock';
 import Colors from '../../constants/Colors';
+import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -45,8 +48,9 @@ interface LinkedPlan {
   member_count: number;
   max_invites: number;
   status: string;
-  host_name: string | null;
-  host_photo: string | null;
+  creator_user_id: string;
+  creator_name: string | null;
+  creator_photo: string | null;
   primary_vibe: string | null;
 }
 
@@ -73,11 +77,40 @@ export default function EventDetailScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
-  const [showShareModal, setShowShareModal] = useState(false);
+
+  const [showReport, setShowReport] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+  const { blockUser } = useBlock();
 
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
+
+  const handleCreatorMenu = useCallback((creatorId: string, creatorName: string) => {
+    if (creatorId === userId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert(
+      creatorName,
+      undefined,
+      [
+        {
+          text: `Report ${creatorName}`,
+          onPress: () => {
+            setReportTarget({ id: creatorId, name: creatorName });
+            setShowReport(true);
+          },
+        },
+        {
+          text: `Block ${creatorName}`,
+          style: 'destructive',
+          onPress: () => blockUser(creatorId, creatorName, () => {
+            queryClient.invalidateQueries({ queryKey: ['event-plans', id] });
+          }),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }, [userId, blockUser, queryClient, id]);
 
   const { data: event, isLoading } = useQuery({
     queryKey: ['explore-event', id],
@@ -110,11 +143,33 @@ export default function EventDetailScreen() {
       if (error) throw error;
       return (data ?? []).map((p: any) => ({
         ...p,
-        host_name: p.profiles?.first_name_display ?? null,
-        host_photo: p.profiles?.profile_photo_url ?? null,
+        creator_name: p.profiles?.first_name_display ?? null,
+        creator_photo: p.profiles?.profile_photo_url ?? null,
       }));
     },
     enabled: !!id,
+  });
+
+  // Fetch actual member counts from event_members — member_count on events can be out of sync
+  const planIdsKey = linkedPlans.map((p) => p.id).sort().join(',');
+  const { data: memberCountsMap = {} } = useQuery({
+    queryKey: ['event-plans-member-counts', planIdsKey],
+    queryFn: async (): Promise<Record<string, number>> => {
+      const planIds = linkedPlans.map((p) => p.id);
+      if (planIds.length === 0) return {};
+      const { data, error } = await supabase
+        .from('event_members')
+        .select('event_id')
+        .in('event_id', planIds)
+        .eq('status', 'joined');
+      if (error) throw error;
+      const counts: Record<string, number> = {};
+      (data ?? []).forEach((r: { event_id: string }) => {
+        counts[r.event_id] = (counts[r.event_id] ?? 0) + 1;
+      });
+      return counts;
+    },
+    enabled: linkedPlans.length > 0,
   });
 
   const { data: isWishlisted = false } = useQuery({
@@ -157,10 +212,16 @@ export default function EventDetailScreen() {
     );
   }
 
-  const spotsInfo = (plan: LinkedPlan) => {
-    if (plan.status === 'full') return 'Full';
-    const left = plan.max_invites - plan.member_count;
-    return `${left} ${left === 1 ? 'spot' : 'spots'} left`;
+  const isFree = !event.ticket_price || (typeof event.ticket_price === 'string' && (event.ticket_price.trim() === '' || event.ticket_price.trim().toLowerCase() === 'free'));
+
+  const getPlanSpotsInfo = (plan: LinkedPlan): { text: string; isFull: boolean } => {
+    const actualCount = memberCountsMap[plan.id] ?? plan.member_count;
+    const capped = capDisplayCount(actualCount);
+    const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
+    const left = Math.max(0, totalCapacity - capped);
+    const isFull = left === 0;
+    const text = isFull ? 'Full' : `${left} ${left === 1 ? 'spot' : 'spots'} left`;
+    return { text, isFull };
   };
 
   return (
@@ -247,7 +308,7 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          {event.external_url && (
+          {!isFree && event.external_url && (
             <TouchableOpacity
               style={styles.ticketLink}
               onPress={() => openUrl(event.external_url!)}
@@ -266,46 +327,61 @@ export default function EventDetailScreen() {
             {linkedPlans.length === 0 ? (
               <Text style={styles.noPlansText}>No one has posted a plan yet. Be the first!</Text>
             ) : (
-              linkedPlans.map(plan => (
-                <TouchableOpacity
-                  key={plan.id}
-                  style={styles.planCard}
-                  onPress={() => router.push(`/plan/${plan.id}`)}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.planCardTop}>
-                    {plan.host_photo ? (
-                      <Image source={{ uri: plan.host_photo }} style={styles.planCreatorAvatar} contentFit="cover" />
-                    ) : (
-                      <View style={[styles.planCreatorAvatar, { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' }]}>
-                        <Text style={{ fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta }}>
-                          {plan.host_name?.[0]?.toUpperCase() ?? '?'}
+              linkedPlans.map(plan => {
+                const { text: spotsText, isFull } = getPlanSpotsInfo(plan);
+                return (
+                  <TouchableOpacity
+                    key={plan.id}
+                    style={styles.planCard}
+                    onPress={() => router.push(`/plan/${plan.id}`)}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.planCardTop}>
+                      {plan.creator_photo ? (
+                        <Image source={{ uri: plan.creator_photo }} style={styles.planCreatorAvatar} contentFit="cover" />
+                      ) : (
+                        <View style={[styles.planCreatorAvatar, styles.planCreatorAvatarFallback]}>
+                          <Text style={styles.planCreatorInitial}>
+                            {plan.creator_name?.[0]?.toUpperCase() ?? '?'}
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={styles.planCreatorName}>Posted by {plan.creator_name ?? 'Someone'}</Text>
+                      {plan.primary_vibe && (
+                        <View style={styles.planVibePill}>
+                          <Text style={styles.planVibeText}>{plan.primary_vibe}</Text>
+                        </View>
+                      )}
+                      <View style={styles.planCardSpacer} />
+                      {plan.creator_user_id !== userId && (
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleCreatorMenu(plan.creator_user_id, plan.creator_name ?? 'this person');
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          style={styles.planMenuBtn}
+                        >
+                          <MoreHorizontal size={16} color={Colors.textLight} />
+                        </TouchableOpacity>
+                      )}
+                      <View style={[
+                        styles.planJoinBtn,
+                        isFull && styles.planJoinBtnFull,
+                      ]}>
+                        <Text style={[
+                          styles.planJoinBtnText,
+                          isFull && styles.planJoinBtnTextFull,
+                        ]}>
+                          {isFull ? 'Full' : 'Join'}
                         </Text>
                       </View>
-                    )}
-                    <Text style={styles.planCreatorName}>Posted by {plan.host_name ?? 'Someone'}</Text>
-                    {plan.primary_vibe && (
-                      <View style={styles.planVibePill}>
-                        <Text style={styles.planVibeText}>{plan.primary_vibe}</Text>
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }} />
-                    <View style={[
-                      styles.planJoinBtn,
-                      plan.status === 'full' && { backgroundColor: Colors.border }
-                    ]}>
-                      <Text style={[
-                        styles.planJoinBtnText,
-                        plan.status === 'full' && { color: Colors.textLight }
-                      ]}>
-                        {plan.status === 'full' ? 'Full' : 'Join'}
-                      </Text>
                     </View>
-                  </View>
-                  <Text style={styles.planTitle}>{plan.title}</Text>
-                  <Text style={styles.planMeta}>{spotsInfo(plan)}</Text>
-                </TouchableOpacity>
-              ))
+                    <Text style={styles.planTitle}>{plan.title}</Text>
+                    <Text style={styles.planMeta}>{spotsText}</Text>
+                  </TouchableOpacity>
+                );
+              })
             )}
           </View>
         </View>
@@ -328,6 +404,15 @@ export default function EventDetailScreen() {
           <Text style={styles.postPlanButtonText}>Find People to Go With</Text>
         </TouchableOpacity>
       </View>
+
+      {reportTarget && (
+        <ReportModal
+          visible={showReport}
+          onClose={() => { setShowReport(false); setReportTarget(null); }}
+          reportedUserId={reportTarget.id}
+          reportedUserName={reportTarget.name}
+        />
+      )}
     </View>
   );
 }
@@ -379,10 +464,16 @@ const styles = StyleSheet.create({
   },
   planCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   planCreatorAvatar: { width: 28, height: 28, borderRadius: 14, overflow: 'hidden' },
+  planCreatorAvatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  planCreatorInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
   planCreatorName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   planVibePill: { backgroundColor: Colors.inputBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   planVibeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.warmGray, textTransform: 'capitalize' },
+  planCardSpacer: { flex: 1 },
+  planMenuBtn: { padding: 4, marginRight: 4 },
   planJoinBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8 },
+  planJoinBtnFull: { backgroundColor: Colors.border },
+  planJoinBtnTextFull: { color: Colors.textLight },
   planJoinBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
   planTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   planMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },

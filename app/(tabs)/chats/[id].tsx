@@ -10,7 +10,6 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  Linking,
   Modal,
   Pressable,
 } from 'react-native';
@@ -18,15 +17,17 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
+import { capDisplayCount } from '../../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { openUrl } from '../../../lib/url';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
-import { useChat, ChatMessage } from '../../../hooks/useChat';
+import { useChat, ChatMessage, MessageReaction } from '../../../hooks/useChat';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 
@@ -124,10 +125,14 @@ interface BubbleProps {
   showAvatar: boolean;
   showName: boolean;
   isGrouped: boolean;
+  currentUserId: string;
   onPhotoPress?: (url: string) => void;
+  onReaction?: (messageId: string) => void;
 }
 
-function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, onPhotoPress }: BubbleProps) {
+function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, onPhotoPress, onReaction }: BubbleProps) {
+  const lastTapRef = React.useRef(0);
+
   if (message.message_type === 'system') {
     return (
       <View style={bubbleStyles.systemRow}>
@@ -135,6 +140,21 @@ function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, onPhot
       </View>
     );
   }
+
+  const handleDoubleTap = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onReaction?.(message.id);
+      lastTapRef.current = 0;
+    } else {
+      lastTapRef.current = now;
+    }
+  };
+
+  const reactions = message.reactions ?? [];
+  const heartCount = reactions.filter(r => r.reaction === 'heart').length;
+  const iHearted = reactions.some(r => r.reaction === 'heart' && r.user_id === currentUserId);
 
   const borderRadius = {
     borderTopLeftRadius: isOwn ? 18 : (isGrouped ? 6 : 18),
@@ -145,7 +165,6 @@ function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, onPhot
 
   return (
     <View style={[bubbleStyles.row, isOwn ? bubbleStyles.rowOwn : bubbleStyles.rowOther]}>
-      {/* Avatar slot — only for others */}
       {!isOwn && (
         <View style={bubbleStyles.avatarSlot}>
           {showAvatar ? (
@@ -170,30 +189,43 @@ function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, onPhot
           </View>
         )}
 
-        <View style={[
-          bubbleStyles.bubble,
-          isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
-          borderRadius,
-        ]}>
-          {!!message.image_url ? (
-            <TouchableOpacity onPress={() => onPhotoPress?.(message.image_url!)}>
-              <Image
-                source={{ uri: message.image_url }}
-                style={bubbleStyles.messageImage}
-                contentFit="cover"
-              />
-              {message.content ? (
-                <Text style={[bubbleStyles.caption, isOwn && bubbleStyles.captionOwn]}>
-                  {message.content}
-                </Text>
-              ) : null}
-            </TouchableOpacity>
-          ) : (
-            <Text style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn]}>
-              {message.content}
-            </Text>
+        <Pressable onPress={handleDoubleTap}>
+          <View style={[
+            bubbleStyles.bubble,
+            isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
+            borderRadius,
+          ]}>
+            {!!message.image_url ? (
+              <TouchableOpacity onPress={() => onPhotoPress?.(message.image_url!)}>
+                <Image
+                  source={{ uri: message.image_url }}
+                  style={bubbleStyles.messageImage}
+                  contentFit="cover"
+                />
+                {message.content ? (
+                  <Text style={[bubbleStyles.caption, isOwn && bubbleStyles.captionOwn]}>
+                    {message.content}
+                  </Text>
+                ) : null}
+              </TouchableOpacity>
+            ) : (
+              <Text style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn]}>
+                {message.content}
+              </Text>
+            )}
+          </View>
+
+          {heartCount > 0 && (
+            <View style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther]}>
+              <Text style={[bubbleStyles.reactionHeart, iHearted && bubbleStyles.reactionHeartActive]}>
+                {iHearted ? '\u2764\uFE0F' : '\u2661'}
+              </Text>
+              {heartCount > 1 && (
+                <Text style={bubbleStyles.reactionCount}>{heartCount}</Text>
+              )}
+            </View>
           )}
-        </View>
+        </Pressable>
 
         {(isOwn || !showName) && (
           <Text style={[bubbleStyles.timestamp, isOwn && bubbleStyles.timestampOwn]}>
@@ -257,6 +289,33 @@ const bubbleStyles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
   },
+  reactionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    position: 'absolute',
+    bottom: -10,
+    gap: 2,
+    shadowColor: Colors.shadowBlack,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  reactionBadgeOwn: { right: 4 },
+  reactionBadgeOther: { left: 4 },
+  reactionHeart: { fontSize: 13 },
+  reactionHeartActive: { color: Colors.errorRed },
+  reactionCount: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.textMedium,
+  },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -272,7 +331,7 @@ export default function ChatScreen() {
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const listRef = useRef<FlatList>(null);
 
-  const { messages, loading, currentUserId, sendMessage } = useChat(id);
+  const { messages, loading, currentUserId, sendMessage, toggleReaction } = useChat(id);
   const { blockUser } = useBlock();
 
   const { data: event } = useQuery({
@@ -360,11 +419,30 @@ export default function ChatScreen() {
   }, [inputText, uploading, sendMessage]);
 
   const handlePhotoPress = useCallback(async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: false,
-      quality: 0.8,
+    const choice = await new Promise<'camera' | 'library' | null>((resolve) => {
+      Alert.alert('Add Photo', '', [
+        { text: 'Take Photo', onPress: () => resolve('camera') },
+        { text: 'Choose from Library', onPress: () => resolve('library') },
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+      ]);
     });
+    if (!choice) return;
+
+    if (choice === 'camera') {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Camera access needed', 'Please allow camera access in Settings to take photos.');
+        return;
+      }
+    }
+
+    const result = choice === 'camera'
+      ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
+      : await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsMultipleSelection: false,
+          quality: 0.8,
+        });
 
     if (result.canceled || !result.assets[0]) return;
 
@@ -483,8 +561,8 @@ export default function ChatScreen() {
                   )}
                 </View>
               ))}
-              {event.member_count > 5 && (
-                <Text style={chatStyles.moreMembers}>+{event.member_count - 5}</Text>
+              {capDisplayCount(event.member_count) > 5 && (
+                <Text style={chatStyles.moreMembers}>+{capDisplayCount(event.member_count) - 5}</Text>
               )}
               <Ionicons name="chevron-forward" size={14} color={Colors.warmGray} style={{ marginLeft: 8 }} />
             </TouchableOpacity>
@@ -533,14 +611,16 @@ export default function ChatScreen() {
               const isGroupedWithNext = !!(nextMsg?.user_id === msg.user_id && isSameDay(msg.created_at, nextMsg.created_at));
 
               return (
-                <View style={{ marginBottom: isGroupedWithNext ? 1 : 10 }}>
+                <View style={{ marginBottom: isGroupedWithNext ? 1 : (msg.reactions?.length ? 16 : 10) }}>
                   <MessageBubble
                     message={msg}
                     isOwn={isOwn}
                     showAvatar={!isOwn && !isGroupedWithNext}
                     showName={!isOwn && !isGroupedWithPrev}
                     isGrouped={isGroupedWithPrev}
+                    currentUserId={currentUserId}
                     onPhotoPress={setPhotoViewUrl}
+                    onReaction={(messageId) => toggleReaction(messageId)}
                   />
                 </View>
               );
@@ -627,7 +707,7 @@ const chatStyles = StyleSheet.create({
   },
   backBtn: { padding: 2 },
   headerCenter: { flex: 1 },
-  headerTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  headerTitle: { fontFamily: Fonts.display, fontSize: FontSizes.displayLG, color: Colors.asphalt },
   headerSub: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginTop: 1 },
   ellipsisBtn: {
     padding: 4,

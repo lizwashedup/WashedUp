@@ -29,7 +29,7 @@ export interface ReportModalProps {
   onClose: () => void;
   reportedUserId: string;
   reportedUserName: string;
-  eventId: string;
+  eventId?: string;
 }
 
 export function ReportModal({
@@ -60,8 +60,8 @@ export function ReportModal({
         reporter_user_id: user.id,
         reported_user_id: reportedUserId,
         reason: selectedReason,
-        reported_event_id: eventId,
-        details: 'Reported from plan chat',
+        reported_event_id: eventId ?? null,
+        details: eventId ? 'Reported from plan' : 'Reported from user search',
       });
 
       if (error) throw error;

@@ -21,6 +21,7 @@ export interface Plan {
     id: string;
     first_name: string | null;
     avatar_url: string | null;
+    plans_posted?: number;
   } | null;
 }
 
@@ -52,55 +53,59 @@ function mapRowToPlan(item: any): Plan {
   };
 }
 
-async function fetchPlansFallback(_userId: string): Promise<Plan[]> {
-  try {
-    const { data: rows, error } = await supabase
-      .from('events')
-      .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, host_message, creator_user_id')
-      .in('status', ['forming', 'active', 'full'])
-      .gte('start_time', new Date().toISOString())
-      .order('start_time', { ascending: true });
-
-    if (error) return [];
-    if (!rows?.length) return [];
-
-    const creatorIds = [...new Set(rows.map((r: any) => r.creator_user_id).filter(Boolean))];
-    const profileMap: Record<string, { first_name_display: string | null; profile_photo_url: string | null }> = {};
-    if (creatorIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from('profiles_public')
-        .select('id, first_name_display, profile_photo_url')
-        .in('id', creatorIds);
-      (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-    }
-
-    return rows.map((r: any) => {
-      const p = profileMap[r.creator_user_id];
-      return mapRowToPlan({
-        ...r,
-        creator_name: p?.first_name_display ?? null,
-        creator_photo: p?.profile_photo_url ?? null,
-      });
-    });
-  } catch {
-    return [];
-  }
-}
-
 export async function fetchPlans(userId: string): Promise<Plan[]> {
   if (!userId) return [];
 
-  try {
-    const { data, error } = await supabase.rpc('get_filtered_feed', {
-      p_user_id: userId,
+  const { data, error } = await supabase.rpc('get_filtered_feed', {
+    p_user_id: userId,
+  });
+
+  if (error) {
+    console.warn('[fetchPlans] RPC failed:', error.message);
+    throw new Error(error.message ?? 'Failed to load plans');
+  }
+
+  const plans = (Array.isArray(data) ? data : []).map((item: any) => mapRowToPlan(item));
+  if (plans.length === 0) return plans;
+
+  // Override member_count with actual count from event_members — DB trigger can be out of sync
+  const planIds = plans.map((p) => p.id);
+  const { data: memberRows } = await supabase
+    .from('event_members')
+    .select('event_id')
+    .in('event_id', planIds)
+    .eq('status', 'joined');
+
+  const countByEvent: Record<string, number> = {};
+  (memberRows ?? []).forEach((r: { event_id: string }) => {
+    countByEvent[r.event_id] = (countByEvent[r.event_id] ?? 0) + 1;
+  });
+
+  const withCounts = plans.map((p) => ({
+    ...p,
+    member_count: countByEvent[p.id] ?? p.member_count,
+  }));
+
+  // Enrich creator with plan count
+  const creatorIds = [...new Set(withCounts.map((p) => p.creator?.id).filter(Boolean))] as string[];
+  if (creatorIds.length > 0) {
+    const { data: creatorEvents } = await supabase
+      .from('events')
+      .select('creator_user_id')
+      .in('creator_user_id', creatorIds);
+
+    const planCountByCreator: Record<string, number> = {};
+    (creatorEvents ?? []).forEach((e: { creator_user_id: string }) => {
+      planCountByCreator[e.creator_user_id] = (planCountByCreator[e.creator_user_id] ?? 0) + 1;
     });
 
-    if (!error && data != null) {
-      return (Array.isArray(data) ? data : []).map((item: any) => mapRowToPlan(item));
-    }
-
-    return fetchPlansFallback(userId);
-  } catch {
-    return fetchPlansFallback(userId);
+    return withCounts.map((p) => ({
+      ...p,
+      creator: p.creator
+        ? { ...p.creator, plans_posted: planCountByCreator[p.creator.id] ?? 0 }
+        : null,
+    }));
   }
+
+  return withCounts;
 }

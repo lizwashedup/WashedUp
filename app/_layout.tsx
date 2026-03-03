@@ -15,12 +15,12 @@ import {
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Linking } from 'react-native';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
@@ -53,12 +53,6 @@ export default function RootLayout() {
     if (error) throw error;
   }, [error]);
 
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
-
   if (!loaded) {
     return null;
   }
@@ -66,17 +60,27 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
-        <RootLayoutNav />
+        <RootLayoutNav onReady={() => SplashScreen.hideAsync()} />
       </SafeAreaProvider>
     </QueryClientProvider>
   );
 }
 
-function RootLayoutNav() {
+function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const router = useRouter();
   const [authResolved, setAuthResolved] = useState(false);
   const [authedUserId, setAuthedUserId] = useState<string | null>(null);
+  const isRecoveryRef = useRef(false);
+  const splashHiddenRef = useRef(false);
+  const lastNavRef = useRef({ dest: '', ts: 0 });
   usePushNotifications(authedUserId);
+
+  useEffect(() => {
+    if (authResolved && !splashHiddenRef.current) {
+      splashHiddenRef.current = true;
+      try { onReady(); } catch {}
+    }
+  }, [authResolved, onReady]);
 
   // Notification tap handler — deep-links into the relevant chat when user taps a notification
   useEffect(() => {
@@ -99,10 +103,13 @@ function RootLayoutNav() {
       const refreshToken = params.get('refresh_token');
       const type = params.get('type');
       if (accessToken && refreshToken && type === 'recovery') {
+        isRecoveryRef.current = true;
         const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
         if (!error) {
           setAuthResolved(true);
           router.replace('/reset-password');
+        } else {
+          isRecoveryRef.current = false;
         }
       }
     };
@@ -129,9 +136,8 @@ function RootLayoutNav() {
           : null;
 
         if (!session?.user) {
+          lastNavRef.current = { dest: '/login', ts: Date.now() };
           router.replace('/login');
-          // Delay overlay hide so router.replace completes before we reveal the stack
-          // (avoids flash of (tabs) before login mounts)
           setTimeout(() => setAuthResolved(true), 80);
           return;
         }
@@ -151,6 +157,7 @@ function RootLayoutNav() {
         if (cancelled) return;
 
         if (!profileData) {
+          lastNavRef.current = { dest: '/login', ts: Date.now() };
           router.replace('/login');
           setTimeout(() => setAuthResolved(true), 80);
           return;
@@ -158,10 +165,12 @@ function RootLayoutNav() {
 
         setAuthedUserId(session.user.id);
         const dest = profileData.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
+        lastNavRef.current = { dest, ts: Date.now() };
         setAuthResolved(true);
         router.replace(dest as any);
       } catch {
         if (!cancelled) {
+          lastNavRef.current = { dest: '/login', ts: Date.now() };
           router.replace('/login');
           setTimeout(() => setAuthResolved(true), 80);
         }
@@ -173,14 +182,17 @@ function RootLayoutNav() {
     // Keep listening for sign-in/out and password recovery after initial load
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
+        isRecoveryRef.current = true;
         setAuthResolved(true);
         router.replace('/reset-password');
         return;
       }
+      if (event === 'SIGNED_IN' && isRecoveryRef.current) return;
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
       if (!session?.user) {
         setAuthedUserId(null);
+        lastNavRef.current = { dest: '/login', ts: Date.now() };
         router.replace('/login');
         return;
       }
@@ -191,8 +203,11 @@ function RootLayoutNav() {
         .eq('id', session.user.id)
         .single();
 
-      setAuthedUserId(session.user.id);
       const dest = data?.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
+      const now = Date.now();
+      if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) return;
+      lastNavRef.current = { dest, ts: now };
+      setAuthedUserId(session.user.id);
       router.replace(dest as any);
     });
 
@@ -210,6 +225,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="plan/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="admin/events" options={{ headerShown: false }} />
       </Stack>
       {!authResolved && (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.parchment }}>

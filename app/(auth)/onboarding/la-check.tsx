@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -30,7 +31,11 @@ export default function OnboardingLACheckScreen() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        Alert.alert('Session expired', 'Please sign in again.');
+        supabase.auth.signOut();
+        return;
+      }
       await supabase.from('profiles').update({ city: 'Los Angeles' }).eq('id', user.id);
       router.push('/onboarding/photo');
     } finally {
@@ -48,7 +53,11 @@ export default function OnboardingLACheckScreen() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        Alert.alert('Session expired', 'Please sign in again.');
+        supabase.auth.signOut();
+        return;
+      }
       await supabase.from('profiles').update({ city: city.trim() || 'Other' }).eq('id', user.id);
       router.push('/onboarding/photo');
     } finally {

@@ -21,6 +21,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.washedup.app",
       "buildNumber": "1",
+      "usesAppleSignIn": true,
       "config": {},
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -78,6 +79,8 @@
           "locationAlwaysAndWhenInUsePermission": "Allow WashedUp to use your location to show plans near you."
         }
       ],
+      "expo-apple-authentication",
+      "@react-native-google-signin/google-signin",
       "expo-font",
       [
         "expo-notifications",

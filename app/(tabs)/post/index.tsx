@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Keyboard,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
@@ -21,16 +22,18 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import { ImagePlus, X } from 'lucide-react-native';
+import { ImagePlus, X, FileText, Trash2 } from 'lucide-react-native';
 import { SharePlanModal } from '../../../components/modals/SharePlanModal';
+import ProfileButton from '../../../components/ProfileButton';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import { checkContent } from '../../../lib/contentFilter';
 
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
+const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -106,6 +109,38 @@ function ageRangesToMinMax(ranges: AgeRange[]): { min: number | null; max: numbe
     }
   }
   return { min, max };
+}
+
+// ─── Drafts ────────────────────────────────────────────────────────────────────
+
+const DRAFTS_KEY = 'washedup_plan_drafts';
+
+interface PlanDraft {
+  id: string;
+  title: string;
+  location: string;
+  locationLat: number | null;
+  locationLng: number | null;
+  ticketUrl: string;
+  category: Category | null;
+  genderPref: GenderPreference;
+  ageRanges: AgeRange[];
+  description: string;
+  creatorMessage: string;
+  groupSize: number;
+  imageUrl: string | null;
+  savedAt: number;
+}
+
+async function loadDrafts(): Promise<PlanDraft[]> {
+  try {
+    const raw = await AsyncStorage.getItem(DRAFTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+async function saveDrafts(drafts: PlanDraft[]): Promise<void> {
+  await AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
 }
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -271,10 +306,60 @@ export default function PostScreen() {
   const [postedSpotsLeft, setPostedSpotsLeft] = useState<number | undefined>();
   const [postedGenderLabel, setPostedGenderLabel] = useState<string | undefined>();
 
+  // ─── Drafts ────────────────────────────────────────────────────────────────
+  const [drafts, setDrafts] = useState<PlanDraft[]>([]);
+
+  useEffect(() => {
+    loadDrafts().then(setDrafts);
+  }, []);
+
+  const handleSaveDraft = useCallback(async () => {
+    if (!title.trim()) {
+      Alert.alert('Add a title', 'Give your plan a title before saving as a draft.');
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const draft: PlanDraft = {
+      id: Date.now().toString(),
+      title: title.trim(),
+      location, locationLat, locationLng, ticketUrl,
+      category, genderPref, ageRanges,
+      description, creatorMessage, groupSize,
+      imageUrl: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
+      savedAt: Date.now(),
+    };
+    const updated = [draft, ...drafts];
+    setDrafts(updated);
+    await saveDrafts(updated);
+    Alert.alert('Draft saved', 'You can continue editing it later.');
+  }, [title, location, locationLat, locationLng, ticketUrl, category, genderPref, ageRanges, description, creatorMessage, groupSize, imageUrl, drafts]);
+
+  const loadDraft = useCallback((draft: PlanDraft) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setTitle(draft.title);
+    setLocation(draft.location);
+    setLocationLat(draft.locationLat);
+    setLocationLng(draft.locationLng);
+    setTicketUrl(draft.ticketUrl);
+    setCategory(draft.category);
+    setGenderPref(draft.genderPref);
+    setAgeRanges(draft.ageRanges);
+    setDescription(draft.description);
+    setCreatorMessage(draft.creatorMessage);
+    setGroupSize(draft.groupSize);
+    if (draft.imageUrl) setImageUrl(draft.imageUrl);
+  }, []);
+
+  const deleteDraft = useCallback(async (draftId: string) => {
+    const updated = drafts.filter(d => d.id !== draftId);
+    setDrafts(updated);
+    await saveDrafts(updated);
+  }, [drafts]);
+
   const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
   const safeTempDay = Math.min(tempDay, daysInTempMonth);
 
-  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
+  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && location.trim().length > 0 && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
 
   // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -316,6 +401,14 @@ export default function PostScreen() {
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+
+    const fieldsToCheck = [title, description, creatorMessage].filter(Boolean).join(' ');
+    const filter = checkContent(fieldsToCheck);
+    if (!filter.ok) {
+      Alert.alert('Content not allowed', filter.reason ?? 'Please revise your plan and try again.');
+      return;
+    }
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setLoading(true);
 
@@ -424,9 +517,38 @@ export default function PostScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.headerTitle}>Post a Plan</Text>
-              <Text style={styles.headerSub}>Create something for people to join</Text>
+              <Text style={styles.headerSub}>Find people to go with</Text>
             </View>
+            <ProfileButton />
           </View>
+
+          {/* ── Drafts (only if any exist) ── */}
+          {drafts.length > 0 && (
+            <View style={styles.draftsSection}>
+              <Text style={styles.draftsTitle}>Drafts</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.draftsScroll}>
+                {drafts.map((d) => (
+                  <View key={d.id} style={styles.draftChip}>
+                    <TouchableOpacity
+                      style={styles.draftChipContent}
+                      onPress={() => loadDraft(d)}
+                      activeOpacity={0.8}
+                    >
+                      <FileText size={14} color={Colors.terracotta} strokeWidth={2} />
+                      <Text style={styles.draftChipText} numberOfLines={1}>{d.title}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => deleteDraft(d.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                      style={styles.draftDeleteBtn}
+                    >
+                      <Trash2 size={12} color={Colors.textLight} strokeWidth={2} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
 
           {/* ── Photo (first field) ── */}
           {!imageUrl ? (
@@ -667,7 +789,7 @@ export default function PostScreen() {
 
           {/* ── Group size ── */}
           <View style={styles.field}>
-            <Text style={styles.label}>Group size</Text>
+            <Text style={styles.label}>How many people?</Text>
             <View style={styles.stepperRow}>
               <TouchableOpacity
                 style={[styles.stepperBtn, groupSize <= MIN_GROUP && styles.stepperBtnDisabled]}
@@ -698,7 +820,7 @@ export default function PostScreen() {
                 <Text style={styles.stepperBtnText}>+</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.stepperHint}>Min {MIN_GROUP} · Max {MAX_GROUP}</Text>
+            <Text style={styles.stepperHint}>Including you · Min {MIN_GROUP} · Max {MAX_GROUP}</Text>
           </View>
 
           {/* Bottom spacer so content isn't hidden behind sticky button */}
@@ -717,11 +839,13 @@ export default function PostScreen() {
                     ? 'Select a time'
                     : category === null
                       ? 'Select a category'
-                      : description.trim().length === 0
-                        ? 'Add a plan description'
-                        : creatorMessage.trim().length < MSG_MIN
-                          ? `Message must be at least ${MSG_MIN} characters`
-                          : 'Add a message'}
+                      : location.trim().length === 0
+                        ? 'Add a location'
+                        : description.trim().length === 0
+                          ? 'Add a plan description'
+                          : creatorMessage.trim().length < MSG_MIN
+                            ? `Message must be at least ${MSG_MIN} characters`
+                            : 'Add a message'}
             </Text>
           )}
           <TouchableOpacity
@@ -735,6 +859,15 @@ export default function PostScreen() {
               : <Text style={styles.submitBtnText}>Post It  →</Text>
             }
           </TouchableOpacity>
+          {title.trim().length > 0 && !loading && (
+            <TouchableOpacity
+              style={styles.saveDraftBtn}
+              onPress={handleSaveDraft}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.saveDraftBtnText}>Save as Draft</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </KeyboardAvoidingView>
 
@@ -745,11 +878,13 @@ export default function PostScreen() {
           setShareModalVisible(false);
           setPostedPlanId(null);
           setPostedPlanTitle('');
-          if (planIdToNavigate) {
-            router.push(`/plan/${planIdToNavigate}` as any);
-          } else {
-            router.replace('/(tabs)/plans');
-          }
+          setTimeout(() => {
+            if (planIdToNavigate) {
+              router.push(`/plan/${planIdToNavigate}` as any);
+            } else {
+              router.replace('/(tabs)/plans');
+            }
+          }, 350);
         }}
         planTitle={postedPlanTitle}
         planId={postedPlanId || ''}
@@ -953,12 +1088,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   headerTitle: {
-    fontFamily: Fonts.displayBold,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.terracotta,
-    textShadowColor: Colors.shadowLight,
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: Colors.asphalt,
   },
   headerSub: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.textLight, marginTop: 4 },
 
@@ -1162,4 +1294,53 @@ const styles = StyleSheet.create({
   categoryItemSelected: { backgroundColor: Colors.terracotta },
   categoryItemText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sans, color: Colors.asphalt },
   categoryItemTextSelected: { color: Colors.white, fontFamily: Fonts.sansMedium },
+
+  draftsSection: {
+    marginBottom: 20,
+    marginTop: -8,
+  },
+  draftsTitle: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  draftsScroll: { gap: 8 },
+  draftChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 20,
+    paddingLeft: 12,
+    paddingRight: 4,
+    height: 36,
+  },
+  draftChipContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    maxWidth: 160,
+  },
+  draftChipText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+  },
+  draftDeleteBtn: {
+    padding: 8,
+  },
+  saveDraftBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  saveDraftBtnText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
 });

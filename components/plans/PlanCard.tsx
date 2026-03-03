@@ -8,9 +8,11 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { Heart } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Colors from '../../constants/Colors';
+import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
 interface PlanCardProps {
@@ -29,18 +31,48 @@ interface PlanCardProps {
       member_since?: string;
       plans_posted?: number;
     };
-    attendees: { profile_photo_url: string | null }[];
+    attendees?: { profile_photo_url: string | null }[];
   };
   isMember?: boolean;
+  isWishlisted?: boolean;
+  onWishlist?: (planId: string, current: boolean) => void;
+  isPast?: boolean;
 }
 
-export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) => {
+function formatDateTimeForCard(dateString: string): string {
+  const d = new Date(dateString);
+  const dateStr = d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+  const timeStr = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  return `${dateStr} · ${timeStr}`;
+}
+
+export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, isPast = false }) => {
   const router = useRouter();
+
+  const handleWishlist = useCallback(
+    (e: any) => {
+      e?.stopPropagation?.();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onWishlist?.(plan.id, isWishlisted);
+    },
+    [plan.id, isWishlisted, onWishlist],
+  );
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (plan.creator.profile_photo_url) {
+      Image.prefetch(plan.creator.profile_photo_url).catch(() => {});
+    }
     router.push(`/plan/${plan.id}`);
-  }, [plan.id, router]);
+  }, [plan.id, plan.creator.profile_photo_url, router]);
 
   const handleShare = useCallback((e: any) => {
     e.stopPropagation();
@@ -51,33 +83,31 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) =
     }).catch(() => {});
   }, [plan.id, plan.title]);
 
-  const spotsLeft = plan.max_invites - plan.member_count;
+  const going = capDisplayCount(plan.member_count);
+  const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
+  const spotsLeft = Math.max(0, totalCapacity - going);
+  const isFull = going >= totalCapacity;
   const oneSpotLeft = spotsLeft === 1;
-  const spotsText = spotsLeft > 0 ? `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : null;
 
-  const creatorLine2 = [
-    plan.creator.member_since && `Member since ${plan.creator.member_since}`,
-    plan.creator.plans_posted != null && `${plan.creator.plans_posted} plans posted`,
-  ]
-    .filter(Boolean)
-    .join(' • ') || 'New member';
+  const planCount = plan.creator.plans_posted;
+  const creatorLine2 = planCount === 1 ? 'First plan' : '';
 
-  const creatorLine1 = plan.location_text
-    ? `Posted by ${plan.creator.first_name_display} in ${plan.location_text}`
-    : `Posted by ${plan.creator.first_name_display}`;
+  const locationDisplay = plan.location_text && !plan.location_text.startsWith('http')
+    ? plan.location_text
+    : null;
+  const creatorLine1 = `Posted by ${plan.creator.first_name_display}`;
 
   const creatorNote = plan.host_message
     ? `"${plan.host_message}"`
     : null;
 
-  const goingText = `${plan.member_count} going`;
-  const spotsTextFull = spotsText ? `${goingText} • ${spotsText}` : goingText;
+  const countText = isFull ? `${going} of ${totalCapacity} · Full` : `${going} of ${totalCapacity}`;
 
   return (
     <TouchableOpacity
       onPress={handlePress}
       activeOpacity={0.92}
-      style={styles.card}
+      style={[styles.card, isPast && styles.cardPast]}
       accessibilityLabel={`${plan.title} plan`}
       accessibilityRole="button"
     >
@@ -99,16 +129,33 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) =
             <Text style={styles.creatorLine1} numberOfLines={1}>
               {creatorLine1}
             </Text>
-            <Text style={styles.creatorLine2} numberOfLines={1}>
-              {creatorLine2}
-            </Text>
+            {!!creatorLine2 && (
+              <Text style={styles.creatorLine2} numberOfLines={1}>
+                {creatorLine2}
+              </Text>
+            )}
           </View>
         </View>
         <View style={styles.badgesRow}>
           {oneSpotLeft && (
             <View style={styles.spotsBadge}>
-              <Text style={styles.spotsBadgeText}>1 spot left</Text>
+              <Text style={styles.spotsBadgeText}>1 left</Text>
             </View>
+          )}
+          {onWishlist && (
+            <TouchableOpacity
+              onPress={handleWishlist}
+              style={styles.heartButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel={isWishlisted ? 'Remove from saved' : 'Save plan'}
+            >
+              <Heart
+                size={18}
+                color={isWishlisted ? Colors.errorRed : Colors.asphalt}
+                fill={isWishlisted ? Colors.errorRed : 'transparent'}
+                strokeWidth={2}
+              />
+            </TouchableOpacity>
           )}
           <TouchableOpacity
             onPress={handleShare}
@@ -133,38 +180,48 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false }) =
         </Text>
       )}
 
-      {/* D. Logistics & CTA */}
-      <View style={styles.bottomRow}>
-        <View style={styles.avatarPile}>
-          {plan.attendees.slice(0, 4).map((a, i) =>
-            a.profile_photo_url ? (
-              <Image
-                key={i}
-                source={{ uri: a.profile_photo_url }}
-                style={[styles.attendeeAvatar, { marginLeft: i > 0 ? -8 : 0 }]}
-                contentFit="cover"
-              />
-            ) : (
-              <View
-                key={i}
-                style={[styles.attendeeAvatar, styles.attendeeAvatarPlaceholder, { marginLeft: i > 0 ? -8 : 0 }]}
-              >
-                <Ionicons name="person-outline" size={12} color={Colors.textLight} />
-              </View>
-            ),
+      {/* D. Date/Time & Location */}
+      {(plan.start_time || locationDisplay) && (
+        <View style={styles.logisticsBlock}>
+          {plan.start_time && (
+            <View style={styles.logisticsLine}>
+              <Ionicons name="calendar-outline" size={14} color={Colors.textLight} />
+              <Text style={styles.logisticsLineText}>
+                {formatDateTimeForCard(plan.start_time)}
+              </Text>
+            </View>
+          )}
+          {locationDisplay && (
+            <View style={[styles.logisticsLine, plan.start_time && styles.logisticsLineGap]}>
+              <Ionicons name="location-outline" size={14} color={Colors.textLight} />
+              <Text style={styles.logisticsLineText} numberOfLines={1}>
+                {locationDisplay}
+              </Text>
+            </View>
           )}
         </View>
-        <Text style={styles.spotsText}>{spotsTextFull}</Text>
+      )}
+
+      {/* E. Member count & CTA */}
+      <View style={styles.bottomRow}>
+        <Text style={styles.spotsText}>{isPast ? `${going} went` : countText}</Text>
         <View style={styles.ctaSpacer} />
-        <TouchableOpacity
-          style={[styles.ctaButton, isMember && styles.ctaButtonJoined]}
-          onPress={handlePress}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.ctaButtonText}>
-            {isMember ? "Going ✓" : "Let's Go →"}
-          </Text>
-        </TouchableOpacity>
+        {isPast ? (
+          <View style={styles.completedBadge}>
+            <Ionicons name="checkmark-circle-outline" size={14} color={Colors.warmGray} />
+            <Text style={styles.completedText}>Completed</Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.ctaButton, isMember && styles.ctaButtonJoined, isFull && !isMember && styles.ctaButtonWaitlist]}
+            onPress={handlePress}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.ctaButtonText, isFull && !isMember && styles.ctaButtonWaitlistText]}>
+              {isMember ? "Going \u2713" : isFull ? "Waitlist \u2192" : "Let's Go \u2192"}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -179,6 +236,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     padding: 16,
+  },
+  cardPast: {
+    opacity: 0.7,
   },
   creatorRow: {
     flexDirection: 'row',
@@ -239,6 +299,9 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.white,
   },
+  heartButton: {
+    padding: 4,
+  },
   shareButton: {
     padding: 4,
   },
@@ -254,29 +317,29 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
     lineHeight: 20,
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  logisticsBlock: {
+    marginBottom: 12,
+  },
+  logisticsLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  logisticsLineGap: {
+    marginTop: 4,
+  },
+  logisticsLineText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
+    flex: 1,
   },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  avatarPile: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  attendeeAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: Colors.cardBg,
-  },
-  attendeeAvatarPlaceholder: {
-    backgroundColor: Colors.white,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   spotsText: {
     fontFamily: Fonts.sans,
@@ -295,9 +358,31 @@ const styles = StyleSheet.create({
   ctaButtonJoined: {
     backgroundColor: Colors.asphalt,
   },
+  ctaButtonWaitlist: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+  },
   ctaButtonText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
     color: Colors.white,
+  },
+  ctaButtonWaitlistText: {
+    color: Colors.terracotta,
+  },
+  completedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 14,
+  },
+  completedText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
   },
 });

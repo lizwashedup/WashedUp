@@ -106,7 +106,11 @@ export default function OnboardingPhotoScreen() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        Alert.alert('Session expired', 'Please sign in again.');
+        supabase.auth.signOut();
+        return;
+      }
 
       let avatarUrl: string | null = null;
 

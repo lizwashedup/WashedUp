@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { checkContent } from '../lib/contentFilter';
+
+export interface MessageReaction {
+  user_id: string;
+  reaction: string;
+}
 
 export interface ChatMessage {
   id: string;
@@ -10,6 +16,7 @@ export interface ChatMessage {
   message_type: 'user' | 'system';
   image_url?: string | null;
   created_at: string;
+  reactions?: MessageReaction[];
   sender?: {
     id: string;
     first_name: string | null;
@@ -87,16 +94,25 @@ export function useChat(eventId: string) {
       .eq('event_id', eventId)
       .order('created_at', { ascending: true });
 
-    // Fetch current user's blocked list and mark chat as read in parallel
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      const [{ data: profile }] = await Promise.all([
+      const msgIds = (data ?? []).map((m: any) => m.id);
+      const [{ data: profile }, , { data: reactionsData }] = await Promise.all([
         supabase.from('profiles').select('blocked_users').eq('id', user.id).single(),
         supabase.from('chat_reads').upsert(
           { event_id: eventId, user_id: user.id, last_read_at: new Date().toISOString() },
           { onConflict: 'event_id,user_id' },
         ),
+        msgIds.length > 0
+          ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
+          : Promise.resolve({ data: [] as any[] }),
       ]);
+
+      const reactionsByMsg: Record<string, MessageReaction[]> = {};
+      (reactionsData ?? []).forEach((r: any) => {
+        if (!reactionsByMsg[r.message_id]) reactionsByMsg[r.message_id] = [];
+        reactionsByMsg[r.message_id].push({ user_id: r.user_id, reaction: r.reaction });
+      });
 
       const blockedLookup: Record<string, boolean> = {};
       (profile?.blocked_users ?? []).forEach((uid: string) => { blockedLookup[uid] = true; });
@@ -104,7 +120,7 @@ export function useChat(eventId: string) {
 
       const filtered = (data ?? []).filter((msg: any) => !blockedLookup[msg.user_id]);
       const enriched = await attachSenders(filtered);
-      setMessages(enriched);
+      setMessages(enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] })));
     } else {
       if (data) {
         const enriched = await attachSenders(data);
@@ -115,7 +131,46 @@ export function useChat(eventId: string) {
     setLoading(false);
   };
 
+  const toggleReaction = useCallback(async (messageId: string, reaction = 'heart') => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: existing } = await supabase
+      .from('message_reactions')
+      .select('id')
+      .eq('message_id', messageId)
+      .eq('user_id', user.id)
+      .eq('reaction', reaction)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase.from('message_reactions').delete().eq('id', existing.id);
+      setMessages(prev => prev.map(m =>
+        m.id === messageId
+          ? { ...m, reactions: (m.reactions ?? []).filter(r => !(r.user_id === user.id && r.reaction === reaction)) }
+          : m,
+      ));
+    } else {
+      await supabase.from('message_reactions').insert({
+        message_id: messageId,
+        user_id: user.id,
+        reaction,
+      });
+      setMessages(prev => prev.map(m =>
+        m.id === messageId
+          ? { ...m, reactions: [...(m.reactions ?? []), { user_id: user.id, reaction }] }
+          : m,
+      ));
+    }
+  }, []);
+
   const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
+    const filter = checkContent(content);
+    if (!filter.ok) {
+      Alert.alert('Content not allowed', filter.reason ?? 'Please revise your message.');
+      return;
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -132,5 +187,5 @@ export function useChat(eventId: string) {
     }
   }, [eventId]);
 
-  return { messages, loading, currentUserId, sendMessage };
+  return { messages, loading, currentUserId, sendMessage, toggleReaction };
 }

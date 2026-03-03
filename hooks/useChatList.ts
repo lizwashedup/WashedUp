@@ -24,7 +24,6 @@ export function useChatList() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
-    // Get all events the user has joined
     const { data: memberships } = await supabase
       .from('event_members')
       .select(`
@@ -38,66 +37,83 @@ export function useChatList() {
 
     if (!memberships) { setLoading(false); return; }
 
-    // Only show events with 2+ members (chat unlocks at 2)
     const eligible = memberships.filter((m: any) => {
       const e = m.events;
       return e && e.member_count >= 2;
     });
 
-    const previews: ChatPreview[] = await Promise.all(
-      eligible.map(async (m: any) => {
-        const event = m.events;
-        const isPast = new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
+    if (eligible.length === 0) {
+      setChats([]);
+      setLoading(false);
+      return;
+    }
 
-        // Last message
-        const { data: lastMsgArr } = await supabase
-          .from('messages')
-          .select('content, created_at, image_url')
-          .eq('event_id', event.id)
-          .order('created_at', { ascending: false })
-          .limit(1);
+    const eventIds = eligible.map((m: any) => m.events.id);
 
-        const lastMsg = lastMsgArr?.[0];
+    // Batch: last message per event (single query using distinct-on via ordering trick)
+    // We fetch the most recent message per event in one go
+    const { data: allMessages } = await supabase
+      .from('messages')
+      .select('event_id, content, created_at, image_url')
+      .in('event_id', eventIds)
+      .order('created_at', { ascending: false });
 
-        // Unread count: messages from others after last_read_at (or all from others if never read)
-        const { data: readData } = await supabase
-          .from('chat_reads')
-          .select('last_read_at')
-          .eq('event_id', event.id)
-          .eq('user_id', user.id)
-          .maybeSingle();
+    const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null }> = {};
+    (allMessages ?? []).forEach((msg: any) => {
+      if (!lastMsgMap[msg.event_id]) {
+        lastMsgMap[msg.event_id] = msg;
+      }
+    });
 
-        let unreadCount = 0;
-        let q = supabase
-          .from('messages')
-          .select('*', { count: 'exact', head: true })
-          .eq('event_id', event.id)
-          .neq('user_id', user.id);
-        if (readData?.last_read_at) {
-          q = q.gt('created_at', readData.last_read_at);
-        }
-        const { count } = await q;
-        unreadCount = count ?? 0;
+    // Batch: all read receipts for this user
+    const { data: allReads } = await supabase
+      .from('chat_reads')
+      .select('event_id, last_read_at')
+      .eq('user_id', user.id)
+      .in('event_id', eventIds);
 
-        return {
-          eventId: event.id,
-          title: event.title,
-          category: event.primary_vibe ?? null,
-          image_url: event.image_url ?? null,
-          start_time: event.start_time,
-          member_count: event.member_count ?? 0,
-          ticket_url: event.tickets_url ?? null,
-          last_message: lastMsg
-            ? (lastMsg.image_url ? 'Sent a photo' : lastMsg.content)
-            : null,
-          last_message_at: lastMsg?.created_at ?? null,
-          unread_count: unreadCount,
-          is_past: isPast,
-        };
-      }),
-    );
+    const readMap: Record<string, string> = {};
+    (allReads ?? []).forEach((r: any) => {
+      readMap[r.event_id] = r.last_read_at;
+    });
 
-    // Active chats sorted by most recent message, then past plans
+    // Batch: all messages from others (for unread count)
+    const { data: otherMessages } = await supabase
+      .from('messages')
+      .select('event_id, created_at')
+      .in('event_id', eventIds)
+      .neq('user_id', user.id);
+
+    const unreadMap: Record<string, number> = {};
+    (otherMessages ?? []).forEach((msg: any) => {
+      const lastRead = readMap[msg.event_id];
+      if (!lastRead || msg.created_at > lastRead) {
+        unreadMap[msg.event_id] = (unreadMap[msg.event_id] ?? 0) + 1;
+      }
+    });
+
+    const previews: ChatPreview[] = eligible.map((m: any) => {
+      const event = m.events;
+      const isPast = new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
+      const lastMsg = lastMsgMap[event.id];
+
+      return {
+        eventId: event.id,
+        title: event.title,
+        category: event.primary_vibe ?? null,
+        image_url: event.image_url ?? null,
+        start_time: event.start_time,
+        member_count: event.member_count ?? 0,
+        ticket_url: event.tickets_url ?? null,
+        last_message: lastMsg
+          ? (lastMsg.image_url ? 'Sent a photo' : lastMsg.content)
+          : null,
+        last_message_at: lastMsg?.created_at ?? null,
+        unread_count: unreadMap[event.id] ?? 0,
+        is_past: isPast,
+      };
+    });
+
     const active = previews
       .filter(p => !p.is_past)
       .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
@@ -113,7 +129,6 @@ export function useChatList() {
     fetchChats();
   }, [fetchChats]);
 
-  // Realtime: when a new message arrives in any of our chats, refetch to update unread badges
   useEffect(() => {
     if (chats.length === 0) return;
     const eventIds = new Set(chats.map(c => c.eventId));

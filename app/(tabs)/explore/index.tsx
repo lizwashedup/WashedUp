@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import {
   View,
   Text,
@@ -18,9 +18,14 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { MapView } from '../../../components/MapView.native';
 import { supabase } from '../../../lib/supabase';
+
+// Lazy-load MapView — react-native-maps can crash in Expo Go when imported at top level
+const LazyMapView = lazy(() =>
+  import('../../../components/MapView.native').then((m) => ({ default: m.MapView })),
+);
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
+import ProfileButton from '../../../components/ProfileButton';
 import { CATEGORY_OPTIONS } from '../../../constants/Categories';
 import Colors from '../../../constants/Colors';
 import { MAP_STYLE } from '../../../constants/MapStyle';
@@ -80,9 +85,9 @@ function formatVenueLocation(venueAddress: string | null): string {
   return parts[parts.length - 2] || parts[0] || venueAddress;
 }
 
-function getPriceLabel(ticketPrice: string | null): string {
-  if (!ticketPrice || ticketPrice.toLowerCase() === 'free') return 'Free';
-  return ticketPrice;
+function getPriceLabel(ticketPrice: string | null | undefined): string {
+  const isFree = !ticketPrice || (typeof ticketPrice === 'string' && (ticketPrice.trim() === '' || ticketPrice.trim().toLowerCase() === 'free'));
+  return isFree ? 'Free' : 'Tickets';
 }
 
 const LA_REGION = {
@@ -94,11 +99,21 @@ const LA_REGION = {
 
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
+function todayLocalDateString(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 async function fetchSceneEvents(): Promise<SceneEvent[]> {
+  const today = todayLocalDateString();
   const { data: events, error } = await supabase
     .from('explore_events')
     .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price')
     .eq('status', 'Live')
+    .gte('event_date', today)
     .order('event_date', { ascending: true });
 
   if (error) throw error;
@@ -135,8 +150,6 @@ async function fetchExploreWishlists(userId: string): Promise<string[]> {
 
 // ─── SceneCard ───────────────────────────────────────────────────────────────
 
-type SceneTab = 'events' | 'restaurants' | 'ideas';
-
 const SceneCard = React.memo(function SceneCard({
   event,
   isWishlisted,
@@ -149,7 +162,7 @@ const SceneCard = React.memo(function SceneCard({
   const priceLabel = getPriceLabel(event.ticket_price);
   const dateTimeStr = formatEventDate(event.event_date, event.start_time);
   const locationStr = formatVenueLocation(event.venue_address) || event.venue || '';
-  const isFree = !event.ticket_price || event.ticket_price.toLowerCase() === 'free';
+  const isFree = !event.ticket_price || (typeof event.ticket_price === 'string' && (event.ticket_price.trim() === '' || event.ticket_price.trim().toLowerCase() === 'free'));
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -210,10 +223,19 @@ const SceneCard = React.memo(function SceneCard({
         />
         <View style={cardStyles.imageOverlay} />
 
+        {/* Top left: Category */}
+        {event.category && (
+          <View style={cardStyles.categoryBadge}>
+            <Text style={cardStyles.categoryBadgeText} numberOfLines={1}>
+              {event.category}
+            </Text>
+          </View>
+        )}
+
         {/* Top right: Price badge + Share + Heart */}
         <View style={cardStyles.topRightActions}>
-          <View style={cardStyles.priceBadge}>
-            <Text style={cardStyles.priceBadgeText}>{priceLabel}</Text>
+          <View style={[cardStyles.priceBadge, isFree ? cardStyles.priceBadgeFree : cardStyles.priceBadgeTickets]}>
+            <Text style={[cardStyles.priceBadgeText, isFree ? cardStyles.priceBadgeTextFree : cardStyles.priceBadgeTextTickets]}>{priceLabel}</Text>
           </View>
           <TouchableOpacity style={cardStyles.iconButton} onPress={handleShare} hitSlop={10}>
             <Ionicons name="share-outline" size={18} color={Colors.white} />
@@ -240,9 +262,20 @@ const SceneCard = React.memo(function SceneCard({
 
       {/* Content below image */}
       <View style={cardStyles.content}>
-        <Text style={cardStyles.eventTitle} numberOfLines={2}>
-          {event.title}
-        </Text>
+        <View style={cardStyles.titleRow}>
+          <Text style={cardStyles.eventTitle} numberOfLines={2}>
+            {event.title}
+          </Text>
+          <TouchableOpacity
+            style={[cardStyles.ctaButtonSmall, isFree && cardStyles.ctaButtonFree]}
+            onPress={handleCta}
+            activeOpacity={0.9}
+          >
+            <Text style={[cardStyles.ctaButtonTextSmall, isFree && cardStyles.ctaButtonTextFree]}>
+              {isFree ? 'RSVP Free ↗' : 'Get Tickets ↗'}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {(dateTimeStr || locationStr) && (
           <View style={cardStyles.metaRow}>
@@ -279,24 +312,6 @@ const SceneCard = React.memo(function SceneCard({
             <Text style={cardStyles.socialProofLink}>Find others →</Text>
           </TouchableOpacity>
         )}
-
-        {/* Category & CTA row */}
-        <View style={cardStyles.ctaRow}>
-          {event.category && (
-            <View style={cardStyles.categoryTag}>
-              <Text style={cardStyles.categoryTagText}>{event.category}</Text>
-            </View>
-          )}
-          <TouchableOpacity
-            style={[cardStyles.ctaButton, isFree && cardStyles.ctaButtonFree]}
-            onPress={handleCta}
-            activeOpacity={0.9}
-          >
-            <Text style={cardStyles.ctaButtonText}>
-              {isFree ? 'RSVP Free ↗' : 'Get Tickets ↗'}
-            </Text>
-          </TouchableOpacity>
-        </View>
       </View>
     </TouchableOpacity>
   );
@@ -317,13 +332,40 @@ const cardStyles = StyleSheet.create({
     backgroundColor: Colors.overlayDark25,
   },
   priceBadge: {
-    backgroundColor: Colors.overlayDark60,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 20,
   },
+  priceBadgeFree: {
+    backgroundColor: Colors.asphalt,
+  },
+  priceBadgeTickets: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: Colors.terracotta,
+  },
   priceBadgeText: {
     fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+  },
+  priceBadgeTextFree: {
+    color: Colors.white,
+  },
+  priceBadgeTextTickets: {
+    color: Colors.terracotta,
+  },
+  categoryBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: Colors.overlayDark60,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    maxWidth: SCREEN_WIDTH * 0.5,
+  },
+  categoryBadgeText: {
+    fontFamily: Fonts.sans,
     fontSize: FontSizes.caption,
     color: Colors.white,
   },
@@ -358,12 +400,19 @@ const cardStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   content: { paddingTop: 14, paddingHorizontal: 2 },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 8,
+  },
   eventTitle: {
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     lineHeight: 28,
-    marginBottom: 8,
+    flex: 1,
   },
   metaRow: {
     flexDirection: 'row',
@@ -416,37 +465,27 @@ const cardStyles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
   },
-  ctaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  categoryTag: {
+  ctaButtonSmall: {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  categoryTagText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
-  },
-  ctaButton: {
-    backgroundColor: Colors.terracotta,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 14,
+    borderRadius: 12,
+    flexShrink: 0,
+    borderWidth: 2,
+    borderColor: Colors.terracotta,
+    backgroundColor: 'transparent',
   },
   ctaButtonFree: {
     backgroundColor: Colors.asphalt,
+    borderColor: Colors.asphalt,
   },
-  ctaButtonText: {
+  ctaButtonTextSmall: {
     fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyMD,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
+  ctaButtonTextFree: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
     color: Colors.white,
   },
 });
@@ -461,8 +500,6 @@ const WHEN_OPTIONS: { key: WhenKey; label: string }[] = [
   { key: 'this_weekend', label: 'This Weekend' },
   { key: 'next_week', label: 'Next Week' },
 ];
-
-const CATEGORY_CHIPS = ['This Weekend', ...CATEGORY_OPTIONS];
 
 function matchesWhenFilter(eventDate: string | null, filters: WhenKey[]): boolean {
   if (!eventDate) return false;
@@ -494,23 +531,14 @@ function matchesWhenFilter(eventDate: string | null, filters: WhenKey[]): boolea
   return false;
 }
 
-function matchesCategoryChip(event: SceneEvent, chip: string): boolean {
-  if (chip === 'This Weekend') {
-    return matchesWhenFilter(event.event_date, ['this_weekend']);
-  }
-  return event.category?.toLowerCase() === chip.toLowerCase();
-}
-
 export default function SceneScreen() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<SceneTab>('events');
   const [heartFilter, setHeartFilter] = useState(false);
   const [whenFilter, setWhenFilter] = useState<WhenKey[]>([]);
   const [whenSheetOpen, setWhenSheetOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
-  const [activeChip, setActiveChip] = useState<string | null>(null);
   const [mapView, setMapView] = useState(false);
 
   React.useEffect(() => {
@@ -529,8 +557,11 @@ export default function SceneScreen() {
     enabled: !!userId,
   });
 
-  const wishlistedSet: Record<string, boolean> = {};
-  wishlistedIds.forEach((id) => { wishlistedSet[id] = true; });
+  const wishlistedSet = useMemo(() => {
+    const set: Record<string, boolean> = {};
+    wishlistedIds.forEach((id) => { set[id] = true; });
+    return set;
+  }, [wishlistedIds]);
 
   const wishlistMutation = useMutation({
     mutationFn: async ({ exploreEventId, current }: { exploreEventId: string; current: boolean }) => {
@@ -563,11 +594,8 @@ export default function SceneScreen() {
         e.category && categoryFilter.some((c) => c.toLowerCase() === e.category?.toLowerCase()),
       );
     }
-    if (activeChip) {
-      result = result.filter((e) => matchesCategoryChip(e, activeChip));
-    }
     return result;
-  }, [events, heartFilter, wishlistedSet, whenFilter, categoryFilter, activeChip]);
+  }, [events, heartFilter, wishlistedSet, whenFilter, categoryFilter]);
 
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
@@ -594,54 +622,24 @@ export default function SceneScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+      {/* Header — The Scene (like Plans has logo) */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>
           The <Text style={styles.headerTitleItalic}>Scene</Text>
         </Text>
+        <ProfileButton />
       </View>
 
-      {/* Filter Tabs: Events only (Restaurants & Ideas hidden until ready) */}
-      <View style={styles.filterTabs}>
-        {[{ key: 'events' as SceneTab, label: 'Events' }].map((tab) => (
-          <TouchableOpacity
-            key={tab.key}
-            style={[styles.filterTab, activeTab === tab.key && styles.filterTabActive]}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setActiveTab(tab.key);
-              if (tab.key !== 'events') setMapView(false);
-            }}
-          >
-            <Text style={[styles.filterTabText, activeTab === tab.key && styles.filterTabTextActive]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      {/* Row 1: Events pill (like Plans | My Plans, but just Events — no switch) */}
+      <View style={styles.primaryChipsRow}>
+        <View style={styles.primaryChips}>
+          <View style={[styles.primaryChip, styles.primaryChipActive]}>
+            <Text style={styles.primaryChipTextActive}>All Events</Text>
+          </View>
+        </View>
       </View>
 
       <>
-        {/* Category Chips */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipsScroll}
-            style={styles.chipsScrollView}
-          >
-            {CATEGORY_CHIPS.map((chip) => (
-              <TouchableOpacity
-                key={chip}
-                style={[styles.chip, activeChip === chip && styles.chipActive]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setActiveChip((prev) => (prev === chip ? null : chip));
-                }}
-              >
-                <Text style={[styles.chipText, activeChip === chip && styles.chipTextActive]}>{chip}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-
           {/* Filter row (When, Category, Heart, Map) */}
           <View style={styles.filterRow}>
             <TouchableOpacity
@@ -685,7 +683,7 @@ export default function SceneScreen() {
               />
             </TouchableOpacity>
 
-            <View style={{ flex: 1 }} />
+            <View style={styles.filterSpacer} />
 
             <TouchableOpacity
               style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
@@ -711,13 +709,19 @@ export default function SceneScreen() {
               <ActivityIndicator size="large" color={Colors.terracotta} />
             </View>
           ) : mapView ? (
-            <MapView
-              style={{ flex: 1 }}
-              initialRegion={LA_REGION}
-              customMapStyle={MAP_STYLE}
-              showsUserLocation
-              showsMyLocationButton={false}
-            />
+            <Suspense fallback={
+              <View style={styles.centered}>
+                <ActivityIndicator size="large" color={Colors.terracotta} />
+              </View>
+            }>
+              <LazyMapView
+                style={{ flex: 1 }}
+                initialRegion={LA_REGION}
+                customMapStyle={MAP_STYLE}
+                showsUserLocation
+                showsMyLocationButton={false}
+              />
+            </Suspense>
           ) : filteredEvents.length === 0 ? (
             <View style={styles.centered}>
               {heartFilter ? (
@@ -814,60 +818,32 @@ const styles = StyleSheet.create({
   headerTitleItalic: {
     fontFamily: Fonts.displayItalic,
   },
-  filterTabs: {
+  primaryChipsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 12,
-    gap: 0,
-    backgroundColor: Colors.border,
-    marginHorizontal: 20,
-    borderRadius: 24,
-    padding: 4,
-  },
-  filterTab: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 20,
     alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
   },
-  filterTabActive: {
+  primaryChips: {
+    flexDirection: 'row',
+    gap: 0,
+    borderRadius: 24,
+    backgroundColor: Colors.border,
+    padding: 4,
+    flexShrink: 0,
+  },
+  primaryChip: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+    minWidth: 90,
+  },
+  primaryChipActive: {
     backgroundColor: Colors.asphalt,
   },
-  filterTabText: {
+  primaryChipTextActive: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
-    color: Colors.textMedium,
-  },
-  filterTabTextActive: {
-    color: Colors.white,
-  },
-  chipsScrollView: { maxHeight: 44 },
-  chipsScroll: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    gap: 10,
-    alignItems: 'center',
-  },
-  chip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  chipActive: {
-    backgroundColor: Colors.asphalt,
-    borderColor: Colors.asphalt,
-  },
-  chipText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  chipTextActive: {
     color: Colors.white,
   },
   filterRow: {
@@ -877,6 +853,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     alignItems: 'center',
   },
+  filterSpacer: { flex: 1, minWidth: 8 },
   heartFilterPill: {
     width: 40,
     height: 40,
@@ -949,7 +926,7 @@ const styles = StyleSheet.create({
     color: Colors.textMedium,
     textAlign: 'center',
   },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 120 },
   bottomCta: { alignItems: 'center', paddingVertical: 32, gap: 6 },
   bottomCtaText: {
     fontFamily: Fonts.sans,

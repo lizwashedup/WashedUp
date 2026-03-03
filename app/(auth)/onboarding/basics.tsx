@@ -95,7 +95,8 @@ export default function OnboardingBasicsScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setSaveError('Please sign in again.');
+        setSaveError('Session expired. Signing you out...');
+        setTimeout(() => supabase.auth.signOut(), 1500);
         return;
       }
       const y = birthday.getFullYear();
