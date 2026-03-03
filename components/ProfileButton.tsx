@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { User } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
+import { Fonts, FontSizes } from '../constants/Typography';
 
 export const PROFILE_PHOTO_KEY = ['profile-photo'] as const;
 
@@ -100,8 +101,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   label: {
-    fontSize: 9,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.micro,
     color: Colors.textLight,
   },
 });

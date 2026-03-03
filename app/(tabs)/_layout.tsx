@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
-import { Fonts } from '../../constants/Typography';
+import { Fonts, FontSizes } from '../../constants/Typography';
 import { Image } from 'expo-image';
 
 function PostTabIcon() {
@@ -29,7 +29,7 @@ export default function TabLayout() {
         },
         tabBarLabelStyle: {
           fontFamily: Fonts.sansMedium,
-          fontSize: 11,
+          fontSize: FontSizes.caption,
         },
       }}
     >

@@ -1563,13 +1563,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  memberAvatarInitial: { fontFamily: Fonts.sansBold, fontSize: 14, color: Colors.terracotta },
+  memberAvatarInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   memberAvatarOverflow: {
     backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  memberAvatarOverflowText: { fontFamily: Fonts.sansBold, fontSize: 12, color: Colors.terracotta },
+  memberAvatarOverflowText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   youPlaceholder: {
     width: 40,
     height: 40,
@@ -1643,7 +1643,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  joinButtonText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: 17 },
+  joinButtonText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM },
   memberActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1679,7 +1679,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.terracotta,
     borderColor: Colors.terracotta,
   },
-  waitlistButtonText: { fontFamily: Fonts.sansBold, fontSize: 17, color: Colors.terracotta },
+  waitlistButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.terracotta },
   waitlistButtonTextActive: { color: Colors.white },
   ineligibleBar: { paddingVertical: 16, alignItems: 'center' },
   ineligibleText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textLight },

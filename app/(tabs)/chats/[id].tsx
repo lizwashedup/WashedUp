@@ -23,6 +23,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 import { openUrl } from '../../../lib/url';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { useChat, ChatMessage } from '../../../hooks/useChat';
@@ -211,11 +212,11 @@ const bubbleStyles = StyleSheet.create({
   avatarSlot: { width: 28, marginRight: 8, alignSelf: 'flex-end' },
   avatar: { width: 28, height: 28, borderRadius: 14 },
   avatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { fontSize: 11, fontWeight: '700', color: Colors.terracotta },
+  avatarInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
   bubbleWrapper: { maxWidth: '75%', gap: 3 },
   wrapperOwn: { alignItems: 'flex-end' },
   wrapperOther: { alignItems: 'flex-start' },
-  senderName: { fontSize: 13, fontWeight: '700', color: Colors.asphalt, marginBottom: 0 },
+  senderName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt, marginBottom: 0 },
   nameTimeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -224,7 +225,8 @@ const bubbleStyles = StyleSheet.create({
     marginBottom: 2,
   },
   nameTimestamp: {
-    fontSize: 11,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
     color: Colors.warmGray,
   },
   bubble: { paddingHorizontal: 13, paddingVertical: 9, overflow: 'hidden' },
@@ -237,16 +239,17 @@ const bubbleStyles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
   },
-  messageText: { fontSize: 15, color: Colors.asphalt, lineHeight: 21 },
+  messageText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.asphalt, lineHeight: 21 },
   messageTextOwn: { color: Colors.white },
   messageImage: { width: 220, height: 165, borderRadius: 8 },
-  caption: { fontSize: 13, color: Colors.textMedium, marginTop: 6, paddingHorizontal: 2 },
+  caption: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, marginTop: 6, paddingHorizontal: 2 },
   captionOwn: { color: Colors.overlayWhiteLight },
-  timestamp: { fontSize: 10, color: Colors.warmGray, marginLeft: 4 },
+  timestamp: { fontFamily: Fonts.sans, fontSize: FontSizes.micro, color: Colors.warmGray, marginLeft: 4 },
   timestampOwn: { textAlign: 'right', marginRight: 4 },
   systemRow: { alignItems: 'center', marginVertical: 8, paddingHorizontal: 16 },
   systemText: {
-    fontSize: 12,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
     color: Colors.warmGray,
     backgroundColor: Colors.inputBg,
     paddingHorizontal: 12,
@@ -624,8 +627,8 @@ const chatStyles = StyleSheet.create({
   },
   backBtn: { padding: 2 },
   headerCenter: { flex: 1 },
-  headerTitle: { fontSize: 15, fontWeight: '700', color: Colors.asphalt },
-  headerSub: { fontSize: 12, color: Colors.warmGray, marginTop: 1 },
+  headerTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  headerSub: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginTop: 1 },
   ellipsisBtn: {
     padding: 4,
   },
@@ -636,7 +639,7 @@ const chatStyles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
-  viewPlanText: { fontSize: 12, color: Colors.terracotta, fontWeight: '600' },
+  viewPlanText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
 
   ticketBanner: {
     flexDirection: 'row',
@@ -651,8 +654,8 @@ const chatStyles = StyleSheet.create({
     borderBottomColor: Colors.inputBg,
   },
   ticketLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ticketText: { fontSize: 13, color: Colors.asphalt, fontWeight: '500' },
-  ticketCta: { fontSize: 13, color: Colors.terracotta, fontWeight: '700' },
+  ticketText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
+  ticketCta: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
 
   membersBar: {
     paddingHorizontal: 16,
@@ -665,8 +668,8 @@ const chatStyles = StyleSheet.create({
   memberAvatar: { borderWidth: 2, borderColor: Colors.white, borderRadius: 16 },
   memberAvatarImg: { width: 30, height: 30, borderRadius: 15 },
   memberAvatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
-  memberInitial: { fontSize: 11, fontWeight: '700', color: Colors.terracotta },
-  moreMembers: { fontSize: 12, color: Colors.warmGray, marginLeft: 10, fontWeight: '600' },
+  memberInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
+  moreMembers: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginLeft: 10 },
 
   messageList: { paddingVertical: 12 },
 
@@ -690,7 +693,8 @@ const chatStyles = StyleSheet.create({
     paddingLeft: 16,
     paddingRight: 16,
     paddingVertical: 10,
-    fontSize: 15,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
     maxHeight: 100,
     textAlign: 'left',
@@ -714,7 +718,7 @@ const chatStyles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
   },
-  readOnlyText: { fontSize: 13, color: Colors.warmGray, fontStyle: 'italic' },
+  readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, fontStyle: 'italic' },
 
   photoModal: {
     flex: 1,

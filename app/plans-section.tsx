@@ -124,12 +124,12 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: Fonts.sansBold,
-    fontSize: 18,
+    fontSize: FontSizes.displaySM,
     color: Colors.asphalt,
     letterSpacing: -0.3,
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { padding: 20, gap: 16 },
   empty: { alignItems: 'center', paddingTop: 80 },
-  emptyText: { fontFamily: Fonts.sans, fontSize: 16, color: Colors.textLight },
+  emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textLight },
 });

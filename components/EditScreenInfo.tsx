@@ -6,6 +6,7 @@ import { MonoText } from './StyledText';
 import { Text, View } from './Themed';
 
 import Colors from '../constants/Colors';
+import { Fonts, FontSizes } from '../constants/Typography';
 
 export default function EditScreenInfo({ path }: { path: string }) {
   return (
@@ -59,7 +60,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   getStartedText: {
-    fontSize: 17,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.displaySM,
     lineHeight: 24,
     textAlign: 'center',
   },

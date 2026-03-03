@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   partyEmoji: {
-    fontSize: 28,
+    fontSize: FontSizes.displayLG,
   },
   title: {
     fontFamily: Fonts.sansBold,

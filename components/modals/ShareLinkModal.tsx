@@ -11,6 +11,7 @@ import {
 import { Share2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '../../constants/Colors';
+import { Fonts, FontSizes } from '../../constants/Typography';
 
 const SHARE_EXAMPLES = [
   'Instagram Stories or DMs',
@@ -98,13 +99,14 @@ const styles = StyleSheet.create({
     maxWidth: 340,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
     color: Colors.asphalt,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
     marginBottom: 16,
   },
@@ -116,18 +118,20 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   bullet: {
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
     marginRight: 8,
   },
   listItem: {
     flex: 1,
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
   },
   encouragement: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
     color: Colors.terracotta,
     marginBottom: 20,
   },
@@ -146,8 +150,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   shareButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyLG,
     color: Colors.white,
   },
   doneButton: {
@@ -160,8 +164,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.terracotta,
   },
   doneButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyLG,
     color: Colors.terracotta,
   },
 });

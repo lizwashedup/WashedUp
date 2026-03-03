@@ -666,7 +666,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: Fonts.display,
-    fontSize: 32,
+    fontSize: FontSizes.displayLG,
     color: Colors.terracotta,
   },
 
@@ -788,7 +788,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  deleteHeaderTitle: { fontFamily: Fonts.sansBold, fontSize: 17, color: Colors.asphalt },
+  deleteHeaderTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
   deleteContent: { padding: 24, alignItems: 'center', gap: 16 },
   deleteWarningIcon: {
     width: 80,
@@ -799,8 +799,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 8,
   },
-  deleteTitle: { fontFamily: Fonts.displayBold, fontSize: 24, color: Colors.asphalt, textAlign: 'center' },
-  deleteBody: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.textMedium, textAlign: 'center', lineHeight: 22 },
+  deleteTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt, textAlign: 'center' },
+  deleteBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center', lineHeight: 22 },
   deleteListRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -829,9 +829,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
   },
-  deleteNextBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: 15 },
+  deleteNextBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
   deleteCancelBtn: { paddingVertical: 12 },
-  deleteCancelBtnText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.warmGray },
+  deleteCancelBtnText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray },
   deleteFinalBtn: {
     alignSelf: 'stretch',
     backgroundColor: Colors.cancelRed,
@@ -840,7 +840,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   deleteFinalBtnDisabled: { backgroundColor: Colors.inputBg },
-  deleteFinalBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: 15 },
+  deleteFinalBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
 
   // Edit Profile button on main profile
   editProfileBtn: {
@@ -856,7 +856,7 @@ const styles = StyleSheet.create({
   },
   editProfileBtnText: {
     fontFamily: Fonts.sansMedium,
-    fontSize: 13,
+    fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
   },
 
@@ -892,7 +892,7 @@ const styles = StyleSheet.create({
   },
   editPhotoHint: {
     fontFamily: Fonts.sans,
-    fontSize: 12,
+    fontSize: FontSizes.bodySM,
     color: Colors.warmGray,
     marginBottom: 20,
   },
@@ -915,7 +915,8 @@ const styles = StyleSheet.create({
     paddingLeft: 16,
     paddingRight: 16,
     paddingVertical: 14,
-    fontSize: 16,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
     textAlign: 'left',
   },
@@ -927,13 +928,14 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     borderRadius: 14,
   },
-  handlePrefix: { fontFamily: Fonts.sans, fontSize: 16, color: Colors.textLight, marginLeft: 16 },
+  handlePrefix: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textLight, marginLeft: 16 },
   handleInput: {
     flex: 1,
     paddingVertical: 14,
     paddingLeft: 8,
     paddingRight: 16,
-    fontSize: 16,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
     textAlign: 'left',
   },
@@ -943,7 +945,7 @@ const styles = StyleSheet.create({
   },
   editCharCount: {
     fontFamily: Fonts.sans,
-    fontSize: 11,
+    fontSize: FontSizes.caption,
     color: Colors.textLight,
     textAlign: 'right',
     marginTop: 4,
@@ -961,15 +963,15 @@ const styles = StyleSheet.create({
   },
   editReadOnlyText: {
     fontFamily: Fonts.sans,
-    fontSize: 16,
+    fontSize: FontSizes.bodyLG,
     color: Colors.warmGray,
   },
   handleAvailability: { marginTop: 6, marginBottom: 4 },
-  handleAvailable: { fontFamily: Fonts.sansMedium, fontSize: 12, color: Colors.successGreen, marginTop: 6, marginBottom: 4 },
-  handleTaken: { fontFamily: Fonts.sansMedium, fontSize: 12, color: Colors.errorRed, marginTop: 6, marginBottom: 4 },
+  handleAvailable: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.successGreen, marginTop: 6, marginBottom: 4 },
+  handleTaken: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 6, marginBottom: 4 },
   editHelp: {
     fontFamily: Fonts.sans,
-    fontSize: 11,
+    fontSize: FontSizes.caption,
     color: Colors.textLight,
     marginTop: 4,
   },
@@ -984,9 +986,9 @@ const styles = StyleSheet.create({
   editSaveBtnText: {
     color: Colors.white,
     fontFamily: Fonts.sansBold,
-    fontSize: 15,
+    fontSize: FontSizes.bodyMD,
   },
 
   // Footer
-  footer: { textAlign: 'center', fontFamily: Fonts.sans, fontSize: 12, color: Colors.textLight, marginTop: 8 },
+  footer: { textAlign: 'center', fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textLight, marginTop: 8 },
 });

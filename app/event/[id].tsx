@@ -19,7 +19,7 @@ import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import Colors from '../../constants/Colors';
-import { Fonts } from '../../constants/Typography';
+import { Fonts, FontSizes } from '../../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -278,7 +278,7 @@ export default function EventDetailScreen() {
                       <Image source={{ uri: plan.host_photo }} style={styles.planCreatorAvatar} contentFit="cover" />
                     ) : (
                       <View style={[styles.planCreatorAvatar, { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' }]}>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.terracotta }}>
+                        <Text style={{ fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta }}>
                           {plan.host_name?.[0]?.toUpperCase() ?? '?'}
                         </Text>
                       </View>
@@ -352,23 +352,23 @@ const styles = StyleSheet.create({
   },
   content: { padding: 20, gap: 12 },
   detailCategoryPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  detailCategoryText: { fontSize: 11, fontWeight: '700', color: Colors.white, textTransform: 'capitalize' },
+  detailCategoryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.white, textTransform: 'capitalize' },
   title: {
-    fontFamily: Fonts.display,
-    fontSize: 28,
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayLG,
     color: Colors.asphalt,
     lineHeight: 34,
   },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  metaText: { fontSize: 14, color: Colors.warmGray, flex: 1, lineHeight: 20 },
+  metaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, flex: 1, lineHeight: 20 },
   descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg },
-  descriptionText: { fontSize: 15, color: Colors.textMedium, lineHeight: 22 },
+  descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, lineHeight: 22 },
   ticketLink: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingVertical: 8 },
-  ticketLinkText: { fontSize: 15, fontWeight: '700', color: Colors.terracotta },
+  ticketLinkText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   plansSection: { marginTop: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
   plansSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  plansSectionTitle: { fontSize: 18, fontWeight: '700', color: Colors.asphalt },
-  noPlansText: { fontSize: 14, color: Colors.warmGray, fontStyle: 'italic' },
+  plansSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
+  noPlansText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, fontStyle: 'italic' },
   planCard: {
     backgroundColor: Colors.white,
     borderRadius: 12,
@@ -379,13 +379,13 @@ const styles = StyleSheet.create({
   },
   planCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   planCreatorAvatar: { width: 28, height: 28, borderRadius: 14, overflow: 'hidden' },
-  planCreatorName: { fontSize: 13, fontWeight: '600', color: Colors.asphalt },
+  planCreatorName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   planVibePill: { backgroundColor: Colors.inputBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  planVibeText: { fontSize: 10, fontWeight: '600', color: Colors.warmGray, textTransform: 'capitalize' },
+  planVibeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.warmGray, textTransform: 'capitalize' },
   planJoinBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8 },
-  planJoinBtnText: { fontSize: 13, fontWeight: '700', color: Colors.white },
-  planTitle: { fontSize: 15, fontWeight: '600', color: Colors.asphalt },
-  planMeta: { fontSize: 12, color: Colors.warmGray },
+  planJoinBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
+  planTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  planMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
   stickyBar: {
     paddingHorizontal: 20,
     paddingTop: 12,
@@ -399,5 +399,5 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
-  postPlanButtonText: { fontSize: 16, fontWeight: '700', color: Colors.white },
+  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
 });

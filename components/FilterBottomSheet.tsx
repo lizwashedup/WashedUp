@@ -10,6 +10,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { Check } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
+import { Fonts, FontSizes } from '../../constants/Typography';
 
 export interface FilterSheetOption {
   key: string;
@@ -111,8 +112,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 4,
   },
-  sheetTitle: { fontSize: 18, fontWeight: '800', color: Colors.asphalt },
-  sheetClear: { fontSize: 14, color: Colors.textLight, fontWeight: '500' },
+  sheetTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
+  sheetClear: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textLight },
   sheetRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -121,8 +122,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  sheetRowText: { fontSize: 16, color: Colors.asphalt, fontWeight: '500' },
-  sheetRowTextActive: { color: Colors.terracotta, fontWeight: '700' },
+  sheetRowText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
+  sheetRowTextActive: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
   sheetCheck: {
     width: 24,
     height: 24,
@@ -141,5 +142,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sheetDoneText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
+  sheetDoneText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG },
 });

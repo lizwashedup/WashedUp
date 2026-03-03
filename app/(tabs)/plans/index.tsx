@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
   },
   designBadgeText: {
     fontFamily: Fonts.sansBold,
-    fontSize: 10,
+    fontSize: FontSizes.micro,
     color: Colors.white,
   },
   headerIcons: {

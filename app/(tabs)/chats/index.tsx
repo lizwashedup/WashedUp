@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: Fonts.display,
-    fontSize: 28,
+    fontSize: FontSizes.displayLG,
     color: Colors.terracotta,
     textShadowColor: Colors.shadowLight,
     textShadowOffset: { width: 0, height: 1 },
@@ -205,8 +205,8 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: 32 },
 
   sectionLabel: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
     color: Colors.warmGray,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
@@ -248,10 +248,10 @@ const styles = StyleSheet.create({
 
   rowContent: { flex: 1, gap: 3 },
   rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  planTitle: { fontSize: 15, fontWeight: '700', color: Colors.asphalt, flex: 1, marginRight: 8 },
+  planTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt, flex: 1, marginRight: 8 },
   textPast: { color: Colors.warmGray },
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  timestamp: { fontSize: 12, color: Colors.warmGray },
+  timestamp: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
   badge: {
     backgroundColor: Colors.terracotta,
     borderRadius: 10,
@@ -261,17 +261,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 5,
   },
-  badgeText: { color: Colors.white, fontSize: 11, fontWeight: '700' },
+  badgeText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.caption },
   rowBottom: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  preview: { fontSize: 13, color: Colors.warmGray, flex: 1 },
+  preview: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, flex: 1 },
   readOnlyPill: {
     backgroundColor: Colors.inputBg,
     borderRadius: 8,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
-  readOnlyText: { fontSize: 11, color: Colors.warmGray, fontStyle: 'italic' },
-  memberCount: { fontSize: 12, color: Colors.terracotta, fontWeight: '600' },
+  readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray, fontStyle: 'italic' },
+  memberCount: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   separator: { height: 1, backgroundColor: Colors.inputBg, marginLeft: 84 },
 
   emptyState: {
@@ -290,8 +290,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 8,
   },
-  emptyTitle: { fontSize: 20, fontWeight: '700', color: Colors.asphalt },
-  emptySubtitle: { fontSize: 15, color: Colors.warmGray, textAlign: 'center', lineHeight: 22 },
+  emptyTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
+  emptySubtitle: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, textAlign: 'center', lineHeight: 22 },
   emptyButton: {
     backgroundColor: Colors.terracotta,
     paddingHorizontal: 28,
@@ -299,5 +299,5 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginTop: 8,
   },
-  emptyButtonText: { color: Colors.white, fontSize: 15, fontWeight: '700' },
+  emptyButtonText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
 });

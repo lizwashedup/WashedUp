@@ -211,7 +211,8 @@ const styles = StyleSheet.create({
     paddingLeft: 16,
     paddingRight: 48,
     paddingVertical: 0,
-    fontSize: 16,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
     textAlign: 'left',
   },
@@ -241,12 +242,13 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontFamily: Fonts.sansBold,
-    fontSize: 17,
+    fontSize: FontSizes.displaySM,
     color: Colors.white,
   },
   errorText: {
     marginTop: 8,
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.errorRed,
   },
   errorPlaceholder: {
