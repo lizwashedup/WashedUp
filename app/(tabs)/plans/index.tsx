@@ -212,7 +212,7 @@ export default function PlansScreen() {
   });
 
   const queryClient = useQueryClient();
-  const { data: wishlistIds = [] } = useQuery<string[]>({
+  const { data: wishlistIds = [], isLoading: wishlistsLoading } = useQuery<string[]>({
     queryKey: ['wishlists', userId],
     queryFn: async () => {
       if (!userId) return [];
@@ -583,7 +583,7 @@ export default function PlansScreen() {
                 <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
             </View>
-          ) : !userId || isLoading ? (
+          ) : !userId || isLoading || wishlistsLoading ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={Colors.terracotta} />
             </View>
