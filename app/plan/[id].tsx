@@ -440,6 +440,7 @@ export default function PlanDetailScreen() {
   const joinMutation = useMutation({
     mutationFn: async (greeting?: string) => {
       if (!currentUserId || !id) throw new Error('Not authenticated');
+      if (!plan) throw new Error('Plan not loaded');
 
       try {
         const { data: canJoinGender } = await supabase.rpc('can_join_event_gender', {
@@ -453,26 +454,29 @@ export default function PlanDetailScreen() {
         if (eligibilityError.message?.includes('not eligible')) throw eligibilityError;
       }
 
-      // Check if there's an existing row (user previously left or partial insert)
-      const { data: existing } = await supabase
-        .from('event_members')
-        .select('id')
-        .eq('event_id', id)
-        .eq('user_id', currentUserId)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc('join_event_atomic', {
+        p_event_id: id,
+        p_user_id: currentUserId,
+        p_age_at_join: userAge ?? null,
+        p_gender_at_join: userGender ?? null,
+      });
 
-      if (existing) {
-        const { error: updateError } = await supabase
-          .from('event_members')
-          .update({ status: 'joined', role: 'guest' })
-          .eq('event_id', id)
-          .eq('user_id', currentUserId);
-        if (updateError) throw updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('event_members')
-          .insert({ event_id: id, user_id: currentUserId, role: 'guest', status: 'joined' });
-        if (insertError) throw insertError;
+      const rpcUnavailable = error && (error.message?.includes('does not exist') || (error as any).code === '42883');
+
+      if (!rpcUnavailable && error) throw error;
+      if (!rpcUnavailable && data === 'full') throw new Error('This plan is full. Try joining the waitlist.');
+      if (!rpcUnavailable && data === 'not_found') throw new Error('This plan no longer exists.');
+
+      if (rpcUnavailable) {
+        // Fallback when join_event_atomic RPC not deployed
+        const { data: existing } = await supabase.from('event_members').select('id').eq('event_id', id).eq('user_id', currentUserId).maybeSingle();
+        if (existing) {
+          const { error: updateError } = await supabase.from('event_members').update({ status: 'joined', role: 'guest' }).eq('event_id', id).eq('user_id', currentUserId);
+          if (updateError) throw updateError;
+        } else {
+          const { error: insertError } = await supabase.from('event_members').insert({ event_id: id, user_id: currentUserId, role: 'guest', status: 'joined' });
+          if (insertError) throw insertError;
+        }
       }
 
       await supabase.from('messages').insert({

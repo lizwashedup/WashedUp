@@ -20,4 +20,4 @@ export const MAP_STYLE = [
   { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#e8e3dc' }] },
   { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#e8e3dc' }] },
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#9b8b7a' }] },
-] as const;
+];

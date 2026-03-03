@@ -268,6 +268,17 @@ export default function ProfileScreen() {
       const { error: rpcError } = await supabase.rpc('delete_own_account');
       if (rpcError) throw rpcError;
 
+      // Also call the Edge Function for reliability (RPC may not delete auth.users in all setups)
+      if (session?.access_token) {
+        try {
+          await supabase.functions.invoke('delete-user', {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+        } catch {
+          // User may already be deleted by RPC; ignore
+        }
+      }
+
       try {
         await supabase.auth.signOut();
       } catch {

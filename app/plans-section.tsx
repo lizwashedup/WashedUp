@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase';
 import { fetchPlans, Plan } from '../lib/fetchPlans';
 import { PlanCard } from '../components/plans/PlanCard';
 import Colors from '../constants/Colors';
-import { Fonts } from '../constants/Typography';
+import { Fonts, FontSizes } from '../constants/Typography';
 
 // Map Plan (from fetchPlans) to PlanCard shape
 function toPlanCardPlan(plan: Plan) {

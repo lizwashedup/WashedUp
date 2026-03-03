@@ -9,8 +9,8 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Check } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import Colors from '../constants/Colors';
+import { Fonts, FontSizes } from '../constants/Typography';
 
 export interface FilterSheetOption {
   key: string;

@@ -107,8 +107,8 @@ function RootLayoutNav() {
       }
     };
 
-    Linking.getInitialURL().then((url) => url && parseSessionFromUrl(url));
-    const sub = Linking.addEventListener('url', ({ url }) => parseSessionFromUrl(url));
+    Linking.getInitialURL().then((url) => { if (url) parseSessionFromUrl(url); });
+    const sub = Linking.addEventListener('url', ({ url }) => { if (url) parseSessionFromUrl(url); });
     return () => sub.remove();
   }, []);
 

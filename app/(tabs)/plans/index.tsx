@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, Suspense, lazy } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,6 @@ import { router, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { MapView, Marker } from '../../../components/MapView.native';
 import { supabase } from '../../../lib/supabase';
 import { fetchPlans, Plan } from '../../../lib/fetchPlans';
 import { PlanCard } from '../../../components/plans/PlanCard';
@@ -23,8 +22,10 @@ import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import Colors from '../../../constants/Colors';
-import { MAP_STYLE } from '../../../constants/MapStyle';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+
+// Lazy-load map to avoid crash on Expo Go / environments where react-native-maps fails
+const LazyPlansMapView = lazy(() => import('./PlansMapView'));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,15 +56,6 @@ interface PlanCardPlan {
   };
   attendees: { profile_photo_url: string | null }[];
 }
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const LA_REGION = {
-  latitude: 34.0522,
-  longitude: -118.2437,
-  latitudeDelta: 0.4,
-  longitudeDelta: 0.4,
-};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -174,8 +166,35 @@ export default function PlansScreen() {
   const [categoryFilter, setCategoryFilter] = useState<CategoryOption[]>([]);
 
   const [userId, setUserId] = React.useState<string | null>(null);
+  const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
+
   React.useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+    let cancelled = false;
+
+    async function resolveUserId() {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
+      const id = data.session?.user?.id ?? null;
+      if (id) setUserId(id);
+    }
+
+    resolveUserId();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
+      setUserId(session?.user?.id ?? null);
+    });
+
+    const t = setTimeout(() => {
+      if (cancelled) return;
+      setUserIdTimedOut(true);
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+      clearTimeout(t);
+    };
   }, []);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
@@ -441,37 +460,39 @@ export default function PlansScreen() {
         )}
       </ScrollView>
 
-      {/* Map view */}
+      {/* Map view — lazy-loaded to avoid crash when react-native-maps fails (e.g. Expo Go) */}
       {mapView ? (
         mapLoading ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
         ) : (
-          <MapView
-            style={styles.map}
-            initialRegion={LA_REGION}
-            customMapStyle={MAP_STYLE}
-            showsUserLocation
-            showsMyLocationButton={false}
-          >
-            {mapPlans
-              .filter((p) => p.latitude != null && p.longitude != null)
-              .map((plan) => (
-                <Marker
-                  key={plan.id}
-                  coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
-                  title={plan.title}
-                  description={plan.location_text ?? undefined}
-                  pinColor={wishlistedSet[plan.id] ? Colors.errorRed : Colors.terracotta}
-                  onCalloutPress={() => router.push(`/plan/${plan.id}`)}
-                />
-              ))}
-          </MapView>
+          <Suspense fallback={
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color={Colors.terracotta} />
+            </View>
+          }>
+            <LazyPlansMapView
+              plans={mapPlans}
+              wishlistedSet={wishlistedSet}
+              onPlanPress={(id) => router.push(`/plan/${id}`)}
+            />
+          </Suspense>
         )
       ) : activeTab === 'plans' ? (
         <>
-          {!userId || isLoading ? (
+          {userIdTimedOut && !userId ? (
+            <View style={styles.centered}>
+              <Text style={styles.errorTitle}>Having trouble loading</Text>
+              <Text style={styles.errorMessage}>Sign in may have timed out. Try again or restart the app.</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => {
+              setUserIdTimedOut(false);
+              supabase.auth.getSession().then(({ data }) => setUserId(data.session?.user?.id ?? null));
+            }}>
+                <Text style={styles.retryButtonText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : !userId || isLoading ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={Colors.terracotta} />
             </View>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
 
 export interface ChatMessage {
@@ -126,7 +127,9 @@ export function useChat(eventId: string) {
       image_url: imageUrl ?? null,
     });
 
-    if (error) { /* insert failed */ }
+    if (error) {
+      Alert.alert("Couldn't send message", "Your message failed to send. Please try again.");
+    }
   }, [eventId]);
 
   return { messages, loading, currentUserId, sendMessage };

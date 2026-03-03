@@ -20,6 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.washedup.app",
+      "buildNumber": "1",
       "config": {},
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
