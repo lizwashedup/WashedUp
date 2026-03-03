@@ -1719,19 +1719,20 @@ const joinStyles = StyleSheet.create({
     zIndex: 1,
   },
   closeX: {
-    fontSize: 18,
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.displaySM,
     color: Colors.textLight,
-    fontWeight: '600',
   },
   title: {
-    fontSize: 20,
-    fontWeight: '800',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     marginBottom: 4,
     paddingRight: 32,
   },
   subtitle: {
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.textLight,
     marginBottom: 20,
   },
@@ -1743,27 +1744,28 @@ const joinStyles = StyleSheet.create({
     alignItems: 'center',
   },
   infoTitle: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
     textAlign: 'center',
     marginBottom: 4,
   },
   infoText: {
-    fontSize: 13,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
     color: Colors.textMedium,
     textAlign: 'center',
     lineHeight: 18,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
     marginBottom: 8,
   },
   required: {
-    fontSize: 12,
-    fontWeight: '400',
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
     color: Colors.terracotta,
   },
   input: {
@@ -1772,7 +1774,8 @@ const joinStyles = StyleSheet.create({
     borderColor: Colors.inputBg,
     borderRadius: 12,
     padding: 14,
-    fontSize: 15,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
     minHeight: 80,
     textAlignVertical: 'top',
@@ -1781,7 +1784,8 @@ const joinStyles = StyleSheet.create({
     borderColor: Colors.terracotta,
   },
   hint: {
-    fontSize: 12,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
     color: Colors.textLight,
     marginTop: 6,
     marginBottom: 20,
@@ -1807,12 +1811,12 @@ const joinStyles = StyleSheet.create({
   },
   checkmark: {
     color: Colors.white,
-    fontSize: 13,
-    fontWeight: '700',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
   },
   checkLabel: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
   },
   joinBtn: {
@@ -1826,8 +1830,8 @@ const joinStyles = StyleSheet.create({
   },
   joinBtnText: {
     color: Colors.white,
-    fontSize: 17,
-    fontWeight: '700',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
   },
 });
 
@@ -1841,18 +1845,19 @@ const ticketStyles = StyleSheet.create({
     alignItems: 'center',
   },
   emoji: {
-    fontSize: 40,
+    fontSize: FontSizes.displayXL,
     marginBottom: 12,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '800',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
     textAlign: 'center',
     lineHeight: 20,
@@ -1868,8 +1873,8 @@ const ticketStyles = StyleSheet.create({
   },
   primaryBtnText: {
     color: Colors.white,
-    fontSize: 17,
-    fontWeight: '700',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
   },
   secondaryBtn: {
     paddingVertical: 12,
@@ -1878,8 +1883,8 @@ const ticketStyles = StyleSheet.create({
   },
   secondaryBtnText: {
     color: Colors.textLight,
-    fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
   },
 });
 
@@ -1892,7 +1897,8 @@ const managePlacesStyles = {
     borderColor: Colors.inputBg,
     borderRadius: 12,
     paddingHorizontal: 14,
-    fontSize: 15,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
     height: 46,
     marginBottom: 0,
@@ -1907,7 +1913,7 @@ const managePlacesStyles = {
   },
   row: { paddingHorizontal: 14, paddingVertical: 12, backgroundColor: Colors.white },
   separator: { height: 1, backgroundColor: Colors.inputBg, marginHorizontal: 14 },
-  description: { color: Colors.asphalt, fontSize: 14 },
+  description: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   poweredContainer: { display: 'none' as const },
 };
 
@@ -1932,18 +1938,18 @@ const manageStyles = StyleSheet.create({
     marginBottom: 12,
   },
   title: {
-    fontSize: 22,
-    fontWeight: '800',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
   },
   closeX: {
-    fontSize: 18,
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.displaySM,
     color: Colors.textLight,
-    fontWeight: '600',
   },
   label: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
     color: Colors.warmGray,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -1957,7 +1963,8 @@ const manageStyles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 15,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
   },
   textArea: {
@@ -1969,7 +1976,8 @@ const manageStyles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   hint: {
-    fontSize: 13,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
     color: Colors.textLight,
     marginTop: 4,
   },
@@ -1991,13 +1999,13 @@ const manageStyles = StyleSheet.create({
     borderColor: Colors.terracotta,
   },
   pillText: {
-    fontSize: 14,
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
-    fontWeight: '500',
   },
   pillTextSelected: {
     color: Colors.white,
-    fontWeight: '600',
+    fontFamily: Fonts.sansBold,
   },
   genderRow: {
     flexDirection: 'row',
@@ -2028,10 +2036,10 @@ const manageStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepperBtnDisabled: { opacity: 0.35 },
-  stepperBtnText: { fontSize: 22, color: Colors.asphalt, fontWeight: '300' },
+  stepperBtnText: { fontFamily: Fonts.sans, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   stepperValue: { flex: 1, alignItems: 'center' },
-  stepperValueText: { fontSize: 28, fontWeight: '700', color: Colors.terracotta },
-  stepperValueSub: { fontSize: 12, color: Colors.textLight, marginTop: -2 },
+  stepperValueText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayLG, color: Colors.terracotta },
+  stepperValueSub: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.textLight, marginTop: -2 },
   saveBtn: {
     backgroundColor: Colors.terracotta,
     borderRadius: 14,
@@ -2042,11 +2050,11 @@ const manageStyles = StyleSheet.create({
   saveBtnDisabled: {
     opacity: 0.4,
   },
-  saveBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
+  saveBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG },
   cancelBtn: {
     alignItems: 'center',
     paddingVertical: 14,
     marginTop: 8,
   },
-  cancelBtnText: { color: Colors.cancelRed, fontSize: 14, fontWeight: '600' },
+  cancelBtnText: { color: Colors.cancelRed, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
 });

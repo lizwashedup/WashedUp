@@ -15,7 +15,7 @@
     },
     "notification": {
       "icon": "./assets/images/app-icon.png",
-      "color": "#C4652A"
+      "color": "#D97746"
     },
     "ios": {
       "supportsTablet": true,
@@ -82,7 +82,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/app-icon.png",
-          "color": "#C4652A",
+          "color": "#D97746",
           "sounds": []
         }
       ]

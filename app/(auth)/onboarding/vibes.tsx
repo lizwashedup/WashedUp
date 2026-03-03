@@ -137,8 +137,8 @@ const styles = StyleSheet.create({
   progressBar: { height: '100%', backgroundColor: Colors.terracotta, borderRadius: 2 },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
   backButton: { padding: 4 },
-  heading: { fontSize: 22, fontWeight: '700', color: Colors.textDark },
-  subtext: { fontSize: 14, color: Colors.textMedium, marginTop: 4 },
+  heading: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
+  subtext: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: 4 },
   gap20: { height: 20 },
   grid: {
     flexDirection: 'row',

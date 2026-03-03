@@ -15,6 +15,7 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 
 const GENDERS = ['Woman', 'Man', 'Non-binary'] as const;
 type Gender = (typeof GENDERS)[number];
@@ -255,7 +256,8 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   signOutLink: {
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.textLight,
   },
   progressBar: {
@@ -263,8 +265,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primaryOrange,
     borderRadius: 2,
   },
-  stepText: { fontSize: 13, color: Colors.textLight, marginBottom: 24 },
-  heading: { fontSize: 22, fontWeight: '700', color: Colors.textDark },
+  stepText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textLight, marginBottom: 24 },
+  heading: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   gap24: { height: 24 },
   gap20: { height: 20 },
   gap12: { height: 12 },
@@ -278,11 +280,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   inputError: { borderColor: Colors.errorRed, borderWidth: 1.5 },
-  inputText: { fontSize: 16, color: Colors.textDark },
+  inputText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   placeholder: { color: Colors.textMedium },
-  errorText: { fontSize: 14, color: Colors.errorRed, marginTop: 4 },
+  errorText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.errorRed, marginTop: 4 },
   errorPlaceholder: { height: 22, marginTop: 4 },
-  label: { fontSize: 16, color: Colors.textDark, fontWeight: '500' },
+  label: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   pill: {
     paddingVertical: 14,
@@ -293,8 +295,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   pillSelected: { backgroundColor: Colors.primaryOrange, borderColor: Colors.primaryOrange },
-  pillText: { fontSize: 16, color: Colors.textDark },
-  pillTextSelected: { color: Colors.white, fontWeight: '600' },
+  pillText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
+  pillTextSelected: { color: Colors.white, fontFamily: Fonts.sansBold },
   spacer: { flex: 1 },
   primaryButton: {
     height: 52,
@@ -309,7 +311,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: { fontSize: 17, fontWeight: '700', color: Colors.white },
+  primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.white },
   modalOverlay: {
     flex: 1,
     backgroundColor: Colors.overlayDark,
@@ -322,7 +324,7 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: Platform.OS === 'ios' ? 40 : 24,
   },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: Colors.textDark, marginBottom: 16 },
+  modalTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt, marginBottom: 16 },
   pickerRow: { flexDirection: 'row', gap: 12, maxHeight: 200, marginBottom: 20 },
   pickerScroll: { flex: 1 },
   pickerItem: {
@@ -331,7 +333,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pickerItemSelected: { backgroundColor: Colors.primaryOrange, borderRadius: 8 },
-  pickerItemText: { fontSize: 16, color: Colors.textDark },
+  pickerItemText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   pickerItemTextSelected: { color: Colors.white },
   modalButton: {
     height: 52,

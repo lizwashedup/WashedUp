@@ -290,7 +290,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: Colors.backgroundCream,
+    backgroundColor: Colors.parchment,
   },
   keyboardView: {
     flex: 1,
@@ -312,13 +312,15 @@ const styles = StyleSheet.create({
     height: 56,
   },
   tagline: {
-    fontSize: 16,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
     color: Colors.textMedium,
     marginTop: 4,
     textAlign: 'center',
   },
   socialProof: {
-    fontSize: 13,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
     color: Colors.textLight,
     marginTop: 8,
     textAlign: 'center',
@@ -329,9 +331,9 @@ const styles = StyleSheet.create({
     minHeight: 320,
   },
   formTitle: {
-    fontFamily: Fonts.display,
-    fontSize: 28,
-    color: Colors.textDark,
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayLG,
+    color: Colors.asphalt,
   },
   gap20: { height: 20 },
   gap12: { height: 12 },
@@ -339,22 +341,22 @@ const styles = StyleSheet.create({
   gap16: { height: 16 },
   input: {
     height: 52,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
     paddingLeft: 16,
     paddingRight: 16,
     paddingVertical: 0,
-    fontSize: 16,
-    fontWeight: '400',
-    color: Colors.textDark,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
     textAlign: 'left',
   },
   inputFocused: {
-    borderColor: Colors.primaryOrange,
+    borderColor: Colors.terracotta,
     borderWidth: 1.5,
-    shadowColor: Colors.primaryOrange,
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
@@ -374,9 +376,9 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   forgotText: {
-    fontSize: 13,
-    color: Colors.primaryOrange,
-    fontWeight: '600',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
   },
   primaryButton: {
     height: 52,
@@ -394,13 +396,14 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   primaryButtonText: {
-    fontSize: 17,
-    fontWeight: '700',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
     color: Colors.white,
   },
   errorText: {
     marginTop: 8,
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.errorRed,
   },
   errorPlaceholder: {
@@ -422,10 +425,11 @@ const styles = StyleSheet.create({
   orChip: {
     paddingHorizontal: 12,
     paddingVertical: 4,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
   },
   orText: {
-    fontSize: 13,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
     color: Colors.textMedium,
   },
   signupRow: {
@@ -435,13 +439,14 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   signupPrompt: {
-    fontSize: 15,
-    color: Colors.textDark,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
   },
   signupLink: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.primaryOrange,
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
   },
 });
 
@@ -476,7 +481,8 @@ const modalStyles = StyleSheet.create({
     marginBottom: 16,
   },
   errorText: {
-    fontSize: 14,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.errorRed,
     marginBottom: 12,
   },
@@ -485,7 +491,8 @@ const modalStyles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelText: {
-    fontSize: 15,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
   },
 });
