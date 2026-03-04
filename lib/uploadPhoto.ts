@@ -17,11 +17,12 @@ export async function uploadBase64ToStorage(
   options?: { upsert?: boolean }
 ): Promise<string> {
   const arrayBuffer = decode(base64);
+  const contentType = path.endsWith('.png') ? 'image/png' : 'image/jpeg';
 
   const { error } = await supabase.storage
     .from(bucket)
     .upload(path, arrayBuffer, {
-      contentType: 'image/jpeg',
+      contentType,
       upsert: options?.upsert ?? false,
     });
 

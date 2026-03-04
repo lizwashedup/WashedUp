@@ -29,8 +29,8 @@ function toPlanCardPlan(plan: Plan) {
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
     creator: {
-      first_name_display: plan.creator?.first_name ?? 'Creator',
-      profile_photo_url: plan.creator?.avatar_url ?? null,
+      first_name_display: plan.creator?.first_name_display ?? 'Creator',
+      profile_photo_url: plan.creator?.profile_photo_url ?? null,
       plans_posted: plan.creator?.plans_posted ?? undefined,
     },
   };

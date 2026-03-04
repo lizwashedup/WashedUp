@@ -6,7 +6,6 @@ import { MoreHorizontal, QrCode, Search, Send, Share2, UserPlus, Users, X } from
 import React, { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Keyboard,
     Modal,

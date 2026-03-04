@@ -4,6 +4,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
+import Colors from '../constants/Colors';
 
 // Global handler: controls how notifications are displayed when the app is in the foreground.
 // Set once at module level so it's always active regardless of which component mounts first.
@@ -46,7 +47,7 @@ async function registerForPushNotifications(): Promise<string | null> {
       name: 'default',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#C4652A',
+      lightColor: Colors.terracotta,
     });
   }
 

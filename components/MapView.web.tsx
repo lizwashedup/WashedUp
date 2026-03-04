@@ -4,6 +4,8 @@
  */
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import Colors from '../constants/Colors';
+import { Fonts, FontSizes } from '../constants/Typography';
 
 export const MapView = ({ style, children }: { style?: object; children?: React.ReactNode }) => (
   <View style={[styles.placeholder, style]}>
@@ -19,10 +21,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F0E6D3',
+    backgroundColor: Colors.inputBg,
   },
   text: {
-    color: '#666666',
-    fontSize: 14,
+    color: Colors.textMedium,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
   },
 });

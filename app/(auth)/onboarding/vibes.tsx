@@ -182,10 +182,10 @@ const styles = StyleSheet.create({
   primaryButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.primaryOrange,
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

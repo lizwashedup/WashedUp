@@ -73,7 +73,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
   }, []);
 
   const filteredPlans = plans.filter((p) => {
-    if (!p.latitude || !p.longitude) return false;
+    if (!p.location_lat || !p.location_lng) return false;
     if (selectedFilter && (p.category?.toLowerCase() !== selectedFilter.toLowerCase())) return false;
     if (heartFilter && !wishlistedSet[p.id]) return false;
     return true;
@@ -88,10 +88,10 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
       }
       return plan;
     });
-    if (plan.latitude && plan.longitude && mapRef.current) {
+    if (plan.location_lat && plan.location_lng && mapRef.current) {
       mapRef.current.animateToRegion({
-        latitude: plan.latitude - 0.02,
-        longitude: plan.longitude,
+        latitude: plan.location_lat - 0.02,
+        longitude: plan.location_lng,
         latitudeDelta: 0.08,
         longitudeDelta: 0.08,
       }, 300);
@@ -122,7 +122,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
           return (
             <Marker
               key={plan.id}
-              coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
+              coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
               onPress={() => handleMarkerPress(plan)}
               tracksViewChanges={false}
               stopPropagation

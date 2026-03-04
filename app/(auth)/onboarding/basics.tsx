@@ -20,7 +20,7 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 const GENDERS = ['Woman', 'Man', 'Non-binary'] as const;
 type Gender = (typeof GENDERS)[number];
 
-// Map UI labels to profiles.gender_type enum values (lowercase/snake_case in DB)
+// Map UI labels to profiles.gender enum values (lowercase/snake_case in DB)
 const GENDER_TO_ENUM: Record<Gender, string> = {
   Woman: 'woman',
   Man: 'man',
@@ -241,7 +241,7 @@ export default function OnboardingBasicsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.backgroundCream },
+  safe: { flex: 1, backgroundColor: Colors.parchment },
   container: { flex: 1, paddingHorizontal: 24 },
   topRow: {
     flexDirection: 'row',
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: '100%',
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
     borderRadius: 2,
   },
   stepText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textLight, marginBottom: 24 },
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
   gap12: { height: 12 },
   input: {
     height: 52,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
@@ -291,22 +291,22 @@ const styles = StyleSheet.create({
   pill: {
     paddingVertical: 14,
     paddingHorizontal: 20,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
   },
-  pillSelected: { backgroundColor: Colors.primaryOrange, borderColor: Colors.primaryOrange },
+  pillSelected: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
   pillText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   pillTextSelected: { color: Colors.white, fontFamily: Fonts.sansBold },
   spacer: { flex: 1 },
   primaryButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.primaryOrange,
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: Colors.backgroundCream,
+    backgroundColor: Colors.parchment,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
@@ -334,13 +334,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     alignItems: 'center',
   },
-  pickerItemSelected: { backgroundColor: Colors.primaryOrange, borderRadius: 8 },
+  pickerItemSelected: { backgroundColor: Colors.terracotta, borderRadius: 8 },
   pickerItemText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   pickerItemTextSelected: { color: Colors.white },
   modalButton: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: Colors.primaryOrange,
+    backgroundColor: Colors.terracotta,
     justifyContent: 'center',
     alignItems: 'center',
   },

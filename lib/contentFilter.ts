@@ -46,7 +46,7 @@ function normalize(text: string): string {
     .trim();
 }
 
-function isAllowed(word: string, original: string): boolean {
+function isAllowed(original: string): boolean {
   const lowerOriginal = original.toLowerCase();
   return ALLOWED_TERMS.some((allowed) => lowerOriginal.includes(allowed));
 }
@@ -60,7 +60,7 @@ export function checkContent(text: string): { ok: boolean; reason?: string } {
     const normalizedTerm = normalize(term);
     const regex = new RegExp(`\\b${normalizedTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
 
-    if (regex.test(normalized) && !isAllowed(term, text)) {
+    if (regex.test(normalized) && !isAllowed(text)) {
       return {
         ok: false,
         reason: 'Your message contains language that goes against our community guidelines.',

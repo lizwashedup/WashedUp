@@ -1,8 +1,3 @@
-// -----------------------------------------------------------------------------
-// FILE: app/(auth)/onboarding/photo.tsx
-// INSTRUCTIONS: Replace the ENTIRE contents of this file with everything below.
-// -----------------------------------------------------------------------------
-
 import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,12 +10,12 @@ import { Camera, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -190,7 +185,7 @@ export default function OnboardingPhotoScreen() {
             activeOpacity={0.85}
           >
             {imageUri ? (
-              <Image source={{ uri: imageUri }} style={styles.avatarImage} />
+              <Image source={{ uri: imageUri }} style={styles.avatarImage} contentFit="cover" />
             ) : (
               <View style={styles.avatarEmpty}>
                 <Camera size={44} color={Colors.textLight} />

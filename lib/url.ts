@@ -1,4 +1,4 @@
-import { Linking } from 'react-native';
+import { Alert, Linking } from 'react-native';
 
 /**
  * Ensures URL has a protocol before opening.
@@ -11,5 +11,7 @@ export function openUrl(url: string): void {
     trimmed.startsWith('http://') || trimmed.startsWith('https://')
       ? trimmed
       : `https://${trimmed}`;
-  Linking.openURL(withProtocol).catch(() => {});
+  Linking.openURL(withProtocol).catch(() => {
+    Alert.alert('Could not open link', 'The link may be invalid or unsupported on this device.');
+  });
 }

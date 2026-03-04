@@ -72,8 +72,8 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
     creator: {
-      first_name_display: plan.creator?.first_name ?? 'Creator',
-      profile_photo_url: plan.creator?.avatar_url ?? null,
+      first_name_display: plan.creator?.first_name_display ?? 'Creator',
+      profile_photo_url: plan.creator?.profile_photo_url ?? null,
       plans_posted: plan.creator?.plans_posted ?? undefined,
     },
   };
@@ -324,23 +324,13 @@ export default function PlansScreen() {
 
       const creatorIds = allEvents.map((e: any) => e.creator_user_id).filter(Boolean);
       const uniqueCreatorIds = creatorIds.filter((id: string, i: number) => creatorIds.indexOf(id) === i);
-      const eventIds = allEvents.map((e: any) => e.id);
 
-      // Run profile fetch + member count in parallel
-      const [profilesResult, memberResult] = await Promise.all([
-        uniqueCreatorIds.length > 0
-          ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', uniqueCreatorIds)
-          : Promise.resolve({ data: [] as any[] }),
-        supabase.from('event_members').select('event_id').in('event_id', eventIds).eq('status', 'joined'),
-      ]);
+      const { data: profilesData } = uniqueCreatorIds.length > 0
+        ? await supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', uniqueCreatorIds)
+        : { data: [] as any[] };
 
       const profileMap: Record<string, any> = {};
-      (profilesResult.data ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-
-      const countByEvent: Record<string, number> = {};
-      (memberResult.data ?? []).forEach((r: { event_id: string }) => {
-        countByEvent[r.event_id] = (countByEvent[r.event_id] ?? 0) + 1;
-      });
+      (profilesData ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
       return allEvents.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
@@ -351,17 +341,15 @@ export default function PlansScreen() {
           location_text: e.location_text ?? null,
           location_lat: e.location_lat ?? null,
           location_lng: e.location_lng ?? null,
-          latitude: e.location_lat ?? null,
-          longitude: e.location_lng ?? null,
           image_url: e.image_url ?? null,
           category: e.primary_vibe ?? null,
           gender_rule: e.gender_rule ?? null,
           max_invites: e.max_invites ?? null,
           min_invites: e.min_invites ?? null,
-          member_count: countByEvent[e.id] ?? e.member_count ?? 0,
+          member_count: e.member_count ?? 0,
           status: e.status ?? 'forming',
           host_message: e.host_message ?? null,
-          creator: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
+          creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
         } as Plan;
       });
     },
@@ -400,11 +388,10 @@ export default function PlansScreen() {
         return {
           id: e.id, title: e.title, start_time: e.start_time,
           location_text: e.location_text ?? null, location_lat: e.location_lat ?? null, location_lng: e.location_lng ?? null,
-          latitude: e.location_lat ?? null, longitude: e.location_lng ?? null,
           image_url: e.image_url ?? null, category: e.primary_vibe ?? null, gender_rule: e.gender_rule ?? null,
           max_invites: e.max_invites ?? null, min_invites: e.min_invites ?? null,
           member_count: e.member_count ?? 0, status: e.status ?? 'forming', host_message: e.host_message ?? null,
-          creator: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
+          creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
         } as Plan;
       });
     },

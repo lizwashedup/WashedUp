@@ -75,12 +75,12 @@ interface PlanDetail {
   target_age_min: number | null;
   target_age_max: number | null;
   status: string;
-  creator_id: string;
+  creator_user_id: string;
   tickets_url: string | null;
   creator: {
     id: string;
-    first_name: string | null;
-    avatar_url: string | null;
+    first_name_display: string | null;
+    profile_photo_url: string | null;
     bio: string | null;
   } | null;
   member_count: number;
@@ -89,8 +89,8 @@ interface PlanDetail {
 interface Member {
   id: string;
   user_id: string;
-  first_name: string | null;
-  avatar_url: string | null;
+  first_name_display: string | null;
+  profile_photo_url: string | null;
   joined_at: string;
 }
 
@@ -187,8 +187,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     if (profileRow) {
       creator = {
         id: profileRow.id,
-        first_name: profileRow.first_name_display ?? null,
-        avatar_url: profileRow.profile_photo_url ?? null,
+        first_name_display: profileRow.first_name_display ?? null,
+        profile_photo_url: profileRow.profile_photo_url ?? null,
         bio: profileRow.bio ?? null,
       };
     }
@@ -211,7 +211,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     target_age_min: row.target_age_min ?? null,
     target_age_max: row.target_age_max ?? null,
     status: row.status,
-    creator_id: row.creator_user_id ?? null,
+    creator_user_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
     member_count: row.member_count ?? 0,
     creator,
@@ -226,8 +226,8 @@ async function fetchMembers(planId: string): Promise<Member[]> {
     return rpcData.map((row: any) => ({
       id: row.id,
       user_id: row.user_id,
-      first_name: row.first_name ?? row.first_name_display ?? null,
-      avatar_url: row.avatar_url ?? row.profile_photo_url ?? null,
+      first_name_display: row.first_name ?? row.first_name_display ?? null,
+      profile_photo_url: row.avatar_url ?? row.profile_photo_url ?? null,
       joined_at: row.joined_at ?? '',
     }));
   }
@@ -259,8 +259,8 @@ async function fetchMembers(planId: string): Promise<Member[]> {
       id: m.id,
       user_id: m.user_id,
       joined_at: m.joined_at,
-      first_name: profile?.first_name_display ?? null,
-      avatar_url: profile?.profile_photo_url ?? null,
+      first_name_display: profile?.first_name_display ?? null,
+      profile_photo_url: profile?.profile_photo_url ?? null,
     };
   });
 }
@@ -269,9 +269,9 @@ async function fetchMembers(planId: string): Promise<Member[]> {
 
 const MemberAvatar = React.memo(({ member, onPress }: { member: Member; onPress?: () => void }) => (
   <TouchableOpacity style={styles.memberAvatarWrapper} onPress={onPress} activeOpacity={0.7}>
-    {member.avatar_url ? (
+    {member.profile_photo_url ? (
       <Image
-        source={{ uri: member.avatar_url }}
+        source={{ uri: member.profile_photo_url }}
         style={styles.memberAvatar}
         contentFit="cover"
         transition={200}
@@ -279,12 +279,12 @@ const MemberAvatar = React.memo(({ member, onPress }: { member: Member; onPress?
     ) : (
       <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
         <Text style={styles.memberAvatarInitial}>
-          {member.first_name?.[0]?.toUpperCase() ?? '?'}
+          {member.first_name_display?.[0]?.toUpperCase() ?? '?'}
         </Text>
       </View>
     )}
     <Text style={styles.memberAvatarName} numberOfLines={1}>
-      {member.first_name ?? 'Member'}
+      {member.first_name_display ?? 'Member'}
     </Text>
   </TouchableOpacity>
 ));
@@ -397,12 +397,12 @@ export default function PlanDetailScreen() {
   // Prefetch avatar images so they load faster when displayed
   useEffect(() => {
     const urls: string[] = [];
-    if (plan?.creator?.avatar_url) urls.push(plan.creator.avatar_url);
-    members.forEach((m) => { if (m.avatar_url) urls.push(m.avatar_url); });
+    if (plan?.creator?.profile_photo_url) urls.push(plan.creator.profile_photo_url);
+    members.forEach((m) => { if (m.profile_photo_url) urls.push(m.profile_photo_url); });
     if (urls.length > 0) {
       Image.prefetch(urls).catch(() => {});
     }
-  }, [plan?.creator?.avatar_url, members]);
+  }, [plan?.creator?.profile_photo_url, members]);
 
   // Wishlist check
   useEffect(() => {
@@ -449,7 +449,7 @@ export default function PlanDetailScreen() {
   }, [currentUserId, id]);
 
   const isMember = members.some((m) => m.user_id === currentUserId);
-  const isCreator = plan?.creator_id === currentUserId;
+  const isCreator = plan?.creator_user_id === currentUserId;
   // Use actual member count when available — member_count can be out of sync
   const displayMemberCount = members.length > 0 ? capDisplayCount(members.length) : capDisplayCount(plan?.member_count ?? 0);
   const totalCapacity = Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
@@ -777,7 +777,7 @@ export default function PlanDetailScreen() {
 
   const handleReportMenu = useCallback(() => {
     if (isCreator || !plan?.creator) return;
-    const creatorName = plan.creator?.first_name ?? 'Creator';
+    const creatorName = plan.creator?.first_name_display ?? 'Creator';
     setBrandedAlert({
       visible: true,
       title: 'Options',
@@ -894,9 +894,9 @@ export default function PlanDetailScreen() {
       >
         {/* A. Creator Info */}
         <View style={styles.creatorBlock}>
-          {plan.creator?.avatar_url ? (
+          {plan.creator?.profile_photo_url ? (
             <Image
-              source={{ uri: plan.creator?.avatar_url ?? '' }}
+              source={{ uri: plan.creator?.profile_photo_url ?? '' }}
               style={styles.creatorAvatarLarge}
               contentFit="cover"
               transition={200}
@@ -909,7 +909,7 @@ export default function PlanDetailScreen() {
           )}
           <View style={styles.creatorDetails}>
             <Text style={styles.postedBy}>POSTED BY</Text>
-            <Text style={styles.creatorNameLarge}>{plan.creator?.first_name ?? 'Someone'}</Text>
+            <Text style={styles.creatorNameLarge}>{plan.creator?.first_name_display ?? 'Someone'}</Text>
             <Text style={styles.creatorMeta}>{creatorMeta}</Text>
           </View>
         </View>
@@ -931,7 +931,7 @@ export default function PlanDetailScreen() {
         {/* D. Creator's Note */}
         {plan.host_message && (
           <View style={styles.noteBox}>
-            <Text style={styles.noteLabel}>{`${plan.creator?.first_name ?? 'CREATOR'}'S NOTE`}</Text>
+            <Text style={styles.noteLabel}>{`${plan.creator?.first_name_display ?? 'CREATOR'}'S NOTE`}</Text>
             <Text style={styles.noteText}>{plan.host_message}</Text>
           </View>
         )}

@@ -160,7 +160,7 @@ export default function OnboardingLACheckScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.backgroundCream },
+  safe: { flex: 1, backgroundColor: Colors.parchment },
   keyboardView: { flex: 1 },
   container: { flex: 1, paddingHorizontal: 24 },
   progressWrap: {
