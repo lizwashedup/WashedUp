@@ -43,19 +43,20 @@ interface EventInfo {
 }
 
 async function fetchEventInfo(eventId: string): Promise<EventInfo> {
-  const { data: event } = await supabase
-    .from('events')
-    .select('id, title, start_time, tickets_url, member_count')
-    .eq('id', eventId)
-    .single();
-
-  // Two-step fetch — avoid FK join on profiles_public view
-  const { data: memberRows } = await supabase
-    .from('event_members')
-    .select('user_id')
-    .eq('event_id', eventId)
-    .eq('status', 'joined')
-    .limit(6);
+  // Run event + member list in parallel — both only need eventId
+  const [{ data: event }, { data: memberRows }] = await Promise.all([
+    supabase
+      .from('events')
+      .select('id, title, start_time, tickets_url, member_count')
+      .eq('id', eventId)
+      .single(),
+    supabase
+      .from('event_members')
+      .select('user_id')
+      .eq('event_id', eventId)
+      .eq('status', 'joined')
+      .limit(6),
+  ]);
 
   const userIds = (memberRows ?? []).map((m: any) => m.user_id).filter(Boolean);
 
@@ -428,6 +429,7 @@ export default function ChatScreen() {
   }, [inputText, uploading, sendMessage]);
 
   const handlePhotoPress = useCallback(async () => {
+    if (!currentUserId) return;
     const choice = await new Promise<'camera' | 'library' | null>((resolve) => {
       Alert.alert('Add Photo', '', [
         { text: 'Take Photo', onPress: () => resolve('camera') },
@@ -453,7 +455,7 @@ export default function ChatScreen() {
           quality: 0.8,
         });
 
-    if (result.canceled || !result.assets[0]) return;
+    if (result.canceled || !result.assets?.[0]) return;
 
     setUploading(true);
     try {
@@ -547,35 +549,47 @@ export default function ChatScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Member avatars bar */}
+        {/* Member avatars + names bar */}
         {event && event.members.length > 0 && (
-          <View style={chatStyles.membersBar}>
-            <TouchableOpacity
-              onPress={() => router.push(`/plan/${id}` as any)}
-              style={chatStyles.membersInner}
-            >
-              {event.members.slice(0, 5).map((member, i) => (
-                <View
-                  key={member.id}
-                  style={[chatStyles.memberAvatar, { marginLeft: i === 0 ? 0 : -8, zIndex: 5 - i }]}
-                >
+          <TouchableOpacity
+            onPress={() => router.push(`/plan/${id}` as any)}
+            style={chatStyles.membersBar}
+            activeOpacity={0.7}
+          >
+            <FlatList
+              data={event.members.slice(0, 6)}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(m) => m.id}
+              contentContainerStyle={chatStyles.membersScroll}
+              renderItem={({ item: member }) => (
+                <View style={chatStyles.memberChip}>
                   {member.avatar_url ? (
-                    <Image source={{ uri: member.avatar_url }} style={chatStyles.memberAvatarImg} contentFit="cover" />
+                    <Image source={{ uri: member.avatar_url }} style={chatStyles.memberChipImg} contentFit="cover" />
                   ) : (
-                    <View style={[chatStyles.memberAvatarImg, chatStyles.memberAvatarFallback]}>
+                    <View style={[chatStyles.memberChipImg, chatStyles.memberAvatarFallback]}>
                       <Text style={chatStyles.memberInitial}>
                         {member.first_name?.[0]?.toUpperCase() ?? '?'}
                       </Text>
                     </View>
                   )}
+                  <Text style={chatStyles.memberChipName} numberOfLines={1}>
+                    {member.first_name ?? 'Member'}
+                  </Text>
                 </View>
-              ))}
-              {capDisplayCount(event.member_count) > 5 && (
-                <Text style={chatStyles.moreMembers}>+{capDisplayCount(event.member_count) - 5}</Text>
               )}
-              <Ionicons name="chevron-forward" size={14} color={Colors.warmGray} style={{ marginLeft: 8 }} />
-            </TouchableOpacity>
-          </View>
+              ListFooterComponent={
+                capDisplayCount(event.member_count) > 6 ? (
+                  <View style={chatStyles.memberChip}>
+                    <View style={[chatStyles.memberChipImg, chatStyles.memberAvatarFallback]}>
+                      <Text style={chatStyles.memberInitial}>+{capDisplayCount(event.member_count) - 6}</Text>
+                    </View>
+                  </View>
+                ) : null
+              }
+            />
+            <Ionicons name="chevron-forward" size={14} color={Colors.warmGray} style={{ marginLeft: 4 }} />
+          </TouchableOpacity>
         )}
       </SafeAreaView>
 
@@ -747,18 +761,27 @@ const chatStyles = StyleSheet.create({
   ticketCta: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
 
   membersBar: {
-    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: Colors.inputBg,
     backgroundColor: Colors.white,
   },
-  membersInner: { flexDirection: 'row', alignItems: 'center' },
-  memberAvatar: { borderWidth: 2, borderColor: Colors.white, borderRadius: 16 },
-  memberAvatarImg: { width: 30, height: 30, borderRadius: 15 },
+  membersScroll: { paddingHorizontal: 16, gap: 14 },
+  memberChip: { alignItems: 'center', width: 48 },
+  memberChipImg: { width: 36, height: 36, borderRadius: 18 },
+  memberChipName: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 10,
+    color: Colors.textMedium,
+    marginTop: 3,
+    textAlign: 'center',
+    maxWidth: 48,
+  },
   memberAvatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
   memberInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
-  moreMembers: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginLeft: 10 },
 
   messageList: { paddingVertical: 12 },
 

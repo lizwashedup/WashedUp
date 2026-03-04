@@ -38,42 +38,50 @@ export default function OnboardingPhotoScreen() {
   const [loading, setLoading] = useState(false);
 
   const pickImageFromLibrary = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(
-        'Permission needed',
-        'Go to Settings → WashedUp → Photos and allow access.',
-        [{ text: 'OK' }]
-      );
-      return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission needed',
+          'Go to Settings → WashedUp → Photos and allow access.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      await processPickedImage(result.assets[0].uri);
+    } catch {
+      Alert.alert('Something went wrong', 'Could not open photo library. Please try again.');
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 1,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await processPickedImage(result.assets[0].uri);
   };
 
   const takePhotoFromCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(
-        'Permission needed',
-        'Go to Settings → WashedUp → Camera and allow access.',
-        [{ text: 'OK' }]
-      );
-      return;
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission needed',
+          'Go to Settings → WashedUp → Camera and allow access.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      await processPickedImage(result.assets[0].uri);
+    } catch {
+      Alert.alert('Something went wrong', 'Could not open camera. Please try again.');
     }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 1,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await processPickedImage(result.assets[0].uri);
   };
 
   const processPickedImage = async (uri: string) => {

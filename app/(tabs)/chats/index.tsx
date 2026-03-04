@@ -128,8 +128,7 @@ export default function ChatsScreen() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refetch();
-    setRefreshing(false);
+    try { await refetch(); } finally { setRefreshing(false); }
   };
 
   const activeChats = chats.filter(c => !c.is_past);

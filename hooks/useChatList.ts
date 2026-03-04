@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 export interface ChatPreview {
@@ -22,107 +22,103 @@ export function useChatList() {
   const fetchChats = useCallback(async () => {
     setLoading(true);
     try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+      const user = (await supabase.auth.getUser()).data?.user;
+      if (!user) return;
 
-    const { data: memberships } = await supabase
-      .from('event_members')
-      .select(`
-        event_id,
-        events (
-          id, title, primary_vibe, image_url, start_time, member_count, tickets_url, status
-        )
-      `)
-      .eq('user_id', user.id)
-      .eq('status', 'joined');
+      const { data: memberships } = await supabase
+        .from('event_members')
+        .select(`
+          event_id,
+          events (
+            id, title, primary_vibe, image_url, start_time, member_count, tickets_url, status
+          )
+        `)
+        .eq('user_id', user.id)
+        .eq('status', 'joined');
 
-    if (!memberships) { setLoading(false); return; }
+      if (!memberships) return;
 
-    const eligible = memberships.filter((m: any) => {
-      const e = m.events;
-      return e && (e.member_count >= 2 || e.status === 'cancelled');
-    });
+      const eligible = memberships.filter((m: any) => {
+        const e = m.events;
+        return e && (e.member_count >= 2 || e.status === 'cancelled');
+      });
 
-    if (eligible.length === 0) {
-      setChats([]);
-      setLoading(false);
-      return;
-    }
-
-    const eventIds = eligible.map((m: any) => m.events.id);
-
-    // Batch: last message per event (single query using distinct-on via ordering trick)
-    // We fetch the most recent message per event in one go
-    const { data: allMessages } = await supabase
-      .from('messages')
-      .select('event_id, content, created_at, image_url')
-      .in('event_id', eventIds)
-      .order('created_at', { ascending: false });
-
-    const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null }> = {};
-    (allMessages ?? []).forEach((msg: any) => {
-      if (!lastMsgMap[msg.event_id]) {
-        lastMsgMap[msg.event_id] = msg;
+      if (eligible.length === 0) {
+        setChats([]);
+        return;
       }
-    });
 
-    // Batch: all read receipts for this user
-    const { data: allReads } = await supabase
-      .from('chat_reads')
-      .select('event_id, last_read_at')
-      .eq('user_id', user.id)
-      .in('event_id', eventIds);
+      const eventIds = eligible.map((m: any) => m.events.id);
 
-    const readMap: Record<string, string> = {};
-    (allReads ?? []).forEach((r: any) => {
-      readMap[r.event_id] = r.last_read_at;
-    });
+      // Run all 3 queries in parallel — they only need eventIds + user.id
+      const [{ data: allMessages }, { data: allReads }, { data: otherMessages }] = await Promise.all([
+        supabase
+          .from('messages')
+          .select('event_id, content, created_at, image_url')
+          .in('event_id', eventIds)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('chat_reads')
+          .select('event_id, last_read_at')
+          .eq('user_id', user.id)
+          .in('event_id', eventIds),
+        supabase
+          .from('messages')
+          .select('event_id, created_at')
+          .in('event_id', eventIds)
+          .neq('user_id', user.id),
+      ]);
 
-    // Batch: all messages from others (for unread count)
-    const { data: otherMessages } = await supabase
-      .from('messages')
-      .select('event_id, created_at')
-      .in('event_id', eventIds)
-      .neq('user_id', user.id);
+      const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null }> = {};
+      (allMessages ?? []).forEach((msg: any) => {
+        if (!lastMsgMap[msg.event_id]) {
+          lastMsgMap[msg.event_id] = msg;
+        }
+      });
 
-    const unreadMap: Record<string, number> = {};
-    (otherMessages ?? []).forEach((msg: any) => {
-      const lastRead = readMap[msg.event_id];
-      if (!lastRead || msg.created_at > lastRead) {
-        unreadMap[msg.event_id] = (unreadMap[msg.event_id] ?? 0) + 1;
-      }
-    });
+      const readMap: Record<string, string> = {};
+      (allReads ?? []).forEach((r: any) => {
+        readMap[r.event_id] = r.last_read_at;
+      });
 
-    const previews: ChatPreview[] = eligible.map((m: any) => {
-      const event = m.events;
-      const isPast = event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
-      const lastMsg = lastMsgMap[event.id];
+      const unreadMap: Record<string, number> = {};
+      (otherMessages ?? []).forEach((msg: any) => {
+        const lastRead = readMap[msg.event_id];
+        if (!lastRead || msg.created_at > lastRead) {
+          unreadMap[msg.event_id] = (unreadMap[msg.event_id] ?? 0) + 1;
+        }
+      });
 
-      return {
-        eventId: event.id,
-        title: event.title,
-        category: event.primary_vibe ?? null,
-        image_url: event.image_url ?? null,
-        start_time: event.start_time,
-        member_count: event.member_count ?? 0,
-        ticket_url: event.tickets_url ?? null,
-        last_message: lastMsg
-          ? (lastMsg.image_url ? 'Sent a photo' : lastMsg.content)
-          : null,
-        last_message_at: lastMsg?.created_at ?? null,
-        unread_count: unreadMap[event.id] ?? 0,
-        is_past: isPast,
-      };
-    });
+      const previews: ChatPreview[] = eligible.map((m: any) => {
+        const event = m.events;
+        const isPast = event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
+        const lastMsg = lastMsgMap[event.id];
 
-    const active = previews
-      .filter(p => !p.is_past)
-      .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
-    const past = previews
-      .filter(p => p.is_past)
-      .sort((a, b) => b.start_time.localeCompare(a.start_time));
+        return {
+          eventId: event.id,
+          title: event.title,
+          category: event.primary_vibe ?? null,
+          image_url: event.image_url ?? null,
+          start_time: event.start_time,
+          member_count: event.member_count ?? 0,
+          ticket_url: event.tickets_url ?? null,
+          last_message: lastMsg
+            ? (lastMsg.image_url ? 'Sent a photo' : lastMsg.content)
+            : null,
+          last_message_at: lastMsg?.created_at ?? null,
+          unread_count: unreadMap[event.id] ?? 0,
+          is_past: isPast,
+        };
+      });
 
-    setChats([...active, ...past]);
+      const active = previews
+        .filter(p => !p.is_past)
+        .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
+      const past = previews
+        .filter(p => p.is_past)
+        .sort((a, b) => b.start_time.localeCompare(a.start_time));
+
+      setChats([...active, ...past]);
     } finally {
       setLoading(false);
     }

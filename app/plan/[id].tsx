@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
-import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
     ArrowLeft,
     Calendar,
@@ -33,14 +33,14 @@ import {
 } from 'react-native';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BrandedAlert } from '../../components/BrandedAlert';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP, MIN_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { BrandedAlert } from '../../components/BrandedAlert';
-import { checkContent } from '../../lib/contentFilter';
 import { useBlock } from '../../hooks/useBlock';
+import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 
@@ -282,6 +282,9 @@ const MemberAvatar = React.memo(({ member }: { member: Member }) => (
         </Text>
       </View>
     )}
+    <Text style={styles.memberAvatarName} numberOfLines={1}>
+      {member.first_name ?? 'Member'}
+    </Text>
   </View>
 ));
 MemberAvatar.displayName = 'MemberAvatar';
@@ -421,21 +424,19 @@ export default function PlanDetailScreen() {
       .then(({ data }) => setIsOnWaitlist(!!data));
   }, [currentUserId, id]);
 
-  // Pending invite check — re-runs on every focus so it stays fresh after accept/decline
+  // Pending invite check
   const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
-  useFocusEffect(
-    useCallback(() => {
-      if (!currentUserId || !id) return;
-      supabase
-        .from('plan_invites')
-        .select('id')
-        .eq('event_id', id)
-        .eq('recipient_id', currentUserId)
-        .eq('status', 'pending')
-        .maybeSingle()
-        .then(({ data }) => setPendingInviteId(data?.id ?? null));
-    }, [currentUserId, id])
-  );
+  useEffect(() => {
+    if (!currentUserId || !id) return;
+    supabase
+      .from('plan_invites')
+      .select('id')
+      .eq('event_id', id)
+      .eq('recipient_id', currentUserId)
+      .eq('status', 'pending')
+      .maybeSingle()
+      .then(({ data }) => setPendingInviteId(data?.id ?? null));
+  }, [currentUserId, id]);
 
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_id === currentUserId;
@@ -541,7 +542,6 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
-      queryClient.invalidateQueries({ queryKey: ['wishlist-plans'] });
       queryClient.invalidateQueries({ queryKey: ['wishlists'] });
 
       setShareAfterJoinVisible(true);
@@ -979,8 +979,10 @@ export default function PlanDetailScreen() {
             <MemberAvatar key={member.id} member={member} />
           ))}
           {overflowCount > 0 && (
-            <View style={[styles.memberAvatar, styles.memberAvatarOverflow]}>
-              <Text style={styles.memberAvatarOverflowText}>+{overflowCount}</Text>
+            <View style={styles.memberAvatarWrapper}>
+              <View style={[styles.memberAvatar, styles.memberAvatarOverflow]}>
+                <Text style={styles.memberAvatarOverflowText}>+{overflowCount}</Text>
+              </View>
             </View>
           )}
         </View>
@@ -1077,18 +1079,22 @@ export default function PlanDetailScreen() {
               style={styles.declineInviteButton}
               onPress={async () => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                await supabase
-                  .from('plan_invites')
-                  .update({ status: 'declined', updated_at: new Date().toISOString() })
-                  .eq('id', pendingInviteId);
-                setPendingInviteId(null);
-                queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
-                queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
-                setBrandedAlert({
-                  visible: true,
-                  title: 'No worries',
-                  message: "Maybe next time! We won't tell them.",
-                });
+                try {
+                  await supabase
+                    .from('plan_invites')
+                    .update({ status: 'declined', updated_at: new Date().toISOString() })
+                    .eq('id', pendingInviteId);
+                  setPendingInviteId(null);
+                  queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
+                  queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
+                  setBrandedAlert({
+                    visible: true,
+                    title: 'No worries',
+                    message: "Maybe next time! We won't tell them.",
+                  });
+                } catch {
+                  setBrandedAlert({ visible: true, title: 'Something went wrong', message: 'Please try again.' });
+                }
               }}
               activeOpacity={0.85}
             >
@@ -1098,14 +1104,18 @@ export default function PlanDetailScreen() {
               style={styles.acceptInviteButton}
               onPress={async () => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                await supabase
-                  .from('plan_invites')
-                  .update({ status: 'accepted', updated_at: new Date().toISOString() })
-                  .eq('id', pendingInviteId);
-                setPendingInviteId(null);
-                queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
-                queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
-                setJoinModalVisible(true);
+                try {
+                  await supabase
+                    .from('plan_invites')
+                    .update({ status: 'accepted', updated_at: new Date().toISOString() })
+                    .eq('id', pendingInviteId);
+                  setPendingInviteId(null);
+                  queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
+                  queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
+                  setJoinModalVisible(true);
+                } catch {
+                  setBrandedAlert({ visible: true, title: 'Something went wrong', message: 'Could not accept invite. Please try again.' });
+                }
               }}
               activeOpacity={0.9}
             >
@@ -1635,16 +1645,18 @@ const styles = StyleSheet.create({
   },
   memberAvatarRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 24,
+    gap: 12,
   },
   memberAvatarWrapper: {
-    marginRight: -8,
+    alignItems: 'center',
+    width: 52,
   },
   memberAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 2,
     borderColor: Colors.parchment,
   },
@@ -1654,6 +1666,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   memberAvatarInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  memberAvatarName: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 10,
+    color: Colors.textMedium,
+    marginTop: 4,
+    textAlign: 'center',
+    maxWidth: 52,
+  },
   memberAvatarOverflow: {
     backgroundColor: Colors.inputBg,
     alignItems: 'center',

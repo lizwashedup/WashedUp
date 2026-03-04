@@ -1,32 +1,32 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  ScrollView,
-  ActivityIndicator,
-  Alert,
-  Share,
-  Modal,
-  Pressable,
-  Keyboard,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, Users, UserPlus, QrCode, Share2, X, MoreHorizontal, Send, Mail, Check, XCircle, Bell, Clock, Megaphone, ChevronDown, ChevronRight } from 'lucide-react-native';
+import { Image } from 'expo-image';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { Bell, Check, ChevronDown, ChevronRight, Clock, Mail, Megaphone, MoreHorizontal, QrCode, Search, Send, Share2, UserPlus, Users, X, XCircle } from 'lucide-react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Keyboard,
+    Modal,
+    Pressable,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { supabase } from '../../../lib/supabase';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import ProfileButton, { INBOX_COUNT_KEY } from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
-import { useBlock } from '../../../hooks/useBlock';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import { useBlock } from '../../../hooks/useBlock';
+import { supabase } from '../../../lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -224,8 +224,12 @@ export default function YourPeopleScreen() {
             onPress: async () => {
               if (!userId) return;
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              await supabase.rpc('remove_friend', { p_friend_id: friend.friend_id });
-              queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+              try {
+                await supabase.rpc('remove_friend', { p_friend_id: friend.friend_id });
+                queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+              } catch {
+                Alert.alert('Something went wrong', 'Could not remove. Please try again.');
+              }
             },
           },
         ],
@@ -403,8 +407,9 @@ export default function YourPeopleScreen() {
 
   React.useEffect(() => {
     if (params.openInbox === '1') {
-      setShowInvites(true);
+      const t = setTimeout(() => setShowInvites(true), 350);
       router.setParams({ openInbox: undefined } as any);
+      return () => clearTimeout(t);
     }
   }, [params.openInbox]);
   const { data: pendingInvites = [], refetch: refetchInvites } = useQuery({
@@ -504,29 +509,37 @@ export default function YourPeopleScreen() {
 
   const respondToInvite = useCallback(async (inviteId: string, action: 'accepted' | 'declined', eventId?: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await supabase.from('plan_invites').update({ status: action, updated_at: new Date().toISOString() }).eq('id', inviteId);
-    refetchInvites();
-    refetchOldInvites();
-    queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
-    if (action === 'accepted' && eventId) {
-      setShowInvites(false);
-      router.push(`/plan/${eventId}`);
+    try {
+      await supabase.from('plan_invites').update({ status: action, updated_at: new Date().toISOString() }).eq('id', inviteId);
+      refetchInvites();
+      refetchOldInvites();
+      queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+      if (action === 'accepted' && eventId) {
+        setShowInvites(false);
+        router.push(`/plan/${eventId}`);
+      }
+    } catch {
+      Alert.alert('Something went wrong', 'Please try again.');
     }
   }, [refetchInvites, refetchOldInvites, router, queryClient]);
 
   const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
-    refetchNotifs();
-    refetchOldNotifs();
-    queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
-    if (action === 'acted' && eventId) {
-      setShowInvites(false);
-      if (notifType === 'member_joined' || notifType === 'invite_accepted') {
-        router.push(`/(tabs)/chats/${eventId}` as any);
-      } else {
-        router.push(`/plan/${eventId}`);
+    try {
+      await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
+      refetchNotifs();
+      refetchOldNotifs();
+      queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+      if (action === 'acted' && eventId) {
+        setShowInvites(false);
+        if (notifType === 'member_joined' || notifType === 'invite_accepted') {
+          router.push(`/(tabs)/chats/${eventId}` as any);
+        } else {
+          router.push(`/plan/${eventId}`);
+        }
       }
+    } catch {
+      Alert.alert('Something went wrong', 'Please try again.');
     }
   }, [refetchNotifs, refetchOldNotifs, router, queryClient]);
 

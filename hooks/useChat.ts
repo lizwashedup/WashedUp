@@ -87,48 +87,50 @@ export function useChat(eventId: string) {
 
   const fetchMessages = async () => {
     setLoading(true);
-
-    const { data } = await supabase
-      .from('messages')
-      .select('id, event_id, user_id, content, message_type, image_url, created_at')
-      .eq('event_id', eventId)
-      .order('created_at', { ascending: true });
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const msgIds = (data ?? []).map((m: any) => m.id);
-      const [{ data: profile }, , { data: reactionsData }] = await Promise.all([
-        supabase.from('profiles').select('blocked_users').eq('id', user.id).single(),
-        supabase.from('chat_reads').upsert(
-          { event_id: eventId, user_id: user.id, last_read_at: new Date().toISOString() },
-          { onConflict: 'event_id,user_id' },
-        ),
-        msgIds.length > 0
-          ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
-          : Promise.resolve({ data: [] as any[] }),
+    try {
+      const [{ data }, { data: { user } }] = await Promise.all([
+        supabase
+          .from('messages')
+          .select('id, event_id, user_id, content, message_type, image_url, created_at')
+          .eq('event_id', eventId)
+          .order('created_at', { ascending: true }),
+        supabase.auth.getUser(),
       ]);
+      if (user) {
+        const msgIds = (data ?? []).map((m: any) => m.id);
+        const [{ data: profile }, , { data: reactionsData }] = await Promise.all([
+          supabase.from('profiles').select('blocked_users').eq('id', user.id).single(),
+          supabase.from('chat_reads').upsert(
+            { event_id: eventId, user_id: user.id, last_read_at: new Date().toISOString() },
+            { onConflict: 'event_id,user_id' },
+          ),
+          msgIds.length > 0
+            ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
+            : Promise.resolve({ data: [] as any[] }),
+        ]);
 
-      const reactionsByMsg: Record<string, MessageReaction[]> = {};
-      (reactionsData ?? []).forEach((r: any) => {
-        if (!reactionsByMsg[r.message_id]) reactionsByMsg[r.message_id] = [];
-        reactionsByMsg[r.message_id].push({ user_id: r.user_id, reaction: r.reaction });
-      });
+        const reactionsByMsg: Record<string, MessageReaction[]> = {};
+        (reactionsData ?? []).forEach((r: any) => {
+          if (!reactionsByMsg[r.message_id]) reactionsByMsg[r.message_id] = [];
+          reactionsByMsg[r.message_id].push({ user_id: r.user_id, reaction: r.reaction });
+        });
 
-      const blockedLookup: Record<string, boolean> = {};
-      (profile?.blocked_users ?? []).forEach((uid: string) => { blockedLookup[uid] = true; });
-      blockedIdsRef.current = blockedLookup;
+        const blockedLookup: Record<string, boolean> = {};
+        (profile?.blocked_users ?? []).forEach((uid: string) => { blockedLookup[uid] = true; });
+        blockedIdsRef.current = blockedLookup;
 
-      const filtered = (data ?? []).filter((msg: any) => !blockedLookup[msg.user_id]);
-      const enriched = await attachSenders(filtered);
-      setMessages(enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] })));
-    } else {
-      if (data) {
-        const enriched = await attachSenders(data);
-        setMessages(enriched);
+        const filtered = (data ?? []).filter((msg: any) => !blockedLookup[msg.user_id]);
+        const enriched = await attachSenders(filtered);
+        setMessages(enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] })));
+      } else {
+        if (data) {
+          const enriched = await attachSenders(data);
+          setMessages(enriched);
+        }
       }
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const toggleReaction = useCallback(async (messageId: string, reaction = 'heart') => {

@@ -68,44 +68,36 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
   const plans = (Array.isArray(data) ? data : []).map((item: any) => mapRowToPlan(item));
   if (plans.length === 0) return plans;
 
-  // Override member_count with actual count from event_members — DB trigger can be out of sync
   const planIds = plans.map((p) => p.id);
-  const { data: memberRows } = await supabase
-    .from('event_members')
-    .select('event_id')
-    .in('event_id', planIds)
-    .eq('status', 'joined');
+  const creatorIds = [...new Set(plans.map((p) => p.creator?.id).filter(Boolean))] as string[];
+
+  // Run member count + creator count in parallel — they don't depend on each other
+  const [{ data: memberRows }, { data: creatorEvents }] = await Promise.all([
+    supabase
+      .from('event_members')
+      .select('event_id')
+      .in('event_id', planIds)
+      .eq('status', 'joined'),
+    creatorIds.length > 0
+      ? supabase.from('events').select('creator_user_id').in('creator_user_id', creatorIds)
+      : Promise.resolve({ data: [] as { creator_user_id: string }[] }),
+  ]);
 
   const countByEvent: Record<string, number> = {};
   (memberRows ?? []).forEach((r: { event_id: string }) => {
     countByEvent[r.event_id] = (countByEvent[r.event_id] ?? 0) + 1;
   });
 
-  const withCounts = plans.map((p) => ({
+  const planCountByCreator: Record<string, number> = {};
+  (creatorEvents ?? []).forEach((e: { creator_user_id: string }) => {
+    planCountByCreator[e.creator_user_id] = (planCountByCreator[e.creator_user_id] ?? 0) + 1;
+  });
+
+  return plans.map((p) => ({
     ...p,
     member_count: countByEvent[p.id] ?? p.member_count,
+    creator: p.creator
+      ? { ...p.creator, plans_posted: planCountByCreator[p.creator.id] ?? 0 }
+      : null,
   }));
-
-  // Enrich creator with plan count
-  const creatorIds = [...new Set(withCounts.map((p) => p.creator?.id).filter(Boolean))] as string[];
-  if (creatorIds.length > 0) {
-    const { data: creatorEvents } = await supabase
-      .from('events')
-      .select('creator_user_id')
-      .in('creator_user_id', creatorIds);
-
-    const planCountByCreator: Record<string, number> = {};
-    (creatorEvents ?? []).forEach((e: { creator_user_id: string }) => {
-      planCountByCreator[e.creator_user_id] = (planCountByCreator[e.creator_user_id] ?? 0) + 1;
-    });
-
-    return withCounts.map((p) => ({
-      ...p,
-      creator: p.creator
-        ? { ...p.creator, plans_posted: planCountByCreator[p.creator.id] ?? 0 }
-        : null,
-    }));
-  }
-
-  return withCounts;
 }

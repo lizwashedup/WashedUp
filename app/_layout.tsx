@@ -169,7 +169,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         }
 
         setAuthedUserId(session.user.id);
-        const dest = profileData.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
+        const dest = profileData.onboarding_status === 'complete' ? '/(tabs)/plans' : '/onboarding/basics';
         lastNavRef.current = { dest, ts: Date.now() };
         setAuthResolved(true);
         router.replace(dest as any);
@@ -209,7 +209,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           .eq('id', session.user.id)
           .single();
 
-        const dest = data?.onboarding_status === 'complete' ? '/plans' : '/onboarding/basics';
+        const dest = data?.onboarding_status === 'complete' ? '/(tabs)/plans' : '/onboarding/basics';
         const now = Date.now();
         if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) return;
         lastNavRef.current = { dest, ts: now };
@@ -217,6 +217,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         router.replace(dest as any);
       } catch {
         setAuthedUserId(session.user.id);
+        setAuthResolved(true);
         router.replace('/onboarding/basics' as any);
       }
     });

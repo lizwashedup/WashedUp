@@ -1,13 +1,13 @@
-import React from 'react';
-import { TouchableOpacity, Text, View, StyleSheet, AppState, AppStateStatus } from 'react-native';
-import { Image } from 'expo-image';
-import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
-import { User, Mail } from 'lucide-react-native';
-import { supabase } from '../lib/supabase';
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
+import { Mail, User } from 'lucide-react-native';
+import React from 'react';
+import { AppState, AppStateStatus, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
+import { supabase } from '../lib/supabase';
 
 export const PROFILE_PHOTO_KEY = ['profile-photo'] as const;
 export const INBOX_COUNT_KEY = ['inbox-count'] as const;
@@ -30,9 +30,10 @@ async function fetchInboxCount(): Promise<number> {
   const [invites, notifs] = await Promise.all([
     supabase
       .from('plan_invites')
-      .select('id', { count: 'exact', head: true })
+      .select('id, events!inner(status)')
       .eq('recipient_id', user.id)
-      .eq('status', 'pending'),
+      .eq('status', 'pending')
+      .in('events.status', ['forming', 'active', 'full']),
     supabase
       .from('app_notifications')
       .select('id', { count: 'exact', head: true })
@@ -40,15 +41,15 @@ async function fetchInboxCount(): Promise<number> {
       .eq('status', 'unread'),
   ]);
 
-  return (invites.count ?? 0) + (notifs.count ?? 0);
+  const activeInviteCount = (invites.data ?? []).length;
+  return activeInviteCount + (notifs.count ?? 0);
 }
 
 export default function ProfileButton() {
   const { data: photoUrl, refetch } = useQuery({
     queryKey: PROFILE_PHOTO_KEY,
     queryFn: fetchProfilePhoto,
-    staleTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 30_000,
   });
 
   const { data: inboxCount = 0 } = useQuery({
@@ -86,7 +87,7 @@ export default function ProfileButton() {
     <View style={styles.wrapper}>
       <TouchableOpacity
         style={styles.envelopeBtn}
-        onPress={() => router.navigate('/(tabs)/friends?openInbox=1' as any)}
+        onPress={() => router.push('/(tabs)/friends?openInbox=1' as any)}
         accessibilityLabel="Inbox"
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >

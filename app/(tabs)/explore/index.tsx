@@ -597,8 +597,7 @@ export default function SceneScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetch();
-    setRefreshing(false);
+    try { await refetch(); } finally { setRefreshing(false); }
   }, [refetch]);
 
   const whenActive = whenFilter.length > 0;

@@ -1,29 +1,31 @@
-import React, { useState, useCallback, useMemo, Suspense, lazy } from 'react';
-import {
-  View,
-  Text,
-  SectionList,
-  TouchableOpacity,
-  StyleSheet,
-  RefreshControl,
-  ActivityIndicator,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router, useNavigation } from 'expo-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import { ChevronDown, ChevronRight, Heart, Map, LayoutList } from 'lucide-react-native';
-import { supabase } from '../../../lib/supabase';
-import { fetchPlans, Plan } from '../../../lib/fetchPlans';
-import { PlanCard } from '../../../components/plans/PlanCard';
+import { router, useNavigation } from 'expo-router';
+import { ChevronDown, ChevronRight, Heart, LayoutList, Map } from 'lucide-react-native';
+import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import {
+    ActivityIndicator,
+    RefreshControl,
+    SectionList,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
-import ProfileButton from '../../../components/ProfileButton';
 import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
+import { PlanCard } from '../../../components/plans/PlanCard';
+import ProfileButton from '../../../components/ProfileButton';
+import WelcomeModal from '../../../components/WelcomeModal';
 import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
-import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
+import { fetchPlans, Plan } from '../../../lib/fetchPlans';
+import { supabase } from '../../../lib/supabase';
 
 // Lazy-load map to avoid crash on Expo Go / environments where react-native-maps fails
 const LazyPlansMapView = lazy(() => import('../../../components/plans/PlansMapView'));
@@ -169,21 +171,48 @@ export default function PlansScreen() {
 
   const [userId, setUserId] = React.useState<string | null>(null);
   const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [welcomeName, setWelcomeName] = useState('');
 
   React.useEffect(() => {
     let cancelled = false;
+    let initDone = false;
 
-    async function resolveUserId() {
+    async function init() {
       const { data } = await supabase.auth.getSession();
       if (cancelled) return;
       const id = data.session?.user?.id ?? null;
-      if (id) setUserId(id);
+
+      if (id) {
+        // Run welcome modal check BEFORE starting data queries.
+        // This gives onboarding profile writes time to fully propagate
+        // in Supabase before the feed RPC reads them for gender/age filtering.
+        try {
+          const key = `has_seen_welcome_${id}`;
+          const seen = await AsyncStorage.getItem(key);
+          if (!seen && !cancelled) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('first_name_display')
+              .eq('id', id)
+              .single();
+            if (!cancelled) {
+              setWelcomeName(profile?.first_name_display ?? '');
+              setShowWelcome(true);
+            }
+          }
+        } catch {}
+      }
+
+      initDone = true;
+      if (!cancelled) setUserId(id);
     }
 
-    resolveUserId();
+    init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (cancelled) return;
+      if (!initDone) return;
       setUserId(session?.user?.id ?? null);
     });
 
@@ -210,6 +239,18 @@ export default function PlansScreen() {
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     refetchOnMount: 'always',
   });
+
+  // Safety net: if the initial feed returns very few results (common for brand-new
+  // accounts where the RPC may execute before profile data fully propagates),
+  // auto-retry once after a short delay.
+  const hasAutoRefetched = React.useRef(false);
+  React.useEffect(() => {
+    if (!isLoading && !isRefetching && !isError && userId && allPlans.length <= 1 && !hasAutoRefetched.current) {
+      hasAutoRefetched.current = true;
+      const t = setTimeout(() => refetch(), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [isLoading, isRefetching, isError, userId, allPlans.length, refetch]);
 
   const queryClient = useQueryClient();
   const { data: wishlistIds = [], isLoading: wishlistsLoading } = useQuery<string[]>({
@@ -280,23 +321,21 @@ export default function PlansScreen() {
 
       const creatorIds = allEvents.map((e: any) => e.creator_user_id).filter(Boolean);
       const uniqueCreatorIds = creatorIds.filter((id: string, i: number) => creatorIds.indexOf(id) === i);
-      const profileMap: Record<string, any> = {};
-      if (uniqueCreatorIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles_public')
-          .select('id, first_name_display, profile_photo_url')
-          .in('id', uniqueCreatorIds);
-        (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-      }
-
       const eventIds = allEvents.map((e: any) => e.id);
-      const { data: memberRows } = await supabase
-        .from('event_members')
-        .select('event_id')
-        .in('event_id', eventIds)
-        .eq('status', 'joined');
+
+      // Run profile fetch + member count in parallel
+      const [profilesResult, memberResult] = await Promise.all([
+        uniqueCreatorIds.length > 0
+          ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', uniqueCreatorIds)
+          : Promise.resolve({ data: [] as any[] }),
+        supabase.from('event_members').select('event_id').in('event_id', eventIds).eq('status', 'joined'),
+      ]);
+
+      const profileMap: Record<string, any> = {};
+      (profilesResult.data ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+
       const countByEvent: Record<string, number> = {};
-      (memberRows ?? []).forEach((r: { event_id: string }) => {
+      (memberResult.data ?? []).forEach((r: { event_id: string }) => {
         countByEvent[r.event_id] = (countByEvent[r.event_id] ?? 0) + 1;
       });
 
@@ -441,6 +480,17 @@ export default function PlansScreen() {
     [memberIdSet, wishlistedSet, wishlistMutation],
   );
 
+  const handleWelcomeDismiss = useCallback(async () => {
+    setShowWelcome(false);
+    if (userId) try { await AsyncStorage.setItem(`has_seen_welcome_${userId}`, '1'); } catch {}
+  }, [userId]);
+
+  const handleWelcomePost = useCallback(async () => {
+    setShowWelcome(false);
+    if (userId) try { await AsyncStorage.setItem(`has_seen_welcome_${userId}`, '1'); } catch {}
+    router.push('/(tabs)/post');
+  }, [userId]);
+
   const listEmpty = sections.length === 0;
   const emptyMessage = heartFilter
     ? 'When you save a plan it shows up here'
@@ -583,7 +633,7 @@ export default function PlansScreen() {
                 <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
             </View>
-          ) : !userId || isLoading || wishlistsLoading ? (
+          ) : !userId || isLoading || wishlistsLoading || myPlansLoading ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={Colors.terracotta} />
             </View>
@@ -611,6 +661,9 @@ export default function PlansScreen() {
               stickySectionHeadersEnabled={false}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
+              initialNumToRender={30}
+              maxToRenderPerBatch={20}
+              windowSize={11}
               refreshControl={
                 <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />
               }
@@ -639,6 +692,9 @@ export default function PlansScreen() {
               stickySectionHeadersEnabled={false}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
+              initialNumToRender={30}
+              maxToRenderPerBatch={20}
+              windowSize={11}
             />
           )}
         </View>
@@ -666,6 +722,13 @@ export default function PlansScreen() {
         }
         onClose={() => setCategorySheetOpen(false)}
         onClear={() => setCategoryFilter([])}
+      />
+
+      <WelcomeModal
+        visible={showWelcome}
+        firstName={welcomeName}
+        onDismiss={handleWelcomeDismiss}
+        onPostPlan={handleWelcomePost}
       />
 
     </SafeAreaView>
