@@ -63,8 +63,11 @@ export function useChat(eventId: string) {
     });
   }, []);
 
+  const cancelledRef = useRef(false);
+
   useEffect(() => {
     if (!eventId) return;
+    cancelledRef.current = false;
     fetchMessages();
 
     const channel = supabase
@@ -74,15 +77,14 @@ export function useChat(eventId: string) {
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
         async (payload) => {
           const newMsg = payload.new as any;
-          // Drop real-time messages from blocked users without a full refetch
           if (blockedIdsRef.current[newMsg.user_id]) return;
           const enriched = await attachSenders([newMsg]);
-          setMessages(prev => [...prev, enriched[0]]);
+          if (!cancelledRef.current) setMessages(prev => [...prev, enriched[0]]);
         },
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { cancelledRef.current = true; supabase.removeChannel(channel); };
   }, [eventId]);
 
   const fetchMessages = async () => {
@@ -96,6 +98,7 @@ export function useChat(eventId: string) {
           .order('created_at', { ascending: true }),
         supabase.auth.getUser(),
       ]);
+      if (cancelledRef.current) return;
       if (user) {
         const msgIds = (data ?? []).map((m: any) => m.id);
         const [{ data: profile }, , { data: reactionsData }] = await Promise.all([
@@ -108,6 +111,7 @@ export function useChat(eventId: string) {
             ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
             : Promise.resolve({ data: [] as any[] }),
         ]);
+        if (cancelledRef.current) return;
 
         const reactionsByMsg: Record<string, MessageReaction[]> = {};
         (reactionsData ?? []).forEach((r: any) => {
@@ -121,15 +125,15 @@ export function useChat(eventId: string) {
 
         const filtered = (data ?? []).filter((msg: any) => !blockedLookup[msg.user_id]);
         const enriched = await attachSenders(filtered);
-        setMessages(enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] })));
+        if (!cancelledRef.current) setMessages(enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] })));
       } else {
         if (data) {
           const enriched = await attachSenders(data);
-          setMessages(enriched);
+          if (!cancelledRef.current) setMessages(enriched);
         }
       }
     } finally {
-      setLoading(false);
+      if (!cancelledRef.current) setLoading(false);
     }
   };
 

@@ -9,13 +9,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { ChevronLeft } from 'lucide-react-native';
+import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -25,6 +25,7 @@ export default function OnboardingLACheckScreen() {
   const [choseNo, setChoseNo] = useState(false);
   const [city, setCity] = useState('');
   const [loading, setLoading] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const handleYes = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -32,12 +33,12 @@ export default function OnboardingLACheckScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert('Session expired', 'Please sign in again.');
+        setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
         supabase.auth.signOut();
         return;
       }
       const { error } = await supabase.from('profiles').update({ city: 'Los Angeles' }).eq('id', user.id);
-      if (error) { Alert.alert('Something went wrong', 'Could not save. Please try again.'); return; }
+      if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
       router.push('/onboarding/photo');
     } finally {
       setLoading(false);
@@ -55,12 +56,12 @@ export default function OnboardingLACheckScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert('Session expired', 'Please sign in again.');
+        setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
         supabase.auth.signOut();
         return;
       }
       const { error } = await supabase.from('profiles').update({ city: city.trim() || 'Other' }).eq('id', user.id);
-      if (error) { Alert.alert('Something went wrong', 'Could not save. Please try again.'); return; }
+      if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
       router.push('/onboarding/photo');
     } finally {
       setLoading(false);
@@ -147,6 +148,13 @@ export default function OnboardingLACheckScreen() {
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }

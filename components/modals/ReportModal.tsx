@@ -5,13 +5,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   Modal,
-  Alert,
   ActivityIndicator,
   ScrollView,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { BrandedAlert } from '../BrandedAlert';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
@@ -41,6 +41,7 @@ export function ReportModal({
 }: ReportModalProps) {
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string } | null>(null);
 
   const handleClose = () => {
     if (submitting) return;
@@ -71,22 +72,23 @@ export function ReportModal({
 
       // Slight delay so the modal has time to close before the alert appears
       setTimeout(() => {
-        Alert.alert(
-          'Report submitted',
-          'Thank you. We review all reports within 24 hours.',
-        );
+        setAlertInfo({
+          title: 'Report submitted',
+          message: 'Thank you. We review all reports within 24 hours.',
+        });
       }, 350);
     } catch {
-      Alert.alert(
-        'Could not submit report',
-        'Please email hello@washedup.app and we\'ll look into it.',
-      );
+      setAlertInfo({
+        title: 'Could not submit report',
+        message: 'Please email hello@washedup.app and we\'ll look into it.',
+      });
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
+    <>
     <Modal
       visible={visible}
       animationType="slide"
@@ -166,7 +168,16 @@ export function ReportModal({
           </TouchableOpacity>
         </View>
       </View>
+
     </Modal>
+
+    <BrandedAlert
+      visible={!!alertInfo}
+      title={alertInfo?.title ?? ''}
+      message={alertInfo?.message}
+      onClose={() => setAlertInfo(null)}
+    />
+    </>
   );
 }
 

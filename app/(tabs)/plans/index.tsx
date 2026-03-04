@@ -276,6 +276,9 @@ export default function PlansScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
     },
+    onError: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    },
   });
 
   const { data: myPlans = [], isLoading: myPlansLoading } = useQuery<Plan[]>({
@@ -367,6 +370,48 @@ export default function PlansScreen() {
     refetchOnMount: 'always',
   });
 
+  const { data: waitlistedPlans = [] } = useQuery<Plan[]>({
+    queryKey: ['waitlisted-plans', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      const { data: waitlistRows } = await supabase
+        .from('event_waitlist')
+        .select('event_id, events (id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message)')
+        .eq('user_id', userId);
+
+      if (!waitlistRows?.length) return [];
+
+      const active = waitlistRows
+        .map((w: any) => w.events)
+        .filter((e: any) => e && ['forming', 'active', 'full'].includes(e.status));
+
+      if (active.length === 0) return [];
+
+      const creatorIds = [...new Set(active.map((e: any) => e.creator_user_id).filter(Boolean))];
+      const { data: profiles } = creatorIds.length > 0
+        ? await supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', creatorIds)
+        : { data: [] as any[] };
+
+      const profileMap: Record<string, any> = {};
+      (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+
+      return active.map((e: any) => {
+        const hp = profileMap[e.creator_user_id] ?? null;
+        return {
+          id: e.id, title: e.title, start_time: e.start_time,
+          location_text: e.location_text ?? null, location_lat: e.location_lat ?? null, location_lng: e.location_lng ?? null,
+          latitude: e.location_lat ?? null, longitude: e.location_lng ?? null,
+          image_url: e.image_url ?? null, category: e.primary_vibe ?? null, gender_rule: e.gender_rule ?? null,
+          max_invites: e.max_invites ?? null, min_invites: e.min_invites ?? null,
+          member_count: e.member_count ?? 0, status: e.status ?? 'forming', host_message: e.host_message ?? null,
+          creator: hp ? { id: hp.id, first_name: hp.first_name_display ?? null, avatar_url: hp.profile_photo_url ?? null } : null,
+        } as Plan;
+      });
+    },
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+
   const wishlistedSet = useMemo(() => {
     const lookup: Record<string, boolean> = {};
     wishlistIds.forEach((id: string) => { lookup[id] = true; });
@@ -394,12 +439,15 @@ export default function PlansScreen() {
     [myPlans],
   );
 
+  const [waitlistExpanded, setWaitlistExpanded] = useState(false);
+
   const myPlansSections = useMemo(() => {
     const s: { title: string; data: Plan[] }[] = [];
     if (myPlansUpcoming.length > 0) s.push({ title: 'Upcoming', data: myPlansUpcoming });
+    if (waitlistedPlans.length > 0) s.push({ title: 'Waitlisted', data: waitlistExpanded ? waitlistedPlans : [] });
     if (myPlansPast.length > 0) s.push({ title: 'Past', data: pastExpanded ? myPlansPast : [] });
     return s;
-  }, [myPlansUpcoming, myPlansPast, pastExpanded]);
+  }, [myPlansUpcoming, myPlansPast, pastExpanded, waitlistedPlans, waitlistExpanded]);
 
   const displayPlans = useMemo(() => {
     if (!heartFilter) return allPlans;
@@ -460,9 +508,26 @@ export default function PlansScreen() {
           </TouchableOpacity>
         );
       }
+      if (section.title === 'Waitlisted') {
+        return (
+          <TouchableOpacity
+            style={styles.pastSectionHeader}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWaitlistExpanded((v) => !v); }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sectionHeader}>{section.title}</Text>
+            <View style={styles.pastChevronRow}>
+              <Text style={styles.pastCount}>{waitlistedPlans.length}</Text>
+              {waitlistExpanded
+                ? <ChevronDown size={16} color={Colors.textLight} />
+                : <ChevronRight size={16} color={Colors.textLight} />}
+            </View>
+          </TouchableOpacity>
+        );
+      }
       return <Text style={styles.sectionHeader}>{section.title}</Text>;
     },
-    [pastExpanded, myPlansPast.length],
+    [pastExpanded, myPlansPast.length, waitlistExpanded, waitlistedPlans.length],
   );
 
   const renderItem = useCallback(

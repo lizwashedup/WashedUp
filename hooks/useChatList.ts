@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 export interface ChatPreview {
@@ -25,7 +25,7 @@ export function useChatList() {
       const user = (await supabase.auth.getUser()).data?.user;
       if (!user) return;
 
-      const { data: memberships } = await supabase
+      const { data: memberships, error: membershipsError } = await supabase
         .from('event_members')
         .select(`
           event_id,
@@ -36,7 +36,7 @@ export function useChatList() {
         .eq('user_id', user.id)
         .eq('status', 'joined');
 
-      if (!memberships) return;
+      if (membershipsError || !memberships) return;
 
       const eligible = memberships.filter((m: any) => {
         const e = m.events;
@@ -128,9 +128,17 @@ export function useChatList() {
     fetchChats();
   }, [fetchChats]);
 
+  const eventIdsRef = useRef(new Set<string>());
   useEffect(() => {
-    if (chats.length === 0) return;
-    const eventIds = new Set(chats.map(c => c.eventId));
+    eventIdsRef.current = new Set(chats.map(c => c.eventId));
+  }, [chats]);
+
+  const hasChatsRef = useRef(false);
+  useEffect(() => {
+    hasChatsRef.current = chats.length > 0;
+  }, [chats.length]);
+
+  useEffect(() => {
     const channel = supabase
       .channel('chat-list-messages')
       .on(
@@ -138,14 +146,14 @@ export function useChatList() {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const eid = (payload.new as any)?.event_id;
-          if (eid && eventIds.has(eid)) fetchChats();
+          if (eid && hasChatsRef.current && eventIdsRef.current.has(eid)) fetchChats();
         },
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [chats, fetchChats]);
+  }, [fetchChats]);
 
   return { chats, loading, refetch: fetchChats };
 }

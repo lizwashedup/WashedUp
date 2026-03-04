@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { Bell, Check, ChevronDown, ChevronRight, Clock, Mail, Megaphone, MoreHorizontal, QrCode, Search, Send, Share2, UserPlus, Users, X, XCircle } from 'lucide-react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { MoreHorizontal, QrCode, Search, Send, Share2, UserPlus, Users, X } from 'lucide-react-native';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -21,10 +21,13 @@ import {
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import ProfileButton, { INBOX_COUNT_KEY } from '../../../components/ProfileButton';
+import { BrandedAlert } from '../../../components/BrandedAlert';
+import MiniProfileCard from '../../../components/MiniProfileCard';
+import ProfileButton from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useBlock } from '../../../hooks/useBlock';
 import { supabase } from '../../../lib/supabase';
 
@@ -75,6 +78,11 @@ export default function YourPeopleScreen() {
   const [handleError, setHandleError] = useState<string | null>(null);
   const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
   const [checkingHandle, setCheckingHandle] = useState(false);
+  const [showHandlePrompt, setShowHandlePrompt] = useState(false);
+  const [friendToRemove, setFriendToRemove] = useState<Friend | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string } | null>(null);
+  const [userMenuTarget, setUserMenuTarget] = useState<{ id: string; name: string } | null>(null);
+  const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
 
   // Debounce search
   React.useEffect(() => {
@@ -125,6 +133,23 @@ export default function YourPeopleScreen() {
     },
     enabled: !!userId,
   });
+
+  // One-time handle prompt for users who haven't set one yet
+  React.useEffect(() => {
+    if (!userId || !myProfile) return;
+    if (myProfile.handle) return; // already has a handle
+    const key = `has_seen_handle_prompt_${userId}`;
+    AsyncStorage.getItem(key).then((seen) => {
+      if (!seen) setShowHandlePrompt(true);
+    }).catch(() => {});
+  }, [userId, myProfile]);
+
+  const dismissHandlePrompt = useCallback(async () => {
+    setShowHandlePrompt(false);
+    if (userId) {
+      await AsyncStorage.setItem(`has_seen_handle_prompt_${userId}`, '1');
+    }
+  }, [userId]);
 
   const blockedSet = useMemo(() => new Set(myProfile?.blocked_users ?? []), [myProfile?.blocked_users]);
 
@@ -203,40 +228,32 @@ export default function YourPeopleScreen() {
     },
     onError: (err: any) => {
       if (err?.code === '23505') {
-        Alert.alert('Already connected', 'You are already connected with this person.');
+        setAlertInfo({ title: 'Already connected', message: 'You are already connected with this person.' });
       } else {
-        Alert.alert('Could not add', err?.message ?? 'Please try again.');
+        setAlertInfo({ title: 'Could not add', message: err?.message ?? 'Please try again.' });
       }
     },
   });
 
-  // Remove friend (delete both rows)
   const removeFriend = useCallback(
     (friend: Friend) => {
-      Alert.alert(
-        'Remove from Your People',
-        `Remove ${friend.first_name_display ?? 'this person'} from Your People?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Remove',
-            style: 'destructive',
-            onPress: async () => {
-              if (!userId) return;
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              try {
-                await supabase.rpc('remove_friend', { p_friend_id: friend.friend_id });
-                queryClient.invalidateQueries({ queryKey: ['friends', userId] });
-              } catch {
-                Alert.alert('Something went wrong', 'Could not remove. Please try again.');
-              }
-            },
-          },
-        ],
-      );
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setFriendToRemove(friend);
     },
-    [userId, queryClient],
+    [],
   );
+
+  const confirmRemoveFriend = useCallback(async () => {
+    if (!userId || !friendToRemove) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      await supabase.rpc('remove_friend', { p_friend_id: friendToRemove.friend_id });
+      queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+    } catch {
+      // Silently fail — the user can try again
+    }
+    setFriendToRemove(null);
+  }, [userId, friendToRemove, queryClient]);
 
   // Save handle
   const saveHandle = useCallback(async () => {
@@ -336,7 +353,7 @@ export default function YourPeopleScreen() {
   const handleInvite = useCallback((friend: Friend) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (myActivePlans.length === 0) {
-      Alert.alert('No active plans', 'Post a plan first, then invite your people.');
+      setAlertInfo({ title: 'No active plans', message: 'Post a plan first, then invite your people.' });
       return;
     }
     loadSentInvites(friend.friend_id);
@@ -354,19 +371,15 @@ export default function YourPeopleScreen() {
       });
       if (error) {
         if (error.code === '23505') {
-          Alert.alert('Already invited', `You already invited ${name} to "${plan.title}".`);
+          setAlertInfo({ title: 'Already invited', message: `You already invited ${name} to "${plan.title}".` });
           return;
         }
         throw error;
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
-        'Invite sent!',
-        `You invited ${name} to "${plan.title}"`,
-        [{ text: 'OK' }],
-      );
+      setAlertInfo({ title: 'Invite sent!', message: `You invited ${name} to "${plan.title}"` });
     } catch (e: any) {
-      Alert.alert('Could not send invite', e?.message ?? 'Something went wrong. Try again.');
+      setAlertInfo({ title: 'Could not send invite', message: e?.message ?? 'Something went wrong. Try again.' });
     }
   }, [inviteTarget, userId]);
 
@@ -376,172 +389,10 @@ export default function YourPeopleScreen() {
 
   const handleUserMenu = useCallback((targetId: string, targetName: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert(
-      targetName,
-      undefined,
-      [
-        {
-          text: `Report ${targetName}`,
-          onPress: () => {
-            setReportTarget({ id: targetId, name: targetName });
-            setShowReport(true);
-          },
-        },
-        {
-          text: `Block ${targetName}`,
-          style: 'destructive',
-          onPress: () => blockUser(targetId, targetName, () => {
-            queryClient.invalidateQueries({ queryKey: ['profile-search'] });
-            queryClient.invalidateQueries({ queryKey: ['friends', userId] });
-          }),
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
-  }, [blockUser, userId, queryClient]);
+    setUserMenuTarget({ id: targetId, name: targetName });
+  }, []);
 
-  // Invite inbox
   const router = useRouter();
-  const params = useLocalSearchParams<{ openInbox?: string }>();
-  const [showInvites, setShowInvites] = useState(false);
-
-  React.useEffect(() => {
-    if (params.openInbox === '1') {
-      const t = setTimeout(() => setShowInvites(true), 350);
-      router.setParams({ openInbox: undefined } as any);
-      return () => clearTimeout(t);
-    }
-  }, [params.openInbox]);
-  const { data: pendingInvites = [], refetch: refetchInvites } = useQuery({
-    queryKey: ['pending-invites', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      try {
-        const { data } = await supabase
-          .from('plan_invites')
-          .select(`
-            id, event_id, sender_id, status, created_at,
-            events (id, title, start_time, status, member_count, max_invites),
-            profiles!plan_invites_sender_id_fkey (first_name_display, profile_photo_url)
-          `)
-          .eq('recipient_id', userId)
-          .eq('status', 'pending')
-          .order('created_at', { ascending: false });
-        return (data ?? []).filter((inv: any) => inv.events && ['forming', 'active', 'full'].includes(inv.events.status));
-      } catch { return []; }
-    },
-    enabled: !!userId,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
-    retry: 2,
-  });
-
-  // App notifications (waitlist spots, broadcasts, reminders)
-  const { data: appNotifications = [], refetch: refetchNotifs } = useQuery({
-    queryKey: ['app-notifications', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      try {
-        await supabase.rpc('expire_stale_notifications').catch(() => {});
-        const { data } = await supabase
-          .from('app_notifications')
-          .select('id, type, title, body, event_id, status, expires_at, created_at')
-          .eq('user_id', userId)
-          .eq('status', 'unread')
-          .order('created_at', { ascending: false })
-          .limit(30);
-        return data ?? [];
-      } catch { return []; }
-    },
-    enabled: !!userId,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
-    retry: 2,
-  });
-
-  // Old / read invites
-  const { data: oldInvites = [], refetch: refetchOldInvites } = useQuery({
-    queryKey: ['old-invites', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      try {
-        const { data } = await supabase
-          .from('plan_invites')
-          .select(`
-            id, event_id, sender_id, status, created_at, updated_at,
-            events (id, title, start_time, status),
-            profiles!plan_invites_sender_id_fkey (first_name_display, profile_photo_url)
-          `)
-          .eq('recipient_id', userId)
-          .in('status', ['accepted', 'declined'])
-          .order('updated_at', { ascending: false })
-          .limit(20);
-        return data ?? [];
-      } catch { return []; }
-    },
-    enabled: !!userId,
-    staleTime: 30_000,
-  });
-
-  // Old / read notifications
-  const { data: oldNotifications = [], refetch: refetchOldNotifs } = useQuery({
-    queryKey: ['old-notifications', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      try {
-        const { data } = await supabase
-          .from('app_notifications')
-          .select('id, type, title, body, event_id, status, created_at')
-          .eq('user_id', userId)
-          .in('status', ['read', 'acted', 'expired'])
-          .order('created_at', { ascending: false })
-          .limit(20);
-        return data ?? [];
-      } catch { return []; }
-    },
-    enabled: !!userId,
-    staleTime: 30_000,
-  });
-
-  const totalInboxCount = pendingInvites.length + appNotifications.length;
-  const totalOldCount = oldInvites.length + oldNotifications.length;
-  const [oldExpanded, setOldExpanded] = useState(false);
-
-  const respondToInvite = useCallback(async (inviteId: string, action: 'accepted' | 'declined', eventId?: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    try {
-      await supabase.from('plan_invites').update({ status: action, updated_at: new Date().toISOString() }).eq('id', inviteId);
-      refetchInvites();
-      refetchOldInvites();
-      queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
-      if (action === 'accepted' && eventId) {
-        setShowInvites(false);
-        router.push(`/plan/${eventId}`);
-      }
-    } catch {
-      Alert.alert('Something went wrong', 'Please try again.');
-    }
-  }, [refetchInvites, refetchOldInvites, router, queryClient]);
-
-  const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    try {
-      await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
-      refetchNotifs();
-      refetchOldNotifs();
-      queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
-      if (action === 'acted' && eventId) {
-        setShowInvites(false);
-        if (notifType === 'member_joined' || notifType === 'invite_accepted') {
-          router.push(`/(tabs)/chats/${eventId}` as any);
-        } else {
-          router.push(`/plan/${eventId}`);
-        }
-      }
-    } catch {
-      Alert.alert('Something went wrong', 'Please try again.');
-    }
-  }, [refetchNotifs, refetchOldNotifs, router, queryClient]);
 
   const isSearching = searchQuery.length > 0;
   const myHandle = myProfile?.handle ?? null;
@@ -613,13 +464,15 @@ export default function YourPeopleScreen() {
                 return (
                   <View style={styles.searchRow}>
                     <View style={styles.searchRowLeft}>
-                      {item.profile_photo_url ? (
-                        <Image source={{ uri: item.profile_photo_url }} style={styles.searchAvatar} contentFit="cover" />
-                      ) : (
-                        <View style={[styles.searchAvatar, styles.avatarFallback]}>
-                          <Text style={styles.avatarInitial}>{item.first_name_display?.[0] ?? '?'}</Text>
-                        </View>
-                      )}
+                      <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMiniProfileUserId(item.id); }}>
+                        {item.profile_photo_url ? (
+                          <Image source={{ uri: item.profile_photo_url }} style={styles.searchAvatar} contentFit="cover" />
+                        ) : (
+                          <View style={[styles.searchAvatar, styles.avatarFallback]}>
+                            <Text style={styles.avatarInitial}>{item.first_name_display?.[0] ?? '?'}</Text>
+                          </View>
+                        )}
+                      </Pressable>
                       <View>
                         <Text style={styles.searchRowName}>{item.first_name_display ?? 'Unknown'}</Text>
                         {item.handle && <Text style={styles.searchRowHandle}>@{item.handle}</Text>}
@@ -730,13 +583,15 @@ export default function YourPeopleScreen() {
                   onLongPress={() => removeFriend(item)}
                   activeOpacity={0.7}
                 >
-                  {item.profile_photo_url ? (
-                    <Image source={{ uri: item.profile_photo_url }} style={styles.friendAvatar} contentFit="cover" />
-                  ) : (
-                    <View style={[styles.friendAvatar, styles.avatarFallback]}>
-                      <Text style={styles.friendAvatarInitial}>{item.first_name_display?.[0] ?? '?'}</Text>
-                    </View>
-                  )}
+                  <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMiniProfileUserId(item.friend_id); }}>
+                    {item.profile_photo_url ? (
+                      <Image source={{ uri: item.profile_photo_url }} style={styles.friendAvatar} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.friendAvatar, styles.avatarFallback]}>
+                        <Text style={styles.friendAvatarInitial}>{item.first_name_display?.[0] ?? '?'}</Text>
+                      </View>
+                    )}
+                  </Pressable>
                   <View style={styles.friendInfo}>
                     <Text style={styles.friendName}>{item.first_name_display ?? 'Unknown'}</Text>
                     {item.handle && <Text style={styles.friendHandle}>@{item.handle}</Text>}
@@ -765,185 +620,6 @@ export default function YourPeopleScreen() {
           reportedUserName={reportTarget.name}
         />
       )}
-
-      {/* Unified Inbox */}
-      <Modal visible={showInvites} transparent animationType="fade">
-        <Pressable style={styles.qrOverlay} onPress={() => setShowInvites(false)}>
-          <Pressable style={styles.inviteSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.inviteSheetTitle}>Invites and Fun Stuff</Text>
-            {totalInboxCount === 0 ? (
-              <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-                <Bell size={36} color={Colors.textLight} />
-                <Text style={[styles.invitePlanMeta, { marginTop: 12, textAlign: 'center' }]}>
-                  {'Invites, waitlist notifications\n& fun updates will show up here'}
-                </Text>
-              </View>
-            ) : (
-              <ScrollView style={styles.invitePlanList} bounces={false}>
-                {/* Plan invites */}
-                {pendingInvites.map((inv: any) => {
-                  const sender = inv.profiles;
-                  const plan = inv.events;
-                  return (
-                    <TouchableOpacity
-                      key={`inv-${inv.id}`}
-                      style={styles.inboxRow}
-                      activeOpacity={0.7}
-                      onPress={() => {
-                        setShowInvites(false);
-                        router.push(`/plan/${inv.event_id}` as any);
-                      }}
-                    >
-                      {sender?.profile_photo_url ? (
-                        <Image source={{ uri: sender.profile_photo_url }} style={styles.inboxAvatar} contentFit="cover" />
-                      ) : (
-                        <View style={[styles.inboxAvatar, styles.inboxAvatarFallback]}>
-                          <Send size={16} color={Colors.terracotta} />
-                        </View>
-                      )}
-                      <View style={{ flex: 1, marginLeft: 10 }}>
-                        <Text style={styles.invitePlanTitle} numberOfLines={1}>
-                          {sender?.first_name_display ?? 'Someone'} invited you
-                        </Text>
-                        <Text style={styles.inboxPlanName} numberOfLines={1}>{plan.title}</Text>
-                        {plan.start_time && (
-                          <Text style={styles.invitePlanMeta}>
-                            {new Date(plan.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={styles.inboxViewBtn}>
-                        <Text style={styles.inboxViewBtnText}>View</Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-
-                {/* App notifications */}
-                {appNotifications.map((notif: any) => {
-                  const icon = notif.type === 'waitlist_spot' ? <Clock size={16} color={Colors.terracotta} />
-                    : notif.type === 'broadcast' ? <Megaphone size={16} color={Colors.terracotta} />
-                    : notif.type === 'member_joined' ? <UserPlus size={16} color={Colors.terracotta} />
-                    : notif.type === 'plan_invite' ? <Mail size={16} color={Colors.terracotta} />
-                    : notif.type === 'invite_accepted' ? <Check size={16} color={Colors.terracotta} />
-                    : <Bell size={16} color={Colors.terracotta} />;
-                  const hasAction = (notif.type === 'waitlist_spot' || notif.type === 'member_joined' || notif.type === 'plan_invite' || notif.type === 'invite_accepted') && notif.event_id;
-                  const timeLeft = notif.expires_at
-                    ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
-                    : null;
-                  return (
-                    <View key={`notif-${notif.id}`} style={styles.inboxRow}>
-                      <View style={[styles.inboxAvatar, styles.inboxAvatarFallback]}>
-                        {icon}
-                      </View>
-                      <View style={{ flex: 1, marginLeft: 10 }}>
-                        <Text style={styles.invitePlanTitle} numberOfLines={1}>{notif.title}</Text>
-                        {notif.body && <Text style={styles.inboxPlanName} numberOfLines={2}>{notif.body}</Text>}
-                        {timeLeft !== null && timeLeft > 0 && (
-                          <Text style={styles.inboxExpiry}>
-                            {timeLeft < 1 ? 'Expires soon' : `${timeLeft}h left to respond`}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={styles.inboxActions}>
-                        {hasAction && (
-                          <TouchableOpacity
-                            style={styles.inboxAcceptBtn}
-                            onPress={() => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type)}
-                          >
-                            <Check size={16} color={Colors.white} />
-                          </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                          style={styles.inboxDeclineBtn}
-                          onPress={() => handleNotifAction(notif.id, 'read', undefined, notif.type)}
-                        >
-                          <XCircle size={16} color={Colors.textLight} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })}
-
-                {/* Old Messages */}
-                {totalOldCount > 0 && (
-                  <>
-                    <TouchableOpacity
-                      style={styles.oldMessagesHeader}
-                      onPress={() => setOldExpanded((v) => !v)}
-                      activeOpacity={0.7}
-                    >
-                      {oldExpanded
-                        ? <ChevronDown size={16} color={Colors.textLight} />
-                        : <ChevronRight size={16} color={Colors.textLight} />
-                      }
-                      <Text style={styles.oldMessagesTitle}>
-                        Old messages ({totalOldCount})
-                      </Text>
-                    </TouchableOpacity>
-
-                    {oldExpanded && (
-                      <>
-                        {oldInvites.map((inv: any) => {
-                          const sender = inv.profiles;
-                          const plan = inv.events;
-                          const statusLabel = inv.status === 'accepted' ? 'Accepted' : 'Declined';
-                          return (
-                            <View key={`old-inv-${inv.id}`} style={[styles.inboxRow, { opacity: 0.6 }]}>
-                              {sender?.profile_photo_url ? (
-                                <Image source={{ uri: sender.profile_photo_url }} style={styles.inboxAvatar} contentFit="cover" />
-                              ) : (
-                                <View style={[styles.inboxAvatar, styles.inboxAvatarFallback]}>
-                                  <Send size={16} color={Colors.textLight} />
-                                </View>
-                              )}
-                              <View style={{ flex: 1, marginLeft: 10 }}>
-                                <Text style={styles.invitePlanTitle} numberOfLines={1}>
-                                  {sender?.first_name_display ?? 'Someone'} invited you
-                                </Text>
-                                <Text style={styles.inboxPlanName} numberOfLines={1}>{plan?.title ?? 'a plan'}</Text>
-                              </View>
-                              <Text style={[styles.oldStatusLabel, inv.status === 'accepted' ? styles.oldStatusAccepted : styles.oldStatusDeclined]}>
-                                {statusLabel}
-                              </Text>
-                            </View>
-                          );
-                        })}
-
-                        {oldNotifications.map((notif: any) => {
-                          const oldIcon = notif.type === 'invite_accepted' ? <Check size={16} color={Colors.textLight} />
-                            : notif.type === 'member_joined' ? <UserPlus size={16} color={Colors.textLight} />
-                            : notif.type === 'waitlist_spot' ? <Clock size={16} color={Colors.textLight} />
-                            : notif.type === 'broadcast' ? <Megaphone size={16} color={Colors.textLight} />
-                            : <Bell size={16} color={Colors.textLight} />;
-                          const statusLabel = notif.status === 'expired' ? 'Expired' : 'Read';
-                          return (
-                            <View key={`old-notif-${notif.id}`} style={[styles.inboxRow, { opacity: 0.6 }]}>
-                              <View style={[styles.inboxAvatar, styles.inboxAvatarFallback]}>
-                                {oldIcon}
-                              </View>
-                              <View style={{ flex: 1, marginLeft: 10 }}>
-                                <Text style={styles.invitePlanTitle} numberOfLines={1}>{notif.title}</Text>
-                                {notif.body && <Text style={styles.inboxPlanName} numberOfLines={2}>{notif.body}</Text>}
-                              </View>
-                              <Text style={[styles.oldStatusLabel, notif.status === 'expired' ? styles.oldStatusDeclined : styles.oldStatusRead]}>
-                                {statusLabel}
-                              </Text>
-                            </View>
-                          );
-                        })}
-                      </>
-                    )}
-                  </>
-                )}
-              </ScrollView>
-            )}
-            <TouchableOpacity style={styles.qrCloseBtn} onPress={() => setShowInvites(false)}>
-              <Text style={styles.qrCloseBtnText}>Done</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {/* Invite Plan Picker */}
       <Modal visible={!!inviteTarget} transparent animationType="fade">
@@ -1007,6 +683,79 @@ export default function YourPeopleScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* One-time handle prompt */}
+      <Modal visible={showHandlePrompt} transparent animationType="fade">
+        <Pressable style={styles.handlePromptOverlay} onPress={dismissHandlePrompt}>
+          <Pressable style={styles.handlePromptCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.handlePromptIconWrap}>
+              <UserPlus size={32} color={Colors.terracotta} />
+            </View>
+            <Text style={styles.handlePromptTitle}>Create your WashedUp handle</Text>
+            <Text style={styles.handlePromptBody}>
+              Your handle is how people find you and invite you to things after you've met. Set one below to get started.
+            </Text>
+            <TouchableOpacity style={styles.handlePromptBtn} onPress={dismissHandlePrompt}>
+              <Text style={styles.handlePromptBtnText}>Got it</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <BrandedAlert
+        visible={!!friendToRemove}
+        title="Remove from Your People"
+        message={`Remove ${friendToRemove?.first_name_display ?? 'this person'} from Your People?`}
+        buttons={[
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: confirmRemoveFriend },
+        ]}
+        onClose={() => setFriendToRemove(null)}
+      />
+
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message ?? ''}
+        buttons={[{ text: 'OK' }]}
+        onClose={() => setAlertInfo(null)}
+      />
+
+      <MiniProfileCard
+        visible={!!miniProfileUserId}
+        userId={miniProfileUserId}
+        onClose={() => setMiniProfileUserId(null)}
+      />
+
+      <BrandedAlert
+        visible={!!userMenuTarget}
+        title={userMenuTarget?.name ?? ''}
+        buttons={[
+          {
+            text: `Report ${userMenuTarget?.name ?? ''}`,
+            onPress: () => {
+              if (userMenuTarget) {
+                setReportTarget({ id: userMenuTarget.id, name: userMenuTarget.name });
+                setShowReport(true);
+              }
+            },
+          },
+          {
+            text: `Block ${userMenuTarget?.name ?? ''}`,
+            style: 'destructive',
+            onPress: () => {
+              if (userMenuTarget) {
+                blockUser(userMenuTarget.id, userMenuTarget.name, () => {
+                  queryClient.invalidateQueries({ queryKey: ['profile-search'] });
+                  queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+                });
+              }
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ]}
+        onClose={() => setUserMenuTarget(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -1175,6 +924,10 @@ const styles = StyleSheet.create({
   friendInfo: { flex: 1, marginLeft: 12 },
   friendName: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
   friendHandle: { fontSize: FontSizes.bodySM, color: Colors.textLight, marginTop: 1 },
+  removeBtn: {
+    marginLeft: 10,
+    padding: 2,
+  },
   inviteBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1196,7 +949,7 @@ const styles = StyleSheet.create({
   },
   inviteSheet: {
     backgroundColor: Colors.white,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     width: '85%',
     maxHeight: '60%',
@@ -1281,7 +1034,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   inviteBadgeText: {
-    fontSize: 10,
+    fontSize: FontSizes.micro,
     fontFamily: Fonts.sansBold,
     color: Colors.white,
   },
@@ -1297,6 +1050,33 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.inputBg,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+  },
+  waitlistActions: {
+    flexDirection: 'row' as const,
+    gap: 10,
+    marginTop: 10,
+  },
+  claimSpotBtn: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  claimSpotText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.white,
+  },
+  cantGoBtn: {
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    justifyContent: 'center' as const,
+  },
+  cantGoText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
   },
   inboxExpiry: {
     fontSize: FontSizes.caption,
@@ -1396,11 +1176,60 @@ const styles = StyleSheet.create({
   },
   qrModal: {
     backgroundColor: Colors.white,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 24,
     alignItems: 'center',
   },
   qrModalTitle: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.asphalt, marginBottom: 16 },
   qrCloseBtn: { marginTop: 20, paddingVertical: 10, paddingHorizontal: 24 },
   qrCloseBtnText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.terracotta },
+
+  handlePromptOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlayDark,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  handlePromptCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 20,
+    padding: 28,
+    marginHorizontal: 32,
+    alignItems: 'center',
+  },
+  handlePromptIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: `${Colors.terracotta}14`,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  handlePromptTitle: {
+    fontSize: FontSizes.bodyLG,
+    fontFamily: Fonts.sansBold,
+    color: Colors.asphalt,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  handlePromptBody: {
+    fontSize: FontSizes.bodyMD,
+    fontFamily: Fonts.sans,
+    color: Colors.textMedium,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  handlePromptBtn: {
+    backgroundColor: Colors.terracotta,
+    paddingVertical: 12,
+    paddingHorizontal: 36,
+    borderRadius: 14,
+  },
+  handlePromptBtnText: {
+    fontSize: FontSizes.bodyMD,
+    fontFamily: Fonts.sansMedium,
+    color: Colors.white,
+  },
 });

@@ -32,7 +32,7 @@ export function usePushNotifications(userId?: string | null) {
     return () => {
       notificationListener.current?.remove();
     };
-  }, []);
+  }, [userId]);
 
   return { expoPushToken };
 }

@@ -10,7 +10,6 @@ import {
   Platform,
   StyleSheet,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -18,6 +17,7 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
+import { BrandedAlert, type BrandedAlertButton } from '../components/BrandedAlert';
 import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
@@ -33,6 +33,7 @@ export default function ResetPasswordScreen() {
   const [error, setError] = useState<string | null>(null);
   const [newPasswordFocused, setNewPasswordFocused] = useState(false);
   const [confirmPasswordFocused, setConfirmPasswordFocused] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const confirmInputRef = useRef<TextInput>(null);
 
   const triggerHaptic = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -54,15 +55,19 @@ export default function ResetPasswordScreen() {
         setError(updateError.message);
         return;
       }
-      Alert.alert('Success', 'Your password has been updated.', [
-        {
-          text: 'OK',
-          onPress: async () => {
-            await supabase.auth.signOut();
-            router.replace('/login');
+      setAlertInfo({
+        title: 'Success',
+        message: 'Your password has been updated.',
+        buttons: [
+          {
+            text: 'OK',
+            onPress: async () => {
+              await supabase.auth.signOut();
+              router.replace('/login');
+            },
           },
-        },
-      ]);
+        ],
+      });
     } finally {
       setLoading(false);
     }
@@ -165,6 +170,13 @@ export default function ResetPasswordScreen() {
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }

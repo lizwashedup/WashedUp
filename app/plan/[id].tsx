@@ -11,12 +11,12 @@ import {
     MapPin,
     MessageCircle,
     MoreHorizontal,
+    Ticket,
     Users
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Dimensions,
     Keyboard,
     Linking,
@@ -34,6 +34,7 @@ import {
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
+import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import Colors from '../../constants/Colors';
@@ -118,7 +119,7 @@ function formatWhenShort(dateString: string): string {
   const tomorrowStart = new Date(todayStart.getTime() + 86400000);
   const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
-  if (dateStart.getTime() === todayStart.getTime()) return 'Tonight';
+  if (dateStart.getTime() === todayStart.getTime()) return date.getHours() >= 17 ? 'Tonight' : 'Today';
   if (dateStart.getTime() === tomorrowStart.getTime()) return 'Tomorrow';
   return date.toLocaleDateString('en-US', { weekday: 'short' });
 }
@@ -266,8 +267,8 @@ async function fetchMembers(planId: string): Promise<Member[]> {
 
 // ─── Member Avatar ────────────────────────────────────────────────────────────
 
-const MemberAvatar = React.memo(({ member }: { member: Member }) => (
-  <View style={styles.memberAvatarWrapper}>
+const MemberAvatar = React.memo(({ member, onPress }: { member: Member; onPress?: () => void }) => (
+  <TouchableOpacity style={styles.memberAvatarWrapper} onPress={onPress} activeOpacity={0.7}>
     {member.avatar_url ? (
       <Image
         source={{ uri: member.avatar_url }}
@@ -285,7 +286,7 @@ const MemberAvatar = React.memo(({ member }: { member: Member }) => (
     <Text style={styles.memberAvatarName} numberOfLines={1}>
       {member.first_name ?? 'Member'}
     </Text>
-  </View>
+  </TouchableOpacity>
 ));
 MemberAvatar.displayName = 'MemberAvatar';
 
@@ -329,6 +330,7 @@ export default function PlanDetailScreen() {
     message?: string;
     buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
   }>({ visible: false, title: '' });
+  const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
 
   const { blockUser } = useBlock();
 
@@ -360,12 +362,14 @@ export default function PlanDetailScreen() {
     queryKey: ['events', 'detail', id],
     queryFn: () => fetchPlanDetail(id!),
     enabled: !!id,
+    staleTime: 60_000,
   });
 
   const { data: members = [] } = useQuery({
     queryKey: ['events', 'members', id],
     queryFn: () => fetchMembers(id!),
     enabled: !!id,
+    staleTime: 60_000,
   });
 
   // Resolve map coordinates — use stored coords, or geocode from location_text
@@ -403,31 +407,36 @@ export default function PlanDetailScreen() {
   // Wishlist check
   useEffect(() => {
     if (!currentUserId || !id) return;
+    let cancelled = false;
     supabase
       .from('wishlists')
       .select('id')
       .eq('user_id', currentUserId)
       .eq('event_id', id)
       .maybeSingle()
-      .then(({ data }) => setIsWishlisted(!!data));
+      .then(({ data }) => { if (!cancelled) setIsWishlisted(!!data); });
+    return () => { cancelled = true; };
   }, [currentUserId, id]);
 
   // Waitlist check
   useEffect(() => {
     if (!currentUserId || !id) return;
+    let cancelled = false;
     supabase
       .from('event_waitlist')
       .select('id')
       .eq('event_id', id)
       .eq('user_id', currentUserId)
       .maybeSingle()
-      .then(({ data }) => setIsOnWaitlist(!!data));
+      .then(({ data }) => { if (!cancelled) setIsOnWaitlist(!!data); });
+    return () => { cancelled = true; };
   }, [currentUserId, id]);
 
   // Pending invite check
   const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
   useEffect(() => {
     if (!currentUserId || !id) return;
+    let cancelled = false;
     supabase
       .from('plan_invites')
       .select('id')
@@ -435,7 +444,8 @@ export default function PlanDetailScreen() {
       .eq('recipient_id', currentUserId)
       .eq('status', 'pending')
       .maybeSingle()
-      .then(({ data }) => setPendingInviteId(data?.id ?? null));
+      .then(({ data }) => { if (!cancelled) setPendingInviteId(data?.id ?? null); });
+    return () => { cancelled = true; };
   }, [currentUserId, id]);
 
   const isMember = members.some((m) => m.user_id === currentUserId);
@@ -768,10 +778,10 @@ export default function PlanDetailScreen() {
   const handleReportMenu = useCallback(() => {
     if (isCreator || !plan?.creator) return;
     const creatorName = plan.creator?.first_name ?? 'Creator';
-    Alert.alert(
-      'Options',
-      undefined,
-      [
+    setBrandedAlert({
+      visible: true,
+      title: 'Options',
+      buttons: [
         {
           text: `Report ${creatorName}`,
           onPress: () => {
@@ -786,7 +796,7 @@ export default function PlanDetailScreen() {
         },
         { text: 'Cancel', style: 'cancel' },
       ],
-    );
+    });
   }, [isCreator, plan, blockUser]);
 
   // ─── Loading / Error ─────────────────────────────────────────────────────────
@@ -817,8 +827,6 @@ export default function PlanDetailScreen() {
   }
 
   const genderLabel = formatGenderLabel(plan.gender_rule);
-  const visibleMembers = members.slice(0, 5);
-  const overflowCount = members.length > 5 ? members.length - 5 : 0;
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -975,16 +983,9 @@ export default function PlanDetailScreen() {
         {/* F. Who's Going */}
         <Text style={styles.whoGoingTitle}>Who's going</Text>
         <View style={styles.memberAvatarRow}>
-          {visibleMembers.map((member) => (
-            <MemberAvatar key={member.id} member={member} />
+          {members.map((member) => (
+            <MemberAvatar key={member.id} member={member} onPress={() => setMiniProfileUserId(member.user_id)} />
           ))}
-          {overflowCount > 0 && (
-            <View style={styles.memberAvatarWrapper}>
-              <View style={[styles.memberAvatar, styles.memberAvatarOverflow]}>
-                <Text style={styles.memberAvatarOverflowText}>+{overflowCount}</Text>
-              </View>
-            </View>
-          )}
         </View>
 
         {/* G. CTA hints (button is in sticky bar) */}
@@ -1216,7 +1217,9 @@ export default function PlanDetailScreen() {
       <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => setTicketModalVisible(false)}>
         <Pressable style={joinStyles.overlay} onPress={() => setTicketModalVisible(false)}>
           <Pressable style={ticketStyles.sheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={ticketStyles.emoji}>🎟</Text>
+            <View style={ticketStyles.iconCircle}>
+              <Ticket size={28} color={Colors.terracotta} strokeWidth={2} />
+            </View>
             <Text style={ticketStyles.title}>This plan is ticketed!</Text>
             <Text style={ticketStyles.subtitle}>
               Make sure to grab your tickets so you're all set for the day.
@@ -1464,6 +1467,12 @@ export default function PlanDetailScreen() {
         buttons={brandedAlert.buttons}
         onClose={() => setBrandedAlert((a) => ({ ...a, visible: false }))}
       />
+
+      <MiniProfileCard
+        userId={miniProfileUserId}
+        visible={!!miniProfileUserId}
+        onClose={() => setMiniProfileUserId(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -1646,6 +1655,7 @@ const styles = StyleSheet.create({
   memberAvatarRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    flexWrap: 'wrap',
     marginBottom: 24,
     gap: 12,
   },
@@ -1668,7 +1678,7 @@ const styles = StyleSheet.create({
   memberAvatarInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   memberAvatarName: {
     fontFamily: Fonts.sansMedium,
-    fontSize: 10,
+    fontSize: FontSizes.micro,
     color: Colors.textMedium,
     marginTop: 4,
     textAlign: 'center',
@@ -1970,8 +1980,13 @@ const ticketStyles = StyleSheet.create({
     maxWidth: 340,
     alignItems: 'center',
   },
-  emoji: {
-    fontSize: FontSizes.displayXL,
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: `${Colors.terracotta}14`,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
   title: {

@@ -7,7 +7,6 @@ import { Eye, EyeOff } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Keyboard,
     KeyboardAvoidingView,
     Modal,
@@ -22,6 +21,7 @@ import {
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
@@ -40,6 +40,7 @@ export default function LoginScreen() {
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [resetModalVisible, setResetModalVisible] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [resetLoading, setResetLoading] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
@@ -124,7 +125,7 @@ export default function LoginScreen() {
         return;
       }
       setResetModalVisible(false);
-      Alert.alert('Check your email', 'Check your email for a password reset link.');
+      setAlertInfo({ title: 'Check your email', message: 'Check your email for a password reset link.' });
     } finally {
       setResetLoading(false);
     }
@@ -354,6 +355,13 @@ export default function LoginScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }

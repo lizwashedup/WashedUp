@@ -68,7 +68,7 @@ export function BrandedAlert({ visible, title, message, buttons, onClose }: Bran
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: Colors.overlayDark,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,

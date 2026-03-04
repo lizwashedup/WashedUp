@@ -1,16 +1,18 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { Mail, User } from 'lucide-react-native';
-import React from 'react';
-import { AppState, AppStateStatus, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { AppState, AppStateStatus, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
+import { INBOX_COUNT_KEY, PROFILE_PHOTO_KEY } from '../constants/QueryKeys';
+import InboxModal from './InboxModal';
 import { supabase } from '../lib/supabase';
 
-export const PROFILE_PHOTO_KEY = ['profile-photo'] as const;
-export const INBOX_COUNT_KEY = ['inbox-count'] as const;
+const PROFILE_PROMPT_KEY = 'has_seen_profile_prompt';
 
 async function fetchProfilePhoto(): Promise<string | null> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -38,7 +40,8 @@ async function fetchInboxCount(): Promise<number> {
       .from('app_notifications')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
-      .eq('status', 'unread'),
+      .eq('status', 'unread')
+      .neq('type', 'plan_invite'),
   ]);
 
   const activeInviteCount = (invites.data ?? []).length;
@@ -46,6 +49,30 @@ async function fetchInboxCount(): Promise<number> {
 }
 
 export default function ProfileButton() {
+  const [showInbox, setShowInbox] = useState(false);
+  const [showProfilePrompt, setShowProfilePrompt] = useState(false);
+  const hasCheckedPrompt = useRef(false);
+
+  const handleProfilePress = async () => {
+    if (!hasCheckedPrompt.current) {
+      const seen = await AsyncStorage.getItem(PROFILE_PROMPT_KEY).catch(() => null);
+      hasCheckedPrompt.current = true;
+      if (!seen) {
+        setShowProfilePrompt(true);
+        return;
+      }
+    }
+    router.push('/(tabs)/profile');
+  };
+
+  const dismissPrompt = (navigate: boolean) => {
+    setShowProfilePrompt(false);
+    AsyncStorage.setItem(PROFILE_PROMPT_KEY, 'true').catch(() => {});
+    if (navigate) {
+      router.push('/(tabs)/profile');
+    }
+  };
+
   const { data: photoUrl, refetch } = useQuery({
     queryKey: PROFILE_PHOTO_KEY,
     queryFn: fetchProfilePhoto,
@@ -57,6 +84,15 @@ export default function ProfileButton() {
     queryFn: fetchInboxCount,
     staleTime: 15_000,
     refetchInterval: 30_000,
+  });
+
+  const { data: userId } = useQuery({
+    queryKey: ['auth-user-id'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user?.id ?? null;
+    },
+    staleTime: 60_000,
   });
 
   useFocusEffect(
@@ -87,7 +123,7 @@ export default function ProfileButton() {
     <View style={styles.wrapper}>
       <TouchableOpacity
         style={styles.envelopeBtn}
-        onPress={() => router.push('/(tabs)/friends?openInbox=1' as any)}
+        onPress={() => setShowInbox(true)}
         accessibilityLabel="Inbox"
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
@@ -100,8 +136,9 @@ export default function ProfileButton() {
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.container}
-        onPress={() => router.push('/(tabs)/profile')}
+        onPress={handleProfilePress}
         accessibilityLabel="Profile"
+        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
       >
         <View style={styles.circle}>
           {photoUrl ? (
@@ -116,6 +153,33 @@ export default function ProfileButton() {
         </View>
         <Text style={styles.label}>Profile</Text>
       </TouchableOpacity>
+      <InboxModal
+        visible={showInbox}
+        onClose={() => setShowInbox(false)}
+        userId={userId ?? null}
+      />
+      <Modal
+        visible={showProfilePrompt}
+        transparent
+        animationType="fade"
+        onRequestClose={() => dismissPrompt(false)}
+      >
+        <Pressable style={styles.promptOverlay} onPress={() => dismissPrompt(false)}>
+          <Pressable style={styles.promptCard} onPress={() => {}}>
+            <Text style={styles.promptTitle}>Complete your profile!</Text>
+            <Text style={styles.promptBody}>
+              Tell people a little about you so they get excited to meet you.
+            </Text>
+            <TouchableOpacity
+              style={styles.promptButton}
+              onPress={() => dismissPrompt(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.promptButtonText}>Let's do it</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -148,13 +212,13 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     fontFamily: Fonts.sansBold,
-    fontSize: 10,
+    fontSize: FontSizes.micro,
     color: Colors.white,
   },
   circle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: Colors.white,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -163,13 +227,55 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   photo: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   label: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.micro,
     color: Colors.textLight,
+  },
+  promptOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlayDark,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  promptCard: {
+    backgroundColor: Colors.parchment,
+    borderRadius: 20,
+    padding: 28,
+    width: '100%',
+    maxWidth: 320,
+    alignItems: 'center',
+  },
+  promptTitle: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  promptBody: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  promptButton: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+  },
+  promptButtonText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.white,
   },
 });

@@ -20,16 +20,13 @@ import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown } from 'lucide-re
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
 
-// Lazy-load MapView — react-native-maps can crash in Expo Go when imported at top level
-const LazyMapView = lazy(() =>
-  import('../../../components/MapView.native').then((m) => ({ default: m.MapView })),
-);
+// Lazy-load SceneMapView — react-native-maps can crash in Expo Go when imported at top level
+const LazySceneMapView = lazy(() => import('../../../components/SceneMapView'));
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
 import ProfileButton from '../../../components/ProfileButton';
 import { CATEGORY_OPTIONS } from '../../../constants/Categories';
 import Colors from '../../../constants/Colors';
-import { MAP_STYLE } from '../../../constants/MapStyle';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -90,13 +87,6 @@ function getPriceLabel(ticketPrice: string | null | undefined): string {
   const isFree = !ticketPrice || (typeof ticketPrice === 'string' && (ticketPrice.trim() === '' || ticketPrice.trim().toLowerCase() === 'free'));
   return isFree ? 'Free' : 'Tickets';
 }
-
-const LA_REGION = {
-  latitude: 34.0522,
-  longitude: -118.2437,
-  latitudeDelta: 0.35,
-  longitudeDelta: 0.35,
-};
 
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
@@ -572,6 +562,9 @@ export default function SceneScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['explore-wishlists', userId] });
     },
+    onError: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    },
   });
 
   const handleWishlist = useCallback((id: string, current: boolean) => {
@@ -711,12 +704,11 @@ export default function SceneScreen() {
                   <ActivityIndicator size="large" color={Colors.terracotta} />
                 </View>
               }>
-                <LazyMapView
-                  style={{ flex: 1 }}
-                  initialRegion={LA_REGION}
-                  customMapStyle={MAP_STYLE}
-                  showsUserLocation
-                  showsMyLocationButton={false}
+                <LazySceneMapView
+                  events={filteredEvents}
+                  wishlistedSet={wishlistedSet}
+                  onClose={() => setMapView(false)}
+                  onWishlist={handleWishlist}
                 />
               </Suspense>
             </MapErrorBoundary>

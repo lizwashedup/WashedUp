@@ -63,7 +63,7 @@ export function SharePlanModal({
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.iconCircle}>
-            <Text style={styles.partyEmoji}>🎉</Text>
+            <Share2 size={28} color={Colors.terracotta} strokeWidth={2} />
           </View>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>
@@ -80,7 +80,7 @@ export function SharePlanModal({
 
           <View style={styles.growthCard}>
             <Text style={styles.growthText}>
-              We're brand new and growing! The best way to fill your plan is sharing it where people are looking for things to do — Facebook groups, Reddit, Instagram stories, group chats. It really helps 🙏
+              We're brand new and growing! The best way to fill your plan is sharing it where people are looking for things to do — Facebook groups, Reddit, Instagram stories, group chats. It really helps!
             </Text>
           </View>
 
@@ -112,9 +112,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
-  },
-  partyEmoji: {
-    fontSize: FontSizes.displayLG,
   },
   title: {
     fontFamily: Fonts.sansBold,

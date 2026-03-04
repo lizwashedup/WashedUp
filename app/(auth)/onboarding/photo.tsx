@@ -8,13 +8,13 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { PROFILE_PHOTO_KEY } from '../../../components/ProfileButton';
+import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
+import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
 import { StatusBar } from 'expo-status-bar';
 import { Camera, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   StyleSheet,
   Text,
@@ -36,20 +36,17 @@ export default function OnboardingPhotoScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const pickImageFromLibrary = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(
-          'Permission needed',
-          'Go to Settings → WashedUp → Photos and allow access.',
-          [{ text: 'OK' }]
-        );
+        setAlertInfo({ title: 'Permission needed', message: 'Go to Settings → WashedUp → Photos and allow access.' });
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 1,
@@ -57,7 +54,7 @@ export default function OnboardingPhotoScreen() {
       if (result.canceled || !result.assets?.[0]) return;
       await processPickedImage(result.assets[0].uri);
     } catch {
-      Alert.alert('Something went wrong', 'Could not open photo library. Please try again.');
+      setAlertInfo({ title: 'Something went wrong', message: 'Could not open photo library. Please try again.' });
     }
   };
 
@@ -65,11 +62,7 @@ export default function OnboardingPhotoScreen() {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(
-          'Permission needed',
-          'Go to Settings → WashedUp → Camera and allow access.',
-          [{ text: 'OK' }]
-        );
+        setAlertInfo({ title: 'Permission needed', message: 'Go to Settings → WashedUp → Camera and allow access.' });
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -80,7 +73,7 @@ export default function OnboardingPhotoScreen() {
       if (result.canceled || !result.assets?.[0]) return;
       await processPickedImage(result.assets[0].uri);
     } catch {
-      Alert.alert('Something went wrong', 'Could not open camera. Please try again.');
+      setAlertInfo({ title: 'Something went wrong', message: 'Could not open camera. Please try again.' });
     }
   };
 
@@ -94,17 +87,21 @@ export default function OnboardingPhotoScreen() {
       setImageUri(manipulated.uri);
       setImageBase64(manipulated.base64 ?? null);
     } catch {
-      Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE, [{ text: 'OK' }]);
+      setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
     }
   };
 
   const pickImage = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert('Add a profile photo', 'Choose how to add your photo', [
-      { text: 'Take Photo', onPress: takePhotoFromCamera },
-      { text: 'Choose from Library', onPress: pickImageFromLibrary },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setAlertInfo({
+      title: 'Add a profile photo',
+      message: 'Choose how to add your photo',
+      buttons: [
+        { text: 'Take Photo', onPress: takePhotoFromCamera },
+        { text: 'Choose from Library', onPress: pickImageFromLibrary },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    });
   };
 
   const handleContinue = async () => {
@@ -115,7 +112,7 @@ export default function OnboardingPhotoScreen() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert('Session expired', 'Please sign in again.');
+        setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
         supabase.auth.signOut();
         return;
       }
@@ -147,11 +144,10 @@ export default function OnboardingPhotoScreen() {
 
       router.push('/onboarding/vibes');
     } catch (e: any) {
-      Alert.alert(
-        'Upload failed',
-        e?.message ?? 'Could not upload photo. Please try again.',
-        [{ text: 'Try Again' }]
-      );
+      setAlertInfo({
+        title: 'Upload failed',
+        message: e?.message ?? 'Could not upload photo. Please try again.',
+      });
     } finally {
       setLoading(false);
     }
@@ -248,6 +244,13 @@ export default function OnboardingPhotoScreen() {
           )}
         </TouchableOpacity>
       </View>
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }

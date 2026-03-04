@@ -6,11 +6,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   Dimensions,
   Share,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -19,6 +18,7 @@ import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import { ReportModal } from '../../components/modals/ReportModal';
+import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { useBlock } from '../../hooks/useBlock';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
@@ -80,6 +80,7 @@ export default function EventDetailScreen() {
 
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const { blockUser } = useBlock();
 
   React.useEffect(() => {
@@ -89,10 +90,9 @@ export default function EventDetailScreen() {
   const handleCreatorMenu = useCallback((creatorId: string, creatorName: string) => {
     if (creatorId === userId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert(
-      creatorName,
-      undefined,
-      [
+    setAlertInfo({
+      title: creatorName,
+      buttons: [
         {
           text: `Report ${creatorName}`,
           onPress: () => {
@@ -109,7 +109,7 @@ export default function EventDetailScreen() {
         },
         { text: 'Cancel', style: 'cancel' },
       ],
-    );
+    });
   }, [userId, blockUser, queryClient, id]);
 
   const { data: event, isLoading } = useQuery({
@@ -124,6 +124,7 @@ export default function EventDetailScreen() {
       return data;
     },
     enabled: !!id,
+    staleTime: 60_000,
   });
 
   const { data: linkedPlans = [] } = useQuery({
@@ -148,6 +149,7 @@ export default function EventDetailScreen() {
       }));
     },
     enabled: !!id,
+    staleTime: 60_000,
   });
 
   // Fetch actual member counts from event_members — member_count on events can be out of sync
@@ -200,28 +202,40 @@ export default function EventDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['explore-wishlists'] });
       queryClient.invalidateQueries({ queryKey: ['explore-wishlist-check', id] });
     },
+    onError: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    },
   });
 
-  if (isLoading) {
+  if (!id || isLoading) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.terracotta} />
+          {!id ? (
+            <>
+              <Text style={styles.emptyText}>Event not found</Text>
+              <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
+                <Text style={styles.goBackText}>Go Back</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <ActivityIndicator size="large" color={Colors.terracotta} />
+          )}
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (!event) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.centered}>
-          <Text style={{ fontFamily: 'DMSans_500Medium', fontSize: 16, color: '#666', textAlign: 'center' }}>Event not found</Text>
-          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 }}>
-            <Text style={{ fontFamily: 'DMSans_700Bold', fontSize: 14, color: '#fff' }}>Go Back</Text>
+          <Text style={styles.emptyText}>Event not found</Text>
+          <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
+            <Text style={styles.goBackText}>Go Back</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -426,13 +440,24 @@ export default function EventDetailScreen() {
           reportedUserName={reportTarget.name}
         />
       )}
+
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  emptyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.textMedium, textAlign: 'center' },
+  goBackBtn: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 },
+  goBackText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   heroContainer: { width: SCREEN_WIDTH, height: 280, position: 'relative' },
   circleButton: {
     position: 'absolute',
@@ -449,7 +474,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   content: { padding: 20, gap: 12 },
-  detailCategoryPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  detailCategoryPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   detailCategoryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.white, textTransform: 'capitalize' },
   title: {
     fontFamily: Fonts.displayBold,
@@ -484,7 +509,7 @@ const styles = StyleSheet.create({
   planVibeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.warmGray, textTransform: 'capitalize' },
   planCardSpacer: { flex: 1 },
   planMenuBtn: { padding: 4, marginRight: 4 },
-  planJoinBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8 },
+  planJoinBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 14 },
   planJoinBtnFull: { backgroundColor: Colors.border },
   planJoinBtnTextFull: { color: Colors.textLight },
   planJoinBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },

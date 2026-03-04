@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
 } from 'react-native';
@@ -28,8 +27,10 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { openUrl } from '../../../lib/url';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { useChat, ChatMessage, MessageReaction } from '../../../hooks/useChat';
+import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
+import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
 
 // ─── Event Header Data ────────────────────────────────────────────────────────
 
@@ -44,12 +45,12 @@ interface EventInfo {
 
 async function fetchEventInfo(eventId: string): Promise<EventInfo> {
   // Run event + member list in parallel — both only need eventId
-  const [{ data: event }, { data: memberRows }] = await Promise.all([
+  const [eventResult, memberResult] = await Promise.all([
     supabase
       .from('events')
       .select('id, title, start_time, tickets_url, member_count')
       .eq('id', eventId)
-      .single(),
+      .maybeSingle(),
     supabase
       .from('event_members')
       .select('user_id')
@@ -57,6 +58,11 @@ async function fetchEventInfo(eventId: string): Promise<EventInfo> {
       .eq('status', 'joined')
       .limit(6),
   ]);
+
+  if (eventResult.error) throw eventResult.error;
+  if (!eventResult.data) throw new Error('Event not found');
+  const event = eventResult.data;
+  const memberRows = memberResult.data;
 
   const userIds = (memberRows ?? []).map((m: any) => m.user_id).filter(Boolean);
 
@@ -75,9 +81,9 @@ async function fetchEventInfo(eventId: string): Promise<EventInfo> {
   }
 
   return {
-    id: (event as any).id,
-    title: (event as any).title,
-    start_time: (event as any).start_time,
+    id: event.id,
+    title: event.title,
+    start_time: event.start_time,
     tickets_url: (event as any).tickets_url ?? null,
     member_count: (event as any).member_count ?? 0,
     members,
@@ -310,7 +316,7 @@ const bubbleStyles = StyleSheet.create({
   },
   reactionBadgeOwn: { right: 4 },
   reactionBadgeOther: { left: 4 },
-  reactionHeart: { fontSize: 13 },
+  reactionHeart: { fontSize: FontSizes.bodySM },
   reactionHeartActive: { color: Colors.errorRed },
   reactionCount: {
     fontFamily: Fonts.sansMedium,
@@ -330,6 +336,8 @@ export default function ChatScreen() {
   const [photoViewUrl, setPhotoViewUrl] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+  const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const listRef = useRef<FlatList>(null);
 
   const { messages, loading, currentUserId, sendMessage, toggleReaction } = useChat(id);
@@ -340,12 +348,23 @@ export default function ChatScreen() {
     queryFn: () => fetchEventInfo(id),
     enabled: !!id,
     staleTime: 60_000,
+    retry: 2,
   });
 
-  if (!id) {
+  if (!id || eventError) {
     return (
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.centered}><Text style={styles.emptyText}>Chat not found</Text></View>
+      <SafeAreaView style={{ flex: 1, backgroundColor: Colors.parchment }} edges={['top', 'bottom']}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium }}>
+            {eventError ? 'Could not load this chat' : 'Chat not found'}
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={{ marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 }}
+          >
+            <Text style={{ fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
@@ -372,7 +391,7 @@ export default function ChatScreen() {
     const otherIds = userIds.filter((uid) => uid !== currentUserId);
 
     if (otherIds.length === 0) {
-      Alert.alert('No other members', 'There are no other members in this plan to report.');
+      setAlertInfo({ title: 'No other members', message: 'There are no other members in this plan to report.' });
       return;
     }
 
@@ -387,38 +406,40 @@ export default function ChatScreen() {
     }));
 
     // First alert: pick a member
-    Alert.alert(
-      'Members',
-      'Select a member',
-      [
+    setAlertInfo({
+      title: 'Members',
+      message: 'Select a member',
+      buttons: [
         ...members.map((member) => ({
           text: member.name,
           onPress: () => {
-            // Second alert: pick an action for that member
-            Alert.alert(
-              member.name,
-              'What would you like to do?',
-              [
-                {
-                  text: 'Report User',
-                  onPress: () => {
-                    setReportTarget(member);
-                    setShowReport(true);
+            // Second alert: show after first closes (BrandedAlert calls onClose automatically)
+            setTimeout(() => {
+              setAlertInfo({
+                title: member.name,
+                message: 'What would you like to do?',
+                buttons: [
+                  {
+                    text: 'Report User',
+                    onPress: () => {
+                      setReportTarget(member);
+                      setShowReport(true);
+                    },
                   },
-                },
-                {
-                  text: 'Block User',
-                  style: 'destructive' as const,
-                  onPress: () => blockUser(member.id, member.name, () => router.back()),
-                },
-                { text: 'Cancel', style: 'cancel' as const },
-              ],
-            );
+                  {
+                    text: 'Block User',
+                    style: 'destructive' as const,
+                    onPress: () => blockUser(member.id, member.name, () => router.back()),
+                  },
+                  { text: 'Cancel', style: 'cancel' as const },
+                ],
+              });
+            }, 100);
           },
         })),
         { text: 'Cancel', style: 'cancel' as const },
       ],
-    );
+    });
   }, [id, currentUserId, blockUser]);
 
   const handleSend = useCallback(async () => {
@@ -428,21 +449,13 @@ export default function ChatScreen() {
     await sendMessage(text);
   }, [inputText, uploading, sendMessage]);
 
-  const handlePhotoPress = useCallback(async () => {
+  const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
-    const choice = await new Promise<'camera' | 'library' | null>((resolve) => {
-      Alert.alert('Add Photo', '', [
-        { text: 'Take Photo', onPress: () => resolve('camera') },
-        { text: 'Choose from Library', onPress: () => resolve('library') },
-        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
-      ]);
-    });
-    if (!choice) return;
 
     if (choice === 'camera') {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Camera access needed', 'Please allow camera access in Settings to take photos.');
+        setAlertInfo({ title: 'Camera access needed', message: 'Please allow camera access in Settings to take photos.' });
         return;
       }
     }
@@ -450,7 +463,7 @@ export default function ChatScreen() {
     const result = choice === 'camera'
       ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
       : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: ['images'],
           allowsMultipleSelection: false,
           quality: 0.8,
         });
@@ -482,22 +495,37 @@ export default function ChatScreen() {
 
       await sendMessage('', urlData.publicUrl);
     } catch {
-      Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
+      setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
     } finally {
       setUploading(false);
     }
   }, [currentUserId, sendMessage]);
 
-  // Build message list with date separators
+  const handlePhotoPress = useCallback(() => {
+    if (!currentUserId) return;
+    setAlertInfo({
+      title: 'Add Photo',
+      message: '',
+      buttons: [
+        { text: 'Take Photo', onPress: () => doPhotoAction('camera') },
+        { text: 'Choose from Library', onPress: () => doPhotoAction('library') },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    });
+  }, [currentUserId, doPhotoAction]);
+
   type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string };
-  const enrichedItems: EnrichedItem[] = [];
-  messages.forEach((msg, i) => {
-    const prev = messages[i - 1];
-    if (!prev || !isSameDay(prev.created_at, msg.created_at)) {
-      enrichedItems.push({ type: 'date', label: formatChatDate(msg.created_at), id: `date-${msg.id}` });
-    }
-    enrichedItems.push(msg);
-  });
+  const enrichedItems = useMemo<EnrichedItem[]>(() => {
+    const items: EnrichedItem[] = [];
+    messages.forEach((msg, i) => {
+      const prev = messages[i - 1];
+      if (!prev || !isSameDay(prev.created_at, msg.created_at)) {
+        items.push({ type: 'date', label: formatChatDate(msg.created_at), id: `date-${msg.id}` });
+      }
+      items.push(msg);
+    });
+    return items;
+  }, [messages]);
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.parchment }}>
@@ -551,11 +579,7 @@ export default function ChatScreen() {
 
         {/* Member avatars + names bar */}
         {event && event.members.length > 0 && (
-          <TouchableOpacity
-            onPress={() => router.push(`/plan/${id}` as any)}
-            style={chatStyles.membersBar}
-            activeOpacity={0.7}
-          >
+          <View style={chatStyles.membersBar}>
             <FlatList
               data={event.members.slice(0, 6)}
               horizontal
@@ -563,7 +587,11 @@ export default function ChatScreen() {
               keyExtractor={(m) => m.id}
               contentContainerStyle={chatStyles.membersScroll}
               renderItem={({ item: member }) => (
-                <View style={chatStyles.memberChip}>
+                <TouchableOpacity
+                  style={chatStyles.memberChip}
+                  onPress={() => setMiniProfileUserId(member.id)}
+                  activeOpacity={0.7}
+                >
                   {member.avatar_url ? (
                     <Image source={{ uri: member.avatar_url }} style={chatStyles.memberChipImg} contentFit="cover" />
                   ) : (
@@ -576,7 +604,7 @@ export default function ChatScreen() {
                   <Text style={chatStyles.memberChipName} numberOfLines={1}>
                     {member.first_name ?? 'Member'}
                   </Text>
-                </View>
+                </TouchableOpacity>
               )}
               ListFooterComponent={
                 capDisplayCount(event.member_count) > 6 ? (
@@ -588,8 +616,10 @@ export default function ChatScreen() {
                 ) : null
               }
             />
-            <Ionicons name="chevron-forward" size={14} color={Colors.warmGray} style={{ marginLeft: 4 }} />
-          </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push(`/plan/${id}` as any)} activeOpacity={0.7}>
+              <Ionicons name="chevron-forward" size={14} color={Colors.warmGray} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          </View>
         )}
       </SafeAreaView>
 
@@ -612,6 +642,9 @@ export default function ChatScreen() {
             showsVerticalScrollIndicator={false}
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
+            initialNumToRender={20}
+            windowSize={10}
+            maxToRenderPerBatch={15}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
             renderItem={({ item, index }) => {
               if ('type' in item && item.type === 'date') {
@@ -713,6 +746,20 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </Pressable>
       </Modal>
+
+      <MiniProfileCard
+        userId={miniProfileUserId}
+        visible={!!miniProfileUserId}
+        onClose={() => setMiniProfileUserId(null)}
+      />
+
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </View>
   );
 }
@@ -774,7 +821,7 @@ const chatStyles = StyleSheet.create({
   memberChipImg: { width: 36, height: 36, borderRadius: 18 },
   memberChipName: {
     fontFamily: Fonts.sansMedium,
-    fontSize: 10,
+    fontSize: FontSizes.micro,
     color: Colors.textMedium,
     marginTop: 3,
     textAlign: 'center',

@@ -10,7 +10,6 @@ import {
   Platform,
   Modal,
   Pressable,
-  Alert,
   ActivityIndicator,
   Keyboard,
 } from 'react-native';
@@ -32,6 +31,7 @@ import Colors from '../../../constants/Colors';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { checkContent } from '../../../lib/contentFilter';
+import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
 
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
@@ -217,11 +217,11 @@ export default function PostScreen() {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Go to Settings and allow photo access.');
+      setAlertInfo({ title: 'Permission needed', message: 'Go to Settings and allow photo access.' });
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [16, 10],
       quality: 1,
@@ -239,11 +239,11 @@ export default function PostScreen() {
           uploadPhoto(manipulated.base64);
         } else {
           setImageUrl(null);
-          Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
+          setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
         }
       } catch {
         setImageUrl(null);
-        Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
+        setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
       }
     }
   };
@@ -261,7 +261,7 @@ export default function PostScreen() {
       setImageUrl(publicUrl);
     } catch {
       setImageUrl(null);
-      Alert.alert('Upload failed', 'Could not upload photo. Try again.');
+      setAlertInfo({ title: 'Upload failed', message: 'Could not upload photo. Try again.' });
     } finally {
       setImageLoading(false);
     }
@@ -310,6 +310,7 @@ export default function PostScreen() {
   const [postedPlanTitle, setPostedPlanTitle] = useState('');
   const [postedSpotsLeft, setPostedSpotsLeft] = useState<number | undefined>();
   const [postedGenderLabel, setPostedGenderLabel] = useState<string | undefined>();
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   // ─── Drafts ────────────────────────────────────────────────────────────────
   const [drafts, setDrafts] = useState<PlanDraft[]>([]);
@@ -320,7 +321,7 @@ export default function PostScreen() {
 
   const handleSaveDraft = useCallback(async () => {
     if (!title.trim()) {
-      Alert.alert('Add a title', 'Give your plan a title before saving as a draft.');
+      setAlertInfo({ title: 'Add a title', message: 'Give your plan a title before saving as a draft.' });
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -336,7 +337,7 @@ export default function PostScreen() {
     const updated = [draft, ...drafts];
     setDrafts(updated);
     await saveDrafts(updated);
-    Alert.alert('Draft saved', 'You can continue editing it later.');
+    setAlertInfo({ title: 'Draft saved', message: 'You can continue editing it later.' });
   }, [title, location, locationLat, locationLng, ticketUrl, category, genderPref, ageRanges, description, creatorMessage, groupSize, imageUrl, drafts]);
 
   const loadDraft = useCallback((draft: PlanDraft) => {
@@ -410,7 +411,7 @@ export default function PostScreen() {
     const fieldsToCheck = [title, description, creatorMessage].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
     if (!filter.ok) {
-      Alert.alert('Content not allowed', filter.reason ?? 'Please revise your plan and try again.');
+      setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
       return;
     }
 
@@ -420,14 +421,14 @@ export default function PostScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert('Error', 'Please sign in again.');
+        setAlertInfo({ title: 'Error', message: 'Please sign in again.' });
         setLoading(false);
         return;
       }
 
       const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
       if (startTime <= new Date()) {
-        Alert.alert('Invalid time', 'Please choose a future date and time.');
+        setAlertInfo({ title: 'Invalid time', message: 'Please choose a future date and time.' });
         setLoading(false);
         return;
       }
@@ -495,7 +496,7 @@ export default function PostScreen() {
       const msg = rawMsg.includes('events_host_message_length')
         ? `Message must be at least ${MSG_MIN} characters.`
         : rawMsg || 'Could not post your plan. Please try again.';
-      Alert.alert('Something went wrong', msg);
+      setAlertInfo({ title: 'Something went wrong', message: msg });
     } finally {
       setLoading(false);
     }
@@ -1053,6 +1054,14 @@ export default function PostScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -1081,6 +1090,8 @@ const placesStyles = {
     borderRadius: 14,
     marginTop: 4,
     overflow: 'hidden' as const,
+    zIndex: 100,
+    elevation: 100,
   },
   row: { paddingHorizontal: 16, paddingVertical: 13, backgroundColor: Colors.cardBg },
   separator: { height: 1, backgroundColor: Colors.border, marginHorizontal: 16 },
@@ -1174,7 +1185,7 @@ const styles = StyleSheet.create({
   photoChangeBtnText: { fontSize: FontSizes.caption, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
 
   field: { marginBottom: 20 },
-  placesField: { zIndex: 10 },
+  placesField: { zIndex: 100, elevation: 100 },
   label: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.textMedium, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   labelOptional: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sans, color: Colors.textLight, fontStyle: 'italic' },

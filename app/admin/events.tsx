@@ -7,7 +7,6 @@ import {
   StyleSheet,
   ActivityIndicator,
   TextInput,
-  Alert,
   RefreshControl,
   Modal,
   KeyboardAvoidingView,
@@ -25,6 +24,7 @@ import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
+import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 interface SceneEvent {
   id: string;
@@ -66,9 +66,10 @@ export default function AdminEventsScreen() {
   const [broadcastTitle, setBroadcastTitle] = useState('');
   const [broadcastBody, setBroadcastBody] = useState('');
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const sendBroadcast = async () => {
-    if (!broadcastTitle.trim()) { Alert.alert('Title required'); return; }
+    if (!broadcastTitle.trim()) { setAlertInfo({ title: 'Title required' }); return; }
     setSendingBroadcast(true);
     try {
       const { error } = await supabase.rpc('admin_send_broadcast', {
@@ -77,11 +78,11 @@ export default function AdminEventsScreen() {
       });
       if (error) throw error;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Sent', 'Broadcast delivered to all users.');
+      setAlertInfo({ title: 'Sent', message: 'Broadcast delivered to all users.' });
       setBroadcastTitle('');
       setBroadcastBody('');
     } catch (e: any) {
-      Alert.alert('Failed', e.message ?? 'Could not send broadcast.');
+      setAlertInfo({ title: 'Failed', message: e.message ?? 'Could not send broadcast.' });
     } finally {
       setSendingBroadcast(false);
     }
@@ -89,7 +90,7 @@ export default function AdminEventsScreen() {
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsMultipleSelection: false,
       quality: 0.85,
     });
@@ -111,7 +112,7 @@ export default function AdminEventsScreen() {
       const { data: urlData } = supabase.storage.from('event-images').getPublicUrl(fileName);
       setForm(f => ({ ...f, image_url: urlData.publicUrl }));
     } catch (e: any) {
-      Alert.alert('Upload failed', e.message ?? 'Could not upload image.');
+      setAlertInfo({ title: 'Upload failed', message: e.message ?? 'Could not upload image.' });
     } finally {
       setUploadingImage(false);
     }
@@ -135,6 +136,7 @@ export default function AdminEventsScreen() {
       if (error) throw error;
       return data ?? [];
     },
+    staleTime: 30_000,
   });
 
   const openCreate = () => {
@@ -162,7 +164,7 @@ export default function AdminEventsScreen() {
 
   const handleSave = async () => {
     if (!form.title.trim()) {
-      Alert.alert('Title required', 'Please enter an event title.');
+      setAlertInfo({ title: 'Title required', message: 'Please enter an event title.' });
       return;
     }
     setSaving(true);
@@ -199,32 +201,32 @@ export default function AdminEventsScreen() {
       setShowForm(false);
       setEditingEvent(null);
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not save. Make sure the admin migration has been run.');
+      setAlertInfo({ title: 'Error', message: e.message ?? 'Could not save. Make sure the admin migration has been run.' });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleArchive = (e: SceneEvent) => {
-    Alert.alert(
-      e.status === 'Live' ? 'Archive event?' : 'Restore event?',
-      e.status === 'Live' ? 'This will hide it from the Scene tab.' : 'This will make it visible again.',
-      [
+  const handleArchive = (ev: SceneEvent) => {
+    setAlertInfo({
+      title: ev.status === 'Live' ? 'Archive event?' : 'Restore event?',
+      message: ev.status === 'Live' ? 'This will hide it from the Scene tab.' : 'This will make it visible again.',
+      buttons: [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: e.status === 'Live' ? 'Archive' : 'Restore',
-          style: e.status === 'Live' ? 'destructive' : 'default',
+          text: ev.status === 'Live' ? 'Archive' : 'Restore',
+          style: ev.status === 'Live' ? 'destructive' : 'default',
           onPress: async () => {
-            const newStatus = e.status === 'Live' ? 'Archived' : 'Live';
+            const newStatus = ev.status === 'Live' ? 'Archived' : 'Live';
             await supabase.rpc('admin_update_explore_event', {
-              p_event_id: e.id,
+              p_event_id: ev.id,
               p_status: newStatus,
             });
             queryClient.invalidateQueries({ queryKey: ['admin-scene-events'] });
           },
         },
       ],
-    );
+    });
   };
 
   const liveEvents = events.filter(e => e.status === 'Live');
@@ -377,6 +379,14 @@ export default function AdminEventsScreen() {
           </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
+
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -523,7 +533,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: Colors.overlayDark,
     alignItems: 'center',
     justifyContent: 'center',
   },

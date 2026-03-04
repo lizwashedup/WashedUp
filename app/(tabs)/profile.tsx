@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   Linking,
   ActivityIndicator,
   TextInput,
@@ -24,11 +23,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
-import { PROFILE_PHOTO_KEY } from '../../components/ProfileButton';
+import { PROFILE_PHOTO_KEY } from '../../constants/QueryKeys';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { checkContent } from '../../lib/contentFilter';
+import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 // Uses correct column names from profiles table: first_name_display, profile_photo_url, handle
 interface Profile {
@@ -39,6 +39,9 @@ interface Profile {
   city: string | null;
   gender: string | null;
   handle: string | null;
+  neighborhood: string | null;
+  is_traveling: boolean;
+  fun_fact: string | null;
 }
 
 export default function ProfileScreen() {
@@ -46,6 +49,7 @@ export default function ProfileScreen() {
   const queryClient = useQueryClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [showDeleteFlow, setShowDeleteFlow] = useState(false);
   const [deleteStep, setDeleteStep] = useState(1);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -60,6 +64,9 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
   const [checkingHandle, setCheckingHandle] = useState(false);
+  const [editNeighborhood, setEditNeighborhood] = useState('');
+  const [editIsTraveling, setEditIsTraveling] = useState(false);
+  const [editFunFact, setEditFunFact] = useState('');
 
   useEffect(() => {
     fetchProfile();
@@ -110,7 +117,7 @@ export default function ProfileScreen() {
       if (!user) { setLoading(false); return; }
       const { data } = await supabase
         .from('profiles')
-        .select('id, first_name_display, profile_photo_url, bio, city, gender, handle')
+        .select('id, first_name_display, profile_photo_url, bio, city, gender, handle, neighborhood, is_traveling, fun_fact')
         .eq('id', user.id)
         .single();
       if (data) {
@@ -122,6 +129,9 @@ export default function ProfileScreen() {
           city: data.city ?? null,
           gender: data.gender ?? null,
           handle: (data as any).handle ?? null,
+          neighborhood: (data as any).neighborhood ?? null,
+          is_traveling: (data as any).is_traveling ?? false,
+          fun_fact: (data as any).fun_fact ?? null,
         });
       }
     } catch {}
@@ -129,14 +139,18 @@ export default function ProfileScreen() {
   };
 
   const handleLogOut = () => {
-    Alert.alert('Log Out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log Out',
-        style: 'destructive',
-        onPress: () => supabase.auth.signOut(),
-      },
-    ]);
+    setAlertInfo({
+      title: 'Log Out',
+      message: 'Are you sure you want to log out?',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: () => supabase.auth.signOut(),
+        },
+      ],
+    });
   };
 
   const resetDeleteFlow = () => {
@@ -149,6 +163,9 @@ export default function ProfileScreen() {
     setEditName(profile?.first_name ?? '');
     setEditBio(profile?.bio ?? '');
     setEditHandle(profile?.handle ?? '');
+    setEditNeighborhood(profile?.neighborhood ?? '');
+    setEditIsTraveling(profile?.is_traveling ?? false);
+    setEditFunFact(profile?.fun_fact ?? '');
     setEditPhotoUri(null);
     setEditPhotoBase64(null);
     setHandleAvailable(null);
@@ -159,11 +176,11 @@ export default function ProfileScreen() {
   const pickEditPhotoFromLibrary = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Go to Settings and allow photo access.');
+      setAlertInfo({ title: 'Permission needed', message: 'Go to Settings and allow photo access.' });
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 1,
@@ -175,7 +192,7 @@ export default function ProfileScreen() {
   const takeEditPhotoFromCamera = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Go to Settings and allow camera access.');
+      setAlertInfo({ title: 'Permission needed', message: 'Go to Settings and allow camera access.' });
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -197,17 +214,21 @@ export default function ProfileScreen() {
       setEditPhotoUri(manipulated.uri);
       setEditPhotoBase64(manipulated.base64 ?? null);
     } catch {
-      Alert.alert('Invalid image', PHOTO_FORMAT_ERROR_MESSAGE);
+      setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
     }
   };
 
   const pickEditPhoto = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert('Change photo', 'Choose how to add your photo', [
-      { text: 'Take Photo', onPress: takeEditPhotoFromCamera },
-      { text: 'Choose from Library', onPress: pickEditPhotoFromLibrary },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setAlertInfo({
+      title: 'Change photo',
+      message: 'Choose how to add your photo',
+      buttons: [
+        { text: 'Take Photo', onPress: takeEditPhotoFromCamera },
+        { text: 'Choose from Library', onPress: pickEditPhotoFromLibrary },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    });
   };
 
   const handleSaveProfile = async () => {
@@ -215,13 +236,13 @@ export default function ProfileScreen() {
     Keyboard.dismiss();
     const trimmedName = editName.trim();
     if (!trimmedName) {
-      Alert.alert('Name required', 'Please enter a display name.');
+      setAlertInfo({ title: 'Name required', message: 'Please enter a display name.' });
       return;
     }
 
-    const filter = checkContent([trimmedName, editBio].filter(Boolean).join(' '));
+    const filter = checkContent([trimmedName, editNeighborhood, editFunFact].filter(Boolean).join(' '));
     if (!filter.ok) {
-      Alert.alert('Content not allowed', filter.reason ?? 'Please revise your profile and try again.');
+      setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your profile and try again.' });
       return;
     }
 
@@ -242,13 +263,17 @@ export default function ProfileScreen() {
       }
 
       const handleVal = editHandle.trim().toLowerCase() || null;
+      const neighborhoodVal = editNeighborhood.trim() || null;
+      const funFactVal = editFunFact.trim() || null;
       const { error } = await supabase
         .from('profiles')
         .update({
           first_name_display: trimmedName,
-          bio: editBio.trim() || null,
           profile_photo_url: newPhotoUrl,
           handle: handleVal,
+          neighborhood: neighborhoodVal,
+          is_traveling: editIsTraveling,
+          fun_fact: funFactVal,
         })
         .eq('id', user.id);
 
@@ -256,11 +281,19 @@ export default function ProfileScreen() {
 
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
       setProfile((prev) =>
-        prev ? { ...prev, first_name: trimmedName, bio: editBio.trim() || null, avatar_url: newPhotoUrl, handle: handleVal } : prev,
+        prev ? {
+          ...prev,
+          first_name: trimmedName,
+          avatar_url: newPhotoUrl,
+          handle: handleVal,
+          neighborhood: neighborhoodVal,
+          is_traveling: editIsTraveling,
+          fun_fact: funFactVal,
+        } : prev,
       );
       setShowEditFlow(false);
     } catch (err: any) {
-      Alert.alert('Could not save', err?.message ?? 'Please try again.');
+      setAlertInfo({ title: 'Could not save', message: err?.message ?? 'Please try again.' });
     } finally {
       setSaving(false);
     }
@@ -272,7 +305,7 @@ export default function ProfileScreen() {
 
   const handleDeleteAccount = async () => {
     if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') {
-      Alert.alert('Type DELETE to confirm', 'Please type DELETE in all caps to confirm.');
+      setAlertInfo({ title: 'Type DELETE to confirm', message: 'Please type DELETE in all caps to confirm.' });
       return;
     }
 
@@ -305,10 +338,10 @@ export default function ProfileScreen() {
     } catch (err: any) {
       setDeleting(false);
       const msg = err?.message ?? String(err);
-      Alert.alert(
-        'Something went wrong',
-        `We could not delete your account automatically. ${msg}\n\nPlease email hello@washedup.app and we will delete it within 24 hours.`,
-      );
+      setAlertInfo({
+        title: 'Something went wrong',
+        message: `We could not delete your account automatically. ${msg}\n\nPlease email hello@washedup.app and we will delete it within 24 hours.`,
+      });
     }
   };
 
@@ -327,11 +360,20 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.terracotta} />
-        </View>
-      </SafeAreaView>
+      <>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <View style={styles.centered}>
+            <ActivityIndicator size="large" color={Colors.terracotta} />
+          </View>
+        </SafeAreaView>
+        <BrandedAlert
+          visible={!!alertInfo}
+          title={alertInfo?.title ?? ''}
+          message={alertInfo?.message}
+          buttons={alertInfo?.buttons}
+          onClose={() => setAlertInfo(null)}
+        />
+      </>
     );
   }
 
@@ -339,7 +381,8 @@ export default function ProfileScreen() {
 
   if (showDeleteFlow) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <>
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.deleteHeader}>
           <TouchableOpacity
             onPress={resetDeleteFlow}
@@ -427,6 +470,14 @@ export default function ProfileScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
+        <BrandedAlert
+          visible={!!alertInfo}
+          title={alertInfo?.title ?? ''}
+          message={alertInfo?.message}
+          buttons={alertInfo?.buttons}
+          onClose={() => setAlertInfo(null)}
+        />
+      </>
     );
   }
 
@@ -437,7 +488,8 @@ export default function ProfileScreen() {
     const handleChanged = editHandle.trim().toLowerCase() !== (profile?.handle ?? '').trim().toLowerCase();
     const saveDisabledByHandle = handleChanged && (handleAvailable !== true || checkingHandle);
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <>
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.deleteHeader}>
           <TouchableOpacity
             onPress={() => setShowEditFlow(false)}
@@ -512,19 +564,59 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.editFieldGroup}>
-            <Text style={styles.editLabel}>Bio</Text>
+            <Text style={styles.editLabel}>Fun Fact</Text>
             <TextInput
               style={[styles.editInput, styles.editBioInput]}
-              value={editBio}
-              onChangeText={setEditBio}
-              placeholder="Tell people a little about yourself"
+              value={editFunFact}
+              onChangeText={setEditFunFact}
+              placeholder="Something fun about you (e.g. I really love wine and cheese)"
               placeholderTextColor={Colors.textLight}
-              maxLength={150}
+              maxLength={120}
               multiline
               textAlignVertical="top"
               returnKeyType="default"
             />
-            <Text style={styles.editCharCount}>{editBio.length}/150</Text>
+            <Text style={styles.editCharCount}>{editFunFact.length}/120</Text>
+            <Text style={styles.editHelp}>This shows on your profile and when people tap your picture</Text>
+          </View>
+
+          <View style={styles.editFieldGroup}>
+            <Text style={styles.editLabel}>Neighborhood</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editNeighborhood}
+              onChangeText={setEditNeighborhood}
+              placeholder="e.g. Silver Lake, West Hollywood"
+              placeholderTextColor={Colors.textLight}
+              maxLength={40}
+              autoCorrect={false}
+              returnKeyType="next"
+            />
+            <Text style={styles.editHelp}>Where you're based (shown on your mini profile)</Text>
+          </View>
+
+          <View style={styles.editFieldGroup}>
+            <Text style={styles.editLabel}>Do you live in LA?</Text>
+            <View style={styles.travelOptions}>
+              <TouchableOpacity
+                style={[styles.travelOption, !editIsTraveling && styles.travelOptionActive]}
+                onPress={() => setEditIsTraveling(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.travelOptionText, !editIsTraveling && styles.travelOptionTextActive]}>
+                  Yes, I live here
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.travelOption, editIsTraveling && styles.travelOptionActive]}
+                onPress={() => setEditIsTraveling(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.travelOptionText, editIsTraveling && styles.travelOptionTextActive]}>
+                  No, just traveling through
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {profile?.gender && (
@@ -561,6 +653,14 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
+        <BrandedAlert
+          visible={!!alertInfo}
+          title={alertInfo?.title ?? ''}
+          message={alertInfo?.message}
+          buttons={alertInfo?.buttons}
+          onClose={() => setAlertInfo(null)}
+        />
+      </>
     );
   }
 
@@ -580,8 +680,9 @@ export default function ProfileScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+    <>
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
         {/* Header row with back button */}
         <View style={styles.header}>
@@ -623,8 +724,8 @@ export default function ProfileScreen() {
               <Text style={styles.locationText}>{profile.city}</Text>
             </View>
           )}
-          {profile?.bio && (
-            <Text style={styles.bio}>{profile.bio}</Text>
+          {profile?.fun_fact && (
+            <Text style={styles.bio}>{profile.fun_fact}</Text>
           )}
 
           <TouchableOpacity style={styles.editProfileBtn} onPress={openEditFlow} activeOpacity={0.8}>
@@ -688,6 +789,14 @@ export default function ProfileScreen() {
         <Text style={styles.footer}>WashedUp · hello@washedup.app</Text>
       </ScrollView>
     </SafeAreaView>
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
+    </>
   );
 }
 
@@ -996,6 +1105,31 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     textAlign: 'right',
     marginTop: 4,
+  },
+  travelOptions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  travelOption: {
+    flex: 1,
+    backgroundColor: Colors.white,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  travelOptionActive: {
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
+  },
+  travelOptionText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+  },
+  travelOptionTextActive: {
+    color: Colors.white,
   },
   editReadOnly: {
     flexDirection: 'row',

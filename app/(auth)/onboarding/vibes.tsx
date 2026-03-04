@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { PROFILE_PHOTO_KEY } from '../../../components/ProfileButton';
+import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
+import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import { ChevronLeft } from 'lucide-react-native';
@@ -23,6 +24,7 @@ export default function OnboardingVibesScreen() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const selectedCount = Object.keys(selected).filter(k => selected[k]).length;
 
@@ -45,7 +47,7 @@ export default function OnboardingVibesScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert('Session expired', 'Please sign in again.');
+        setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
         supabase.auth.signOut();
         return;
       }
@@ -58,7 +60,7 @@ export default function OnboardingVibesScreen() {
         })
         .eq('id', user.id);
       if (updateError) {
-        Alert.alert('Something went wrong', 'Could not save your vibes. Please try again.');
+        setAlertInfo({ title: 'Something went wrong', message: 'Could not save your vibes. Please try again.' });
         return;
       }
 
@@ -66,8 +68,11 @@ export default function OnboardingVibesScreen() {
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
       await queryClient.refetchQueries({ queryKey: PROFILE_PHOTO_KEY });
 
-      // Ask for push permission at the natural completion moment.
-      Notifications.requestPermissionsAsync().catch(() => {});
+      // Only request push permission if not already granted
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        await Notifications.requestPermissionsAsync().catch(() => {});
+      }
 
       router.replace('/(tabs)/plans');
     } finally {
@@ -128,6 +133,13 @@ export default function OnboardingVibesScreen() {
           <Text style={styles.primaryButtonText}>Let&apos;s Go</Text>
         </TouchableOpacity>
       </View>
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }

@@ -1,18 +1,16 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator, Linking } from 'react-native';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
-import { ArrowLeft, MapPin, Calendar, Users, Heart, ChevronDown } from 'lucide-react-native';
+import { ArrowLeft, MapPin, Calendar, Heart, ChevronDown } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
-import { MapView, Marker } from '../MapView.native';
-import { MAP_STYLE } from '../../constants/MapStyle';
-import { CATEGORY_OPTIONS } from '../../constants/Categories';
-import { FilterBottomSheet } from '../FilterBottomSheet';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
-import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
-import type { Plan } from '../../lib/fetchPlans';
+import { router } from 'expo-router';
+import { MapView, Marker } from './MapView.native';
+import { MAP_STYLE } from '../constants/MapStyle';
+import { CATEGORY_OPTIONS } from '../constants/Categories';
+import { FilterBottomSheet } from './FilterBottomSheet';
+import Colors from '../constants/Colors';
+import { Fonts, FontSizes } from '../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -37,30 +35,60 @@ const CATEGORY_COLORS: Record<string, string> = {
   community: Colors.terracotta,
 };
 
-function formatDateShort(dateString: string): string {
-  const d = new Date(dateString);
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-  const dateStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  if (dateStart.getTime() === todayStart.getTime()) return `Today at ${time}`;
-  if (dateStart.getTime() === tomorrowStart.getTime()) return `Tomorrow at ${time}`;
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ` at ${time}`;
+interface SceneEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  image_url: string | null;
+  event_date: string | null;
+  start_time: string | null;
+  venue: string | null;
+  venue_address: string | null;
+  category: string | null;
+  external_url: string | null;
+  ticket_price: string | null;
+  plans_count: number;
 }
 
-interface PlansMapViewProps {
-  plans: Plan[];
+interface GeocodedEvent extends SceneEvent {
+  latitude: number;
+  longitude: number;
+}
+
+function formatDateShort(dateStr: string | null, timeStr: string | null): string {
+  if (!dateStr) return '';
+  const date = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00`);
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+
+  let dayLabel: string;
+  if (date.toDateString() === today.toDateString()) dayLabel = 'Tonight';
+  else if (date.toDateString() === tomorrow.toDateString()) dayLabel = 'Tomorrow';
+  else dayLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+  if (timeStr) {
+    const [h, m] = timeStr.split(':');
+    const d = new Date();
+    d.setHours(parseInt(h, 10), parseInt(m, 10));
+    const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    return `${dayLabel} · ${t}`;
+  }
+  return dayLabel;
+}
+
+interface SceneMapViewProps {
+  events: SceneEvent[];
   wishlistedSet: Record<string, boolean>;
-  onPlanPress: (planId: string) => void;
   onClose: () => void;
-  onWishlist?: (planId: string, current: boolean) => void;
+  onWishlist?: (id: string, current: boolean) => void;
 }
 
-export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClose, onWishlist }: PlansMapViewProps) {
-  const [selectedFilter, setSelectedFilter] = useState<string | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+export default function SceneMapView({ events, wishlistedSet, onClose, onWishlist }: SceneMapViewProps) {
+  const [geocodedEvents, setGeocodedEvents] = useState<GeocodedEvent[]>([]);
+  const [geocoding, setGeocoding] = useState(true);
+  const [selectedEvent, setSelectedEvent] = useState<GeocodedEvent | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [heartFilter, setHeartFilter] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
@@ -72,38 +100,64 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
     });
   }, []);
 
-  const filteredPlans = plans.filter((p) => {
-    if (!p.latitude || !p.longitude) return false;
-    if (selectedFilter && (p.category?.toLowerCase() !== selectedFilter.toLowerCase())) return false;
-    if (heartFilter && !wishlistedSet[p.id]) return false;
+  useEffect(() => {
+    let cancelled = false;
+    async function geocodeAll() {
+      const results: GeocodedEvent[] = [];
+      for (const event of events) {
+        if (cancelled) return;
+        const address = event.venue_address || event.venue;
+        if (!address) continue;
+        try {
+          const coords = await Location.geocodeAsync(address);
+          if (coords.length > 0) {
+            results.push({ ...event, latitude: coords[0].latitude, longitude: coords[0].longitude });
+          }
+        } catch {
+          // Skip events that can't be geocoded
+        }
+      }
+      if (!cancelled) {
+        setGeocodedEvents(results);
+        setGeocoding(false);
+      }
+    }
+    geocodeAll();
+    return () => { cancelled = true; };
+  }, [events]);
+
+  const filteredEvents = geocodedEvents.filter((e) => {
+    if (categoryFilter && e.category?.toLowerCase() !== categoryFilter.toLowerCase()) return false;
+    if (heartFilter && !wishlistedSet[e.id]) return false;
     return true;
   });
 
-  const handleMarkerPress = useCallback((plan: Plan) => {
+  const handleMarkerPress = useCallback((event: GeocodedEvent) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedPlan((prev) => {
-      if (prev?.id === plan.id) {
-        setTimeout(() => onPlanPress(plan.id), 0);
+    setSelectedEvent((prev) => {
+      if (prev?.id === event.id) {
+        router.push(`/event/${event.id}`);
         return prev;
       }
-      return plan;
+      return event;
     });
-    if (plan.latitude && plan.longitude && mapRef.current) {
+    if (mapRef.current) {
       mapRef.current.animateToRegion({
-        latitude: plan.latitude - 0.02,
-        longitude: plan.longitude,
+        latitude: event.latitude - 0.02,
+        longitude: event.longitude,
         latitudeDelta: 0.08,
         longitudeDelta: 0.08,
       }, 300);
     }
-  }, [onPlanPress]);
-
-  const handleMapPress = useCallback(() => {
-    setSelectedPlan(null);
   }, []);
 
-  const going = selectedPlan ? capDisplayCount(selectedPlan.member_count) : 0;
-  const totalCapacity = selectedPlan ? Math.min((selectedPlan.max_invites ?? 7) + 1, MAX_GROUP) : 0;
+  const handleMapPress = useCallback(() => {
+    setSelectedEvent(null);
+  }, []);
+
+  const isFree = selectedEvent
+    ? !selectedEvent.ticket_price || selectedEvent.ticket_price.trim() === '' || selectedEvent.ticket_price.trim().toLowerCase() === 'free'
+    : true;
 
   return (
     <View style={styles.container}>
@@ -116,20 +170,20 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         showsMyLocationButton={false}
         onPress={handleMapPress}
       >
-        {filteredPlans.map((plan) => {
-          const catColor = CATEGORY_COLORS[plan.category?.toLowerCase() ?? ''] ?? Colors.terracotta;
-          const isSelected = selectedPlan?.id === plan.id;
+        {filteredEvents.map((event) => {
+          const catColor = CATEGORY_COLORS[event.category?.toLowerCase() ?? ''] ?? Colors.terracotta;
+          const isSelected = selectedEvent?.id === event.id;
           return (
             <Marker
-              key={plan.id}
-              coordinate={{ latitude: plan.latitude!, longitude: plan.longitude! }}
-              onPress={() => handleMarkerPress(plan)}
+              key={event.id}
+              coordinate={{ latitude: event.latitude, longitude: event.longitude }}
+              onPress={() => handleMarkerPress(event)}
               tracksViewChanges={false}
               stopPropagation
             >
               <View style={[styles.pin, { backgroundColor: catColor }, isSelected && styles.pinSelected]} pointerEvents="none">
                 <Text style={styles.pinText} numberOfLines={1}>
-                  {plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title}
+                  {event.title.length > 14 ? event.title.slice(0, 14) + '...' : event.title}
                 </Text>
               </View>
               <View style={[styles.pinArrow, { borderTopColor: catColor }]} pointerEvents="none" />
@@ -137,6 +191,13 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
           );
         })}
       </MapView>
+
+      {geocoding && (
+        <View style={styles.geocodingOverlay}>
+          <ActivityIndicator size="small" color={Colors.terracotta} />
+          <Text style={styles.geocodingText}>Loading locations...</Text>
+        </View>
+      )}
 
       {/* Top bar */}
       <View style={styles.topBar}>
@@ -146,23 +207,23 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
 
         <View style={styles.countPill}>
           <Text style={styles.countText}>
-            {filteredPlans.length} {filteredPlans.length === 1 ? 'plan' : 'plans'}
+            {filteredEvents.length} {filteredEvents.length === 1 ? 'event' : 'events'}
           </Text>
         </View>
 
         <View style={styles.topBarRight}>
           <TouchableOpacity
-            style={[styles.categoryPill, selectedFilter !== null && styles.categoryPillActive]}
+            style={[styles.categoryPill, categoryFilter !== null && styles.categoryPillActive]}
             onPress={() => {
               Haptics.selectionAsync();
               setCategorySheetOpen(true);
             }}
             activeOpacity={0.8}
           >
-            <Text style={[styles.categoryPillText, selectedFilter !== null && styles.categoryPillTextActive]}>
-              {selectedFilter ?? 'Category'}
+            <Text style={[styles.categoryPillText, categoryFilter !== null && styles.categoryPillTextActive]}>
+              {categoryFilter ?? 'Category'}
             </Text>
-            <ChevronDown size={14} color={selectedFilter ? Colors.white : Colors.asphalt} strokeWidth={2} />
+            <ChevronDown size={14} color={categoryFilter ? Colors.white : Colors.asphalt} strokeWidth={2} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -170,7 +231,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
             onPress={() => {
               Haptics.selectionAsync();
               setHeartFilter(prev => !prev);
-              setSelectedPlan(null);
+              setSelectedEvent(null);
             }}
             activeOpacity={0.8}
           >
@@ -184,66 +245,74 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         </View>
       </View>
 
-      {/* Selected plan card */}
-      {selectedPlan && (
+      {/* Selected event card */}
+      {selectedEvent && (
         <TouchableOpacity
-          style={styles.planCard}
-          onPress={() => onPlanPress(selectedPlan.id)}
+          style={styles.eventCard}
+          onPress={() => router.push(`/event/${selectedEvent.id}`)}
           activeOpacity={0.95}
         >
-          {selectedPlan.image_url && (
+          {selectedEvent.image_url && (
             <Image
-              source={{ uri: selectedPlan.image_url }}
+              source={{ uri: selectedEvent.image_url }}
               style={styles.cardImage}
               contentFit="cover"
             />
           )}
           <View style={styles.cardContent}>
-            {selectedPlan.category && (
-              <View style={[styles.cardCatBadge, { backgroundColor: CATEGORY_COLORS[selectedPlan.category.toLowerCase()] ?? Colors.terracotta }]}>
-                <Text style={styles.cardCatText}>{selectedPlan.category}</Text>
+            {selectedEvent.category && (
+              <View style={[styles.cardCatBadge, { backgroundColor: CATEGORY_COLORS[selectedEvent.category.toLowerCase()] ?? Colors.terracotta }]}>
+                <Text style={styles.cardCatText}>{selectedEvent.category}</Text>
               </View>
             )}
-            <Text style={styles.cardTitle} numberOfLines={2}>{selectedPlan.title}</Text>
+            <Text style={styles.cardTitle} numberOfLines={2}>{selectedEvent.title}</Text>
 
-            <View style={styles.cardMeta}>
-              <Calendar size={13} color={Colors.textMedium} strokeWidth={2} />
-              <Text style={styles.cardMetaText}>{formatDateShort(selectedPlan.start_time)}</Text>
-            </View>
+            {(selectedEvent.event_date || selectedEvent.start_time) && (
+              <View style={styles.cardMeta}>
+                <Calendar size={13} color={Colors.textMedium} strokeWidth={2} />
+                <Text style={styles.cardMetaText}>{formatDateShort(selectedEvent.event_date, selectedEvent.start_time)}</Text>
+              </View>
+            )}
 
-            {selectedPlan.location_text && !selectedPlan.location_text.startsWith('http') && (
+            {selectedEvent.venue && (
               <View style={styles.cardMeta}>
                 <MapPin size={13} color={Colors.textMedium} strokeWidth={2} />
-                <Text style={styles.cardMetaText} numberOfLines={1}>{selectedPlan.location_text}</Text>
+                <Text style={styles.cardMetaText} numberOfLines={1}>{selectedEvent.venue}</Text>
               </View>
             )}
 
             <View style={styles.cardBottom}>
-              <View style={styles.cardMeta}>
-                <Users size={13} color={Colors.textMedium} strokeWidth={2} />
-                <Text style={styles.cardMetaText}>{going} of {totalCapacity}</Text>
-              </View>
               {onWishlist && (
                 <TouchableOpacity
                   style={styles.cardHeart}
                   onPress={(e) => {
                     e.stopPropagation();
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    onWishlist(selectedPlan.id, !!wishlistedSet[selectedPlan.id]);
+                    onWishlist(selectedEvent.id, !!wishlistedSet[selectedEvent.id]);
                   }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <Heart
                     size={18}
-                    color={wishlistedSet[selectedPlan.id] ? Colors.errorRed : Colors.asphalt}
-                    fill={wishlistedSet[selectedPlan.id] ? Colors.errorRed : 'transparent'}
+                    color={wishlistedSet[selectedEvent.id] ? Colors.errorRed : Colors.asphalt}
+                    fill={wishlistedSet[selectedEvent.id] ? Colors.errorRed : 'transparent'}
                     strokeWidth={2}
                   />
                 </TouchableOpacity>
               )}
-              <View style={styles.cardCta}>
-                <Text style={styles.cardCtaText}>View Plan</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.cardCta}
+                onPress={() => {
+                  if (selectedEvent.external_url && !isFree) {
+                    Linking.openURL(selectedEvent.external_url);
+                  } else {
+                    router.push(`/event/${selectedEvent.id}`);
+                  }
+                }}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.cardCtaText}>{isFree ? 'View Event' : 'Get Tickets'}</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
@@ -253,15 +322,15 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         visible={categorySheetOpen}
         title="Category"
         options={CATEGORY_OPTIONS.map((c) => ({ key: c, label: c }))}
-        selected={selectedFilter ? [selectedFilter] : []}
+        selected={categoryFilter ? [categoryFilter] : []}
         onToggle={(key) => {
-          setSelectedFilter(prev => prev === key ? null : key);
-          setSelectedPlan(null);
+          setCategoryFilter(prev => prev === key ? null : key);
+          setSelectedEvent(null);
         }}
         onClose={() => setCategorySheetOpen(false)}
         onClear={() => {
-          setSelectedFilter(null);
-          setSelectedPlan(null);
+          setCategoryFilter(null);
+          setSelectedEvent(null);
         }}
       />
     </View>
@@ -270,6 +339,30 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+
+  geocodingOverlay: {
+    position: 'absolute',
+    top: 70,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.white,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: Colors.shadowBlack,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 20,
+  },
+  geocodingText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+  },
 
   topBar: {
     position: 'absolute',
@@ -294,7 +387,6 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 4,
   },
-
   countPill: {
     backgroundColor: Colors.white,
     paddingHorizontal: 14,
@@ -311,7 +403,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.asphalt,
   },
-
   topBarRight: {
     flex: 1,
     flexDirection: 'row',
@@ -368,7 +459,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 16,
-    maxWidth: 140,
+    maxWidth: 150,
   },
   pinSelected: {
     transform: [{ scale: 1.1 }],
@@ -395,7 +486,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
 
-  planCard: {
+  eventCard: {
     position: 'absolute',
     bottom: 24,
     left: 16,
@@ -450,13 +541,13 @@ const styles = StyleSheet.create({
   cardBottom: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     marginTop: 4,
     gap: 8,
   },
   cardHeart: {
     padding: 4,
-    marginLeft: 'auto',
+    marginRight: 'auto',
   },
   cardCta: {
     backgroundColor: Colors.terracotta,

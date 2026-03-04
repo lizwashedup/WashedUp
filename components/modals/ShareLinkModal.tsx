@@ -93,7 +93,7 @@ const styles = StyleSheet.create({
   },
   modal: {
     backgroundColor: Colors.white,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 24,
     width: '100%',
     maxWidth: 340,

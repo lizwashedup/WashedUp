@@ -7,7 +7,6 @@ import { Eye, EyeOff } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Keyboard,
     KeyboardAvoidingView,
     Linking,
@@ -21,6 +20,7 @@ import {
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
@@ -36,6 +36,7 @@ export default function SignupScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationTouched, setValidationTouched] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const emailInputRef = useRef<TextInput>(null);
   const passwordInputRef = useRef<TextInput>(null);
 
@@ -100,10 +101,10 @@ export default function SignupScreen() {
       }
 
       if (!authData?.session) {
-        Alert.alert(
-          'Check your email',
-          'We sent you a confirmation link. Please verify your email to continue.',
-        );
+        setAlertInfo({
+          title: 'Check your email',
+          message: 'We sent you a confirmation link. Please verify your email to continue.',
+        });
       }
       // Auth listener in root layout handles navigation when session exists
     } catch (e: any) {
@@ -367,6 +368,13 @@ export default function SignupScreen() {
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }
