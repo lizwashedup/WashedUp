@@ -34,6 +34,9 @@ yarn-error.*
 .env
 .env*.local
 
+# Firebase (iOS only — google-services.json is needed by EAS Build)
+GoogleService-Info.plist
+
 # Cursor MCP config (contains secrets)
 .cursor/mcp.json
 
