@@ -495,6 +495,11 @@ export default function PlanDetailScreen() {
       if (!currentUserId || !id) throw new Error('Not authenticated');
       if (!plan) throw new Error('Plan not loaded');
 
+      if (greeting?.trim()) {
+        const filter = checkContent(greeting.trim());
+        if (!filter.ok) throw new Error(filter.reason ?? 'Your message contains language that goes against our community guidelines.');
+      }
+
       try {
         const { data: canJoinGender } = await supabase.rpc('can_join_event_gender', {
           p_user_id: currentUserId,
@@ -636,7 +641,7 @@ export default function PlanDetailScreen() {
   const handleSaveEdit = async () => {
     if (!plan || !currentUserId || editSaving) return;
 
-    const fieldsToCheck = [editTitle, editDescription, editCreatorMessage].filter(Boolean).join(' ');
+    const fieldsToCheck = [editTitle, editDescription, editCreatorMessage, editLocation].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
     if (!filter.ok) {
       setBrandedAlert({ visible: true, title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
@@ -933,7 +938,12 @@ export default function PlanDetailScreen() {
           </View>
         )}
 
-        {/* D. Creator's Note */}
+        {/* D. Description */}
+        {plan.description && (
+          <Text style={styles.description}>{plan.description}</Text>
+        )}
+
+        {/* F. Creator's Note */}
         {plan.host_message && (
           <View style={styles.noteBox}>
             <Text style={styles.noteLabel}>{`${plan.creator?.first_name_display ?? 'CREATOR'}'S NOTE`}</Text>
@@ -1477,6 +1487,11 @@ export default function PlanDetailScreen() {
         userId={miniProfileUserId}
         visible={!!miniProfileUserId}
         onClose={() => setMiniProfileUserId(null)}
+        onReport={(uid, uname) => {
+          setReportTarget({ id: uid, name: uname });
+          setShowReport(true);
+        }}
+        onBlock={(uid, uname) => blockUser(uid, uname, () => router.back())}
       />
     </SafeAreaView>
   );
@@ -1591,6 +1606,13 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
     color: Colors.asphalt,
+  },
+  description: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+    lineHeight: 22,
+    marginBottom: 20,
   },
   noteBox: {
     backgroundColor: Colors.cardBg,

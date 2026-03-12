@@ -27,7 +27,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
 import { supabase } from '../../lib/supabase';
 
-const SOCIAL_PROOF = '700+ people in LA already joined';
+const SOCIAL_PROOF = '800+ people in LA already joined';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -121,7 +121,12 @@ export default function LoginScreen() {
         redirectTo: 'washedupapp://auth/callback',
       });
       if (err) {
-        setResetError(err.message);
+        const msg = err.message?.toLowerCase() ?? '';
+        if (msg.includes('rate') || msg.includes('60 seconds')) {
+          setResetError('Please wait a minute before requesting another reset link.');
+        } else {
+          setResetError('Something went wrong. Please check your email and try again.');
+        }
         return;
       }
       setResetModalVisible(false);

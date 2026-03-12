@@ -1,5 +1,30 @@
 import { supabase } from './supabase';
 
+/**
+ * Batch-fetch accurate joined counts from event_members.
+ * Returns a map of event_id → actual joined count.
+ * Workaround for member_count column drift in the events table.
+ */
+export async function fetchRealMemberCounts(eventIds: string[]): Promise<Record<string, number>> {
+  if (eventIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('event_members')
+    .select('event_id')
+    .in('event_id', eventIds)
+    .eq('status', 'joined');
+
+  if (error) {
+    console.warn('[fetchRealMemberCounts]', error.message);
+    return {};
+  }
+
+  const counts: Record<string, number> = {};
+  (data ?? []).forEach((row: { event_id: string }) => {
+    counts[row.event_id] = (counts[row.event_id] ?? 0) + 1;
+  });
+  return counts;
+}
+
 export interface Plan {
   id: string;
   title: string;
@@ -64,22 +89,31 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
   const plans = (Array.isArray(data) ? data : []).map((item: any) => mapRowToPlan(item));
   if (plans.length === 0) return plans;
 
+  // Extract creator IDs before parallel fetch
   const creatorIds = [...new Set(plans.map((p) => p.creator?.id).filter(Boolean))] as string[];
 
-  if (creatorIds.length === 0) return plans;
+  // Fetch real member counts and creator plan counts in parallel — saves one round-trip
+  const [realCounts, creatorEventsResult] = await Promise.all([
+    fetchRealMemberCounts(plans.map((p) => p.id)),
+    creatorIds.length > 0
+      ? supabase.from('events').select('creator_user_id').in('creator_user_id', creatorIds)
+      : Promise.resolve({ data: [] as { creator_user_id: string }[], error: null }),
+  ]);
 
-  const { data: creatorEvents, error: creatorError } = await supabase
-    .from('events')
-    .select('creator_user_id')
-    .in('creator_user_id', creatorIds);
+  // Override member_count with real joined counts from event_members.
+  // Always floor at 1 — the creator is always a member of their own plan.
+  plans.forEach((p) => {
+    const raw = realCounts[p.id] ?? p.member_count;
+    p.member_count = Math.max(1, raw);
+  });
 
-  if (creatorError) {
-    console.warn('[fetchPlans] Creator count query failed:', creatorError.message);
+  if (creatorEventsResult.error) {
+    console.warn('[fetchPlans] Creator count query failed:', creatorEventsResult.error.message);
     return plans;
   }
 
   const planCountByCreator: Record<string, number> = {};
-  (creatorEvents ?? []).forEach((e: { creator_user_id: string }) => {
+  (creatorEventsResult.data ?? []).forEach((e: { creator_user_id: string }) => {
     planCountByCreator[e.creator_user_id] = (planCountByCreator[e.creator_user_id] ?? 0) + 1;
   });
 

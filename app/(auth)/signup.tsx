@@ -25,6 +25,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
 import { supabase } from '../../lib/supabase';
+import { checkContent } from '../../lib/contentFilter';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -73,7 +74,12 @@ export default function SignupScreen() {
       return;
     }
     if (!agreedToTerms) {
-      setError('Please agree to the Terms of Service and Community Guidelines.');
+      setError('Please agree to the Terms of Service, Privacy Policy, and Community Guidelines.');
+      return;
+    }
+    const nameFilter = checkContent(trimmedFirst);
+    if (!nameFilter.ok) {
+      setError(nameFilter.reason ?? 'That name is not allowed. Please try a different one.');
       return;
     }
 
@@ -84,7 +90,18 @@ export default function SignupScreen() {
         password,
       });
       if (signUpError) {
-        setError(signUpError.message === 'User already registered' ? 'An account with this email already exists.' : signUpError.message);
+        const msg = signUpError.message?.toLowerCase() ?? '';
+        if (msg.includes('already registered') || msg.includes('already exists')) {
+          setError('An account with this email already exists.');
+        } else if (msg.includes('password') && (msg.includes('weak') || msg.includes('short') || msg.includes('least'))) {
+          setError('Password is too weak. Please use at least 6 characters.');
+        } else if (msg.includes('rate') || msg.includes('too many')) {
+          setError('Too many attempts. Please wait a moment and try again.');
+        } else if (msg.includes('valid') && msg.includes('email')) {
+          setError('Please enter a valid email address.');
+        } else {
+          setError('Something went wrong. Please try again.');
+        }
         return;
       }
 
@@ -134,6 +151,10 @@ export default function SignupScreen() {
   }, []);
 
   const handleAppleSignIn = async () => {
+    if (!agreedToTerms) {
+      setError('Please agree to the Terms of Service, Privacy Policy, and Community Guidelines first.');
+      return;
+    }
     setError(null);
     setSocialLoading('apple');
     try {
@@ -148,6 +169,10 @@ export default function SignupScreen() {
   };
 
   const handleGoogleSignIn = async () => {
+    if (!agreedToTerms) {
+      setError('Please agree to the Terms of Service, Privacy Policy, and Community Guidelines first.');
+      return;
+    }
     setError(null);
     setSocialLoading('google');
     try {
@@ -293,11 +318,11 @@ export default function SignupScreen() {
               <View style={styles.gap16} />
 
               <TouchableOpacity
-                style={[styles.primaryButton, (loading || !agreedToTerms) && styles.primaryButtonDisabled]}
+                style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
                 onPress={handleSignUp}
                 onPressIn={triggerHaptic}
                 activeOpacity={0.9}
-                disabled={loading || !agreedToTerms}
+                disabled={loading}
               >
                 {loading ? (
                   <ActivityIndicator color={Colors.white} />
@@ -328,20 +353,22 @@ export default function SignupScreen() {
               <View style={styles.gap16} />
 
               {appleAvailable && (
-                <AppleAuthentication.AppleAuthenticationButton
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                  cornerRadius={14}
-                  style={styles.appleButton}
-                  onPress={handleAppleSignIn}
-                />
+                <View style={!agreedToTerms && styles.socialDisabled}>
+                  <AppleAuthentication.AppleAuthenticationButton
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                    cornerRadius={14}
+                    style={styles.appleButton}
+                    onPress={handleAppleSignIn}
+                  />
+                </View>
               )}
 
               {showGoogle && (
                 <>
                   <View style={styles.gap12} />
                   <TouchableOpacity
-                    style={styles.googleButton}
+                    style={[styles.googleButton, !agreedToTerms && styles.socialDisabled]}
                     onPress={handleGoogleSignIn}
                     onPressIn={triggerHaptic}
                     activeOpacity={0.9}
@@ -529,7 +556,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   primaryButtonDisabled: {
-    opacity: 0.9,
+    opacity: 0.5,
   },
   primaryButtonText: {
     fontFamily: Fonts.sansBold,
@@ -602,5 +629,8 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
+  },
+  socialDisabled: {
+    opacity: 0.4,
   },
 });

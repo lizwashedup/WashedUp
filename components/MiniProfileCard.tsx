@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
 import { Home, MapPin, Plane } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -7,6 +8,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import Colors from '../constants/Colors';
@@ -17,6 +19,8 @@ interface MiniProfileCardProps {
   visible: boolean;
   userId: string | null;
   onClose: () => void;
+  onReport?: (userId: string, userName: string) => void;
+  onBlock?: (userId: string, userName: string) => void;
 }
 
 interface MiniProfile {
@@ -28,9 +32,14 @@ interface MiniProfile {
   city: string | null;
 }
 
-export default function MiniProfileCard({ visible, userId, onClose }: MiniProfileCardProps) {
+export default function MiniProfileCard({ visible, userId, onClose, onReport, onBlock }: MiniProfileCardProps) {
   const [profile, setProfile] = useState<MiniProfile | null>(null);
   const [loading, setLoading] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? null));
+  }, []);
 
   useEffect(() => {
     if (!visible || !userId) {
@@ -144,6 +153,32 @@ export default function MiniProfileCard({ visible, userId, onClose }: MiniProfil
                   <Text style={styles.funFact}>{profile.fun_fact}</Text>
                 </View>
               ) : null}
+
+              {/* Report / Block — hidden for own profile */}
+              {userId && currentUserId && userId !== currentUserId && (onReport || onBlock) && (
+                <View style={styles.actionRow}>
+                  {onReport && (
+                    <TouchableOpacity
+                      style={styles.actionBtn}
+                      onPress={() => { onClose(); setTimeout(() => onReport(userId, name), 150); }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="flag-outline" size={16} color={Colors.textMedium} />
+                      <Text style={styles.actionBtnText}>Report</Text>
+                    </TouchableOpacity>
+                  )}
+                  {onBlock && (
+                    <TouchableOpacity
+                      style={styles.actionBtn}
+                      onPress={() => { onClose(); setTimeout(() => onBlock(userId, name), 150); }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="ban-outline" size={16} color={Colors.errorRed} />
+                      <Text style={[styles.actionBtnText, { color: Colors.errorRed }]}>Block</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
             </>
           )}
         </Pressable>
@@ -227,5 +262,25 @@ const styles = StyleSheet.create({
     color: Colors.textMedium,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  actionBtnText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
   },
 });

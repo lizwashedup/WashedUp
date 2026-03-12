@@ -63,10 +63,19 @@ function formatFullDate(dateStr: string | null, timeStr: string | null): string 
   const date = parseLocalDate(dateStr);
   const dayLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   if (timeStr) {
-    const [h, m] = timeStr.split(':');
-    const d = new Date();
-    d.setHours(parseInt(h, 10), parseInt(m, 10));
-    const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    let t: string;
+    // Handle full ISO timestamps (e.g. "2025-03-22T18:00:00+00:00") and
+    // time-only strings (e.g. "18:00:00") gracefully.
+    const ts = new Date(timeStr);
+    if (!isNaN(ts.getTime())) {
+      t = ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } else {
+      // Fallback: parse a plain "HH:MM" or "HH:MM:SS" time string
+      const [h, m] = timeStr.split(':');
+      const tmp = new Date();
+      tmp.setHours(parseInt(h, 10), parseInt(m, 10), 0, 0);
+      t = tmp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    }
     return `${dayLabel} at ${t}`;
   }
   return dayLabel;
@@ -424,6 +433,12 @@ export default function EventDetailScreen() {
               params: {
                 prefillTitle: event.title,
                 prefillExploreEventId: event.id,
+                prefillStartTime: event.start_time ?? '',
+                prefillEventDate: event.event_date ?? '',
+                prefillDescription: event.description ?? '',
+                prefillImageUrl: event.image_url ?? '',
+                prefillLocation: event.venue_address ?? event.venue ?? '',
+                prefillCategory: event.category ?? '',
               },
             });
           }}

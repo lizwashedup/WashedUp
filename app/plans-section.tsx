@@ -14,6 +14,8 @@ import { ArrowLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { fetchPlans, Plan } from '../lib/fetchPlans';
 import { PlanCard } from '../components/plans/PlanCard';
+import { ReportModal } from '../components/modals/ReportModal';
+import { useBlock } from '../hooks/useBlock';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 
@@ -44,6 +46,8 @@ export default function PlansSectionScreen() {
   const toDate = useMemo(() => (to ? new Date(to) : new Date(9999, 0, 1)), [to]);
 
   const [userId, setUserId] = React.useState<string | null>(null);
+  const [reportTarget, setReportTarget] = React.useState<{ userId: string; userName: string; eventId: string } | null>(null);
+  const { blockUser } = useBlock();
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
@@ -90,7 +94,22 @@ export default function PlansSectionScreen() {
           data={sectionPlans}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <PlanCard plan={toPlanCardPlan(item)} isMember={false} />
+            <PlanCard
+              plan={toPlanCardPlan(item)}
+              isMember={false}
+              onReport={(planId) => {
+                const plan = sectionPlans.find((p) => p.id === planId);
+                if (plan?.creator?.id) {
+                  setReportTarget({ userId: plan.creator.id, userName: plan.creator.first_name_display ?? 'User', eventId: planId });
+                }
+              }}
+              onBlock={(planId) => {
+                const plan = sectionPlans.find((p) => p.id === planId);
+                if (plan?.creator?.id) {
+                  blockUser(plan.creator.id, plan.creator.first_name_display ?? 'User');
+                }
+              }}
+            />
           )}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
@@ -99,6 +118,16 @@ export default function PlansSectionScreen() {
               <Text style={styles.emptyText}>No plans for this period.</Text>
             </View>
           }
+        />
+      )}
+
+      {reportTarget && (
+        <ReportModal
+          visible
+          onClose={() => setReportTarget(null)}
+          reportedUserId={reportTarget.userId}
+          reportedUserName={reportTarget.userName}
+          eventId={reportTarget.eventId}
         />
       )}
     </SafeAreaView>

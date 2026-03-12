@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Camera } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
@@ -77,6 +77,14 @@ export default function ProfileScreen() {
       fetchProfile();
     }, [])
   );
+
+  // Open edit modal directly when navigated here with ?openEdit=true
+  const { openEdit } = useLocalSearchParams<{ openEdit?: string }>();
+  useEffect(() => {
+    if (openEdit === 'true' && !loading && profile) {
+      openEditFlow();
+    }
+  }, [openEdit, loading, profile]);
 
   // Debounced handle availability check (500ms) — skip if unchanged from current
   useEffect(() => {

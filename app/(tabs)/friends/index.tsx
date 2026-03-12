@@ -28,6 +28,7 @@ import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useBlock } from '../../../hooks/useBlock';
+import { checkContent } from '../../../lib/contentFilter';
 import { supabase } from '../../../lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -181,8 +182,10 @@ export default function YourPeopleScreen() {
     enabled: !!userId,
   });
 
+  const filteredFriends = useMemo(() => friends.filter((f) => !blockedSet.has(f.friend_id)), [friends, blockedSet]);
+
   // Friend IDs set for O(1) lookup
-  const friendIds = useMemo(() => new Set(friends.map((f) => f.friend_id)), [friends]);
+  const friendIds = useMemo(() => new Set(filteredFriends.map((f) => f.friend_id)), [filteredFriends]);
 
   // Search results — handle-only for privacy (people must share their handle intentionally)
   const cleanQuery = debouncedQuery.replace(/^@/, '').toLowerCase();
@@ -260,6 +263,11 @@ export default function YourPeopleScreen() {
     const v = validateHandle(raw);
     if (!v.ok) {
       setHandleError(v.error ?? 'Invalid handle');
+      return;
+    }
+    const filter = checkContent(raw);
+    if (!filter.ok) {
+      setHandleError('That handle is not allowed.');
       return;
     }
     setHandleError(null);
@@ -561,10 +569,10 @@ export default function YourPeopleScreen() {
           {/* Friends list */}
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Your People</Text>
-            <Text style={styles.sectionCount}> · {friends.length}</Text>
+            <Text style={styles.sectionCount}> · {filteredFriends.length}</Text>
           </View>
 
-          {friends.length === 0 ? (
+          {filteredFriends.length === 0 ? (
             <View style={styles.emptyState}>
               <Users size={48} color={Colors.terracotta} />
               <Text style={[styles.emptyTitle, { textAlign: 'center' }]}>Add people here to invite them to your plans.</Text>
@@ -572,7 +580,7 @@ export default function YourPeopleScreen() {
             </View>
           ) : (
             <FlatList
-              data={friends}
+              data={filteredFriends}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.friendsList}
               keyboardDismissMode="on-drag"
@@ -724,6 +732,16 @@ export default function YourPeopleScreen() {
         visible={!!miniProfileUserId}
         userId={miniProfileUserId}
         onClose={() => setMiniProfileUserId(null)}
+        onReport={(uid, uname) => {
+          setReportTarget({ id: uid, name: uname });
+          setShowReport(true);
+        }}
+        onBlock={(uid, uname) => {
+          blockUser(uid, uname, () => {
+            queryClient.invalidateQueries({ queryKey: ['profile-search'] });
+            queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+          });
+        }}
       />
 
       <BrandedAlert

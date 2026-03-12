@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { ChevronLeft } from 'lucide-react-native';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
+import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
@@ -37,7 +38,7 @@ export default function OnboardingLACheckScreen() {
         supabase.auth.signOut();
         return;
       }
-      const { error } = await supabase.from('profiles').update({ city: 'Los Angeles' }).eq('id', user.id);
+      const { error } = await supabase.from('profiles').update({ city: 'Los Angeles', onboarding_status: 'photo' }).eq('id', user.id);
       if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
       router.push('/onboarding/photo');
     } finally {
@@ -60,7 +61,13 @@ export default function OnboardingLACheckScreen() {
         supabase.auth.signOut();
         return;
       }
-      const { error } = await supabase.from('profiles').update({ city: city.trim() || 'Other' }).eq('id', user.id);
+      const trimmedCity = city.trim() || 'Other';
+      const cityFilter = checkContent(trimmedCity);
+      if (!cityFilter.ok) {
+        setAlertInfo({ title: 'Content not allowed', message: cityFilter.reason ?? 'Please try a different city name.' });
+        return;
+      }
+      const { error } = await supabase.from('profiles').update({ city: trimmedCity, onboarding_status: 'photo' }).eq('id', user.id);
       if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
       router.push('/onboarding/photo');
     } finally {

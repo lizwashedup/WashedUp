@@ -5,6 +5,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Share,
+  ActionSheetIOS,
+  Platform,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +39,8 @@ interface PlanCardProps {
   isMember?: boolean;
   isWishlisted?: boolean;
   onWishlist?: (planId: string, current: boolean) => void;
+  onReport?: (planId: string) => void;
+  onBlock?: (planId: string) => void;
   isPast?: boolean;
 }
 
@@ -54,8 +59,31 @@ function formatDateTimeForCard(dateString: string): string {
   return `${dateStr} · ${timeStr}`;
 }
 
-export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, isPast = false }) => {
+export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, isPast = false }) => {
   const router = useRouter();
+
+  const handleLongPress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const creatorName = plan.creator?.first_name_display ?? 'Creator';
+    const options = ['Report this plan', `Block ${creatorName}`, 'Cancel'];
+    const cancelIndex = 2;
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: 1 },
+        (idx) => {
+          if (idx === 0) onReport?.(plan.id);
+          if (idx === 1) onBlock?.(plan.id);
+        },
+      );
+    } else {
+      Alert.alert('', '', [
+        { text: 'Report this plan', onPress: () => onReport?.(plan.id) },
+        { text: `Block ${creatorName}`, style: 'destructive', onPress: () => onBlock?.(plan.id) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  }, [plan.id, plan.creator?.first_name_display, onReport, onBlock]);
 
   const handleWishlist = useCallback(
     (e: any) => {
@@ -83,7 +111,8 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     }).catch(() => {});
   }, [plan.id, plan.title]);
 
-  const going = capDisplayCount(plan.member_count);
+  // Creator always counts as 1 — member_count should never display as 0
+  const going = Math.max(1, capDisplayCount(plan.member_count));
   const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
   const spotsLeft = Math.max(0, totalCapacity - going);
   const isFull = going >= totalCapacity;
@@ -106,6 +135,8 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   return (
     <TouchableOpacity
       onPress={handlePress}
+      onLongPress={handleLongPress}
+      delayLongPress={500}
       activeOpacity={0.92}
       style={[styles.card, isPast && styles.cardPast]}
       accessibilityLabel={`${plan.title} plan`}
@@ -119,6 +150,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               source={{ uri: plan.creator.profile_photo_url }}
               style={styles.creatorAvatar}
               contentFit="cover"
+              cachePolicy="memory-disk"
             />
           ) : (
             <View style={styles.creatorAvatarPlaceholder}>

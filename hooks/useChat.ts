@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { checkContent } from '../lib/contentFilter';
+import { useQueryClient } from '@tanstack/react-query';
+import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
 
 export interface MessageReaction {
   user_id: string;
@@ -13,7 +15,7 @@ export interface ChatMessage {
   event_id: string;
   user_id: string;
   content: string;
-  message_type: 'user' | 'system';
+  message_type: 'user' | 'system' | 'location';
   image_url?: string | null;
   created_at: string;
   reactions?: MessageReaction[];
@@ -54,12 +56,18 @@ export function useChat(eventId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  // Ref mirrors currentUserId for synchronous access inside callbacks (avoids async round-trip on send)
+  const currentUserIdRef = useRef<string>('');
   // Ref so the real-time channel closure always has the latest blocked set
   const blockedIdsRef = useRef<Record<string, boolean>>({});
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id);
+      if (user) {
+        setCurrentUserId(user.id);
+        currentUserIdRef.current = user.id;
+      }
     });
   }, []);
 
@@ -79,7 +87,25 @@ export function useChat(eventId: string) {
           const newMsg = payload.new as any;
           if (blockedIdsRef.current[newMsg.user_id]) return;
           const enriched = await attachSenders([newMsg]);
-          if (!cancelledRef.current) setMessages(prev => [...prev, enriched[0]]);
+          if (!cancelledRef.current) {
+            setMessages(prev => {
+              // Drop optimistic placeholders from the same user (real row now confirmed)
+              const deduped = prev.filter(m => !(m.id.startsWith('optimistic-') && m.user_id === newMsg.user_id));
+              // Guard against duplicate real rows
+              if (deduped.some(m => m.id === enriched[0].id)) return deduped;
+              return [...deduped, enriched[0]];
+            });
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
+        (payload) => {
+          const deleted = payload.old as any;
+          if (deleted?.id && !cancelledRef.current) {
+            setMessages(prev => prev.filter(m => m.id !== deleted.id));
+          }
         },
       )
       .subscribe();
@@ -101,17 +127,26 @@ export function useChat(eventId: string) {
       if (cancelledRef.current) return;
       if (user) {
         const msgIds = (data ?? []).map((m: any) => m.id);
-        const [{ data: profile }, , { data: reactionsData }] = await Promise.all([
+        const [{ data: profile }, , , { data: reactionsData }] = await Promise.all([
           supabase.from('profiles').select('blocked_users').eq('id', user.id).single(),
           supabase.from('chat_reads').upsert(
             { event_id: eventId, user_id: user.id, last_read_at: new Date().toISOString() },
             { onConflict: 'event_id,user_id' },
           ),
+          // Mark new_message notifications for this chat as read so the tab badge clears
+          supabase.from('app_notifications')
+            .update({ status: 'read' })
+            .eq('user_id', user.id)
+            .eq('event_id', eventId)
+            .eq('type', 'new_message')
+            .eq('status', 'unread'),
           msgIds.length > 0
             ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
             : Promise.resolve({ data: [] as any[] }),
         ]);
         if (cancelledRef.current) return;
+        // Invalidate tab badge so it reflects the just-cleared notifications
+        queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
 
         const reactionsByMsg: Record<string, MessageReaction[]> = {};
         (reactionsData ?? []).forEach((r: any) => {
@@ -170,6 +205,23 @@ export function useChat(eventId: string) {
     }
   }, []);
 
+  const deleteMessage = useCallback(async (messageId: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .eq('id', messageId)
+      .eq('user_id', user.id);
+
+    if (error) {
+      Alert.alert('Could not delete', 'Something went wrong. Please try again.');
+    }
+  }, []);
+
   const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
     const filter = checkContent(content);
     if (!filter.ok) {
@@ -177,21 +229,83 @@ export function useChat(eventId: string) {
       return;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    // Use the ref for instant, synchronous access — no async round-trip before showing the message
+    const userId = currentUserIdRef.current;
+    if (!userId) return;
 
-    const { error } = await supabase.from('messages').insert({
+    // Optimistic insert — synchronous, appears immediately with zero lag
+    const optimisticId = `optimistic-${Date.now()}`;
+    const optimisticMsg: ChatMessage = {
+      id: optimisticId,
       event_id: eventId,
-      user_id: user.id,
+      user_id: userId,
       content: content || '',
       message_type: 'user',
       image_url: imageUrl ?? null,
-    });
+      created_at: new Date().toISOString(),
+      reactions: [],
+      sender: null,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    // Insert and select back the real row so we can confirm the message even if real-time is slow
+    const { data: inserted, error } = await supabase.from('messages').insert({
+      event_id: eventId,
+      user_id: userId,
+      content: content || '',
+      message_type: 'user',
+      image_url: imageUrl ?? null,
+    }).select('id, created_at').single();
 
     if (error) {
+      setMessages(prev => prev.filter(m => m.id !== optimisticId));
       Alert.alert("Couldn't send message", "Your message failed to send. Please try again.");
+    } else if (inserted) {
+      // Replace optimistic ID with real DB row ID — message is now confirmed regardless of real-time
+      // Real-time handler will dedup correctly (checks for the real ID, won't add a duplicate)
+      setMessages(prev => prev.map(m =>
+        m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
+      ));
     }
   }, [eventId]);
 
-  return { messages, loading, currentUserId, sendMessage, toggleReaction };
+  const sendLocation = useCallback(async (lat: number, lng: number, address: string) => {
+    const userId = currentUserIdRef.current;
+    if (!userId) return;
+
+    const content = JSON.stringify({ lat, lng, address });
+
+    // Optimistic insert — synchronous, no async delay
+    const optimisticId = `optimistic-${Date.now()}`;
+    const optimisticMsg: ChatMessage = {
+      id: optimisticId,
+      event_id: eventId,
+      user_id: userId,
+      content,
+      message_type: 'location',
+      image_url: null,
+      created_at: new Date().toISOString(),
+      reactions: [],
+      sender: null,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    const { data: inserted, error } = await supabase.from('messages').insert({
+      event_id: eventId,
+      user_id: userId,
+      content,
+      message_type: 'location',
+    }).select('id, created_at').single();
+
+    if (error) {
+      setMessages(prev => prev.filter(m => m.id !== optimisticId));
+      Alert.alert("Couldn't send location", "Your location failed to send. Please try again.");
+    } else if (inserted) {
+      setMessages(prev => prev.map(m =>
+        m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
+      ));
+    }
+  }, [eventId]);
+
+  return { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction };
 }

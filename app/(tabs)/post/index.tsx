@@ -194,6 +194,7 @@ export default function PostScreen() {
   const [imageLoading, setImageLoading] = useState(false);
   const [title, setTitle] = useState('');
   const [location, setLocation] = useState('');
+  const [locationRaw, setLocationRaw] = useState(''); // always tracks visible input text
   const [locationLat, setLocationLat] = useState<number | null>(null);
   const [locationLng, setLocationLng] = useState<number | null>(null);
   const [ticketUrl, setTicketUrl] = useState('');
@@ -205,7 +206,16 @@ export default function PostScreen() {
   const [groupSize, setGroupSize] = useState(6);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
-  const params = useLocalSearchParams<{ prefillTitle?: string; prefillExploreEventId?: string }>();
+  const params = useLocalSearchParams<{
+    prefillTitle?: string;
+    prefillExploreEventId?: string;
+    prefillStartTime?: string;
+    prefillEventDate?: string;
+    prefillDescription?: string;
+    prefillImageUrl?: string;
+    prefillLocation?: string;
+    prefillCategory?: string;
+  }>();
   const [exploreEventId, setExploreEventId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -215,9 +225,72 @@ export default function PostScreen() {
     if (params.prefillExploreEventId) {
       setExploreEventId(params.prefillExploreEventId);
     }
-  }, [params.prefillTitle, params.prefillExploreEventId]);
+
+    // Date — prefer event_date (always a local date string like "2025-03-22")
+    if (params.prefillEventDate) {
+      const d = new Date(`${params.prefillEventDate}T12:00:00`);
+      if (!isNaN(d.getTime())) {
+        setDateMonth(d.getMonth());
+        setDateDay(d.getDate());
+        setDateYear(d.getFullYear());
+        setDateSelected(true);
+      }
+    }
+
+    // Time — from start_time (ISO timestamp or "HH:MM:SS" time-only)
+    if (params.prefillStartTime) {
+      let hours: number | null = null;
+      let minutes: number | null = null;
+      if (params.prefillStartTime.includes('T')) {
+        const d = new Date(params.prefillStartTime);
+        if (!isNaN(d.getTime())) {
+          hours = d.getHours();
+          minutes = d.getMinutes();
+        }
+      } else if (params.prefillStartTime.includes(':')) {
+        const parts = params.prefillStartTime.split(':');
+        hours = parseInt(parts[0], 10);
+        minutes = parseInt(parts[1] ?? '0', 10);
+      }
+      if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
+        const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
+        let displayHour = hours % 12;
+        if (displayHour === 0) displayHour = 12;
+        const nearestMinute = MINUTE_OPTIONS.reduce((prev, curr) =>
+          Math.abs(parseInt(curr) - minutes!) < Math.abs(parseInt(prev) - minutes!) ? curr : prev
+        );
+        setTimeHour(displayHour);
+        setTimeMinute(nearestMinute);
+        setTimePeriod(period);
+        setTimeSelected(true);
+      }
+    }
+
+    if (params.prefillDescription) {
+      setDescription(params.prefillDescription);
+    }
+    if (params.prefillImageUrl) {
+      setImageUrl(params.prefillImageUrl);
+    }
+    if (params.prefillLocation) {
+      setLocation(params.prefillLocation);
+      setLocationRaw(params.prefillLocation);
+      placesRef.current?.setAddressText(params.prefillLocation);
+    }
+    if (params.prefillCategory) {
+      const matched = CATEGORIES.find(
+        (c) => c.toLowerCase() === params.prefillCategory!.toLowerCase(),
+      );
+      if (matched) setCategory(matched);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.prefillTitle, params.prefillExploreEventId, params.prefillStartTime,
+      params.prefillEventDate, params.prefillDescription, params.prefillImageUrl,
+      params.prefillLocation, params.prefillCategory]);
 
   const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
+  // Used to prevent onChangeText from clearing coordinates after a Place selection
+  const placeJustSelectedRef = useRef(false);
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -349,8 +422,11 @@ export default function PostScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setTitle(draft.title);
     setLocation(draft.location);
+    setLocationRaw(draft.location);
     setLocationLat(draft.locationLat);
     setLocationLng(draft.locationLng);
+    // Sync the GooglePlacesAutocomplete text input (it manages its own internal state)
+    if (draft.location) placesRef.current?.setAddressText(draft.location);
     setTicketUrl(draft.ticketUrl);
     setCategory(draft.category);
     setGenderPref(draft.genderPref);
@@ -370,6 +446,8 @@ export default function PostScreen() {
   const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
   const safeTempDay = Math.min(tempDay, daysInTempMonth);
 
+  // locationText is used for hint display only — location is validated at submit time via ref
+  const locationText = locationRaw.trim() || location.trim() || '';
   const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
 
   // ─── Date picker ─────────────────────────────────────────────────────────────
@@ -413,7 +491,13 @@ export default function PostScreen() {
   const handleSubmit = async () => {
     if (!canSubmit) return;
 
-    const fieldsToCheck = [title, description, creatorMessage].filter(Boolean).join(' ');
+    // Read location from ref at tap time — this is always current regardless of state sync issues
+    const effectiveLocation = locationRaw.trim() || location.trim() || placesRef.current?.getAddressText()?.trim() || '';
+    if (!effectiveLocation) {
+      setAlertInfo({ title: 'Add a location', message: 'Please add a location for your plan.' });
+      return;
+    }
+    const fieldsToCheck = [title, description, creatorMessage, effectiveLocation].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
     if (!filter.ok) {
       setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
@@ -445,7 +529,7 @@ export default function PostScreen() {
         .insert({
           title: title.trim(),
           start_time: startTime.toISOString(),
-          location_text: location.trim() || null,
+          location_text: effectiveLocation || null,
           location_lat: locationLat,
           location_lng: locationLng,
           tickets_url: ticketUrl.trim() || null,
@@ -469,12 +553,28 @@ export default function PostScreen() {
       if (error) throw error;
 
       if (insertedEvent?.id) {
-        await supabase.from('event_members').insert({
+        const { error: memberErr } = await supabase.from('event_members').insert({
           event_id: insertedEvent.id,
           user_id: user.id,
           role: 'host',
           status: 'joined',
         });
+
+        if (memberErr) {
+          await new Promise(r => setTimeout(r, 500));
+          const { error: retryErr } = await supabase.from('event_members').insert({
+            event_id: insertedEvent.id,
+            user_id: user.id,
+            role: 'host',
+            status: 'joined',
+          });
+          if (retryErr) {
+            setAlertInfo({
+              title: 'Plan posted with a hiccup',
+              message: 'Your plan was created but we had trouble adding you as a member. Please contact support if you don\'t appear in "Who\'s Going."',
+            });
+          }
+        }
       }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -488,7 +588,7 @@ export default function PostScreen() {
       );
       setShareModalVisible(true);
       setImageUrl(null);
-      setTitle(''); setLocation(''); setLocationLat(null); setLocationLng(null);
+      setTitle(''); setLocation(''); setLocationRaw(''); setLocationLat(null); setLocationLng(null);
       setTicketUrl(''); setCategory(null);
       setGenderPref('mixed'); setAgeRanges([]);
       setDescription(''); setCreatorMessage(''); setGroupSize(6);
@@ -533,7 +633,7 @@ export default function PostScreen() {
           style={styles.flex}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
           keyboardDismissMode="on-drag"
         >
           {/* Header */}
@@ -655,7 +755,7 @@ export default function PostScreen() {
 
           {/* ── Location (Google Places) ── */}
           <View style={[styles.field, styles.placesField]}>
-            <Text style={styles.label}>Location</Text>
+            <Text style={styles.label}>Location <Text style={styles.required}>*</Text></Text>
             <GooglePlacesAutocomplete
               ref={placesRef}
               placeholder="Venue or neighborhood"
@@ -665,7 +765,11 @@ export default function PostScreen() {
                 const lat = details?.geometry?.location?.lat ?? null;
                 const lng = details?.geometry?.location?.lng ?? null;
                 const name = data.structured_formatting?.main_text ?? data.description;
-                setLocation(name || data.description);
+                const locationName = name || data.description;
+                // Flag so onChangeText (fired after onPress by the library) doesn't clear these
+                placeJustSelectedRef.current = true;
+                setLocation(locationName);
+                setLocationRaw(locationName);
                 setLocationLat(lat);
                 setLocationLng(lng);
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -681,11 +785,22 @@ export default function PostScreen() {
               textInputProps={{
                 placeholderTextColor: Colors.textLight,
                 returnKeyType: 'next',
+                onChangeText: (text) => {
+                  setLocationRaw(text); // always keep raw input state in sync
+                  // If the change was triggered by a place selection, skip clearing coordinates
+                  if (placeJustSelectedRef.current) {
+                    placeJustSelectedRef.current = false;
+                    return;
+                  }
+                  setLocation(text);
+                  // User manually edited the text — coordinates no longer match, so clear them
+                  setLocationLat(null);
+                  setLocationLng(null);
+                },
               }}
               enablePoweredByContainer={false}
               debounce={300}
-              keepResultsAfterBlur={false}
-              nearbyPlacesAPI="GooglePlacesSearch"
+              keepResultsAfterBlur={true}
             />
           </View>
 
@@ -810,9 +925,9 @@ export default function PostScreen() {
             <Text style={styles.stepperHint}>Min {MSG_MIN} characters · Max {MSG_LIMIT}</Text>
           </View>
 
-          {/* ── How many to invite ── */}
+          {/* ── Group size ── */}
           <View style={styles.field}>
-            <Text style={styles.label}>How many to invite</Text>
+            <Text style={styles.label}>Group size</Text>
             <View style={styles.stepperRow}>
               <TouchableOpacity
                 style={[styles.stepperBtn, groupSize <= (MIN_GROUP - 1) && styles.stepperBtnDisabled]}
@@ -827,8 +942,8 @@ export default function PostScreen() {
                 <Text style={styles.stepperBtnText}>−</Text>
               </TouchableOpacity>
               <View style={styles.stepperValue}>
-                <Text style={styles.stepperValueText}>{groupSize}</Text>
-                <Text style={styles.stepperValueSub}>people + you</Text>
+                <Text style={styles.stepperValueText}>{groupSize + 1}</Text>
+                <Text style={styles.stepperValueSub}>people total</Text>
               </View>
               <TouchableOpacity
                 style={[styles.stepperBtn, groupSize >= (MAX_GROUP - 1) && styles.stepperBtnDisabled]}
@@ -843,7 +958,7 @@ export default function PostScreen() {
                 <Text style={styles.stepperBtnText}>+</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.stepperHint}>You + {groupSize} = {groupSize + 1} total</Text>
+            <Text style={styles.stepperHint}>You + {groupSize} others (3–8 including you)</Text>
           </View>
 
           {/* Bottom spacer so content isn't hidden behind sticky button */}
@@ -862,11 +977,13 @@ export default function PostScreen() {
                     ? 'Select a time'
                     : category === null
                       ? 'Select a category'
-                      : description.trim().length === 0
-                        ? 'Add a plan description'
-                        : creatorMessage.trim().length < MSG_MIN
-                          ? `Message must be at least ${MSG_MIN} characters`
-                          : 'Add a message'}
+                      : locationText.length === 0
+                        ? 'Add a location'
+                        : description.trim().length === 0
+                          ? 'Add a plan description'
+                          : creatorMessage.trim().length < MSG_MIN
+                            ? `Message must be at least ${MSG_MIN} characters`
+                            : 'Add a message'}
             </Text>
           )}
           <TouchableOpacity

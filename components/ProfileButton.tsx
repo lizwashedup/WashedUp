@@ -41,7 +41,8 @@ async function fetchInboxCount(): Promise<number> {
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .eq('status', 'unread')
-      .neq('type', 'plan_invite'),
+      .neq('type', 'plan_invite')
+      .neq('type', 'new_message'),
   ]);
 
   const activeInviteCount = (invites.data ?? []).length;
@@ -69,7 +70,7 @@ export default function ProfileButton() {
     setShowProfilePrompt(false);
     AsyncStorage.setItem(PROFILE_PROMPT_KEY, 'true').catch(() => {});
     if (navigate) {
-      router.push('/(tabs)/profile');
+      router.push('/(tabs)/profile?openEdit=true' as any);
     }
   };
 

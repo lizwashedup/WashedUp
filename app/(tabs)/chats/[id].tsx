@@ -7,11 +7,16 @@ import {
   TextInput,
   StyleSheet,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
+  ActionSheetIOS,
+  Alert,
   ActivityIndicator,
   Modal,
   Pressable,
+  Linking,
 } from 'react-native';
+import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,7 +30,7 @@ import Colors from '../../../constants/Colors';
 import { capDisplayCount } from '../../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { openUrl } from '../../../lib/url';
-import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
+import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
@@ -124,6 +129,47 @@ function isSameDay(a: string, b: string): boolean {
     && da.getDate() === db.getDate();
 }
 
+// ─── Linked Text ─────────────────────────────────────────────────────────────
+
+const URL_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
+
+function LinkedText({ text, style, linkStyle }: { text: string; style: any; linkStyle?: any }) {
+  const parts = text.split(/(https?:\/\/[^\s]+|www\.[^\s]+)/i);
+  if (parts.length === 1) return <Text style={style}>{text}</Text>;
+
+  return (
+    <Text style={style}>
+      {parts.map((part, i) => {
+        if (URL_PATTERN.test(part)) {
+          return (
+            <Text
+              key={i}
+              style={[linkStyle ?? { textDecorationLine: 'underline' as const }]}
+              onPress={() => openUrl(part)}
+            >
+              {part}
+            </Text>
+          );
+        }
+        return <Text key={i}>{part}</Text>;
+      })}
+    </Text>
+  );
+}
+
+// ─── Location helpers ─────────────────────────────────────────────────────────
+
+function openLocationInMaps(lat: number, lng: number, address: string) {
+  const encoded = encodeURIComponent(address);
+  const url = Platform.OS === 'ios'
+    ? `maps://app?ll=${lat},${lng}&q=${encoded}`
+    : `geo:${lat},${lng}?q=${encoded}`;
+  Linking.openURL(url).catch(() => {
+    // fallback: Apple Maps web URL works on iOS even without the Maps app
+    Linking.openURL(`https://maps.apple.com/?ll=${lat},${lng}&q=${encoded}`).catch(() => {});
+  });
+}
+
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
 interface BubbleProps {
@@ -135,9 +181,10 @@ interface BubbleProps {
   currentUserId: string;
   onPhotoPress?: (url: string) => void;
   onReaction?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
 }
 
-function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, onPhotoPress, onReaction }: BubbleProps) {
+function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, onPhotoPress, onReaction, onDelete }: BubbleProps) {
   const lastTapRef = React.useRef(0);
 
   if (message.message_type === 'system') {
@@ -156,6 +203,27 @@ function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, curren
       lastTapRef.current = 0;
     } else {
       lastTapRef.current = now;
+    }
+  };
+
+  const handleLongPress = () => {
+    if (!isOwn || !onDelete) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Delete Message', 'Cancel'],
+          destructiveButtonIndex: 0,
+          cancelButtonIndex: 1,
+        },
+        (idx) => { if (idx === 0) onDelete(message.id); },
+      );
+    } else {
+      Alert.alert('Message', '', [
+        { text: 'Delete Message', style: 'destructive', onPress: () => onDelete(message.id) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
     }
   };
 
@@ -196,31 +264,69 @@ function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, curren
           </View>
         )}
 
-        <Pressable onPress={handleDoubleTap}>
-          <View style={[
-            bubbleStyles.bubble,
-            isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
-            borderRadius,
-          ]}>
-            {!!message.image_url ? (
-              <TouchableOpacity onPress={() => onPhotoPress?.(message.image_url!)}>
-                <Image
-                  source={{ uri: message.image_url }}
-                  style={bubbleStyles.messageImage}
-                  contentFit="cover"
-                />
-                {message.content ? (
-                  <Text style={[bubbleStyles.caption, isOwn && bubbleStyles.captionOwn]}>
-                    {message.content}
+        <Pressable
+          onPress={handleDoubleTap}
+          onLongPress={!message.image_url && message.message_type !== 'location' ? handleLongPress : undefined}
+          delayLongPress={400}
+        >
+          {!!message.image_url ? (
+            <Pressable
+              onPress={() => onPhotoPress?.(message.image_url!)}
+              onLongPress={handleLongPress}
+              delayLongPress={400}
+            >
+              <Image
+                source={{ uri: message.image_url }}
+                style={[bubbleStyles.messageImage, borderRadius]}
+                contentFit="cover"
+                transition={200}
+                placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+                cachePolicy="memory-disk"
+              />
+            </Pressable>
+          ) : message.message_type === 'location' ? (() => {
+            let lat = 0, lng = 0, address = '';
+            try { const p = JSON.parse(message.content); lat = p.lat; lng = p.lng; address = p.address; } catch {}
+            return (
+              <Pressable
+                onPress={() => openLocationInMaps(lat, lng, address)}
+                onLongPress={handleLongPress}
+                delayLongPress={400}
+                style={[
+                  bubbleStyles.bubble,
+                  bubbleStyles.locationBubble,
+                  isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
+                  borderRadius,
+                ]}
+              >
+                <View style={bubbleStyles.locationPinRow}>
+                  <Ionicons name="location" size={15} color={isOwn ? Colors.white : Colors.terracotta} />
+                  <Text style={[bubbleStyles.locationLabel, isOwn && bubbleStyles.locationLabelOwn]}>
+                    Shared location
                   </Text>
-                ) : null}
-              </TouchableOpacity>
-            ) : (
-              <Text style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn]}>
-                {message.content}
-              </Text>
-            )}
-          </View>
+                </View>
+                <Text style={[bubbleStyles.locationAddress, isOwn && bubbleStyles.locationAddressOwn]} numberOfLines={2}>
+                  {address}
+                </Text>
+                <Text style={[bubbleStyles.locationTapHint, isOwn && bubbleStyles.locationTapHintOwn]}>
+                  Tap to open in Maps
+                </Text>
+              </Pressable>
+            );
+          })() : (
+            <View style={[
+              bubbleStyles.bubble,
+              bubbleStyles.bubbleText,
+              isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
+              borderRadius,
+            ]}>
+              <LinkedText
+                text={message.content}
+                style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn]}
+                linkStyle={isOwn ? bubbleStyles.linkOwn : bubbleStyles.linkOther}
+              />
+            </View>
+          )}
 
           {heartCount > 0 && (
             <View style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther]}>
@@ -268,7 +374,8 @@ const bubbleStyles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.warmGray,
   },
-  bubble: { paddingHorizontal: 13, paddingVertical: 9, overflow: 'hidden' },
+  bubble: { overflow: 'hidden' },
+  bubbleText: { paddingHorizontal: 13, paddingVertical: 9 },
   bubbleOwn: { backgroundColor: Colors.terracotta },
   bubbleOther: {
     backgroundColor: Colors.white,
@@ -280,9 +387,9 @@ const bubbleStyles = StyleSheet.create({
   },
   messageText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.asphalt, lineHeight: 21 },
   messageTextOwn: { color: Colors.white },
-  messageImage: { width: 220, height: 165, borderRadius: 8 },
-  caption: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, marginTop: 6, paddingHorizontal: 2 },
-  captionOwn: { color: Colors.overlayWhiteLight },
+  linkOther: { textDecorationLine: 'underline' as const, color: Colors.terracotta },
+  linkOwn: { textDecorationLine: 'underline' as const, color: Colors.white },
+  messageImage: { width: 240, height: 180 },
   timestamp: { fontFamily: Fonts.sans, fontSize: FontSizes.micro, color: Colors.warmGray, marginLeft: 4 },
   timestampOwn: { textAlign: 'right', marginRight: 4 },
   systemRow: { alignItems: 'center', marginVertical: 8, paddingHorizontal: 16 },
@@ -323,6 +430,24 @@ const bubbleStyles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.textMedium,
   },
+  locationBubble: { paddingHorizontal: 13, paddingVertical: 10, minWidth: 180 },
+  locationPinRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  locationLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  locationLabelOwn: { color: Colors.white },
+  locationAddress: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+    marginBottom: 6,
+    lineHeight: 20,
+  },
+  locationAddressOwn: { color: Colors.white },
+  locationTapHint: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.textLight,
+  },
+  locationTapHintOwn: { color: 'rgba(255,255,255,0.7)' },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -340,7 +465,11 @@ export default function ChatScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const listRef = useRef<FlatList>(null);
 
-  const { messages, loading, currentUserId, sendMessage, toggleReaction } = useChat(id);
+  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction } = useChat(id);
+
+  const onContentSizeChange = useCallback(() => {
+    listRef.current?.scrollToEnd({ animated: false });
+  }, []);
   const { blockUser } = useBlock();
 
   const { data: event, isError: eventError } = useQuery({
@@ -350,6 +479,22 @@ export default function ChatScreen() {
     staleTime: 60_000,
     retry: 2,
   });
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [messages.length]);
+
+  const prefetchedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    messages.forEach(m => {
+      if (m.image_url && !prefetchedRef.current.has(m.image_url)) {
+        prefetchedRef.current.add(m.image_url);
+        Image.prefetch(m.image_url).catch(() => {});
+      }
+    });
+  }, [messages]);
 
   if (!id || eventError) {
     return (
@@ -368,12 +513,6 @@ export default function ChatScreen() {
       </SafeAreaView>
     );
   }
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-    }
-  }, [messages.length]);
 
   const isPast = event
     ? new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000)
@@ -446,6 +585,7 @@ export default function ChatScreen() {
     const text = inputText.trim();
     if (!text || uploading) return;
     setInputText('');
+    Keyboard.dismiss();
     await sendMessage(text);
   }, [inputText, uploading, sendMessage]);
 
@@ -476,43 +616,90 @@ export default function ChatScreen() {
       const manipulated = await ImageManipulator.manipulateAsync(
         asset.uri,
         [{ resize: { width: 1200 } }],
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
       );
 
+      if (!manipulated.base64) throw new Error('No base64 data');
+
       const fileName = `${currentUserId}/${Date.now()}.jpg`;
-      const response = await fetch(manipulated.uri);
-      const blob = await response.blob();
+      const publicUrl = await uploadBase64ToStorage('chat-images', fileName, manipulated.base64);
 
-      const { error } = await supabase.storage
-        .from('chat-images')
-        .upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
-
-      if (error) throw error;
-
-      const { data: urlData } = supabase.storage
-        .from('chat-images')
-        .getPublicUrl(fileName);
-
-      await sendMessage('', urlData.publicUrl);
+      await sendMessage('', publicUrl);
     } catch {
-      setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
+      setAlertInfo({ title: 'Could not send photo', message: 'Something went wrong uploading the image. Please try again.' });
     } finally {
       setUploading(false);
     }
   }, [currentUserId, sendMessage]);
 
-  const handlePhotoPress = useCallback(() => {
+  const handleAttachPress = useCallback(() => {
     if (!currentUserId) return;
-    setAlertInfo({
-      title: 'Add Photo',
-      message: '',
-      buttons: [
+    Keyboard.dismiss();
+
+    const doLocation = () => {
+      setAlertInfo({
+        title: 'Share your location?',
+        message: 'Your current location will be sent to the group.',
+        buttons: [
+          { text: 'Send Location', onPress: handleLocationSend },
+          { text: 'Cancel', style: 'cancel' as const },
+        ],
+      });
+    };
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Take Photo', 'Choose from Library', 'Share Location', 'Cancel'],
+          cancelButtonIndex: 3,
+        },
+        (idx) => {
+          if (idx === 0) doPhotoAction('camera');
+          else if (idx === 1) doPhotoAction('library');
+          else if (idx === 2) doLocation();
+        },
+      );
+    } else {
+      Alert.alert('Add to chat', '', [
         { text: 'Take Photo', onPress: () => doPhotoAction('camera') },
         { text: 'Choose from Library', onPress: () => doPhotoAction('library') },
+        { text: 'Share Location', onPress: doLocation },
         { text: 'Cancel', style: 'cancel' },
-      ],
-    });
-  }, [currentUserId, doPhotoAction]);
+      ]);
+    }
+  }, [currentUserId, doPhotoAction, handleLocationSend]);
+
+  const handleLocationSend = useCallback(async () => {
+    if (!currentUserId) return;
+    Keyboard.dismiss();
+
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      setAlertInfo({ title: 'Location access needed', message: 'Please allow location access in Settings to share your location.' });
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = loc.coords;
+
+      const geocoded = await Location.reverseGeocodeAsync({ latitude, longitude });
+      const place = geocoded[0];
+      let address = '';
+      if (place) {
+        const parts = [place.name, place.street, place.city].filter(Boolean);
+        address = parts.join(', ');
+      }
+      if (!address) address = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+
+      await sendLocation(latitude, longitude, address);
+    } catch {
+      setAlertInfo({ title: 'Could not get location', message: 'Something went wrong retrieving your location. Please try again.' });
+    } finally {
+      setUploading(false);
+    }
+  }, [currentUserId, sendLocation]);
 
   type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string };
   const enrichedItems = useMemo<EnrichedItem[]>(() => {
@@ -645,7 +832,7 @@ export default function ChatScreen() {
             initialNumToRender={20}
             windowSize={10}
             maxToRenderPerBatch={15}
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+            onContentSizeChange={onContentSizeChange}
             renderItem={({ item, index }) => {
               if ('type' in item && item.type === 'date') {
                 return (
@@ -677,6 +864,7 @@ export default function ChatScreen() {
                     currentUserId={currentUserId}
                     onPhotoPress={setPhotoViewUrl}
                     onReaction={(messageId) => toggleReaction(messageId)}
+                    onDelete={(messageId) => deleteMessage(messageId)}
                   />
                 </View>
               );
@@ -691,11 +879,11 @@ export default function ChatScreen() {
           </View>
         ) : (
           <View style={[chatStyles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
-            <TouchableOpacity onPress={handlePhotoPress} style={chatStyles.cameraBtn} disabled={uploading}>
+            <TouchableOpacity onPress={handleAttachPress} style={chatStyles.cameraBtn} disabled={uploading}>
               {uploading ? (
                 <ActivityIndicator size="small" color={Colors.warmGray} />
               ) : (
-                <Ionicons name="camera-outline" size={24} color={Colors.warmGray} />
+                <Ionicons name="add-circle-outline" size={26} color={Colors.warmGray} />
               )}
             </TouchableOpacity>
 
@@ -708,6 +896,8 @@ export default function ChatScreen() {
               multiline
               maxLength={1000}
               returnKeyType="default"
+              autoCorrect={true}
+              spellCheck={true}
             />
 
             <TouchableOpacity
@@ -751,6 +941,11 @@ export default function ChatScreen() {
         userId={miniProfileUserId}
         visible={!!miniProfileUserId}
         onClose={() => setMiniProfileUserId(null)}
+        onReport={(uid, uname) => {
+          setReportTarget({ id: uid, name: uname });
+          setShowReport(true);
+        }}
+        onBlock={(uid, uname) => blockUser(uid, uname, () => router.back())}
       />
 
       <BrandedAlert
@@ -835,23 +1030,30 @@ const chatStyles = StyleSheet.create({
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingHorizontal: 12,
+    paddingTop: 8,
     backgroundColor: Colors.white,
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
-    gap: 10,
+    gap: 8,
   },
-  cameraBtn: { padding: 4, paddingBottom: 8 },
+  cameraBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
   input: {
     flex: 1,
     backgroundColor: Colors.parchment,
     borderWidth: 1,
     borderColor: Colors.inputBg,
-    borderRadius: 22,
+    borderRadius: 20,
     paddingLeft: 16,
     paddingRight: 16,
-    paddingVertical: 10,
+    paddingTop: 9,
+    paddingBottom: 9,
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,

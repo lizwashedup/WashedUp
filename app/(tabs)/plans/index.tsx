@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import { router, useNavigation } from 'expo-router';
+import { router, useFocusEffect, useNavigation } from 'expo-router';
 import { ChevronDown, ChevronRight, Heart, LayoutList, Map } from 'lucide-react-native';
 import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import {
@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
+import { ReportModal } from '../../../components/modals/ReportModal';
 import { PlanCard } from '../../../components/plans/PlanCard';
 import ProfileButton from '../../../components/ProfileButton';
 import WelcomeModal from '../../../components/WelcomeModal';
@@ -24,8 +25,9 @@ import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Catego
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
-import { fetchPlans, Plan } from '../../../lib/fetchPlans';
+import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { supabase } from '../../../lib/supabase';
+import { useBlock } from '../../../hooks/useBlock';
 
 // Lazy-load map to avoid crash on Expo Go / environments where react-native-maps fails
 const LazyPlansMapView = lazy(() => import('../../../components/plans/PlansMapView'));
@@ -148,7 +150,9 @@ function filterIntoSections(
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PlansScreen() {
-  const sectionDefs = useMemo(() => getSectionDefs(new Date()), []);
+  const [now, setNow] = useState(() => new Date());
+  useFocusEffect(useCallback(() => { setNow(new Date()); }, []));
+  const sectionDefs = useMemo(() => getSectionDefs(now), [now]);
 
   const [activeTab, setActiveTab] = useState<TabKey>('plans');
   const [mapView, setMapView] = useState(false);
@@ -168,6 +172,7 @@ export default function PlansScreen() {
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [whenFilter, setWhenFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<CategoryOption[]>([]);
+  const [reportTarget, setReportTarget] = useState<{ userId: string; userName: string; eventId: string } | null>(null);
 
   const [userId, setUserId] = React.useState<string | null>(null);
   const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
@@ -332,6 +337,8 @@ export default function PlansScreen() {
       const profileMap: Record<string, any> = {};
       (profilesData ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
+      const realCounts = await fetchRealMemberCounts(allEvents.map((e: any) => e.id));
+
       return allEvents.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
         return {
@@ -346,7 +353,7 @@ export default function PlansScreen() {
           gender_rule: e.gender_rule ?? null,
           max_invites: e.max_invites ?? null,
           min_invites: e.min_invites ?? null,
-          member_count: e.member_count ?? 0,
+          member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
           status: e.status ?? 'forming',
           host_message: e.host_message ?? null,
           creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
@@ -362,17 +369,24 @@ export default function PlansScreen() {
     queryKey: ['waitlisted-plans', userId],
     queryFn: async () => {
       if (!userId) return [];
+
+      // Step 1: get waitlisted event IDs (no FK on event_waitlist, so join won't work)
       const { data: waitlistRows } = await supabase
         .from('event_waitlist')
-        .select('event_id, events (id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message)')
+        .select('event_id')
         .eq('user_id', userId);
 
-      if (!waitlistRows?.length) return [];
+      const eventIds = (waitlistRows ?? []).map((w: any) => w.event_id as string);
+      if (eventIds.length === 0) return [];
 
-      const active = waitlistRows
-        .map((w: any) => w.events)
-        .filter((e: any) => e && ['forming', 'active', 'full'].includes(e.status));
+      // Step 2: fetch the actual events
+      const { data: eventsData } = await supabase
+        .from('events')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message')
+        .in('id', eventIds)
+        .in('status', ['forming', 'active', 'full']);
 
+      const active = eventsData ?? [];
       if (active.length === 0) return [];
 
       const creatorIds = [...new Set(active.map((e: any) => e.creator_user_id).filter(Boolean))];
@@ -383,6 +397,8 @@ export default function PlansScreen() {
       const profileMap: Record<string, any> = {};
       (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
+      const realCounts = await fetchRealMemberCounts(active.map((e: any) => e.id));
+
       return active.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
         return {
@@ -390,7 +406,7 @@ export default function PlansScreen() {
           location_text: e.location_text ?? null, location_lat: e.location_lat ?? null, location_lng: e.location_lng ?? null,
           image_url: e.image_url ?? null, category: e.primary_vibe ?? null, gender_rule: e.gender_rule ?? null,
           max_invites: e.max_invites ?? null, min_invites: e.min_invites ?? null,
-          member_count: e.member_count ?? 0, status: e.status ?? 'forming', host_message: e.host_message ?? null,
+          member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0), status: e.status ?? 'forming', host_message: e.host_message ?? null,
           creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
         } as Plan;
       });
@@ -413,17 +429,17 @@ export default function PlansScreen() {
 
   const myPlansUpcoming = useMemo(
     () => myPlans
-      .filter((p) => ['forming', 'active', 'full'].includes(p.status))
+      .filter((p) => ['forming', 'active', 'full'].includes(p.status) && new Date(p.start_time) >= now)
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
-    [myPlans],
+    [myPlans, now],
   );
 
   const myPlansPast = useMemo(
     () => myPlans
-      .filter((p) => p.status === 'completed')
+      .filter((p) => p.status === 'completed' || new Date(p.start_time) < now)
       .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
       .slice(0, 20),
-    [myPlans],
+    [myPlans, now],
   );
 
   const [waitlistExpanded, setWaitlistExpanded] = useState(false);
@@ -470,9 +486,9 @@ export default function PlansScreen() {
         : `Category · ${categoryFilter.length}`;
 
   const mapPlans = useMemo(() => {
-    if (activeTab === 'myplans') return myPlans;
+    if (activeTab === 'myplans') return myPlansUpcoming;
     return allPlans;
-  }, [activeTab, allPlans, myPlans]);
+  }, [activeTab, allPlans, myPlansUpcoming]);
 
   const mapLoading = activeTab === 'myplans' ? myPlansLoading : isLoading;
 
@@ -517,6 +533,26 @@ export default function PlansScreen() {
     [pastExpanded, myPlansPast.length, waitlistExpanded, waitlistedPlans.length],
   );
 
+  const { blockUser } = useBlock();
+
+  const handleReport = useCallback((planId: string) => {
+    const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find((p) => p.id === planId);
+    if (plan?.creator?.id) {
+      setReportTarget({
+        userId: plan.creator.id,
+        userName: plan.creator.first_name_display ?? 'User',
+        eventId: planId,
+      });
+    }
+  }, [allPlans, myPlans, waitlistedPlans]);
+
+  const handleBlock = useCallback((planId: string) => {
+    const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find((p) => p.id === planId);
+    if (plan?.creator?.id) {
+      blockUser(plan.creator.id, plan.creator.first_name_display ?? 'User');
+    }
+  }, [allPlans, myPlans, waitlistedPlans, blockUser]);
+
   const renderItem = useCallback(
     ({ item }: { item: Plan }) => (
       <View style={styles.cardWrap}>
@@ -525,11 +561,13 @@ export default function PlansScreen() {
           isMember={!!memberIdSet[item.id]}
           isWishlisted={!!wishlistedSet[item.id]}
           onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+          onReport={handleReport}
+          onBlock={handleBlock}
           isPast={item.status === 'completed'}
         />
       </View>
     ),
-    [memberIdSet, wishlistedSet, wishlistMutation],
+    [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock],
   );
 
   const handleWelcomeDismiss = useCallback(async () => {
@@ -572,7 +610,6 @@ export default function PlansScreen() {
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setActiveTab(tab);
-                if (tab !== 'plans') setMapView(false);
               }}
             >
               <Text
@@ -629,6 +666,29 @@ export default function PlansScreen() {
             />
           </TouchableOpacity>
           <View style={styles.filterSpacer} />
+          <TouchableOpacity
+            style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setMapView((v) => !v);
+            }}
+            accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
+          >
+            {mapView ? (
+              <LayoutList size={14} color={Colors.white} strokeWidth={2} />
+            ) : (
+              <Map size={14} color={Colors.asphalt} strokeWidth={2} />
+            )}
+            <Text style={[styles.mapToggleLabel, mapView && styles.mapToggleLabelActive]}>
+              {mapView ? 'List' : 'Map'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Row 2b: Map toggle for My Plans */}
+      {activeTab === 'myplans' && (
+        <View style={styles.myPlansFilterRow}>
           <TouchableOpacity
             style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
             onPress={() => {
@@ -783,6 +843,16 @@ export default function PlansScreen() {
         onPostPlan={handleWelcomePost}
       />
 
+      {reportTarget && (
+        <ReportModal
+          visible
+          onClose={() => setReportTarget(null)}
+          reportedUserId={reportTarget.userId}
+          reportedUserName={reportTarget.userName}
+          eventId={reportTarget.eventId}
+        />
+      )}
+
     </SafeAreaView>
   );
 }
@@ -837,6 +907,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   filterSpacer: { flexGrow: 1, flexShrink: 0, minWidth: 4 },
+  myPlansFilterRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 20,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
   dropdownPill: {
     flexDirection: 'row',
     alignItems: 'center',

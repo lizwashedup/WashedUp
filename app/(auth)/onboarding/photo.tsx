@@ -125,7 +125,7 @@ export default function OnboardingPhotoScreen() {
 
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ profile_photo_url: avatarUrl })
+        .update({ profile_photo_url: avatarUrl, onboarding_status: 'vibes' })
         .eq('id', user.id);
 
       if (updateError) throw updateError;

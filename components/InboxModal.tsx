@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Bell, Check, ChevronDown, ChevronRight, Clock, Megaphone, Send, UserPlus, XCircle } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -31,7 +32,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   const [oldExpanded, setOldExpanded] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
-  const { data: pendingInvites = [], refetch: refetchInvites } = useQuery({
+  const { data: pendingInvites = [], refetch: refetchInvites, isLoading: loadingInvites } = useQuery({
     queryKey: ['pending-invites', userId],
     queryFn: async () => {
       if (!userId) return [];
@@ -62,7 +63,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     staleTime: 15_000,
   });
 
-  const { data: appNotifications = [], refetch: refetchNotifs } = useQuery({
+  const { data: appNotifications = [], refetch: refetchNotifs, isLoading: loadingNotifs } = useQuery({
     queryKey: ['app-notifications', userId],
     queryFn: async () => {
       if (!userId) return [];
@@ -74,6 +75,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
           .eq('user_id', userId)
           .eq('status', 'unread')
           .neq('type', 'plan_invite')
+          .neq('type', 'new_message')
           .order('created_at', { ascending: false })
           .limit(30);
         return data ?? [];

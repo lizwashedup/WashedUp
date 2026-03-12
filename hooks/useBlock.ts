@@ -1,9 +1,15 @@
 import { useState } from 'react';
 import { Alert } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 
+/**
+ * Apple Guideline 1.2: Blocking must (1) notify the developer of inappropriate content,
+ * (2) remove the blocked user from the feed instantly.
+ */
 export function useBlock() {
   const [blocking, setBlocking] = useState(false);
+  const queryClient = useQueryClient();
 
   const blockUser = async (
     blockedId: string,
@@ -36,7 +42,34 @@ export function useBlock() {
                   .from('profiles')
                   .update({ blocked_users: [...current, blockedId] })
                   .eq('id', user.id);
+
+                // Apple 1.2: Notify developer of inappropriate content when user blocks
+                try {
+                  await supabase.from('reports').insert({
+                    reporter_user_id: user.id,
+                    reported_user_id: blockedId,
+                    reason: 'Blocked by user',
+                    reported_event_id: null,
+                    details: `User blocked ${blockedName}. They will no longer appear in their feed or be able to contact them.`,
+                  });
+                } catch {
+                  // Report insert is best-effort; block still succeeds
+                }
               }
+
+              // Apple 1.2: Instant removal from feed — invalidate all relevant queries
+              queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+              queryClient.invalidateQueries({ queryKey: ['events', 'detail'] });
+              queryClient.invalidateQueries({ queryKey: ['events', 'members'] });
+              queryClient.invalidateQueries({ queryKey: ['event-plans'] });
+              queryClient.invalidateQueries({ queryKey: ['my-profile'] });
+              queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+              queryClient.invalidateQueries({ queryKey: ['profile-blocked'] });
+              queryClient.invalidateQueries({ queryKey: ['friends'] });
+              queryClient.invalidateQueries({ queryKey: ['profile-search'] });
+              queryClient.invalidateQueries({ queryKey: ['scene-events'] });
+              queryClient.invalidateQueries({ queryKey: ['explore-wishlists'] });
+              queryClient.invalidateQueries({ queryKey: ['wishlists'] });
 
               onSuccess?.();
               setTimeout(() => {

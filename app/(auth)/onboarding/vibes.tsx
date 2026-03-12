@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
@@ -97,29 +97,36 @@ export default function OnboardingVibesScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.heading}>What are you into?</Text>
-        <Text style={styles.subtext}>Pick at least 3</Text>
-        <View style={styles.gap20} />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.heading}>What are you into?</Text>
+          <Text style={styles.subtext}>Pick at least 3</Text>
+          <View style={styles.gap20} />
 
-        <View style={styles.grid}>
-          {VIBE_TAGS.map((tag) => {
-            const isSelected = !!selected[tag];
-            return (
-              <TouchableOpacity
-                key={tag}
-                style={[styles.pill, isSelected && styles.pillSelected]}
-                onPress={() => toggle(tag)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.pillText, isSelected && styles.pillTextSelected]}>{tag}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+          <View style={styles.grid}>
+            {VIBE_TAGS.map((tag) => {
+              const isSelected = !!selected[tag];
+              return (
+                <TouchableOpacity
+                  key={tag}
+                  style={[styles.pill, isSelected && styles.pillSelected]}
+                  onPress={() => toggle(tag)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.pillText, isSelected && styles.pillTextSelected]}>{tag}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
-        <Text style={styles.countText}>{selectedCount} selected</Text>
+          <Text style={styles.countText}>{selectedCount} selected</Text>
+          <View style={styles.gap20} />
+        </ScrollView>
 
-        <View style={styles.spacer} />
         <TouchableOpacity
           style={[
             styles.primaryButton,
@@ -160,6 +167,8 @@ const styles = StyleSheet.create({
   heading: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   subtext: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: 4 },
   gap20: { height: 20 },
+  scroll: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -178,7 +187,6 @@ const styles = StyleSheet.create({
   pillText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   pillTextSelected: { color: Colors.white, fontFamily: Fonts.sansBold },
   countText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textLight, marginTop: 16 },
-  spacer: { flex: 1 },
   primaryButton: {
     height: 52,
     borderRadius: 14,

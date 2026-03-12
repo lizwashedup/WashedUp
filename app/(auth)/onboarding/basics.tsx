@@ -109,6 +109,7 @@ export default function OnboardingBasicsScreen() {
         .update({
           birthday: isoBirthday,
           gender: GENDER_TO_ENUM[gender],
+          onboarding_status: 'la_check',
         })
         .eq('id', user.id);
       if (error) throw error;

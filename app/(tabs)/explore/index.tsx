@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import {
   View,
   Text,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -68,9 +68,7 @@ function formatEventDate(dateStr: string | null, timeStr: string | null): string
   else dayLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
   if (timeStr) {
-    const [h, m] = timeStr.split(':');
-    const d = new Date();
-    d.setHours(parseInt(h, 10), parseInt(m, 10));
+    const d = new Date(timeStr);
     const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
     return `${dayLabel} · ${t}`;
   }
@@ -499,9 +497,12 @@ function matchesWhenFilter(eventDate: string | null, filters: WhenKey[]): boolea
   tomorrowEnd.setDate(tomorrowEnd.getDate() + 1);
 
   const dayOfWeek = now.getDay();
-  const daysUntilFriday = (5 - dayOfWeek + 7) % 7;
+  // If today is Sat (6) or Sun (0), anchor to the Friday already behind us so
+  // "This Weekend" correctly includes the ongoing weekend days.
+  // For Mon–Fri, count forward to the upcoming/current Friday as before.
+  const daysToFriday = dayOfWeek === 0 ? -2 : dayOfWeek === 6 ? -1 : (5 - dayOfWeek + 7) % 7;
   const friday = new Date(todayStart);
-  friday.setDate(friday.getDate() + (daysUntilFriday === 0 && dayOfWeek !== 5 ? 7 : daysUntilFriday));
+  friday.setDate(friday.getDate() + daysToFriday);
   const sundayEnd = new Date(friday);
   sundayEnd.setDate(sundayEnd.getDate() + 3);
 
@@ -592,6 +593,14 @@ export default function SceneScreen() {
     setRefreshing(true);
     try { await refetch(); } finally { setRefreshing(false); }
   }, [refetch]);
+
+  const renderSceneCard = useCallback(({ item }: { item: SceneEvent }) => (
+    <SceneCard
+      event={item}
+      isWishlisted={!!wishlistedSet[item.id]}
+      onWishlist={handleWishlist}
+    />
+  ), [wishlistedSet, handleWishlist]);
 
   const whenActive = whenFilter.length > 0;
   const whenLabel =
@@ -729,31 +738,30 @@ export default function SceneScreen() {
               )}
             </View>
           ) : (
-            <ScrollView
-              showsVerticalScrollIndicator={false}
+            <FlatList
+              data={filteredEvents}
+              keyExtractor={(item) => item.id}
+              renderItem={renderSceneCard}
               contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              windowSize={5}
+              maxToRenderPerBatch={4}
+              initialNumToRender={3}
+              removeClippedSubviews
               refreshControl={
                 <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.terracotta} />
               }
-            >
-              {filteredEvents.map((event) => (
-                <SceneCard
-                  key={event.id}
-                  event={event}
-                  isWishlisted={!!wishlistedSet[event.id]}
-                  onWishlist={handleWishlist}
-                />
-              ))}
-
-              <View style={styles.bottomCta}>
-                <Text style={styles.bottomCtaText}>Want your event here?</Text>
-                {/* Temporarily commented out until web page is live
-                <TouchableOpacity onPress={() => Linking.openURL('https://washedup.app/list-your-event')}>
-                  <Text style={styles.bottomCtaLink}>List your event</Text>
-                </TouchableOpacity>
-                */}
-              </View>
-            </ScrollView>
+              ListFooterComponent={
+                <View style={styles.bottomCta}>
+                  <Text style={styles.bottomCtaText}>Want your event here?</Text>
+                  {/* Temporarily commented out until web page is live
+                  <TouchableOpacity onPress={() => Linking.openURL('https://washedup.app/list-your-event')}>
+                    <Text style={styles.bottomCtaLink}>List your event</Text>
+                  </TouchableOpacity>
+                  */}
+                </View>
+              }
+            />
           )}
       </>
 

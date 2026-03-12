@@ -1,9 +1,12 @@
 import { Tabs } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useQuery } from '@tanstack/react-query';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { Image } from 'expo-image';
+import { supabase } from '../../lib/supabase';
+import { UNREAD_CHATS_KEY } from '../../constants/QueryKeys';
 
 function PostTabIcon() {
   return (
@@ -13,7 +16,28 @@ function PostTabIcon() {
   );
 }
 
+async function fetchUnreadChatCount(): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+  const { data } = await supabase
+    .from('app_notifications')
+    .select('event_id')
+    .eq('user_id', user.id)
+    .eq('type', 'new_message')
+    .eq('status', 'unread');
+  // Count distinct chats (event_ids) with unread messages
+  const uniqueChats = new Set((data ?? []).map((r: any) => r.event_id));
+  return uniqueChats.size;
+}
+
 export default function TabLayout() {
+  const { data: unreadChats = 0 } = useQuery({
+    queryKey: UNREAD_CHATS_KEY,
+    queryFn: fetchUnreadChatCount,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+
   return (
     <Tabs
       screenOptions={{
@@ -72,6 +96,7 @@ export default function TabLayout() {
           title: 'Chats',
           tabBarLabel: 'Chats',
           tabBarIcon: ({ color }) => <Ionicons name="chatbubble-outline" size={24} color={color} />,
+          tabBarBadge: unreadChats > 0 ? (unreadChats > 9 ? '9+' : unreadChats) : undefined,
         }}
       />
       <Tabs.Screen

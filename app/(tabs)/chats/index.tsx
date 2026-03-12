@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -62,7 +62,9 @@ function formatEventDate(dateString: string): string {
   return `${dayStr} at ${timeStr}`;
 }
 
-function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) {
+const ChatSeparator = () => <View style={styles.separator} />;
+
+const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) {
   const catColor = CATEGORY_COLORS[chat.category?.toLowerCase() ?? ''] ?? CATEGORY_COLORS.default;
 
   return (
@@ -112,7 +114,7 @@ function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) 
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 export default function ChatsScreen() {
   const router = useRouter();
@@ -126,13 +128,20 @@ export default function ChatsScreen() {
     }, [refetch]),
   );
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try { await refetch(); } finally { setRefreshing(false); }
-  };
+  }, [refetch]);
 
-  const activeChats = chats.filter(c => !c.is_past);
-  const pastChats = chats.filter(c => c.is_past);
+  const activeChats = useMemo(() => chats.filter(c => !c.is_past), [chats]);
+  const pastChats = useMemo(() => chats.filter(c => c.is_past), [chats]);
+
+  const renderChat = useCallback(({ item }: { item: ChatPreview }) => (
+    <ChatRow
+      chat={item}
+      onPress={() => router.push(`/(tabs)/chats/${item.eventId}` as any)}
+    />
+  ), [router]);
 
   if (loading) {
     return (
@@ -179,14 +188,9 @@ export default function ChatsScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.terracotta} />
           }
           contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ItemSeparatorComponent={ChatSeparator}
           ListHeaderComponent={activeChats.length > 0 ? <Text style={styles.sectionLabel}>Active</Text> : null}
-          renderItem={({ item }) => (
-            <ChatRow
-              chat={item}
-              onPress={() => router.push(`/(tabs)/chats/${item.eventId}` as any)}
-            />
-          )}
+          renderItem={renderChat}
           ListFooterComponent={pastChats.length > 0 ? (
             <View>
               <TouchableOpacity
