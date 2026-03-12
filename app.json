@@ -2,7 +2,7 @@
   "expo": {
     "name": "WashedUp",
     "slug": "washedup-app",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon.png",
     "scheme": "washedupapp",
@@ -45,8 +45,11 @@
     },
     "android": {
       "package": "com.washedup.app",
+      "googleServicesFile": "./google-services.json",
       "config": {
-        "googleMaps": {}
+        "googleMaps": {
+          "apiKey": "AIzaSyDxXNIh97gwQXA3uKnvvMYFSB-_c93kox8"
+        }
       },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -82,6 +85,7 @@
       "expo-apple-authentication",
       "@react-native-google-signin/google-signin",
       "expo-font",
+      "expo-updates",
       [
         "expo-notifications",
         {
