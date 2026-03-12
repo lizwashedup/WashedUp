@@ -33,7 +33,12 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { checkContent } from '../../../lib/contentFilter';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
 
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
+// Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
+// Falls back to the hard-coded key so autocomplete works in preview/CI builds
+// where only the EAS Secret GOOGLE_MAPS_API_KEY was set (server-side only).
+const GOOGLE_MAPS_API_KEY =
+  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -365,7 +370,7 @@ export default function PostScreen() {
   const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
   const safeTempDay = Math.min(tempDay, daysInTempMonth);
 
-  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && location.trim().length > 0 && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
+  const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
 
   // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -857,13 +862,11 @@ export default function PostScreen() {
                     ? 'Select a time'
                     : category === null
                       ? 'Select a category'
-                      : location.trim().length === 0
-                        ? 'Add a location'
-                        : description.trim().length === 0
-                          ? 'Add a plan description'
-                          : creatorMessage.trim().length < MSG_MIN
-                            ? `Message must be at least ${MSG_MIN} characters`
-                            : 'Add a message'}
+                      : description.trim().length === 0
+                        ? 'Add a plan description'
+                        : creatorMessage.trim().length < MSG_MIN
+                          ? `Message must be at least ${MSG_MIN} characters`
+                          : 'Add a message'}
             </Text>
           )}
           <TouchableOpacity

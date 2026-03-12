@@ -45,7 +45,12 @@ import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
+// Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
+// Falls back to the hard-coded key so autocomplete works in preview/CI builds
+// where only the EAS Secret GOOGLE_MAPS_API_KEY was set (server-side only).
+const GOOGLE_MAPS_API_KEY =
+  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_WIDTH * (9 / 16);
