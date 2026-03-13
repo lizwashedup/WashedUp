@@ -12,8 +12,8 @@ const brand = {
   white: '#FFFFFF',
 
   // ── Supporting ───────────────────────────────────────────────────────────
-  textMedium: '#666666', // Secondary text / meta
-  textLight: '#999999', // Placeholder / inactive
+  textMedium: '#4A4A4A', // Secondary text / meta
+  textLight: '#777777', // Placeholder / inactive
   warmGray: '#9B8B7A', // Muted labels, handles, secondary UI
   border: '#E8E3DC', // Dividers, card borders (warm-tinted)
   cardBg: '#FFFFFF', // Card surface
