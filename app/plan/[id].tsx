@@ -456,7 +456,11 @@ export default function PlanDetailScreen() {
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
   // Use actual member count when available — member_count can be out of sync
-  const displayMemberCount = members.length > 0 ? capDisplayCount(members.length) : capDisplayCount(plan?.member_count ?? 0);
+  const LAUNCH_PARTY_ID = 'c7acdfab-e775-4b27-b70c-fe503bb71589';
+  const isLaunchParty = plan?.id === LAUNCH_PARTY_ID;
+  const displayMemberCount = isLaunchParty
+    ? (members.length > 0 ? members.length : (plan?.member_count ?? 0))
+    : members.length > 0 ? capDisplayCount(members.length) : capDisplayCount(plan?.member_count ?? 0);
   const totalCapacity = Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
@@ -988,7 +992,7 @@ export default function PlanDetailScreen() {
             <Users size={18} color={Colors.terracotta} strokeWidth={2} />
             <View style={styles.logisticsContent}>
               <Text style={styles.logisticsMain}>
-                {displayMemberCount} of {totalCapacity} spots filled
+                {isLaunchParty ? `${displayMemberCount} going` : `${displayMemberCount} of ${totalCapacity} spots filled`}
               </Text>
               <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
             </View>

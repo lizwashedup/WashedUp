@@ -112,7 +112,11 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   }, [plan.id, plan.title]);
 
   // Creator always counts as 1 — member_count should never display as 0
-  const going = Math.max(1, capDisplayCount(plan.member_count));
+  const LAUNCH_PARTY_ID = 'c7acdfab-e775-4b27-b70c-fe503bb71589';
+  const isLaunchParty = plan.id === LAUNCH_PARTY_ID;
+  const going = isLaunchParty
+    ? (plan.member_count ?? 0)
+    : Math.max(1, capDisplayCount(plan.member_count));
   const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
   const spotsLeft = Math.max(0, totalCapacity - going);
   const isFull = going >= totalCapacity;
@@ -130,7 +134,11 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     ? `"${plan.host_message}"`
     : null;
 
-  const countText = isFull ? `${going} of ${totalCapacity} · Full` : `${going} of ${totalCapacity}`;
+  const countText = isLaunchParty
+    ? `${going} going`
+    : isFull
+      ? `${going} of ${totalCapacity} · Full`
+      : `${going} of ${totalCapacity}`;
 
   return (
     <TouchableOpacity
@@ -236,7 +244,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
 
       {/* E. Member count & CTA */}
       <View style={styles.bottomRow}>
-        <Text style={styles.spotsText}>{isPast ? `${going} went` : countText}</Text>
+        <Text style={styles.spotsText}>{isPast && !isLaunchParty ? `${going} went` : countText}</Text>
         <View style={styles.ctaSpacer} />
         {isPast ? (
           <View style={styles.completedBadge}>
