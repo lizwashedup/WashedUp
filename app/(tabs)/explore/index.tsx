@@ -271,7 +271,7 @@ const SceneCard = React.memo(function SceneCard({
             activeOpacity={0.9}
           >
             <Text style={[cardStyles.ctaButtonTextSmall, isFree && cardStyles.ctaButtonTextFree]}>
-              {isFree ? 'Free ↗' : 'Get Tickets ↗'}
+              {event.id === LAUNCH_PARTY_EXPLORE_ID ? "Let's Go →" : isFree ? 'Free ↗' : 'Get Tickets ↗'}
             </Text>
           </TouchableOpacity>
         </View>

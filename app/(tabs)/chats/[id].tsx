@@ -859,7 +859,7 @@ export default function ChatScreen() {
                     message={msg}
                     isOwn={isOwn}
                     showAvatar={!isOwn && !isGroupedWithNext}
-                    showName={!isOwn && !isGroupedWithPrev}
+                    showName={!isOwn}
                     isGrouped={isGroupedWithPrev}
                     currentUserId={currentUserId}
                     onPhotoPress={setPhotoViewUrl}
