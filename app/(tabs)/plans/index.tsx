@@ -465,7 +465,10 @@ export default function PlansScreen() {
   const LAUNCH_PARTY_ID = 'c7acdfab-e775-4b27-b70c-fe503bb71589';
 
   const sectionListData = useMemo(() => {
-    const launchParty = displayPlans.find((p) => p.id === LAUNCH_PARTY_ID);
+    // Pin launch party to top — check allPlans (non-members) AND myPlans (already joined)
+    const launchParty =
+      displayPlans.find((p) => p.id === LAUNCH_PARTY_ID) ||
+      myPlans.find((p) => p.id === LAUNCH_PARTY_ID);
     const base = sections.map((s) => ({
       title: s.def.title,
       data: s.plans.filter((p) => p.id !== LAUNCH_PARTY_ID),
@@ -474,7 +477,7 @@ export default function PlansScreen() {
       return [{ title: 'Featured', data: [launchParty] }, ...base];
     }
     return base;
-  }, [sections, displayPlans]);
+  }, [sections, displayPlans, myPlans]);
 
   const whenLabel = whenFilter.length === 0
     ? 'When'
