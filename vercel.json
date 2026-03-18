@@ -3,11 +3,24 @@
     {
       "source": "/e/:code",
       "destination": "https://upstjumasqblszevlgik.supabase.co/functions/v1/og-event?code=:code"
+    },
+    {
+      "source": "/u/:handle",
+      "destination": "https://upstjumasqblszevlgik.supabase.co/functions/v1/og-profile?handle=:handle"
     }
   ],
   "headers": [
     {
       "source": "/e/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, max-age=0"
+        }
+      ]
+    },
+    {
+      "source": "/u/(.*)",
       "headers": [
         {
           "key": "Cache-Control",
