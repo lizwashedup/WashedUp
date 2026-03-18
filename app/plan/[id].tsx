@@ -1467,6 +1467,14 @@ export default function PlanDetailScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
+          {/* BrandedAlert inside the modal so it renders on top, not behind it */}
+          <BrandedAlert
+            visible={brandedAlert.visible}
+            title={brandedAlert.title}
+            message={brandedAlert.message}
+            buttons={brandedAlert.buttons}
+            onClose={() => setBrandedAlert((a) => ({ ...a, visible: false }))}
+          />
         </View>
       </Modal>
 
