@@ -332,18 +332,17 @@ export default function SignupScreen() {
               </TouchableOpacity>
             </Animated.View>
 
-            {/* Error message — outside formSection so it pushes bottomSection down */}
-            {error ? (
-              <Text style={styles.errorText}>{error}</Text>
-            ) : (
-              <View style={styles.errorPlaceholder} />
-            )}
-
             {/* Bottom section */}
             <Animated.View
               entering={FadeIn.duration(400).delay(200)}
               style={styles.bottomSection}
             >
+              {/* Error message inside bottomSection so it pushes "or" + social buttons down, never overlaps */}
+              {error ? (
+                <Text style={[styles.errorText, { marginBottom: 12 }]}>{error}</Text>
+              ) : (
+                <View style={styles.errorPlaceholder} />
+              )}
               <View style={styles.orRow}>
                 <View style={styles.orLine} />
                 <View style={styles.orChip}>
