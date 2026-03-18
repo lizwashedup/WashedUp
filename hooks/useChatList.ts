@@ -54,7 +54,7 @@ export function useChatList() {
       const [{ data: allMessages }, { data: allReads }, { data: otherMessages }] = await Promise.all([
         supabase
           .from('messages')
-          .select('event_id, content, created_at, image_url')
+          .select('event_id, content, created_at, image_url, user_id')
           .in('event_id', eventIds)
           .order('created_at', { ascending: false }),
         supabase
@@ -69,12 +69,25 @@ export function useChatList() {
           .neq('user_id', user.id),
       ]);
 
-      const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null }> = {};
+      const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; user_id: string }> = {};
       (allMessages ?? []).forEach((msg: any) => {
         if (!lastMsgMap[msg.event_id]) {
           lastMsgMap[msg.event_id] = msg;
         }
       });
+
+      // Fetch first names for last-message senders
+      const senderIds = [...new Set(Object.values(lastMsgMap).map(m => m.user_id).filter(Boolean))];
+      const senderNameMap: Record<string, string> = {};
+      if (senderIds.length > 0) {
+        const { data: senderProfiles } = await supabase
+          .from('profiles_public')
+          .select('id, first_name_display')
+          .in('id', senderIds);
+        (senderProfiles ?? []).forEach((p: any) => {
+          if (p.first_name_display) senderNameMap[p.id] = p.first_name_display;
+        });
+      }
 
       const readMap: Record<string, string> = {};
       (allReads ?? []).forEach((r: any) => {
@@ -103,7 +116,12 @@ export function useChatList() {
           member_count: event.member_count ?? 0,
           ticket_url: event.tickets_url ?? null,
           last_message: lastMsg
-            ? (lastMsg.image_url ? 'Sent a photo' : lastMsg.content)
+            ? (() => {
+                const isOwn = lastMsg.user_id === user.id;
+                const senderName = isOwn ? 'You' : (senderNameMap[lastMsg.user_id] ?? null);
+                const text = lastMsg.image_url ? 'sent a photo' : lastMsg.content;
+                return senderName ? `${senderName}: ${text}` : text;
+              })()
             : null,
           last_message_at: lastMsg?.created_at ?? null,
           unread_count: unreadMap[event.id] ?? 0,

@@ -243,7 +243,7 @@ export default function PlansScreen() {
     queryFn: async () => {
       const { data } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, primary_vibe, max_invites, min_invites, member_count, status, creator_user_id, host_message')
+        .select('id, title, start_time, location_text, primary_vibe, max_invites, min_invites, member_count, status, creator_user_id, host_message, image_url')
         .eq('id', LAUNCH_PARTY_ID)
         .single();
       if (!data) return null;
@@ -260,7 +260,7 @@ export default function PlansScreen() {
         location_text: data.location_text ?? null,
         location_lat: null,
         location_lng: null,
-        image_url: null,
+        image_url: data.image_url ?? null,
         category: data.primary_vibe ?? null,
         gender_rule: null,
         max_invites: data.max_invites ?? null,
