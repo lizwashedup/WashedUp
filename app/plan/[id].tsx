@@ -999,7 +999,7 @@ export default function PlanDetailScreen() {
               <Text style={styles.logisticsMain}>
                 {isLaunchParty ? `${displayMemberCount} going` : `${displayMemberCount} of ${totalCapacity} spots filled`}
               </Text>
-              <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
+              {!isLaunchParty && <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>}
             </View>
           </View>
         </View>
