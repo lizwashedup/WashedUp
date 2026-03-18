@@ -569,10 +569,13 @@ export default function PostScreen() {
             status: 'joined',
           });
           if (retryErr) {
+            // Roll back the event so it doesn't exist as an orphan with no members
+            await supabase.from('events').delete().eq('id', insertedEvent.id);
             setAlertInfo({
-              title: 'Plan posted with a hiccup',
-              message: 'Your plan was created but we had trouble adding you as a member. Please contact support if you don\'t appear in "Who\'s Going."',
+              title: 'Something went wrong',
+              message: 'Could not create your plan. Please try again.',
             });
+            return;
           }
         }
       }

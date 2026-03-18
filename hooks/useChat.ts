@@ -209,7 +209,9 @@ export function useChat(eventId: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    setMessages(prev => prev.filter(m => m.id !== messageId));
+    // Capture state for rollback before optimistic removal
+    let previousMessages: typeof messages = [];
+    setMessages(prev => { previousMessages = prev; return prev.filter(m => m.id !== messageId); });
 
     const { error } = await supabase
       .from('messages')
@@ -218,9 +220,10 @@ export function useChat(eventId: string) {
       .eq('user_id', user.id);
 
     if (error) {
+      setMessages(previousMessages);
       Alert.alert('Could not delete', 'Something went wrong. Please try again.');
     }
-  }, []);
+  }, [messages]);
 
   const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
     const filter = checkContent(content);

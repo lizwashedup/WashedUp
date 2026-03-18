@@ -119,8 +119,8 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     : Math.max(1, capDisplayCount(plan.member_count));
   const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
   const spotsLeft = Math.max(0, totalCapacity - going);
-  const isFull = going >= totalCapacity;
-  const oneSpotLeft = spotsLeft === 1;
+  const isFull = isLaunchParty ? false : going >= totalCapacity;
+  const oneSpotLeft = isLaunchParty ? false : spotsLeft === 1;
 
   const planCount = plan.creator?.plans_posted ?? 0;
   const creatorLine2 = planCount === 1 ? 'First plan' : '';

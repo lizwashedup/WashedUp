@@ -463,7 +463,7 @@ export default function PlanDetailScreen() {
     ? (members.length > 0 ? members.length : (plan?.member_count ?? 0))
     : members.length > 0 ? capDisplayCount(members.length) : capDisplayCount(plan?.member_count ?? 0);
   const totalCapacity = Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
-  const isFull = plan ? displayMemberCount >= totalCapacity : false;
+  const isFull = isLaunchParty ? false : (plan ? displayMemberCount >= totalCapacity : false);
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
 
   const manageGenderOptions = useMemo(() => {
@@ -482,6 +482,8 @@ export default function PlanDetailScreen() {
 
   const isEligible = useMemo(() => {
     if (!plan) return false;
+    // Launch party is open to everyone
+    if (isLaunchParty) return true;
     const gr = plan.gender_rule;
     if (gr === 'women_only' && userGender !== 'woman') return false;
     if (gr === 'men_only' && userGender !== 'man') return false;
@@ -491,7 +493,7 @@ export default function PlanDetailScreen() {
       if (plan.target_age_max !== null && userAge > plan.target_age_max) return false;
     }
     return true;
-  }, [plan, userGender, userAge]);
+  }, [plan, userGender, userAge, isLaunchParty]);
 
   // ─── Join ────────────────────────────────────────────────────────────────────
 
@@ -505,16 +507,18 @@ export default function PlanDetailScreen() {
         if (!filter.ok) throw new Error(filter.reason ?? 'Your message contains language that goes against our community guidelines.');
       }
 
-      try {
-        const { data: canJoinGender } = await supabase.rpc('can_join_event_gender', {
-          p_user_id: currentUserId,
-          p_event_id: id,
-        });
-        if (canJoinGender === false) {
-          throw new Error('This plan is restricted and you are not eligible to join.');
+      if (!isLaunchParty) {
+        try {
+          const { data: canJoinGender } = await supabase.rpc('can_join_event_gender', {
+            p_user_id: currentUserId,
+            p_event_id: id,
+          });
+          if (canJoinGender === false) {
+            throw new Error('This plan is restricted and you are not eligible to join.');
+          }
+        } catch (eligibilityError: any) {
+          if (eligibilityError.message?.includes('not eligible')) throw eligibilityError;
         }
-      } catch (eligibilityError: any) {
-        if (eligibilityError.message?.includes('not eligible')) throw eligibilityError;
       }
 
       const { data, error } = await supabase.rpc('join_event_atomic', {
@@ -527,7 +531,7 @@ export default function PlanDetailScreen() {
       const rpcUnavailable = error && (error.message?.includes('does not exist') || (error as any).code === '42883');
 
       if (!rpcUnavailable && error) throw error;
-      if (!rpcUnavailable && data === 'full') throw new Error('This plan is full. Try joining the waitlist.');
+      if (!rpcUnavailable && data === 'full' && !isLaunchParty) throw new Error('This plan is full. Try joining the waitlist.');
       if (!rpcUnavailable && data === 'not_found') throw new Error('This plan no longer exists.');
 
       if (rpcUnavailable) {
@@ -1011,7 +1015,7 @@ export default function PlanDetailScreen() {
         {/* G. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && isEligible && !isFull && (
           <View style={styles.ctaBlock}>
-            {spotsLeft > 0 && spotsLeft <= 2 && (
+            {!isLaunchParty && spotsLeft > 0 && spotsLeft <= 2 && (
               <Text style={styles.ctaInfo}>
                 {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left — group closes soon
               </Text>

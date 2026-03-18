@@ -72,6 +72,7 @@ function onboardingDest(status: string | null | undefined): string {
     case 'vibes': return '/onboarding/vibes';
     case 'photo': return '/onboarding/photo';
     case 'la_check': return '/onboarding/la-check';
+    case 'waitlisted': return '/onboarding/waitlisted';
     default: return '/onboarding/basics';
   }
 }
@@ -250,9 +251,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setAuthedUserId(session.user.id);
         router.replace(dest as any);
       } catch {
+        // Profile fetch failed (network error, etc.) — don't navigate the user
+        // away from where they are. Just mark auth as resolved with their userId.
         setAuthedUserId(session.user.id);
         setAuthResolved(true);
-        router.replace('/onboarding/basics' as any);
       }
     });
 

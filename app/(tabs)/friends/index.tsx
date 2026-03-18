@@ -99,16 +99,18 @@ export default function YourPeopleScreen() {
     }
     const t = setTimeout(async () => {
       setCheckingHandle(true);
-      const { data } = await supabase
+      let query = supabase
         .from('profiles')
         .select('id')
-        .eq('handle', clean)
-        .maybeSingle();
+        .eq('handle', clean);
+      // Exclude the current user so they can reclaim their own handle
+      if (userId) query = query.neq('id', userId);
+      const { data } = await query.maybeSingle();
       setHandleAvailable(!data);
       setCheckingHandle(false);
     }, 500);
     return () => clearTimeout(t);
-  }, [handleInput]);
+  }, [handleInput, userId]);
 
   // Current user
   const { data: userId, isLoading: userLoading } = useQuery({

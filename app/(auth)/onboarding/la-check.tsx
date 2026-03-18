@@ -35,7 +35,7 @@ export default function OnboardingLACheckScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
-        supabase.auth.signOut();
+        await supabase.auth.signOut();
         return;
       }
       const { error } = await supabase.from('profiles').update({ city: 'Los Angeles', onboarding_status: 'photo' }).eq('id', user.id);
@@ -58,7 +58,7 @@ export default function OnboardingLACheckScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
-        supabase.auth.signOut();
+        await supabase.auth.signOut();
         return;
       }
       const trimmedCity = city.trim() || 'Other';
@@ -67,9 +67,9 @@ export default function OnboardingLACheckScreen() {
         setAlertInfo({ title: 'Content not allowed', message: cityFilter.reason ?? 'Please try a different city name.' });
         return;
       }
-      const { error } = await supabase.from('profiles').update({ city: trimmedCity, onboarding_status: 'photo' }).eq('id', user.id);
+      const { error } = await supabase.from('profiles').update({ city: trimmedCity, onboarding_status: 'waitlisted' }).eq('id', user.id);
       if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
-      router.push('/onboarding/photo');
+      router.push('/onboarding/waitlisted');
     } finally {
       setLoading(false);
     }
@@ -120,21 +120,21 @@ export default function OnboardingLACheckScreen() {
                   activeOpacity={0.9}
                   disabled={loading}
                 >
-                  <Text style={styles.secondaryButtonText}>Not yet</Text>
+                  <Text style={styles.secondaryButtonText}>No, somewhere else</Text>
                 </TouchableOpacity>
               </>
             ) : (
               <>
+                <Text style={styles.waitlistHeading}>WashedUp is only in LA right now.</Text>
+                <View style={styles.gap16} />
                 <Text style={styles.notLaText}>
-                  WashedUp is LA only for now. We&apos;ll let you know when we expand.
+                  We&apos;re expanding as fast as we can. If you&apos;d like WashedUp in your city, add it below to be added to the waitlist!
                 </Text>
-                <View style={styles.gap20} />
-                <Text style={styles.label}>What city are you in?</Text>
-                <View style={styles.gap8} />
+                <View style={styles.gap24} />
                 <TextInput
                   style={styles.input}
-                  placeholder="City name"
-                  placeholderTextColor={Colors.textMedium}
+                  placeholder="Your city"
+                  placeholderTextColor={Colors.textLight}
                   value={city}
                   onChangeText={setCity}
                   autoCapitalize="words"
@@ -148,7 +148,7 @@ export default function OnboardingLACheckScreen() {
                   activeOpacity={0.9}
                   disabled={loading}
                 >
-                  <Text style={styles.primaryButtonText}>Continue</Text>
+                  <Text style={styles.primaryButtonText}>Join Waitlist</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -209,8 +209,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryButtonText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.displaySM, color: Colors.asphalt },
-  notLaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt, lineHeight: 24 },
-  label: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
+  waitlistHeading: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
+  notLaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textMedium, lineHeight: 24 },
   input: {
     height: 52,
     backgroundColor: Colors.cardBg,

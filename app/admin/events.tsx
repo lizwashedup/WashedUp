@@ -126,6 +126,26 @@ export default function AdminEventsScreen() {
     if (userId !== null && !isAdmin(userId)) router.back();
   }, [userId, router]);
 
+  const { data: waitlist = [], refetch: refetchWaitlist } = useQuery({
+    queryKey: ['admin-city-waitlist'],
+    queryFn: async (): Promise<{ city: string; count: number }[]> => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('city')
+        .eq('onboarding_status', 'waitlisted');
+      if (error) throw error;
+      const counts: Record<string, number> = {};
+      for (const row of data ?? []) {
+        const c = row.city ?? 'Unknown';
+        counts[c] = (counts[c] ?? 0) + 1;
+      }
+      return Object.entries(counts)
+        .map(([city, count]) => ({ city, count }))
+        .sort((a, b) => b.count - a.count);
+    },
+    staleTime: 60_000,
+  });
+
   const { data: events = [], isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['admin-scene-events'],
     queryFn: async (): Promise<SceneEvent[]> => {
@@ -311,6 +331,25 @@ export default function AdminEventsScreen() {
               )}
             </TouchableOpacity>
           </View>
+
+          {/* City Waitlist section */}
+          <Text style={[styles.sectionLabel, { marginTop: 32 }]}>
+            City Waitlist ({waitlist.reduce((s, r) => s + r.count, 0)})
+          </Text>
+          {waitlist.length === 0 ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptySubtext}>No one on the waitlist yet</Text>
+            </View>
+          ) : (
+            <View style={styles.waitlistCard}>
+              {waitlist.map(({ city, count }, i) => (
+                <View key={city} style={[styles.waitlistRow, i === waitlist.length - 1 && { borderBottomWidth: 0 }]}>
+                  <Text style={styles.waitlistCity}>{city}</Text>
+                  <Text style={styles.waitlistCount}>{count}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </ScrollView>
       )}
 
@@ -595,4 +634,24 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyMD,
     color: Colors.white,
   },
+
+  waitlistCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+    marginBottom: 32,
+  },
+  waitlistRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  waitlistCity: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  waitlistCount: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
 });
