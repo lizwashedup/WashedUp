@@ -462,13 +462,19 @@ export default function PlansScreen() {
     [displayPlans, sectionDefs, categoryFilter, whenFilter],
   );
 
-  const sectionListData = useMemo(
-    () => sections.map((s) => ({
+  const LAUNCH_PARTY_ID = 'c7acdfab-e775-4b27-b70c-fe503bb71589';
+
+  const sectionListData = useMemo(() => {
+    const launchParty = displayPlans.find((p) => p.id === LAUNCH_PARTY_ID);
+    const base = sections.map((s) => ({
       title: s.def.title,
-      data: s.plans,
-    })),
-    [sections],
-  );
+      data: s.plans.filter((p) => p.id !== LAUNCH_PARTY_ID),
+    })).filter((s) => s.data.length > 0);
+    if (launchParty) {
+      return [{ title: 'Featured', data: [launchParty] }, ...base];
+    }
+    return base;
+  }, [sections, displayPlans]);
 
   const whenLabel = whenFilter.length === 0
     ? 'When'
