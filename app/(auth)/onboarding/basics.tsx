@@ -56,9 +56,9 @@ export default function OnboardingBasicsScreen() {
   const [loading, setLoading] = useState(false);
 
   const years = getYears();
-  const [tempMonth, setTempMonth] = useState(0);
-  const [tempDay, setTempDay] = useState(1);
-  const [tempYear, setTempYear] = useState(years[0]);
+  const [tempMonth, setTempMonth] = useState<number | null>(null);
+  const [tempDay, setTempDay] = useState<number | null>(null);
+  const [tempYear, setTempYear] = useState<number | null>(null);
 
   const canContinue = birthday && gender && !dateError;
 
@@ -67,19 +67,20 @@ export default function OnboardingBasicsScreen() {
       setTempYear(birthday.getFullYear());
       setTempMonth(birthday.getMonth());
       setTempDay(birthday.getDate());
+    } else {
+      setTempYear(null);
+      setTempMonth(null);
+      setTempDay(null);
     }
     setShowDatePicker(true);
     setDateError(null);
   };
 
   const confirmDate = () => {
-    const d = new Date(tempYear, tempMonth, tempDay);
+    if (tempYear === null || tempMonth === null || tempDay === null) return;
+    const d = new Date(tempYear, tempMonth, Math.min(tempDay, daysInMonth));
     setBirthday(d);
-    if (!is18Plus(d)) {
-      setDateError('You must be 18 or older to use WashedUp');
-    } else {
-      setDateError(null);
-    }
+    setDateError(!is18Plus(d) ? 'You must be 18 or older to use WashedUp' : null);
     setShowDatePicker(false);
   };
 
@@ -128,8 +129,10 @@ export default function OnboardingBasicsScreen() {
     setGender(g);
   };
 
-  const daysInMonth = new Date(tempYear, tempMonth + 1, 0).getDate();
-  const safeDay = Math.min(tempDay, daysInMonth);
+  const daysInMonth = (tempYear !== null && tempMonth !== null)
+    ? new Date(tempYear, tempMonth + 1, 0).getDate()
+    : 31;
+  const safeDay = tempDay !== null ? Math.min(tempDay, daysInMonth) : null;
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -212,7 +215,7 @@ export default function OnboardingBasicsScreen() {
                 {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => (
                   <Pressable
                     key={day}
-                    style={[styles.pickerItem, safeDay === day && styles.pickerItemSelected]}
+                    style={[styles.pickerItem, safeDay !== null && safeDay === day && styles.pickerItemSelected]}
                     onPress={() => setTempDay(day)}
                   >
                     <Text style={[styles.pickerItemText, safeDay === day && styles.pickerItemTextSelected]}>{day}</Text>
@@ -231,7 +234,11 @@ export default function OnboardingBasicsScreen() {
                 ))}
               </ScrollView>
             </View>
-            <TouchableOpacity style={styles.modalButton} onPress={confirmDate}>
+            <TouchableOpacity
+              style={[styles.modalButton, (tempYear === null || tempMonth === null || tempDay === null) && styles.primaryButtonDisabled]}
+              onPress={confirmDate}
+              disabled={tempYear === null || tempMonth === null || tempDay === null}
+            >
               <Text style={styles.primaryButtonText}>Done</Text>
             </TouchableOpacity>
           </Pressable>

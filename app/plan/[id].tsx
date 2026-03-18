@@ -353,7 +353,8 @@ export default function PlanDetailScreen() {
 
       if (profile?.gender) setUserGender(profile.gender);
       if (profile?.birthday) {
-        const birth = new Date(profile.birthday);
+        const [by, bm, bd] = profile.birthday.split('-').map(Number);
+        const birth = new Date(by, bm - 1, bd); // local time — avoids UTC midnight timezone shift
         const today = new Date();
         let age = today.getFullYear() - birth.getFullYear();
         const md = today.getMonth() - birth.getMonth();

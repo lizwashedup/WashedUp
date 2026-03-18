@@ -330,13 +330,14 @@ export default function SignupScreen() {
                   <Text style={styles.primaryButtonText}>Sign Up</Text>
                 )}
               </TouchableOpacity>
-
-              {error ? (
-                <Text style={styles.errorText}>{error}</Text>
-              ) : (
-                <View style={styles.errorPlaceholder} />
-              )}
             </Animated.View>
+
+            {/* Error message — outside formSection so it pushes bottomSection down */}
+            {error ? (
+              <Text style={styles.errorText}>{error}</Text>
+            ) : (
+              <View style={styles.errorPlaceholder} />
+            )}
 
             {/* Bottom section */}
             <Animated.View

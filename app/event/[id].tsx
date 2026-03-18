@@ -71,7 +71,9 @@ function formatFullDate(dateStr: string | null, timeStr: string | null): string 
       t = ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
     } else {
       // Fallback: parse a plain "HH:MM" or "HH:MM:SS" time string
-      const [h, m] = timeStr.split(':');
+      const parts = timeStr.split(':');
+      const h = parts[0] ?? '0';
+      const m = parts[1] ?? '0';
       const tmp = new Date();
       tmp.setHours(parseInt(h, 10), parseInt(m, 10), 0, 0);
       t = tmp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
