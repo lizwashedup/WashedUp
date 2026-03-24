@@ -315,7 +315,11 @@ export default function SignupScreen() {
                   <Text style={styles.agreementText}>.</Text>
                 </View>
               </View>
-              <View style={styles.gap16} />
+              {error ? (
+                <Text style={[styles.errorText, { marginBottom: 8 }]}>{error}</Text>
+              ) : (
+                <View style={{ height: 8 }} />
+              )}
 
               <TouchableOpacity
                 style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
@@ -337,12 +341,6 @@ export default function SignupScreen() {
               entering={FadeIn.duration(400).delay(200)}
               style={styles.bottomSection}
             >
-              {/* Error message inside bottomSection so it pushes "or" + social buttons down, never overlaps */}
-              {error ? (
-                <Text style={[styles.errorText, { marginBottom: 12 }]}>{error}</Text>
-              ) : (
-                <View style={styles.errorPlaceholder} />
-              )}
               <View style={styles.orRow}>
                 <View style={styles.orLine} />
                 <View style={styles.orChip}>
@@ -568,10 +566,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
     color: Colors.errorRed,
-  },
-  errorPlaceholder: {
-    height: 22,
-    marginTop: 8,
   },
   bottomSection: {
     paddingBottom: 8,

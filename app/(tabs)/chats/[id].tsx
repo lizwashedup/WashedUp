@@ -19,7 +19,7 @@ import {
 import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -465,7 +465,13 @@ export default function ChatScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const listRef = useRef<FlatList>(null);
 
-  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction } = useChat(id);
+  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction, refetch } = useChat(id);
+
+  useFocusEffect(
+    useCallback(() => {
+      refetch(true);
+    }, [refetch]),
+  );
 
   const onContentSizeChange = useCallback(() => {
     listRef.current?.scrollToEnd({ animated: false });

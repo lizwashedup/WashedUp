@@ -438,7 +438,7 @@ export default function PlansScreen() {
 
       const realCounts = await fetchRealMemberCounts(active.map((e: any) => e.id));
 
-      return active.map((e: any) => {
+      return active.filter((e: any) => e.id !== LAUNCH_PARTY_ID).map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
         return {
           id: e.id, title: e.title, start_time: e.start_time,

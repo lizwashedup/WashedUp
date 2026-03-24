@@ -38,9 +38,22 @@ export function useChatList() {
 
       if (membershipsError || !memberships) return;
 
+      // Fetch real member counts from event_members to avoid the known drift
+      // in the events.member_count column (same approach as fetchRealMemberCounts in fetchPlans.ts)
+      const allEventIds = memberships.map((m: any) => m.events?.id).filter(Boolean);
+      const { data: memberCountRows } = await supabase
+        .from('event_members')
+        .select('event_id')
+        .in('event_id', allEventIds)
+        .eq('status', 'joined');
+      const realCounts: Record<string, number> = {};
+      (memberCountRows ?? []).forEach((r: any) => {
+        realCounts[r.event_id] = (realCounts[r.event_id] ?? 0) + 1;
+      });
+
       const eligible = memberships.filter((m: any) => {
         const e = m.events;
-        return e && (e.member_count >= 2 || e.status === 'cancelled');
+        return e && (realCounts[e.id] >= 2 || e.status === 'cancelled');
       });
 
       if (eligible.length === 0) {

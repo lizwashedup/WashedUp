@@ -113,8 +113,8 @@ export function useChat(eventId: string) {
     return () => { cancelledRef.current = true; supabase.removeChannel(channel); };
   }, [eventId]);
 
-  const fetchMessages = async () => {
-    setLoading(true);
+  const fetchMessages = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [{ data }, { data: { user } }] = await Promise.all([
         supabase
@@ -310,5 +310,5 @@ export function useChat(eventId: string) {
     }
   }, [eventId]);
 
-  return { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction };
+  return { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction, refetch: fetchMessages };
 }

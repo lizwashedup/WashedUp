@@ -532,6 +532,20 @@ export default function PlanDetailScreen() {
 
       if (!rpcUnavailable && error) throw error;
       if (!rpcUnavailable && data === 'full' && !isLaunchParty) throw new Error('This plan is full. Try joining the waitlist.');
+      // Safety net: if the DB function still blocked the launch party join (e.g. status was 'full'),
+      // bypass it with a direct insert so everyone can always join the launch party.
+      if (!rpcUnavailable && data === 'full' && isLaunchParty) {
+        const { data: existing } = await supabase.from('event_members').select('id').eq('event_id', id).eq('user_id', currentUserId).maybeSingle();
+        if (existing) {
+          const { error: updateError } = await supabase.from('event_members').update({ status: 'joined', role: 'guest' }).eq('event_id', id).eq('user_id', currentUserId);
+          if (updateError) throw updateError;
+        } else {
+          const { error: insertError } = await supabase.from('event_members').insert({ event_id: id, user_id: currentUserId, role: 'guest', status: 'joined' });
+          if (insertError) throw insertError;
+        }
+        // Reset plan status so future joins go through the RPC normally
+        await supabase.from('events').update({ status: 'active' }).eq('id', id).eq('status', 'full');
+      }
       if (!rpcUnavailable && data === 'not_found') throw new Error('This plan no longer exists.');
 
       if (rpcUnavailable) {
