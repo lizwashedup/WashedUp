@@ -115,6 +115,7 @@ export default function OnboardingPhotoScreen() {
   };
 
   const handleContinue = async () => {
+    if (!imageBase64) return; // should never happen — button is disabled without it
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setLoading(true);
     try {
@@ -240,12 +241,12 @@ export default function OnboardingPhotoScreen() {
         <TouchableOpacity
           style={[
             styles.primaryButton,
-            (!imageUri || loading) && styles.primaryButtonDisabled,
+            (!imageUri || !imageBase64 || loading) && styles.primaryButtonDisabled,
           ]}
           onPress={handleContinue}
           onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
           activeOpacity={0.9}
-          disabled={!imageUri || loading}
+          disabled={!imageUri || !imageBase64 || loading}
         >
           {loading ? (
             <ActivityIndicator color={Colors.white} />
