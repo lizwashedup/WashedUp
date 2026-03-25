@@ -10,6 +10,7 @@ import { Camera, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -37,7 +38,14 @@ export default function OnboardingPhotoScreen() {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        setAlertInfo({ title: 'Permission needed', message: 'Go to Settings → WashedUp → Photos and allow access.' });
+        setAlertInfo({
+          title: 'Permission needed',
+          message: 'WashedUp needs access to your photos to set a profile picture.',
+          buttons: [
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            { text: 'Cancel', style: 'cancel' },
+          ],
+        });
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -57,7 +65,14 @@ export default function OnboardingPhotoScreen() {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        setAlertInfo({ title: 'Permission needed', message: 'Go to Settings → WashedUp → Camera and allow access.' });
+        setAlertInfo({
+          title: 'Permission needed',
+          message: 'WashedUp needs access to your camera to take a profile photo.',
+          buttons: [
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            { text: 'Cancel', style: 'cancel' },
+          ],
+        });
         return;
       }
       const result = await ImagePicker.launchCameraAsync({

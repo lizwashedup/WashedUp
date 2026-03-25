@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
@@ -137,7 +137,11 @@ export default function OnboardingVibesScreen() {
           activeOpacity={0.9}
           disabled={!canContinue || loading}
         >
-          <Text style={styles.primaryButtonText}>Let&apos;s Go</Text>
+          {loading ? (
+            <ActivityIndicator color={Colors.white} />
+          ) : (
+            <Text style={styles.primaryButtonText}>Let&apos;s Go</Text>
+          )}
         </TouchableOpacity>
       </View>
       <BrandedAlert
