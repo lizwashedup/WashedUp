@@ -11,6 +11,7 @@ import {
     KeyboardAvoidingView,
     Linking,
     Platform,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -194,6 +195,13 @@ export default function SignupScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.container}>
             {/* Top section */}
@@ -392,6 +400,7 @@ export default function SignupScreen() {
             </Animated.View>
           </View>
         </TouchableWithoutFeedback>
+        </ScrollView>
       </KeyboardAvoidingView>
       <BrandedAlert
         visible={!!alertInfo}
@@ -412,9 +421,16 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
-  container: {
+  scroll: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     paddingHorizontal: 24,
+    justifyContent: 'space-between',
+  },
+  container: {
+    flexGrow: 1,
     justifyContent: 'space-between',
   },
   topSection: {
