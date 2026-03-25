@@ -239,16 +239,6 @@ export default function OnboardingPhotoScreen() {
           )}
         </TouchableOpacity>
 
-        {/* Skip — only shown when no photo is selected yet */}
-        {!imageUri && !loading && (
-          <TouchableOpacity
-            style={styles.skipButton}
-            onPress={handleContinue}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Text style={styles.skipText}>Skip for now</Text>
-          </TouchableOpacity>
-        )}
       </View>
       <BrandedAlert
         visible={!!alertInfo}
@@ -351,6 +341,4 @@ const styles = StyleSheet.create({
   },
   primaryButtonDisabled: { opacity: 0.45 },
   primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.white },
-  skipButton: { alignItems: 'center', paddingVertical: 12, marginBottom: 4 },
-  skipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textLight },
 });
