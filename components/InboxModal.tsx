@@ -60,7 +60,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       } catch { return []; }
     },
     enabled: !!userId && visible,
-    staleTime: 15_000,
+    staleTime: 0,
   });
 
   const { data: appNotifications = [], refetch: refetchNotifs, isLoading: loadingNotifs } = useQuery({
@@ -82,7 +82,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       } catch { return []; }
     },
     enabled: !!userId && visible,
-    staleTime: 15_000,
+    staleTime: 0,
   });
 
   const { data: oldInvites = [], refetch: refetchOldInvites } = useQuery({
@@ -169,7 +169,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       <Pressable style={s.overlay} onPress={onClose}>
         <Pressable style={s.sheet} onPress={(e) => e.stopPropagation()}>
           <Text style={s.title}>Invites and Fun Stuff</Text>
-          {totalInboxCount === 0 && totalOldCount === 0 ? (
+          {loadingInvites || loadingNotifs ? (
+            <ActivityIndicator color={Colors.terracotta} style={{ paddingVertical: 32 }} />
+          ) : totalInboxCount === 0 && totalOldCount === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 32 }}>
               <Bell size={36} color={Colors.textLight} />
               <Text style={[s.meta, { marginTop: 12, textAlign: 'center' }]}>
