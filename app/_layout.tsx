@@ -24,6 +24,7 @@ import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useSessionLogger } from '../hooks/useSessionLogger';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -85,6 +86,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const splashHiddenRef = useRef(false);
   const lastNavRef = useRef({ dest: '', ts: 0 });
   usePushNotifications(authedUserId);
+  useSessionLogger(authedUserId);
 
   useEffect(() => {
     if (authResolved && !splashHiddenRef.current) {
