@@ -19,8 +19,8 @@ export function useChatList() {
   const [chats, setChats] = useState<ChatPreview[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchChats = useCallback(async () => {
-    setLoading(true);
+  const fetchChats = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const user = (await supabase.auth.getUser()).data?.user;
       if (!user) return;
@@ -177,7 +177,7 @@ export function useChatList() {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const eid = (payload.new as any)?.event_id;
-          if (eid && hasChatsRef.current && eventIdsRef.current.has(eid)) fetchChats();
+          if (eid && hasChatsRef.current && eventIdsRef.current.has(eid)) fetchChats(true);
         },
       )
       .subscribe();

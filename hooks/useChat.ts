@@ -113,7 +113,7 @@ export function useChat(eventId: string) {
     return () => { cancelledRef.current = true; supabase.removeChannel(channel); };
   }, [eventId]);
 
-  const fetchMessages = async (silent = false) => {
+  const fetchMessages = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const [{ data }, { data: { user } }] = await Promise.all([
@@ -170,7 +170,7 @@ export function useChat(eventId: string) {
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
-  };
+  }, [eventId]);
 
   const toggleReaction = useCallback(async (messageId: string, reaction = 'heart') => {
     const { data: { user } } = await supabase.auth.getUser();

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -184,7 +184,7 @@ interface BubbleProps {
   onDelete?: (messageId: string) => void;
 }
 
-function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, onPhotoPress, onReaction, onDelete }: BubbleProps) {
+const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, onPhotoPress, onReaction, onDelete }: BubbleProps) {
   const lastTapRef = React.useRef(0);
 
   if (message.message_type === 'system') {
@@ -348,7 +348,7 @@ function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, curren
       </View>
     </View>
   );
-}
+});
 
 const bubbleStyles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 2, paddingHorizontal: 16 },
@@ -473,8 +473,15 @@ export default function ChatScreen() {
     }, [refetch]),
   );
 
+  const isNearBottomRef = useRef(true);
+
+  const onScroll = useCallback(({ nativeEvent }: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+    isNearBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 80;
+  }, []);
+
   const onContentSizeChange = useCallback(() => {
-    listRef.current?.scrollToEnd({ animated: false });
+    if (isNearBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
   }, []);
   const { blockUser } = useBlock();
 
@@ -485,12 +492,6 @@ export default function ChatScreen() {
     staleTime: 60_000,
     retry: 2,
   });
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-    }
-  }, [messages.length]);
 
   const prefetchedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -838,6 +839,8 @@ export default function ChatScreen() {
             initialNumToRender={20}
             windowSize={10}
             maxToRenderPerBatch={15}
+            onScroll={onScroll}
+            scrollEventThrottle={100}
             onContentSizeChange={onContentSizeChange}
             renderItem={({ item, index }) => {
               if ('type' in item && item.type === 'date') {
@@ -869,8 +872,8 @@ export default function ChatScreen() {
                     isGrouped={isGroupedWithPrev}
                     currentUserId={currentUserId}
                     onPhotoPress={setPhotoViewUrl}
-                    onReaction={(messageId) => toggleReaction(messageId)}
-                    onDelete={(messageId) => deleteMessage(messageId)}
+                    onReaction={toggleReaction}
+                    onDelete={deleteMessage}
                   />
                 </View>
               );
