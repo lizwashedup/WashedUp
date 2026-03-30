@@ -149,8 +149,6 @@ function filterIntoSections(
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-const LAUNCH_PARTY_ID = 'c7acdfab-e775-4b27-b70c-fe503bb71589';
-
 export default function PlansScreen() {
   const [now, setNow] = useState(() => new Date());
   useFocusEffect(useCallback(() => { setNow(new Date()); }, []));
@@ -236,43 +234,6 @@ export default function PlansScreen() {
   }, []);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
-
-  // Always fetch launch party directly — bypasses all feed filtering/eligibility rules
-  const { data: launchPartyPlan } = useQuery<Plan | null>({
-    queryKey: ['launch-party-plan'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('events')
-        .select('id, title, start_time, location_text, primary_vibe, max_invites, min_invites, member_count, status, creator_user_id, host_message, image_url')
-        .eq('id', LAUNCH_PARTY_ID)
-        .single();
-      if (!data) return null;
-      const { data: creator } = await supabase
-        .from('profiles_public')
-        .select('id, first_name_display, profile_photo_url')
-        .eq('id', data.creator_user_id)
-        .single();
-      const realCounts = await fetchRealMemberCounts([data.id]);
-      return {
-        id: data.id,
-        title: data.title,
-        start_time: data.start_time,
-        location_text: data.location_text ?? null,
-        location_lat: null,
-        location_lng: null,
-        image_url: data.image_url ?? null,
-        category: data.primary_vibe ?? null,
-        gender_rule: null,
-        max_invites: data.max_invites ?? null,
-        min_invites: data.min_invites ?? null,
-        member_count: Math.max(1, realCounts[data.id] ?? data.member_count ?? 0),
-        status: data.status ?? 'forming',
-        host_message: data.host_message ?? null,
-        creator: creator ? { id: creator.id, first_name_display: creator.first_name_display ?? null, profile_photo_url: creator.profile_photo_url ?? null } : null,
-      } as Plan;
-    },
-    staleTime: 60_000,
-  });
 
   const { data: allPlans = [], isLoading, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['events', 'feed', userId],
@@ -438,7 +399,7 @@ export default function PlansScreen() {
 
       const realCounts = await fetchRealMemberCounts(active.map((e: any) => e.id));
 
-      return active.filter((e: any) => e.id !== LAUNCH_PARTY_ID).map((e: any) => {
+      return active.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
         return {
           id: e.id, title: e.title, start_time: e.start_time,
@@ -502,15 +463,11 @@ export default function PlansScreen() {
   );
 
   const sectionListData = useMemo(() => {
-    const base = sections.map((s) => ({
+    return sections.map((s) => ({
       title: s.def.title,
-      data: s.plans.filter((p) => p.id !== LAUNCH_PARTY_ID),
+      data: s.plans,
     })).filter((s) => s.data.length > 0);
-    if (launchPartyPlan) {
-      return [{ title: 'Featured', data: [launchPartyPlan] }, ...base];
-    }
-    return base;
-  }, [sections, launchPartyPlan]);
+  }, [sections]);
 
   const whenLabel = whenFilter.length === 0
     ? 'When'

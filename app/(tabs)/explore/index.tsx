@@ -153,25 +153,16 @@ const SceneCard = React.memo(function SceneCard({
   const locationStr = formatVenueLocation(event.venue_address) || event.venue || '';
   const isFree = !event.ticket_price || (typeof event.ticket_price === 'string' && (event.ticket_price.trim() === '' || event.ticket_price.trim().toLowerCase() === 'free'));
 
-  const LAUNCH_PARTY_EXPLORE_ID = '1a399d05-e011-4953-b517-f205735e2043';
-  const LAUNCH_PARTY_PLAN_ID = 'c7acdfab-e775-4b27-b70c-fe503bb71589';
-
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (event.id === LAUNCH_PARTY_EXPLORE_ID) {
-      router.push(`/plan/${LAUNCH_PARTY_PLAN_ID}` as any);
-    } else {
-      router.push(`/event/${event.id}`);
-    }
+    router.push(`/event/${event.id}`);
   }, [event.id]);
 
   const handleCta = useCallback(
     (e: any) => {
       e.stopPropagation();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      if (event.id === LAUNCH_PARTY_EXPLORE_ID) {
-        router.push(`/plan/${LAUNCH_PARTY_PLAN_ID}` as any);
-      } else if (event.external_url) {
+      if (event.external_url) {
         Linking.openURL(event.external_url);
       } else {
         router.push(`/event/${event.id}`);
@@ -204,11 +195,7 @@ const SceneCard = React.memo(function SceneCard({
       e.stopPropagation();
       if (event.plans_count > 0) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        if (event.id === LAUNCH_PARTY_EXPLORE_ID) {
-          router.push(`/plan/${LAUNCH_PARTY_PLAN_ID}` as any);
-        } else {
-          router.push(`/event/${event.id}`);
-        }
+        router.push(`/event/${event.id}`);
       }
     },
     [event.id, event.plans_count],
@@ -271,7 +258,7 @@ const SceneCard = React.memo(function SceneCard({
             activeOpacity={0.9}
           >
             <Text style={[cardStyles.ctaButtonTextSmall, isFree && cardStyles.ctaButtonTextFree]}>
-              {event.id === LAUNCH_PARTY_EXPLORE_ID ? "Let's Go →" : isFree ? 'Free ↗' : 'Get Tickets ↗'}
+              {isFree ? 'Free ↗' : 'Get Tickets ↗'}
             </Text>
           </TouchableOpacity>
         </View>

@@ -102,11 +102,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
     setSelectedPlan(null);
   }, []);
 
-  const LAUNCH_PARTY_ID = 'c7acdfab-e775-4b27-b70c-fe503bb71589';
-  const isLaunchParty = selectedPlan?.id === LAUNCH_PARTY_ID;
-  const going = isLaunchParty
-    ? (selectedPlan?.member_count ?? 0)
-    : selectedPlan ? capDisplayCount(selectedPlan.member_count) : 0;
+  const going = selectedPlan ? capDisplayCount(selectedPlan.member_count) : 0;
   const totalCapacity = selectedPlan ? Math.min((selectedPlan.max_invites ?? 7) + 1, MAX_GROUP) : 0;
 
   return (
@@ -225,7 +221,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
             <View style={styles.cardBottom}>
               <View style={styles.cardMeta}>
                 <Users size={13} color={Colors.textMedium} strokeWidth={2} />
-                <Text style={styles.cardMetaText}>{isLaunchParty ? `${going} going` : `${going} of ${totalCapacity}`}</Text>
+                <Text style={styles.cardMetaText}>{`${going} of ${totalCapacity}`}</Text>
               </View>
               {onWishlist && (
                 <TouchableOpacity

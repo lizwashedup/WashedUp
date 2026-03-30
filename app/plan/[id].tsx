@@ -79,6 +79,7 @@ interface PlanDetail {
   min_invites: number | null;
   target_age_min: number | null;
   target_age_max: number | null;
+  end_time: string | null;
   status: string;
   creator_user_id: string;
   tickets_url: string | null;
@@ -129,9 +130,9 @@ function formatWhenShort(dateString: string): string {
   return date.toLocaleDateString('en-US', { weekday: 'short' });
 }
 
-function buildCalendarUrl(title: string, startTime: string, location?: string): string {
+function buildCalendarUrl(title: string, startTime: string, endTime?: string | null, location?: string): string {
   const start = new Date(startTime);
-  const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+  const end = endTime ? new Date(endTime) : new Date(start.getTime() + 2 * 60 * 60 * 1000);
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const params = new URLSearchParams({
     action: 'TEMPLATE',
@@ -167,7 +168,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
   const { data, error } = await supabase
     .from('events')
     .select(`
-      id, title, description, host_message, start_time,
+      id, title, description, host_message, start_time, end_time,
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
@@ -457,13 +458,9 @@ export default function PlanDetailScreen() {
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
   // Use actual member count when available — member_count can be out of sync
-  const LAUNCH_PARTY_ID = 'c7acdfab-e775-4b27-b70c-fe503bb71589';
-  const isLaunchParty = plan?.id === LAUNCH_PARTY_ID;
-  const displayMemberCount = isLaunchParty
-    ? (members.length > 0 ? members.length : (plan?.member_count ?? 0))
-    : members.length > 0 ? capDisplayCount(members.length) : capDisplayCount(plan?.member_count ?? 0);
+  const displayMemberCount = members.length > 0 ? capDisplayCount(members.length) : capDisplayCount(plan?.member_count ?? 0);
   const totalCapacity = Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
-  const isFull = isLaunchParty ? false : (plan ? displayMemberCount >= totalCapacity : false);
+  const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
 
   const manageGenderOptions = useMemo(() => {
@@ -482,8 +479,6 @@ export default function PlanDetailScreen() {
 
   const isEligible = useMemo(() => {
     if (!plan) return false;
-    // Launch party is open to everyone
-    if (isLaunchParty) return true;
     const gr = plan.gender_rule;
     if (gr === 'women_only' && userGender !== 'woman') return false;
     if (gr === 'men_only' && userGender !== 'man') return false;
@@ -493,7 +488,7 @@ export default function PlanDetailScreen() {
       if (plan.target_age_max !== null && userAge > plan.target_age_max) return false;
     }
     return true;
-  }, [plan, userGender, userAge, isLaunchParty]);
+  }, [plan, userGender, userAge]);
 
   // ─── Join ────────────────────────────────────────────────────────────────────
 
@@ -507,18 +502,16 @@ export default function PlanDetailScreen() {
         if (!filter.ok) throw new Error(filter.reason ?? 'Your message contains language that goes against our community guidelines.');
       }
 
-      if (!isLaunchParty) {
-        try {
-          const { data: canJoinGender } = await supabase.rpc('can_join_event_gender', {
-            p_user_id: currentUserId,
-            p_event_id: id,
-          });
-          if (canJoinGender === false) {
-            throw new Error('This plan is restricted and you are not eligible to join.');
-          }
-        } catch (eligibilityError: any) {
-          if (eligibilityError.message?.includes('not eligible')) throw eligibilityError;
+      try {
+        const { data: canJoinGender } = await supabase.rpc('can_join_event_gender', {
+          p_user_id: currentUserId,
+          p_event_id: id,
+        });
+        if (canJoinGender === false) {
+          throw new Error('This plan is restricted and you are not eligible to join.');
         }
+      } catch (eligibilityError: any) {
+        if (eligibilityError.message?.includes('not eligible')) throw eligibilityError;
       }
 
       const { data, error } = await supabase.rpc('join_event_atomic', {
@@ -531,21 +524,7 @@ export default function PlanDetailScreen() {
       const rpcUnavailable = error && (error.message?.includes('does not exist') || (error as any).code === '42883');
 
       if (!rpcUnavailable && error) throw error;
-      if (!rpcUnavailable && data === 'full' && !isLaunchParty) throw new Error('This plan is full. Try joining the waitlist.');
-      // Safety net: if the DB function still blocked the launch party join (e.g. status was 'full'),
-      // bypass it with a direct insert so everyone can always join the launch party.
-      if (!rpcUnavailable && data === 'full' && isLaunchParty) {
-        const { data: existing } = await supabase.from('event_members').select('id').eq('event_id', id).eq('user_id', currentUserId).maybeSingle();
-        if (existing) {
-          const { error: updateError } = await supabase.from('event_members').update({ status: 'joined', role: 'guest' }).eq('event_id', id).eq('user_id', currentUserId);
-          if (updateError) throw updateError;
-        } else {
-          const { error: insertError } = await supabase.from('event_members').insert({ event_id: id, user_id: currentUserId, role: 'guest', status: 'joined' });
-          if (insertError) throw insertError;
-        }
-        // Reset plan status so future joins go through the RPC normally
-        await supabase.from('events').update({ status: 'active' }).eq('id', id).eq('status', 'full');
-      }
+      if (!rpcUnavailable && data === 'full') throw new Error('This plan is full. Try joining the waitlist.');
       if (!rpcUnavailable && data === 'not_found') throw new Error('This plan no longer exists.');
 
       if (rpcUnavailable) {
@@ -985,7 +964,7 @@ export default function PlanDetailScreen() {
               <Text style={styles.logisticsSub}>{formatFullDate(plan.start_time)}</Text>
             </View>
             <TouchableOpacity
-              onPress={() => Linking.openURL(buildCalendarUrl(plan.title, plan.start_time, plan.location_text ?? undefined))}
+              onPress={() => Linking.openURL(buildCalendarUrl(plan.title, plan.start_time, plan.end_time, plan.location_text ?? undefined))}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Text style={styles.logisticsLink}>Add to Calendar</Text>
@@ -1011,9 +990,9 @@ export default function PlanDetailScreen() {
             <Users size={18} color={Colors.terracotta} strokeWidth={2} />
             <View style={styles.logisticsContent}>
               <Text style={styles.logisticsMain}>
-                {isLaunchParty ? `${displayMemberCount} going` : `${displayMemberCount} of ${totalCapacity} spots filled`}
+                {`${displayMemberCount} of ${totalCapacity} spots filled`}
               </Text>
-              {!isLaunchParty && <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>}
+              <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
             </View>
           </View>
         </View>
@@ -1029,7 +1008,7 @@ export default function PlanDetailScreen() {
         {/* G. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && isEligible && !isFull && (
           <View style={styles.ctaBlock}>
-            {!isLaunchParty && spotsLeft > 0 && spotsLeft <= 2 && (
+            {spotsLeft > 0 && spotsLeft <= 2 && (
               <Text style={styles.ctaInfo}>
                 {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left — group closes soon
               </Text>
