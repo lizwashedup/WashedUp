@@ -64,8 +64,14 @@ export async function signInWithGoogle() {
     return null;
   }
 
+  const rawNonce = Crypto.randomUUID();
+  const hashedNonce = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    rawNonce,
+  );
+
   await GoogleSignin.hasPlayServices();
-  const response = await GoogleSignin.signIn();
+  const response = await GoogleSignin.signIn({ nonce: hashedNonce });
 
   if (response.type === 'cancelled') return null;
 
@@ -77,6 +83,7 @@ export async function signInWithGoogle() {
   const { data, error } = await supabase.auth.signInWithIdToken({
     provider: 'google',
     token: idToken,
+    nonce: rawNonce,
   });
 
   if (error) throw error;
