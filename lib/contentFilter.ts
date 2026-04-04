@@ -24,6 +24,15 @@ const BLOCKED_TERMS = [
 
   // Sexual content
   'porn', 'hentai', 'onlyfans', 'nudes', 'nude pics',
+
+  // Dating / solicitation (not appropriate for a non-dating social app)
+  'hookup', 'hook up', 'hook-up', 'fwb', 'friends with benefits',
+  'spend the night', 'netflix and chill', 'nsa', 'no strings',
+  'one night stand', 'casual sex', 'looking for sex',
+  'come over', 'come back to mine', 'come to my place',
+  'dm me', 'dm for', 'slide into',
+  'sugar daddy', 'sugar mommy', 'sugar baby',
+  'escort', 'massage with happy ending',
 ];
 
 const ALLOWED_TERMS = [
