@@ -28,7 +28,8 @@
         "CFBundleDisplayName": "WashedUp",
         "NSCameraUsageDescription": "WashedUp needs camera access so you can take a profile photo.",
         "NSPhotoLibraryUsageDescription": "WashedUp needs access to your photos so you can share images in group chats and set your profile picture.",
-        "NSLocationWhenInUseUsageDescription": "WashedUp uses your location to show plans near you and help you find events in Los Angeles."
+        "NSLocationWhenInUseUsageDescription": "WashedUp uses your location to show plans near you and help you find events in Los Angeles.",
+        "LSApplicationQueriesSchemes": ["comgooglemaps", "waze", "uber", "lyft"]
       },
       "privacyManifests": {
         "NSPrivacyAccessedAPITypes": [

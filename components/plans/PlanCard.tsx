@@ -1,22 +1,43 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
-  Share,
   ActionSheetIOS,
   Platform,
   Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { Heart } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import Colors from '../../constants/Colors';
+import { hapticLight, hapticMedium } from '../../lib/haptics';
+import Animated, {
+  FadeInUp,
+  Easing,
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
-import { Fonts, FontSizes } from '../../constants/Typography';
+
+// ─── Design tokens ───────────────────────────────────────────────────────────
+const C = {
+  terracotta: '#B5522E',
+  dark: '#2C1810',
+  warmGray: '#78695C',
+  lightGray: '#A09385',
+  iconMuted: '#C5C0B8',
+  cream: '#FAF5EC',
+  surface: '#FFFFFF',
+  accentSubtle: '#F5E8E2',
+  goldLight: '#D4BF82',
+  quoteText: '#6B5D50',
+  divider: '#F5EDE0',
+};
 
 interface PlanCardProps {
   plan: {
@@ -25,6 +46,7 @@ interface PlanCardProps {
     host_message: string | null;
     start_time: string;
     location_text: string | null;
+    neighborhood?: string | null;
     category: string | null;
     max_invites: number;
     member_count: number;
@@ -59,11 +81,19 @@ function formatDateTimeForCard(dateString: string): string {
   return `${dateStr} · ${timeStr}`;
 }
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, isPast = false }) => {
   const router = useRouter();
 
+  // ── Bookmark scale animation (declared early so handleWishlist can reference it) ──
+  const bookmarkScale = useSharedValue(1);
+  const bookmarkAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: bookmarkScale.value }],
+  }));
+
   const handleLongPress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
     const creatorName = plan.creator?.first_name_display ?? 'Creator';
     const options = ['Report this plan', `Block ${creatorName}`, 'Cancel'];
     const cancelIndex = 2;
@@ -88,53 +118,76 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   const handleWishlist = useCallback(
     (e: any) => {
       e?.stopPropagation?.();
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      hapticLight();
+      bookmarkScale.value = withSpring(1.3, {}, () => {
+        bookmarkScale.value = withSpring(1);
+      });
       onWishlist?.(plan.id, isWishlisted);
     },
     [plan.id, isWishlisted, onWishlist],
   );
 
   const handlePress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     if (plan.creator?.profile_photo_url) {
       Image.prefetch(plan.creator.profile_photo_url).catch(() => {});
     }
     router.push(`/plan/${plan.id}`);
   }, [plan.id, plan.creator?.profile_photo_url, router]);
 
-  const handleShare = useCallback((e: any) => {
-    e.stopPropagation();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Share.share({
-      message: `Check out "${plan.title}" on WashedUp!\nhttps://washedup.app/e/${plan.id}`,
-      title: 'Share plan',
-    }).catch(() => {});
-  }, [plan.id, plan.title]);
-
   // Creator always counts as 1 — member_count should never display as 0
   const going = Math.max(1, capDisplayCount(plan.member_count));
   const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
   const spotsLeft = Math.max(0, totalCapacity - going);
   const isFull = going >= totalCapacity;
-  const oneSpotLeft = spotsLeft === 1;
+  const showSpotsLeftBadge = spotsLeft >= 1 && spotsLeft <= 2 && !isFull;
 
-  const planCount = plan.creator?.plans_posted ?? 0;
-  const creatorLine2 = planCount === 1 ? 'First plan' : '';
+  // ── Spots-left pulse animation ──
+  const pulseScale = useSharedValue(1);
+  useEffect(() => {
+    if (showSpotsLeftBadge) {
+      pulseScale.value = withRepeat(
+        withTiming(1.06, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true,
+      );
+    } else {
+      pulseScale.value = 1;
+    }
+  }, [showSpotsLeftBadge]);
+  const pulseAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }],
+  }));
 
-  const locationDisplay = plan.location_text && !plan.location_text.startsWith('http')
+  // ── Button press feedback ──
+  const buttonScale = useSharedValue(1);
+  const buttonAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: buttonScale.value }],
+  }));
+  const handleButtonPressIn = useCallback(() => {
+    buttonScale.value = withTiming(0.96, { duration: 100 });
+  }, []);
+  const handleButtonPressOut = useCallback(() => {
+    buttonScale.value = withTiming(1.0, { duration: 100 });
+  }, []);
+
+  const locationRaw = plan.location_text && !plan.location_text.startsWith('http')
     ? plan.location_text
     : null;
-  const creatorLine1 = `Posted by ${plan.creator?.first_name_display ?? 'Creator'}`;
+  const locationDisplay = locationRaw
+    ? (plan.neighborhood ? `${locationRaw} · ${plan.neighborhood}` : locationRaw)
+    : null;
 
   const creatorNote = plan.host_message
     ? `"${plan.host_message}"`
     : null;
 
-  const countText = isFull
-    ? `${going} of ${totalCapacity} · Full`
-    : `${going} of ${totalCapacity}`;
+  const spotsText = isFull
+    ? `${going} of ${totalCapacity} spots`
+    : `${going} of ${totalCapacity} spots`;
 
   return (
+    <Animated.View entering={FadeInUp.duration(300).easing(Easing.out(Easing.ease))}>
     <TouchableOpacity
       onPress={handlePress}
       onLongPress={handleLongPress}
@@ -144,7 +197,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
       accessibilityLabel={`${plan.title} plan`}
       accessibilityRole="button"
     >
-      {/* A. Creator Info */}
+      {/* A. Creator row */}
       <View style={styles.creatorRow}>
         <View style={styles.creatorLeft}>
           {plan.creator?.profile_photo_url ? (
@@ -156,49 +209,40 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             />
           ) : (
             <View style={styles.creatorAvatarPlaceholder}>
-              <Ionicons name="person-outline" size={24} color={Colors.textLight} />
+              <Ionicons name="person-outline" size={18} color={C.lightGray} />
             </View>
           )}
           <View style={styles.creatorDetails}>
-            <Text style={styles.creatorLine1} numberOfLines={1}>
-              {creatorLine1}
+            <Text style={styles.creatorName} numberOfLines={1}>
+              {plan.creator?.first_name_display ?? 'Creator'}
             </Text>
-            {!!creatorLine2 && (
-              <Text style={styles.creatorLine2} numberOfLines={1}>
-                {creatorLine2}
-              </Text>
-            )}
+            <Text style={styles.creatorSubtext}>posted</Text>
           </View>
         </View>
-        <View style={styles.badgesRow}>
-          {oneSpotLeft && (
-            <View style={styles.spotsBadge}>
-              <Text style={styles.spotsBadgeText}>1 left</Text>
-            </View>
+        <View style={styles.headerRight}>
+          {showSpotsLeftBadge && (
+            <Animated.View style={pulseAnimatedStyle}>
+              <View style={styles.spotsLeftBadge}>
+                <Text style={styles.spotsLeftBadgeText}>{spotsLeft} left</Text>
+              </View>
+            </Animated.View>
           )}
           {onWishlist && (
             <TouchableOpacity
               onPress={handleWishlist}
-              style={styles.heartButton}
+              style={styles.iconBtn}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel={isWishlisted ? 'Remove from saved' : 'Save plan'}
             >
-              <Heart
-                size={18}
-                color={isWishlisted ? Colors.errorRed : Colors.asphalt}
-                fill={isWishlisted ? Colors.errorRed : 'transparent'}
-                strokeWidth={2}
-              />
+              <Animated.View style={bookmarkAnimatedStyle}>
+                <Ionicons
+                  name={isWishlisted ? 'bookmark' : 'bookmark-outline'}
+                  size={18}
+                  color={isWishlisted ? '#B5522E' : '#78695C'}
+                />
+              </Animated.View>
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            onPress={handleShare}
-            style={styles.shareButton}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityLabel="Share plan"
-          >
-            <Ionicons name="share-outline" size={18} color={Colors.asphalt} />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -207,11 +251,22 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         {plan.title}
       </Text>
 
+      {/* B2. Category pill */}
+      {plan.category && (
+        <View style={styles.categoryRow}>
+          <View style={styles.categoryPill}>
+            <Text style={styles.categoryPillText}>{plan.category}</Text>
+          </View>
+        </View>
+      )}
+
       {/* C. Creator's Note */}
       {creatorNote && (
-        <Text style={styles.creatorNote} numberOfLines={2}>
-          {creatorNote}
-        </Text>
+        <View style={styles.quoteBlock}>
+          <Text style={styles.quoteText} numberOfLines={2}>
+            {creatorNote}
+          </Text>
+        </View>
       )}
 
       {/* D. Date/Time & Location */}
@@ -219,16 +274,16 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         <View style={styles.logisticsBlock}>
           {plan.start_time && (
             <View style={styles.logisticsLine}>
-              <Ionicons name="calendar-outline" size={14} color={Colors.textLight} />
-              <Text style={styles.logisticsLineText}>
+              <Ionicons name="calendar-outline" size={13} color={C.terracotta} />
+              <Text style={styles.logisticsText}>
                 {formatDateTimeForCard(plan.start_time)}
               </Text>
             </View>
           )}
           {locationDisplay && (
-            <View style={[styles.logisticsLine, plan.start_time && styles.logisticsLineGap]}>
-              <Ionicons name="location-outline" size={14} color={Colors.textLight} />
-              <Text style={styles.logisticsLineText} numberOfLines={1}>
+            <View style={[styles.logisticsLine, plan.start_time && { marginTop: 4 }]}>
+              <Ionicons name="location-outline" size={13} color={C.terracotta} />
+              <Text style={styles.logisticsText} numberOfLines={1}>
                 {locationDisplay}
               </Text>
             </View>
@@ -236,28 +291,36 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         </View>
       )}
 
-      {/* E. Member count & CTA */}
-      <View style={styles.bottomRow}>
-        <Text style={styles.spotsText}>{isPast ? `${going} went` : countText}</Text>
+      {/* E. Footer — spots + CTA */}
+      <View style={styles.footer}>
+        <Text style={styles.spotsLabel}>
+          <Text style={styles.spotsNumber}>{going}</Text>
+          {` of ${totalCapacity} spots`}
+        </Text>
         <View style={styles.ctaSpacer} />
         {isPast ? (
           <View style={styles.completedBadge}>
-            <Ionicons name="checkmark-circle-outline" size={14} color={Colors.warmGray} />
+            <Ionicons name="checkmark-circle-outline" size={14} color={C.warmGray} />
             <Text style={styles.completedText}>Completed</Text>
           </View>
         ) : (
-          <TouchableOpacity
-            style={[styles.ctaButton, isMember && styles.ctaButtonJoined, isFull && !isMember && styles.ctaButtonWaitlist]}
-            onPress={handlePress}
-            activeOpacity={0.85}
+          <AnimatedPressable
+            style={[styles.ctaButton, buttonAnimatedStyle]}
+            onPress={() => {
+              hapticLight();
+              handlePress();
+            }}
+            onPressIn={handleButtonPressIn}
+            onPressOut={handleButtonPressOut}
           >
-            <Text style={[styles.ctaButtonText, isFull && !isMember && styles.ctaButtonWaitlistText]}>
-              {isMember ? "Going \u2713" : isFull ? "Waitlist \u2192" : "Let's Go \u2192"}
+            <Text style={styles.ctaButtonText}>
+              {"Let's Go \u2192"}
             </Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         )}
       </View>
     </TouchableOpacity>
+    </Animated.View>
   );
 });
 
@@ -265,18 +328,23 @@ PlanCard.displayName = 'PlanCard';
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: Colors.cardBg,
+    backgroundColor: C.surface,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
     padding: 16,
+    shadowColor: 'rgba(181, 82, 46, 0.08)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 3,
   },
   cardPast: {
     opacity: 0.7,
   },
+
+  // ── Creator row ──
   creatorRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
   },
@@ -287,71 +355,94 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   creatorAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
   },
   creatorAvatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
   creatorDetails: {
-    marginLeft: 12,
+    marginLeft: 10,
     flex: 1,
     minWidth: 0,
   },
-  creatorLine1: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-    marginBottom: 2,
+  creatorName: {
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 14,
+    color: C.dark,
+    lineHeight: 18,
   },
-  creatorLine2: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textMedium,
+  creatorSubtext: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 12,
+    color: C.lightGray,
+    lineHeight: 16,
   },
-  badgesRow: {
+  headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  spotsBadge: {
-    backgroundColor: Colors.goldenAmber,
+  spotsLeftBadge: {
+    backgroundColor: C.terracotta,
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
+    paddingVertical: 3,
+    borderRadius: 999,
   },
-  spotsBadgeText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.caption,
-    color: Colors.white,
+  spotsLeftBadgeText: {
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 10,
+    color: '#FFFFFF',
+    lineHeight: 14,
   },
-  heartButton: {
+  iconBtn: {
     padding: 4,
   },
-  shareButton: {
-    padding: 4,
-  },
+
+  // ── Body ──
   title: {
-    fontFamily: Fonts.displayBold,
-    fontSize: FontSizes.displayMD,
-    color: Colors.asphalt,
-    lineHeight: 28,
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 18,
+    color: C.dark,
+    lineHeight: 24,
+    marginBottom: 6,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
     marginBottom: 8,
   },
-  creatorNote: {
-    fontFamily: Fonts.displayItalic,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.textMedium,
-    lineHeight: 20,
-    marginBottom: 8,
+  categoryPill: {
+    backgroundColor: C.accentSubtle,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  categoryPillText: {
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 10,
+    color: C.terracotta,
+    textTransform: 'capitalize',
+    letterSpacing: 0.2,
+  },
+  quoteBlock: {
+    borderLeftWidth: 2,
+    borderLeftColor: C.goldLight,
+    paddingLeft: 10,
+    marginBottom: 10,
+  },
+  quoteText: {
+    fontStyle: 'italic',
+    fontSize: 13,
+    color: C.quoteText,
+    lineHeight: 19,
   },
   logisticsBlock: {
     marginBottom: 12,
@@ -361,49 +452,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  logisticsLineGap: {
-    marginTop: 4,
-  },
-  logisticsLineText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textLight,
+  logisticsText: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 12,
+    color: C.warmGray,
     flex: 1,
+    lineHeight: 16,
   },
-  bottomRow: {
+
+  // ── Footer ──
+  footer: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: C.divider,
+    paddingTop: 12,
     gap: 8,
   },
-  spotsText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textMedium,
+  spotsLabel: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 13,
+    color: C.warmGray,
+  },
+  spotsNumber: {
+    fontFamily: 'DMSans_700Bold',
+    color: C.dark,
   },
   ctaSpacer: {
     flex: 1,
   },
   ctaButton: {
-    backgroundColor: Colors.terracotta,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 14,
-  },
-  ctaButtonJoined: {
-    backgroundColor: Colors.terracotta,
-  },
-  ctaButtonWaitlist: {
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: Colors.terracotta,
+    borderColor: C.terracotta,
+    shadowColor: '#B5522E',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 4,
   },
   ctaButtonText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.white,
-  },
-  ctaButtonWaitlistText: {
-    color: Colors.terracotta,
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: C.terracotta,
   },
   completedBadge: {
     flexDirection: 'row',
@@ -411,12 +505,12 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: Colors.inputBg,
-    borderRadius: 14,
+    backgroundColor: C.divider,
+    borderRadius: 999,
   },
   completedText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.warmGray,
+    fontFamily: 'DMSans_500Medium',
+    fontSize: 13,
+    color: C.warmGray,
   },
 });

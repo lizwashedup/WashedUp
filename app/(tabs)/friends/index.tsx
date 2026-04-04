@@ -90,6 +90,15 @@ export default function YourPeopleScreen() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
+  // Current user
+  const { data: userId, isLoading: userLoading } = useQuery({
+    queryKey: ['auth-user'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user?.id ?? null;
+    },
+  });
+
   // Debounced handle availability check (500ms)
   React.useEffect(() => {
     const clean = handleInput.toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -111,15 +120,6 @@ export default function YourPeopleScreen() {
     }, 500);
     return () => clearTimeout(t);
   }, [handleInput, userId]);
-
-  // Current user
-  const { data: userId, isLoading: userLoading } = useQuery({
-    queryKey: ['auth-user'],
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      return user?.id ?? null;
-    },
-  });
 
   // My profile (for handle + blocked users)
   const { data: myProfile, isLoading: profileLoading, refetch: refetchProfile } = useQuery({
@@ -793,12 +793,12 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
+    fontWeight: '700',
+    color: '#2C1810',
   },
   headerTitleItalic: {
-    fontFamily: Fonts.displayItalic,
+    fontWeight: '700',
   },
 
   searchWrap: {

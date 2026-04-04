@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticLight } from '../lib/haptics';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Bell, Check, ChevronDown, ChevronRight, Clock, Megaphone, Send, UserPlus, XCircle } from 'lucide-react-native';
+import { Bell, Clock, Send } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -29,7 +29,6 @@ interface InboxModalProps {
 export default function InboxModal({ visible, onClose, userId }: InboxModalProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const [oldExpanded, setOldExpanded] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: pendingInvites = [], refetch: refetchInvites, isLoading: loadingInvites } = useQuery({
@@ -78,76 +77,53 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
           .neq('type', 'new_message')
           .order('created_at', { ascending: false })
           .limit(30);
-        return data ?? [];
+
+        if (!data || data.length === 0) return [];
+
+        // Try to extract sender name from title (e.g. "Hello joined your plan!" → "Hello")
+        // and look up their profile photo
+        const nameMatches = data
+          .filter((n: any) => n.type === 'member_joined' || n.type === 'invite_accepted')
+          .map((n: any) => {
+            const match = n.title?.match(/^(\S+)\s/);
+            return match?.[1] ?? null;
+          })
+          .filter(Boolean);
+
+        let photoMap: Record<string, string> = {};
+        if (nameMatches.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles_public')
+            .select('first_name_display, profile_photo_url')
+            .in('first_name_display', nameMatches);
+          (profiles ?? []).forEach((p: any) => {
+            if (p.profile_photo_url && p.first_name_display) {
+              photoMap[p.first_name_display] = p.profile_photo_url;
+            }
+          });
+        }
+
+        return data.map((n: any) => {
+          const match = n.title?.match(/^(\S+)\s/);
+          const senderName = match?.[1] ?? null;
+          return { ...n, sender_photo: senderName ? (photoMap[senderName] ?? null) : null };
+        });
       } catch { return []; }
     },
     enabled: !!userId && visible,
     staleTime: 0,
   });
 
-  const { data: oldInvites = [], refetch: refetchOldInvites } = useQuery({
-    queryKey: ['old-invites', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      try {
-        const { data: inviteRows } = await supabase
-          .from('plan_invites')
-          .select('id, event_id, sender_id, status, created_at, updated_at, events (id, title, start_time, status)')
-          .eq('recipient_id', userId)
-          .in('status', ['accepted', 'declined'])
-          .order('updated_at', { ascending: false })
-          .limit(20);
-
-        if (!inviteRows || inviteRows.length === 0) return [];
-
-        const senderIds = [...new Set(inviteRows.map((inv: any) => inv.sender_id).filter(Boolean))];
-        const { data: profiles } = await supabase
-          .from('profiles_public')
-          .select('id, first_name_display, profile_photo_url')
-          .in('id', senderIds);
-
-        const profileMap: Record<string, any> = {};
-        (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-
-        return inviteRows.map((inv: any) => ({ ...inv, profiles: profileMap[inv.sender_id] ?? null }));
-      } catch { return []; }
-    },
-    enabled: !!userId && visible,
-    staleTime: 30_000,
-  });
-
-  const { data: oldNotifications = [], refetch: refetchOldNotifs } = useQuery({
-    queryKey: ['old-notifications', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      try {
-        const { data } = await supabase
-          .from('app_notifications')
-          .select('id, type, title, body, event_id, status, created_at')
-          .eq('user_id', userId)
-          .neq('type', 'plan_invite')
-          .in('status', ['read', 'acted', 'expired'])
-          .order('created_at', { ascending: false })
-          .limit(20);
-        return data ?? [];
-      } catch { return []; }
-    },
-    enabled: !!userId && visible,
-    staleTime: 30_000,
-  });
-
   const totalInboxCount = pendingInvites.length + appNotifications.length;
-  const totalOldCount = oldInvites.length + oldNotifications.length;
 
   const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     try {
       await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
       if (notifType === 'waitlist_spot' && eventId && userId) {
         try { await supabase.from('event_waitlist').delete().eq('event_id', eventId).eq('user_id', userId); } catch {}
       }
       refetchNotifs();
-      refetchOldNotifs();
       queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
       if (action === 'acted' && eventId) {
         onClose();
@@ -160,18 +136,19 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     } catch {
       setAlertInfo({ title: 'Something went wrong', message: 'Please try again.' });
     }
-  }, [refetchNotifs, refetchOldNotifs, router, queryClient, userId, onClose]);
+  }, [refetchNotifs, router, queryClient, userId, onClose]);
 
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="fade">
+    <Modal visible transparent animationType="slide">
       <Pressable style={s.overlay} onPress={onClose}>
         <Pressable style={s.sheet} onPress={(e) => e.stopPropagation()}>
-          <Text style={s.title}>Invites and Fun Stuff</Text>
+          <View style={s.handle} />
+          <Text style={s.title}>Notifications</Text>
           {loadingInvites || loadingNotifs ? (
             <ActivityIndicator color={Colors.terracotta} style={{ paddingVertical: 32 }} />
-          ) : totalInboxCount === 0 && totalOldCount === 0 ? (
+          ) : totalInboxCount === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 32 }}>
               <Bell size={36} color={Colors.textLight} />
               <Text style={[s.meta, { marginTop: 12, textAlign: 'center' }]}>
@@ -189,54 +166,86 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                 const sender = inv.profiles;
                 const plan = inv.events;
                 return (
-                  <TouchableOpacity
-                    key={`inv-${inv.id}`}
-                    style={s.row}
-                    activeOpacity={0.7}
-                    onPress={() => { onClose(); router.push(`/plan/${inv.event_id}` as any); }}
-                  >
-                    {sender?.profile_photo_url ? (
-                      <Image source={{ uri: sender.profile_photo_url }} style={s.avatar} contentFit="cover" />
-                    ) : (
-                      <View style={[s.avatar, s.avatarFallback]}>
-                        <Send size={16} color={Colors.terracotta} />
-                      </View>
-                    )}
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={s.rowTitle} numberOfLines={1}>
-                        {sender?.first_name_display ?? 'Someone'} invited you
-                      </Text>
-                      <Text style={s.planName} numberOfLines={1}>{plan.title}</Text>
-                      {plan.start_time && (
-                        <Text style={s.meta}>
-                          {new Date(plan.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
-                        </Text>
+                  <View key={`inv-${inv.id}`} style={s.inviteCard}>
+                    <View style={s.row}>
+                      {sender?.profile_photo_url ? (
+                        <Image source={{ uri: sender.profile_photo_url }} style={s.avatar} contentFit="cover" />
+                      ) : (
+                        <View style={[s.avatar, s.avatarFallback]}>
+                          <Send size={16} color={Colors.terracotta} />
+                        </View>
                       )}
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={s.rowTitle} numberOfLines={1}>
+                          {sender?.first_name_display ?? 'Someone'} invited you
+                        </Text>
+                        <Text style={s.planName} numberOfLines={1}>{plan.title}</Text>
+                        {plan.start_time && (
+                          <Text style={s.meta}>
+                            {new Date(plan.start_time).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                          </Text>
+                        )}
+                      </View>
                     </View>
-                    <View style={s.viewBtn}>
-                      <Text style={s.viewBtnText}>View</Text>
+                    <View style={s.inviteActions}>
+                      <TouchableOpacity
+                        style={s.letsGoBtn}
+                        activeOpacity={0.85}
+                        onPress={async () => {
+                          hapticLight();
+                          try {
+                            await supabase.from('plan_invites').update({ status: 'accepted' }).eq('id', inv.id);
+                            refetchInvites();
+                            queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+                          } catch {}
+                          onClose();
+                          router.push(`/plan/${inv.event_id}` as any);
+                        }}
+                      >
+                        <Text style={s.letsGoBtnText}>{`Let's Go \u2192`}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={s.notThisTimeBtn}
+                        activeOpacity={0.7}
+                        onPress={async () => {
+                          hapticLight();
+                          try {
+                            await supabase.from('plan_invites').update({ status: 'declined' }).eq('id', inv.id);
+                            refetchInvites();
+                            queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+                          } catch {}
+                        }}
+                      >
+                        <Text style={s.notThisTimeBtnText}>Not This Time</Text>
+                      </TouchableOpacity>
                     </View>
-                  </TouchableOpacity>
+                  </View>
                 );
               })}
 
               {appNotifications.map((notif: any) => {
-                const icon = notif.type === 'waitlist_spot' ? <Clock size={16} color={Colors.terracotta} />
-                  : notif.type === 'broadcast' ? <Megaphone size={16} color={Colors.terracotta} />
-                  : notif.type === 'member_joined' ? <UserPlus size={16} color={Colors.terracotta} />
-                  : notif.type === 'invite_accepted' ? <Check size={16} color={Colors.terracotta} />
-                  : <Bell size={16} color={Colors.terracotta} />;
-                const hasAction = (notif.type === 'waitlist_spot' || notif.type === 'member_joined' || notif.type === 'invite_accepted') && notif.event_id;
                 const isWaitlist = notif.type === 'waitlist_spot';
+                const hasAction = (notif.type === 'waitlist_spot' || notif.type === 'member_joined' || notif.type === 'invite_accepted') && notif.event_id;
                 const timeLeft = notif.expires_at
                   ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
                   : null;
                 return (
-                  <View key={`notif-${notif.id}`} style={s.row}>
-                    <View style={[s.avatar, s.avatarFallback]}>{icon}</View>
+                  <TouchableOpacity
+                    key={`notif-${notif.id}`}
+                    style={s.notifRow}
+                    activeOpacity={0.7}
+                    onPress={() => hasAction ? handleNotifAction(notif.id, 'acted', notif.event_id, notif.type) : handleNotifAction(notif.id, 'read')}
+                  >
+                    {notif.sender_photo ? (
+                      <Image source={{ uri: notif.sender_photo }} style={s.avatar} contentFit="cover" />
+                    ) : (
+                      <View style={[s.avatar, s.avatarFallback]}>
+                        <Bell size={16} color="#B5522E" />
+                      </View>
+                    )}
                     <View style={{ flex: 1, marginLeft: 10 }}>
                       <Text style={s.rowTitle} numberOfLines={1}>{notif.title}</Text>
-                      {notif.body && <Text style={s.planName} numberOfLines={2}>{notif.body}</Text>}
+                      {notif.body && <Text style={s.notifBody} numberOfLines={2}>{notif.body}</Text>}
                       {timeLeft !== null && timeLeft > 0 && (
                         <Text style={s.expiry}>{timeLeft < 1 ? 'Expires soon' : `${timeLeft}h left to respond`}</Text>
                       )}
@@ -246,83 +255,25 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                             <Text style={s.claimText}>Claim Spot</Text>
                           </TouchableOpacity>
                           <TouchableOpacity style={s.cantGoBtn} onPress={() => handleNotifAction(notif.id, 'read', undefined, notif.type)} activeOpacity={0.7}>
-                            <Text style={s.cantGoText}>Can't go, maybe next time</Text>
+                            <Text style={s.cantGoText}>Pass</Text>
                           </TouchableOpacity>
                         </View>
                       )}
                     </View>
                     {!isWaitlist && (
-                      <View style={s.actions}>
-                        {hasAction && (
-                          <TouchableOpacity style={s.acceptBtn} onPress={() => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type)}>
-                            <Check size={16} color={Colors.white} />
-                          </TouchableOpacity>
-                        )}
-                        <TouchableOpacity style={s.declineBtn} onPress={() => handleNotifAction(notif.id, 'read', undefined, notif.type)}>
-                          <XCircle size={16} color={Colors.textLight} />
-                        </TouchableOpacity>
-                      </View>
+                      <TouchableOpacity
+                        onPress={() => handleNotifAction(notif.id, 'read')}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={s.dismissText}>Dismiss</Text>
+                      </TouchableOpacity>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
 
-              {totalOldCount > 0 && (
-                <>
-                  <TouchableOpacity style={s.oldHeader} onPress={() => setOldExpanded((v) => !v)} activeOpacity={0.7}>
-                    {oldExpanded ? <ChevronDown size={16} color={Colors.textLight} /> : <ChevronRight size={16} color={Colors.textLight} />}
-                    <Text style={s.oldTitle}>Old messages ({totalOldCount})</Text>
-                  </TouchableOpacity>
-                  {oldExpanded && (
-                    <>
-                      {oldInvites.map((inv: any) => {
-                        const sender = inv.profiles;
-                        const plan = inv.events;
-                        return (
-                          <View key={`old-inv-${inv.id}`} style={[s.row, { opacity: 0.6 }]}>
-                            {sender?.profile_photo_url ? (
-                              <Image source={{ uri: sender.profile_photo_url }} style={s.avatar} contentFit="cover" />
-                            ) : (
-                              <View style={[s.avatar, s.avatarFallback]}><Send size={16} color={Colors.textLight} /></View>
-                            )}
-                            <View style={{ flex: 1, marginLeft: 10 }}>
-                              <Text style={s.rowTitle} numberOfLines={1}>{sender?.first_name_display ?? 'Someone'} invited you</Text>
-                              <Text style={s.planName} numberOfLines={1}>{plan?.title ?? 'a plan'}</Text>
-                            </View>
-                            <Text style={[s.statusLabel, inv.status === 'accepted' ? s.statusAccepted : s.statusDeclined]}>
-                              {inv.status === 'accepted' ? 'Accepted' : 'Declined'}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                      {oldNotifications.map((notif: any) => {
-                        const oldIcon = notif.type === 'invite_accepted' ? <Check size={16} color={Colors.textLight} />
-                          : notif.type === 'member_joined' ? <UserPlus size={16} color={Colors.textLight} />
-                          : notif.type === 'waitlist_spot' ? <Clock size={16} color={Colors.textLight} />
-                          : notif.type === 'broadcast' ? <Megaphone size={16} color={Colors.textLight} />
-                          : <Bell size={16} color={Colors.textLight} />;
-                        return (
-                          <View key={`old-notif-${notif.id}`} style={[s.row, { opacity: 0.6 }]}>
-                            <View style={[s.avatar, s.avatarFallback]}>{oldIcon}</View>
-                            <View style={{ flex: 1, marginLeft: 10 }}>
-                              <Text style={s.rowTitle} numberOfLines={1}>{notif.title}</Text>
-                              {notif.body && <Text style={s.planName} numberOfLines={2}>{notif.body}</Text>}
-                            </View>
-                            <Text style={[s.statusLabel, notif.status === 'expired' ? s.statusDeclined : s.statusRead]}>
-                              {notif.status === 'expired' ? 'Expired' : 'Read'}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </>
-                  )}
-                </>
-              )}
             </ScrollView>
           )}
-          <TouchableOpacity style={s.doneBtn} onPress={onClose}>
-            <Text style={s.doneBtnText}>Done</Text>
-          </TouchableOpacity>
         </Pressable>
       </Pressable>
       <BrandedAlert
@@ -337,11 +288,13 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
 }
 
 const s = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: Colors.overlayDark, justifyContent: 'center', alignItems: 'center' },
-  sheet: { backgroundColor: Colors.white, borderRadius: 20, padding: 20, width: '85%', maxHeight: '60%' },
-  title: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansBold, color: Colors.asphalt, marginBottom: 16, textAlign: 'center' },
-  list: { maxHeight: 300 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  overlay: { flex: 1, backgroundColor: Colors.overlayDark, justifyContent: 'flex-end' },
+  sheet: { backgroundColor: Colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingBottom: 40, height: '70%' },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#D5CCC2', alignSelf: 'center', marginTop: 10, marginBottom: 12 },
+  title: { fontSize: 17, fontWeight: '700' as const, color: '#2C1810', marginBottom: 16, textAlign: 'center' },
+  list: { flex: 1 },
+  inviteCard: { borderBottomWidth: 1, borderBottomColor: Colors.border },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
   avatar: { width: 36, height: 36, borderRadius: 18 },
   avatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   rowTitle: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
@@ -355,15 +308,12 @@ const s = StyleSheet.create({
   claimText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
   cantGoBtn: { borderRadius: 14, paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'center' as const },
   cantGoText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textLight },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 8 },
-  acceptBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.terracotta, alignItems: 'center', justifyContent: 'center' },
-  declineBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
-  oldHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 14, marginTop: 8, borderTopWidth: 1, borderTopColor: Colors.border },
-  oldTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textLight },
-  statusLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, overflow: 'hidden' },
-  statusAccepted: { backgroundColor: `${Colors.terracotta}18`, color: Colors.terracotta },
-  statusDeclined: { backgroundColor: `${Colors.textLight}18`, color: Colors.textLight },
-  statusRead: { backgroundColor: `${Colors.textMedium}14`, color: Colors.textMedium },
-  doneBtn: { marginTop: 12, paddingVertical: 10, alignItems: 'center' },
-  doneBtnText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.terracotta },
+  notifRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5EDE0' },
+  notifBody: { fontSize: 13, color: '#78695C', marginTop: 1, lineHeight: 18 },
+  dismissText: { fontSize: 12, color: '#A09385', marginLeft: 8 },
+  inviteActions: { flexDirection: 'row' as const, gap: 10, paddingBottom: 12, justifyContent: 'center' as const },
+  letsGoBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 999 },
+  letsGoBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  notThisTimeBtn: { paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' as const },
+  notThisTimeBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textLight },
 });

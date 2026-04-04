@@ -396,7 +396,7 @@ const cardStyles = StyleSheet.create({
     marginBottom: 8,
   },
   eventTitle: {
-    fontFamily: Fonts.displayBold,
+    fontWeight: '700',
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     lineHeight: 28,
@@ -628,12 +628,10 @@ export default function SceneScreen() {
         <ProfileButton />
       </View>
 
-      {/* Row 1: Events pill (like Plans | My Plans, but just Events — no switch) */}
-      <View style={styles.primaryChipsRow}>
-        <View style={styles.primaryChips}>
-          <View style={[styles.primaryChip, styles.primaryChipActive]}>
-            <Text style={styles.primaryChipTextActive}>All Events</Text>
-          </View>
+      {/* Row 1: Tab bar (matches Plans page style) */}
+      <View style={styles.tabRow}>
+        <View style={[styles.tab, styles.tabActive]}>
+          <Text style={styles.tabTextActive}>All Events</Text>
         </View>
       </View>
 
@@ -809,40 +807,34 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
+    fontWeight: '700',
+    color: '#2C1810',
   },
   headerTitleItalic: {
-    fontFamily: Fonts.displayItalic,
+    fontWeight: '700',
   },
-  primaryChipsRow: {
+  tabRow: {
     flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5DDD1',
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  tab: {
+    flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'transparent',
   },
-  primaryChips: {
-    flexDirection: 'row',
-    gap: 0,
-    borderRadius: 24,
-    backgroundColor: Colors.border,
-    padding: 4,
-    flexShrink: 0,
+  tabActive: {
+    borderBottomColor: '#B5522E',
   },
-  primaryChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 90,
-  },
-  primaryChipActive: {
-    backgroundColor: Colors.asphalt,
-  },
-  primaryChipTextActive: {
-    fontFamily: Fonts.sansMedium,
+  tabTextActive: {
+    fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyMD,
-    color: Colors.white,
+    color: '#2C1810',
   },
   filterRow: {
     flexDirection: 'row',
@@ -947,7 +939,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   comingSoonTitle: {
-    fontFamily: Fonts.display,
+    fontWeight: '700',
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     marginTop: 4,

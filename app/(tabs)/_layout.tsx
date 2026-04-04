@@ -43,11 +43,12 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false,
         lazy: true,
-        tabBarActiveTintColor: Colors.asphalt,
-        tabBarInactiveTintColor: Colors.textLight,
+        tabBarActiveTintColor: '#2C1810',
+        tabBarInactiveTintColor: '#A09385',
         tabBarStyle: {
           backgroundColor: Colors.parchment,
-          borderTopWidth: 0,
+          borderTopWidth: 0.5,
+          borderTopColor: '#E5DDD1',
           height: 84,
           paddingBottom: 28,
           paddingTop: 8,
@@ -67,7 +68,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => (
             <Image
               source={require('../../assets/wave-icon.png')}
-              style={{ width: 36, height: 36 }}
+              style={{ width: 32, height: 18, opacity: 0.7 }}
               contentFit="contain"
               tintColor={color}
             />
@@ -79,7 +80,7 @@ export default function TabLayout() {
         options={{
           title: 'Scene',
           tabBarLabel: 'Scene',
-          tabBarIcon: ({ color }) => <Ionicons name="compass-outline" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Ionicons name="compass-outline" size={26} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -97,6 +98,7 @@ export default function TabLayout() {
           tabBarLabel: 'Chats',
           tabBarIcon: ({ color }) => <Ionicons name="chatbubble-outline" size={24} color={color} />,
           tabBarBadge: unreadChats > 0 ? (unreadChats > 9 ? '9+' : unreadChats) : undefined,
+          tabBarBadgeStyle: { backgroundColor: '#B5522E' },
         }}
       />
       <Tabs.Screen
@@ -116,7 +118,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="chats/[id]"
-        options={{ href: null }}
+        options={{ href: null, tabBarStyle: { display: 'none' } }}
       />
     </Tabs>
   );

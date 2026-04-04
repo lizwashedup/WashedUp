@@ -8,15 +8,18 @@ import Colors from '../constants/Colors';
 
 // Global handler: controls how notifications are displayed when the app is in the foreground.
 // Set once at module level so it's always active regardless of which component mounts first.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Wrapped in try/catch because simulators lack push notification entitlements.
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+} catch {}
 
 export function usePushNotifications(userId?: string | null) {
   const [expoPushToken, setExpoPushToken] = useState<string>('');
@@ -26,7 +29,7 @@ export function usePushNotifications(userId?: string | null) {
     if (!userId) return;
     registerForPushNotifications().then((token) => {
       if (token) setExpoPushToken(token);
-    });
+    }).catch(() => {});
 
     notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
 
@@ -51,12 +54,18 @@ async function registerForPushNotifications(): Promise<string | null> {
     });
   }
 
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
+  let finalStatus: string;
+  try {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    finalStatus = existingStatus;
 
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+  } catch {
+    // Simulator doesn't support push notification entitlements
+    return null;
   }
 
   if (finalStatus !== 'granted') return null;

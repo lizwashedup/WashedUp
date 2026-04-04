@@ -19,6 +19,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { ImagePlus, X, FileText, Trash2 } from 'lucide-react-native';
@@ -197,6 +198,7 @@ export default function PostScreen() {
   const [locationRaw, setLocationRaw] = useState(''); // always tracks visible input text
   const [locationLat, setLocationLat] = useState<number | null>(null);
   const [locationLng, setLocationLng] = useState<number | null>(null);
+  const [neighborhood, setNeighborhood] = useState('');
   const [ticketUrl, setTicketUrl] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
@@ -546,6 +548,7 @@ export default function PostScreen() {
           city: 'Los Angeles',
           explore_event_id: exploreEventId,
           image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
+          neighborhood: neighborhood.trim() || null,
         })
         .select('id')
         .single();
@@ -591,7 +594,7 @@ export default function PostScreen() {
       );
       setShareModalVisible(true);
       setImageUrl(null);
-      setTitle(''); setLocation(''); setLocationRaw(''); setLocationLat(null); setLocationLng(null);
+      setTitle(''); setLocation(''); setLocationRaw(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
       setTicketUrl(''); setCategory(null);
       setGenderPref('mixed'); setAgeRanges([]);
       setDescription(''); setCreatorMessage(''); setGroupSize(6);
@@ -775,6 +778,19 @@ export default function PostScreen() {
                 setLocationRaw(locationName);
                 setLocationLat(lat);
                 setLocationLng(lng);
+                // Auto-detect neighborhood via reverse geocoding
+                if (lat != null && lng != null) {
+                  (async () => {
+                    try {
+                      const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+                      if (results.length > 0) {
+                        const place = results[0];
+                        const area = place.district || place.subregion || place.city || '';
+                        setNeighborhood(area);
+                      }
+                    } catch {}
+                  })();
+                }
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               }}
               query={{
@@ -804,6 +820,25 @@ export default function PostScreen() {
               enablePoweredByContainer={false}
               debounce={300}
               keepResultsAfterBlur={true}
+            />
+          </View>
+
+          {/* ── Neighborhood ── */}
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#78695C', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Neighborhood</Text>
+            <TextInput
+              style={{
+                backgroundColor: '#F5EDE0',
+                borderRadius: 10,
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                fontSize: 15,
+                color: '#2C1810',
+              }}
+              value={neighborhood}
+              onChangeText={setNeighborhood}
+              placeholder="e.g. Silver Lake, DTLA"
+              placeholderTextColor="#A09385"
             />
           </View>
 
@@ -1240,9 +1275,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   headerTitle: {
-    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
+    fontWeight: '700',
+    color: '#2C1810',
   },
   headerSub: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.textLight, marginTop: 4 },
 

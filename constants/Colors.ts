@@ -5,7 +5,7 @@
 
 const brand = {
   // ── Primary palette ──────────────────────────────────────────────────────
-  terracotta: '#D97746', // Primary accent — buttons, active states, CTA
+  terracotta: '#B5522E', // Primary accent — buttons, active states, CTA
   goldenAmber: '#F2A32D', // Secondary accent — badges, highlights
   parchment: '#F8F5F0', // App background
   asphalt: '#1E1E1E', // Primary text
@@ -34,7 +34,7 @@ const brand = {
   overlayDark40: 'rgba(0,0,0,0.4)',
   overlayDark60: 'rgba(0,0,0,0.6)',
   overlayDark25: 'rgba(0,0,0,0.25)',
-  overlayWarm: 'rgba(217,119,70,0.18)',
+  overlayWarm: 'rgba(181,82,46,0.18)',
   overlayDarker: 'rgba(0,0,0,0.95)',
   overlayLight: 'rgba(255,255,255,0.15)',
   overlayWhite: 'rgba(255,255,255,0.6)',
@@ -57,12 +57,12 @@ const brand = {
   categoryOutdoors: '#5CBF7C',
   categoryFitness: '#5CBFBF',
   categoryArt: '#BF5CBF',
-  categoryComedy: '#D97746',
+  categoryComedy: '#B5522E',
   categorySports: '#5C7CBF',
   categoryWellness: '#5CBF9C',
 
   // ── Legacy alias (keep so old references don't break immediately) ─────────
-  primaryOrange: '#D97746',
+  primaryOrange: '#B5522E',
   backgroundCream: '#F8F5F0',
   textDark: '#1E1E1E',
   cardBackground: '#FFFFFF',

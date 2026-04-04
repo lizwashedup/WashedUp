@@ -829,9 +829,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
+    fontWeight: '700',
+    color: '#2C1810',
   },
 
   // Profile section — avatar 100px, display name displaySmall, handle bodySmall
@@ -855,7 +855,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarInitial: {
-    fontFamily: Fonts.displayBold,
+    fontWeight: '700',
     fontSize: FontSizes.displayLG,
     color: Colors.terracotta,
   },
@@ -963,7 +963,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 8,
   },
-  deleteTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt, textAlign: 'center' },
+  deleteTitle: { fontWeight: '700', fontSize: FontSizes.displayMD, color: '#2C1810', textAlign: 'center' },
   deleteBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center', lineHeight: 22 },
   deleteListRow: {
     flexDirection: 'row',

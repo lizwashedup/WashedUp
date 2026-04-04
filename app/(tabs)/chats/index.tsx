@@ -15,23 +15,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { ChevronDown, ChevronRight } from 'lucide-react-native';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
+import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
-
-const CATEGORY_COLORS: Record<string, string> = {
-  music: Colors.categoryMusic,
-  film: Colors.categoryFilm,
-  nightlife: Colors.categoryNightlife,
-  food: Colors.categoryFood,
-  outdoors: Colors.categoryOutdoors,
-  fitness: Colors.categoryFitness,
-  art: Colors.categoryArt,
-  comedy: Colors.terracotta,
-  sports: Colors.categorySports,
-  wellness: Colors.categoryWellness,
-  default: Colors.terracotta,
-};
 
 function formatTime(dateString: string): string {
   const date = new Date(dateString);
@@ -44,6 +31,7 @@ function formatTime(dateString: string): string {
   if (diffMins < 1) return 'now';
   if (diffMins < 60) return `${diffMins}m`;
   if (diffHours < 24) return `${diffHours}h`;
+  if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return `${diffDays}d`;
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
@@ -65,53 +53,71 @@ function formatEventDate(dateString: string): string {
 const ChatSeparator = () => <View style={styles.separator} />;
 
 const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) {
-  const catColor = CATEGORY_COLORS[chat.category?.toLowerCase() ?? ''] ?? CATEGORY_COLORS.default;
+  const hasUnread = chat.unread_count > 0;
 
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.7}
-      style={[styles.row, chat.is_past && styles.rowPast]}
+      style={[styles.row, hasUnread && styles.rowUnread, chat.is_past && styles.rowPast]}
     >
       <View style={styles.avatarContainer}>
-        <Image
-          source={chat.image_url ? { uri: chat.image_url } : require('../../../assets/images/plan-placeholder.png')}
-          style={styles.avatar}
-          contentFit="cover"
-        />
-        {chat.unread_count > 0 && <View style={styles.unreadDot} />}
+        {chat.image_url ? (
+          <Image
+            source={{ uri: chat.image_url }}
+            style={styles.avatar}
+            contentFit="cover"
+          />
+        ) : chat.member_avatars.length >= 4 ? (
+          <View style={styles.avatarGrid}>
+            {chat.member_avatars.slice(0, 4).map((url, i) => (
+              <Image key={i} source={{ uri: url }} style={styles.gridPhoto} contentFit="cover" />
+            ))}
+          </View>
+        ) : chat.member_avatars.length >= 2 ? (
+          <View style={styles.avatarDuo}>
+            {chat.member_avatars.slice(0, 2).map((url, i) => (
+              <Image key={i} source={{ uri: url }} style={[styles.duoPhoto, i === 1 && { marginLeft: -6 }]} contentFit="cover" />
+            ))}
+          </View>
+        ) : chat.member_avatars.length === 1 ? (
+          <Image source={{ uri: chat.member_avatars[0] }} style={styles.avatarSingle} contentFit="cover" />
+        ) : (
+          <View style={[styles.avatar, styles.avatarPlaceholder]}>
+            <Ionicons name="people-outline" size={22} color="#A09385" />
+          </View>
+        )}
       </View>
 
       <View style={styles.rowContent}>
         <View style={styles.rowTop}>
-          <Text style={[styles.planTitle, chat.is_past && styles.textPast]} numberOfLines={1}>
-            {chat.title}
-          </Text>
-          <View style={styles.rowRight}>
-            {chat.last_message_at && (
-              <Text style={styles.timestamp}>{formatTime(chat.last_message_at)}</Text>
-            )}
-            {chat.unread_count > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{chat.unread_count > 9 ? '9+' : chat.unread_count}</Text>
-              </View>
-            )}
+          <View style={styles.titleRow}>
+            {hasUnread && <View style={styles.unreadDot} />}
+            <Text style={[styles.planTitle, chat.is_past && styles.textPast]} numberOfLines={1}>
+              {chat.title}
+            </Text>
           </View>
+          {chat.last_message_at && (
+            <Text style={styles.timestamp}>{formatTime(chat.last_message_at)}</Text>
+          )}
         </View>
 
         <View style={styles.rowBottom}>
           <Text style={[styles.preview, chat.is_past && styles.textPast]} numberOfLines={1}>
             {chat.last_message ?? 'No messages yet'}
           </Text>
-          {chat.is_past && (
-            <View style={styles.readOnlyPill}>
-              <Text style={styles.readOnlyText}>Read only</Text>
-            </View>
-          )}
         </View>
 
-        <Text style={styles.memberCount}>{formatEventDate(chat.start_time)}</Text>
+        <View style={styles.datePill}>
+          <Text style={styles.datePillText}>{formatEventDate(chat.start_time)}</Text>
+        </View>
       </View>
+
+      {hasUnread && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{chat.unread_count > 9 ? '9+' : chat.unread_count}</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 });
@@ -150,9 +156,7 @@ export default function ChatsScreen() {
           <Text style={styles.headerTitle}>Chats</Text>
           <ProfileButton />
         </View>
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.terracotta} />
-        </View>
+        <SkeletonChatList />
       </SafeAreaView>
     );
   }
@@ -167,11 +171,11 @@ export default function ChatsScreen() {
       {chats.length === 0 ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyIcon}>
-            <Ionicons name="chatbubbles-outline" size={40} color={Colors.terracotta} />
+            <Ionicons name="chatbubbles-outline" size={40} color="#B5522E" />
           </View>
-          <Text style={styles.emptyTitle}>No chats yet</Text>
+          <Text style={styles.emptyTitle}>Join a plan to start chatting</Text>
           <Text style={styles.emptySubtitle}>
-            Join a plan and a group chat opens once{'\n'}2 people are going.
+            A group chat opens once 2 people are going.
           </Text>
           <TouchableOpacity
             style={styles.emptyButton}
@@ -191,6 +195,17 @@ export default function ChatsScreen() {
           ItemSeparatorComponent={ChatSeparator}
           ListHeaderComponent={activeChats.length > 0 ? <Text style={styles.sectionLabel}>Active</Text> : null}
           renderItem={renderChat}
+          ListEmptyComponent={
+            <View style={styles.noActiveState}>
+              <Text style={styles.noActiveText}>No active chats — join a plan to start chatting</Text>
+              <TouchableOpacity
+                style={styles.noActiveButton}
+                onPress={() => router.push('/(tabs)/plans')}
+              >
+                <Text style={styles.noActiveButtonText}>Browse Plans</Text>
+              </TouchableOpacity>
+            </View>
+          }
           ListFooterComponent={pastChats.length > 0 ? (
             <View>
               <TouchableOpacity
@@ -198,12 +213,11 @@ export default function ChatsScreen() {
                 onPress={() => setPastExpanded(prev => !prev)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.sectionLabel}>Past Plans</Text>
-                <View style={styles.pastChevron}>
+                <View style={styles.pastHeaderLeft}>
                   {pastExpanded
-                    ? <ChevronDown size={16} color={Colors.warmGray} />
-                    : <ChevronRight size={16} color={Colors.warmGray} />}
-                  <Text style={styles.pastCount}>{pastChats.length}</Text>
+                    ? <ChevronDown size={16} color="#A09385" />
+                    : <ChevronRight size={16} color="#A09385" />}
+                  <Text style={styles.pastLabel}>Past Plans ({pastChats.length})</Text>
                 </View>
               </TouchableOpacity>
               {pastExpanded && pastChats.map((chat, i) => (
@@ -224,7 +238,7 @@ export default function ChatsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
+  container: { flex: 1, backgroundColor: '#FAF5EC' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -234,39 +248,41 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#2C1810',
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingBottom: 32 },
 
   sectionLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodySM,
-    color: Colors.warmGray,
-    letterSpacing: 0.8,
+    fontWeight: '700',
+    fontSize: 11,
+    color: '#B5522E',
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 8,
   },
+
   pastHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingRight: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     marginTop: 8,
   },
-  pastChevron: {
+  pastHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
-  pastCount: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.warmGray,
+  pastLabel: {
+    fontWeight: '600',
+    fontSize: 14,
+    color: '#78695C',
   },
 
   row: {
@@ -274,8 +290,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 14,
-    backgroundColor: Colors.white,
     gap: 12,
+  },
+  rowUnread: {
+    backgroundColor: '#FAF0E8',
   },
   rowPast: { opacity: 0.55 },
 
@@ -284,30 +302,61 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 12,
+    backgroundColor: '#F5EDE0',
+  },
+  avatarPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.inputBg,
   },
-  unreadDot: {
-    position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: Colors.terracotta,
+  avatarGrid: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  gridPhoto: {
+    width: 26,
+    height: 26,
+  },
+  avatarDuo: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  duoPhoto: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     borderWidth: 2,
-    borderColor: Colors.white,
+    borderColor: '#FFFFFF',
+  },
+  avatarSingle: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
   },
 
-  rowContent: { flex: 1, gap: 3 },
+  rowContent: { flex: 1, gap: 2 },
   rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  planTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt, flex: 1, marginRight: 8 },
-  textPast: { color: Colors.warmGray },
-  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  timestamp: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  titleRow: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8, gap: 6 },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#B5522E',
+  },
+  planTitle: { fontWeight: '700', fontSize: 15, color: '#2C1810', flex: 1 },
+  textPast: { color: '#A09385' },
+  timestamp: { fontSize: 12, color: '#A09385' },
+
   badge: {
-    backgroundColor: Colors.terracotta,
+    backgroundColor: '#B5522E',
     borderRadius: 10,
     minWidth: 20,
     height: 20,
@@ -315,18 +364,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 5,
   },
-  badgeText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.caption },
+  badgeText: { color: '#FFFFFF', fontWeight: '700', fontSize: 11 },
+
   rowBottom: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  preview: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, flex: 1 },
-  readOnlyPill: {
-    backgroundColor: Colors.inputBg,
+  preview: { fontSize: 13, color: '#78695C', flex: 1 },
+  datePill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F5EDE0',
     borderRadius: 8,
-    paddingHorizontal: 7,
+    paddingHorizontal: 8,
     paddingVertical: 2,
+    marginTop: 4,
   },
-  readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray, fontStyle: 'italic' },
-  memberCount: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  separator: { height: 1, backgroundColor: Colors.inputBg, marginLeft: 84 },
+  datePillText: { fontSize: 10, fontWeight: '500', color: '#78695C' },
+  separator: { height: 1, backgroundColor: '#F5EDE0', marginLeft: 84 },
 
   emptyState: {
     flex: 1,
@@ -339,19 +390,34 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: Colors.emptyIconBg,
+    backgroundColor: '#F5E8E2',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
-  emptyTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
-  emptySubtitle: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, textAlign: 'center', lineHeight: 22 },
+  emptyTitle: { fontWeight: '700', fontSize: 20, color: '#2C1810', textAlign: 'center' },
+  emptySubtitle: { fontSize: 15, color: '#78695C', textAlign: 'center', lineHeight: 22 },
   emptyButton: {
-    backgroundColor: Colors.terracotta,
+    backgroundColor: '#B5522E',
     paddingHorizontal: 28,
     paddingVertical: 13,
-    borderRadius: 14,
+    borderRadius: 999,
     marginTop: 8,
   },
-  emptyButtonText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
+  emptyButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+
+  noActiveState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 32,
+    gap: 12,
+  },
+  noActiveText: { fontSize: 15, color: '#78695C', textAlign: 'center' },
+  noActiveButton: {
+    backgroundColor: '#B5522E',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  noActiveButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
 });

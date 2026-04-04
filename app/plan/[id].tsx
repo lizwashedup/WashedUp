@@ -7,7 +7,6 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
     ArrowLeft,
     Calendar,
-    Heart,
     MapPin,
     MessageCircle,
     MoreHorizontal,
@@ -44,6 +43,9 @@ import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import { showAddToCalendar } from '../../lib/addToCalendar';
+import { showLocation } from 'react-native-map-link';
+import { MapView, Marker } from '../../components/MapView';
 
 // Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
 // Falls back to the hard-coded key so autocomplete works in preview/CI builds
@@ -80,6 +82,7 @@ interface PlanDetail {
   target_age_min: number | null;
   target_age_max: number | null;
   end_time: string | null;
+  neighborhood: string | null;
   status: string;
   creator_user_id: string;
   tickets_url: string | null;
@@ -152,14 +155,25 @@ function formatGenderLabel(gender_rule: string | null): string | null {
   return null;
 }
 
-function openDirections(locationText: string) {
-  const encoded = encodeURIComponent(locationText);
-  const url = Platform.OS === 'ios'
-    ? `maps://?q=${encoded}`
-    : `geo:0,0?q=${encoded}`;
-  Linking.openURL(url).catch(() => {
-    Linking.openURL(`https://maps.google.com/?q=${encoded}`);
-  });
+function openDirections(locationText: string, coords?: { latitude: number; longitude: number } | null) {
+  if (coords) {
+    showLocation({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      title: locationText,
+      dialogTitle: 'Get Directions',
+      dialogMessage: 'Choose your maps app',
+      cancelText: 'Cancel',
+    });
+  } else {
+    const encoded = encodeURIComponent(locationText);
+    const url = Platform.OS === 'ios'
+      ? `maps://?q=${encoded}`
+      : `geo:0,0?q=${encoded}`;
+    Linking.openURL(url).catch(() => {
+      Linking.openURL(`https://maps.google.com/?q=${encoded}`);
+    });
+  }
 }
 
 // ─── Data Fetching ────────────────────────────────────────────────────────────
@@ -172,7 +186,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
-      status, member_count, creator_user_id, tickets_url
+      status, member_count, creator_user_id, tickets_url, neighborhood
     `)
     .eq('id', id)
     .single();
@@ -206,6 +220,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     description: row.description ?? null,
     host_message: row.host_message ?? null,
     start_time: row.start_time,
+    end_time: row.end_time ?? null,
     location_text: row.location_text ?? null,
     location_lat: row.location_lat ?? null,
     location_lng: row.location_lng ?? null,
@@ -216,6 +231,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     min_invites: row.min_invites ?? null,
     target_age_min: row.target_age_min ?? null,
     target_age_max: row.target_age_max ?? null,
+    neighborhood: row.neighborhood ?? null,
     status: row.status,
     creator_user_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
@@ -816,7 +832,7 @@ export default function PlanDetailScreen() {
   if (planLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <Stack.Screen options={{ headerShown: false }} />
+        <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
@@ -827,7 +843,7 @@ export default function PlanDetailScreen() {
   if (planError || !plan) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <Stack.Screen options={{ headerShown: false }} />
+        <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
         <View style={styles.centered}>
           <Text style={styles.errorText}>Couldn't load this plan.</Text>
           <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 12 }}>
@@ -842,9 +858,11 @@ export default function PlanDetailScreen() {
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
-  const creatorMeta = [
-      plan.location_text,
-    ].filter(Boolean).join(' • ');
+  // Show short location under creator name — venue name only (before first comma), or neighborhood
+  const shortLocation = plan.location_text?.split(',')[0] ?? null;
+  const creatorMeta = plan.neighborhood
+    ? `${shortLocation ?? plan.neighborhood}`
+    : shortLocation ?? '';
 
   const categoryTags = [
       plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null,
@@ -855,7 +873,7 @@ export default function PlanDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
 
       {/* Custom Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
@@ -870,22 +888,14 @@ export default function PlanDetailScreen() {
         </TouchableOpacity>
         <View style={styles.headerIcons}>
           <TouchableOpacity
-            onPress={handleShare}
-            style={styles.headerIconButton}
-            accessibilityLabel="Share this plan"
-          >
-            <Ionicons name="share-outline" size={22} color={Colors.asphalt} />
-          </TouchableOpacity>
-          <TouchableOpacity
             onPress={toggleWishlist}
             style={styles.headerIconButton}
             accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
           >
-            <Heart
+            <Ionicons
+              name={isWishlisted ? 'bookmark' : 'bookmark-outline'}
               size={20}
-              color={isWishlisted ? Colors.errorRed : Colors.asphalt}
-              fill={isWishlisted ? Colors.errorRed : 'transparent'}
-              strokeWidth={2}
+              color={isWishlisted ? '#B5522E' : '#78695C'}
             />
           </TouchableOpacity>
           {!isCreator && plan?.creator && (
@@ -904,6 +914,16 @@ export default function PlanDetailScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+        {/* Hero image */}
+        {plan.image_url ? (
+          <Image
+            source={{ uri: plan.image_url }}
+            style={styles.heroImage}
+            contentFit="cover"
+            transition={200}
+          />
+        ) : null}
+
         {/* A. Creator Info */}
         <View style={styles.creatorBlock}>
           {plan.creator?.profile_photo_url ? (
@@ -922,7 +942,7 @@ export default function PlanDetailScreen() {
           <View style={styles.creatorDetails}>
             <Text style={styles.postedBy}>POSTED BY</Text>
             <Text style={styles.creatorNameLarge}>{plan.creator?.first_name_display ?? 'Someone'}</Text>
-            <Text style={styles.creatorMeta}>{creatorMeta}</Text>
+            <Text style={styles.creatorMeta} numberOfLines={1}>{creatorMeta}</Text>
           </View>
         </View>
 
@@ -964,7 +984,7 @@ export default function PlanDetailScreen() {
               <Text style={styles.logisticsSub}>{formatFullDate(plan.start_time)}</Text>
             </View>
             <TouchableOpacity
-              onPress={() => Linking.openURL(buildCalendarUrl(plan.title, plan.start_time, plan.end_time, plan.location_text ?? undefined))}
+              onPress={() => showAddToCalendar(plan.title, plan.start_time, plan.end_time, plan.location_text ?? undefined)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Text style={styles.logisticsLink}>Add to Calendar</Text>
@@ -972,16 +992,56 @@ export default function PlanDetailScreen() {
           </View>
 
           {plan.location_text && (
+            <>
+              <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
+                <MapPin size={18} color={Colors.terracotta} strokeWidth={2} />
+                <View style={styles.logisticsContent}>
+                  <Text style={styles.logisticsMain}>{plan.neighborhood ? `${plan.location_text} · ${plan.neighborhood}` : plan.location_text}</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => openDirections(plan.location_text!, mapCoords)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.logisticsLink}>Map →</Text>
+                </TouchableOpacity>
+              </View>
+              {mapCoords && (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => openDirections(plan.location_text!, mapCoords)}
+                  style={styles.miniMapWrap}
+                >
+                  <MapView
+                    style={styles.miniMap}
+                    initialRegion={{
+                      ...mapCoords,
+                      latitudeDelta: 0.01,
+                      longitudeDelta: 0.01,
+                    }}
+                    scrollEnabled={false}
+                    zoomEnabled={false}
+                    pitchEnabled={false}
+                    rotateEnabled={false}
+                    pointerEvents="none"
+                  >
+                    <Marker coordinate={mapCoords} />
+                  </MapView>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+
+          {plan.tickets_url && (
             <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
-              <MapPin size={18} color={Colors.terracotta} strokeWidth={2} />
+              <Ionicons name="ticket-outline" size={18} color={Colors.terracotta} />
               <View style={styles.logisticsContent}>
-                <Text style={styles.logisticsMain}>{plan.location_text}</Text>
+                <Text style={styles.logisticsMain}>Tickets required</Text>
               </View>
               <TouchableOpacity
-                onPress={() => openDirections(plan.location_text!)}
+                onPress={() => openUrl(plan.tickets_url!)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={styles.logisticsLink}>Map →</Text>
+                <Text style={styles.logisticsLink}>Get Tickets →</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1021,17 +1081,6 @@ export default function PlanDetailScreen() {
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
       <View style={styles.stickyBar}>
-        {/* Get Tickets — only shown after joining */}
-        {plan.tickets_url && (isMember || isCreator) && (
-          <TouchableOpacity
-            style={styles.ticketButton}
-            onPress={() => openUrl(plan.tickets_url!)}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.ticketButtonText}>Get Tickets →</Text>
-          </TouchableOpacity>
-        )}
-
         {isCreator ? (
           <View>
             <View style={styles.memberActions}>
@@ -1548,6 +1597,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  heroImage: {
+    width: SCREEN_WIDTH,
+    height: 200,
+    marginBottom: 16,
+    marginLeft: -20,
+  },
   scrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 140,
@@ -1605,30 +1660,30 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   categoryTag: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#F5E8E2',
   },
   categoryTagText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
+    fontWeight: '600',
+    fontSize: 10,
+    color: '#B5522E',
+    textTransform: 'capitalize',
+    letterSpacing: 0.2,
   },
   description: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
     lineHeight: 22,
-    marginBottom: 20,
+    marginBottom: 12,
   },
   noteBox: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 12,
     borderLeftWidth: 4,
     borderLeftColor: Colors.goldenAmber,
   },
@@ -1682,6 +1737,15 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
     color: Colors.terracotta,
+  },
+  miniMapWrap: {
+    marginTop: 12,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  miniMap: {
+    width: '100%',
+    height: 150,
   },
   whoGoingTitle: {
     fontFamily: Fonts.displayBold,
@@ -1763,8 +1827,8 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     paddingTop: 12,
     backgroundColor: Colors.parchment,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderTopWidth: 0.5,
+    borderTopColor: '#E8DDD0',
   },
   ticketButton: {
     backgroundColor: Colors.cardBg,
@@ -1780,7 +1844,7 @@ const styles = StyleSheet.create({
   joinButton: {
     backgroundColor: Colors.terracotta,
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },

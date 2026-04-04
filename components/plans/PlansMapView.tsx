@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-nati
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { ArrowLeft, MapPin, Calendar, Users, Heart, ChevronDown } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticSelection } from '../../lib/haptics';
 import * as Location from 'expo-location';
 import { MapView, Marker } from '../MapView.native';
 import { MAP_STYLE } from '../../constants/MapStyle';
@@ -80,7 +80,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
   });
 
   const handleMarkerPress = useCallback((plan: Plan) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setSelectedPlan((prev) => {
       if (prev?.id === plan.id) {
         setTimeout(() => onPlanPress(plan.id), 0);
@@ -154,7 +154,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
           <TouchableOpacity
             style={[styles.categoryPill, selectedFilter !== null && styles.categoryPillActive]}
             onPress={() => {
-              Haptics.selectionAsync();
+              hapticSelection();
               setCategorySheetOpen(true);
             }}
             activeOpacity={0.8}
@@ -168,7 +168,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
           <TouchableOpacity
             style={[styles.heartPill, heartFilter && styles.heartPillActive]}
             onPress={() => {
-              Haptics.selectionAsync();
+              hapticSelection();
               setHeartFilter(prev => !prev);
               setSelectedPlan(null);
             }}
@@ -228,7 +228,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
                   style={styles.cardHeart}
                   onPress={(e) => {
                     e.stopPropagation();
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                     onWishlist(selectedPlan.id, !!wishlistedSet[selectedPlan.id]);
                   }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

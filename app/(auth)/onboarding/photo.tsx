@@ -9,8 +9,10 @@ import { StatusBar } from 'expo-status-bar';
 import { Camera, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { useState } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Linking,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -103,15 +105,29 @@ export default function OnboardingPhotoScreen() {
 
   const pickImage = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAlertInfo({
-      title: 'Add a profile photo',
-      message: 'Choose how to add your photo',
-      buttons: [
-        { text: 'Take Photo', onPress: takePhotoFromCamera },
-        { text: 'Choose from Library', onPress: pickImageFromLibrary },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    });
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Take Photo', 'Choose from Library', 'Cancel'],
+          cancelButtonIndex: 2,
+          title: 'Add a profile photo',
+        },
+        (idx) => {
+          if (idx === 0) takePhotoFromCamera();
+          if (idx === 1) pickImageFromLibrary();
+        },
+      );
+    } else {
+      setAlertInfo({
+        title: 'Add a profile photo',
+        message: 'Choose how to add your photo',
+        buttons: [
+          { text: 'Take Photo', onPress: takePhotoFromCamera },
+          { text: 'Choose from Library', onPress: pickImageFromLibrary },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      });
+    }
   };
 
   const handleContinue = async () => {

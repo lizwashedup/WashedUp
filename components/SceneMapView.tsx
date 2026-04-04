@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator, Linking } from 'react-native';
 import { Image } from 'expo-image';
 import { ArrowLeft, MapPin, Calendar, Heart, ChevronDown } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticSelection } from '../lib/haptics';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { MapView, Marker } from './MapView.native';
@@ -133,7 +133,7 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
   });
 
   const handleMarkerPress = useCallback((event: GeocodedEvent) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setSelectedEvent((prev) => {
       if (prev?.id === event.id) {
         router.push(`/event/${event.id}`);
@@ -215,7 +215,7 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
           <TouchableOpacity
             style={[styles.categoryPill, categoryFilter !== null && styles.categoryPillActive]}
             onPress={() => {
-              Haptics.selectionAsync();
+              hapticSelection();
               setCategorySheetOpen(true);
             }}
             activeOpacity={0.8}
@@ -229,7 +229,7 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
           <TouchableOpacity
             style={[styles.heartPill, heartFilter && styles.heartPillActive]}
             onPress={() => {
-              Haptics.selectionAsync();
+              hapticSelection();
               setHeartFilter(prev => !prev);
               setSelectedEvent(null);
             }}
@@ -287,7 +287,7 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
                   style={styles.cardHeart}
                   onPress={(e) => {
                     e.stopPropagation();
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                     onWishlist(selectedEvent.id, !!wishlistedSet[selectedEvent.id]);
                   }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

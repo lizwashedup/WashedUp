@@ -13,6 +13,7 @@ export interface ChatPreview {
   unread_count: number;
   is_past: boolean;
   ticket_url: string | null;
+  member_avatars: string[];
 }
 
 export function useChatList() {
@@ -63,8 +64,8 @@ export function useChatList() {
 
       const eventIds = eligible.map((m: any) => m.events.id);
 
-      // Run all 3 queries in parallel — they only need eventIds + user.id
-      const [{ data: allMessages }, { data: allReads }, { data: otherMessages }] = await Promise.all([
+      // Run all 4 queries in parallel — they only need eventIds + user.id
+      const [{ data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = await Promise.all([
         supabase
           .from('messages')
           .select('event_id, content, created_at, image_url, user_id')
@@ -80,6 +81,11 @@ export function useChatList() {
           .select('event_id, created_at')
           .in('event_id', eventIds)
           .neq('user_id', user.id),
+        supabase
+          .from('event_members')
+          .select('event_id, user_id, profiles_public!inner(profile_photo_url)')
+          .in('event_id', eventIds)
+          .eq('status', 'joined'),
       ]);
 
       const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; user_id: string }> = {};
@@ -101,6 +107,16 @@ export function useChatList() {
           if (p.first_name_display) senderNameMap[p.id] = p.first_name_display;
         });
       }
+
+      // Build member avatar map: eventId -> array of avatar URLs (up to 4)
+      const avatarMap: Record<string, string[]> = {};
+      (memberRows2 ?? []).forEach((r: any) => {
+        const url = (r.profiles_public as any)?.profile_photo_url;
+        if (url && r.event_id) {
+          if (!avatarMap[r.event_id]) avatarMap[r.event_id] = [];
+          if (avatarMap[r.event_id].length < 4) avatarMap[r.event_id].push(url);
+        }
+      });
 
       const readMap: Record<string, string> = {};
       (allReads ?? []).forEach((r: any) => {
@@ -139,6 +155,7 @@ export function useChatList() {
           last_message_at: lastMsg?.created_at ?? null,
           unread_count: unreadMap[event.id] ?? 0,
           is_past: isPast,
+          member_avatars: avatarMap[event.id] ?? [],
         };
       });
 

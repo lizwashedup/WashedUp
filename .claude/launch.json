@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "expo-dev",
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["/Users/liz/Desktop/WashedUp_HQ/washedup-main/node_modules/expo/bin/cli", "start", "--web"],
+      "port": 8081
+    },
+    {
+      "name": "washedup-web",
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["/Users/liz/Desktop/WashedUp_HQ/washedup-web/node_modules/.bin/next", "dev", "/Users/liz/Desktop/WashedUp_HQ/washedup-web"],
+      "env": { "PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" },
+      "port": 3000
+    }
+  ]
+}

@@ -16,8 +16,11 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Linking } from 'react-native';
+import { Alert, Linking, LogBox } from 'react-native';
 import 'react-native-reanimated';
+
+// Suppress push notification entitlement error on simulators
+LogBox.ignoreLogs(['getRegistrationInfoAsync']);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
