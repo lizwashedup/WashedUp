@@ -19,7 +19,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { ArrowLeft, Plus, X, Pencil, Trash2, ImagePlus } from 'lucide-react-native';
+import { ArrowLeft, Plus, X, Pencil, Trash2, ImagePlus, Users } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -261,9 +261,14 @@ export default function AdminEventsScreen() {
           <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Scene Events</Text>
-        <TouchableOpacity onPress={openCreate} style={styles.headerBtn} hitSlop={12}>
-          <Plus size={22} color={Colors.terracotta} strokeWidth={2.5} />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={() => router.push('/admin/users')} style={styles.headerBtn} hitSlop={12}>
+            <Users size={20} color={Colors.warmGray} strokeWidth={2} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={openCreate} style={styles.headerBtn} hitSlop={12}>
+            <Plus size={22} color={Colors.terracotta} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {isLoading ? (
@@ -499,6 +504,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   headerBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 0 },
   headerTitle: { fontFamily: Fonts.display, fontSize: FontSizes.displayLG, color: Colors.asphalt },
 
   list: { flex: 1 },
