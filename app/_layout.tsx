@@ -16,7 +16,7 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Linking } from 'react-native';
+import { Alert, AppState, Linking } from 'react-native';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -106,6 +106,16 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
       } else if (data?.eventId) {
         router.push(`/(tabs)/chats/${data.eventId}` as any);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Clear app icon badge when app comes to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        Notifications.setBadgeCountAsync(0).catch(() => {});
       }
     });
     return () => sub.remove();
