@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../lib/haptics';
 import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { BrandedAlert, type BrandedAlertButton } from '../components/BrandedAlert';
@@ -36,7 +36,7 @@ export default function ResetPasswordScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const confirmInputRef = useRef<TextInput>(null);
 
-  const triggerHaptic = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const triggerHaptic = () => hapticLight();
 
   const handleSubmit = async () => {
     setError(null);
@@ -78,7 +78,7 @@ export default function ResetPasswordScreen() {
       <StatusBar style="dark" />
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

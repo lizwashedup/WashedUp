@@ -19,12 +19,14 @@ export interface ChatPreview {
 export function useChatList() {
   const [chats, setChats] = useState<ChatPreview[]>([]);
   const [loading, setLoading] = useState(true);
+  const userIdRef = useRef<string | null>(null);
 
   const fetchChats = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const user = (await supabase.auth.getUser()).data?.user;
       if (!user) return;
+      userIdRef.current = user.id;
 
       const { data: memberships, error: membershipsError } = await supabase
         .from('event_members')
@@ -70,7 +72,8 @@ export function useChatList() {
           .from('messages')
           .select('event_id, content, created_at, image_url, user_id')
           .in('event_id', eventIds)
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .limit(eventIds.length * 3),
         supabase
           .from('chat_reads')
           .select('event_id, last_read_at')
@@ -80,7 +83,9 @@ export function useChatList() {
           .from('messages')
           .select('event_id, created_at')
           .in('event_id', eventIds)
-          .neq('user_id', user.id),
+          .neq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(eventIds.length * 20),
         supabase
           .from('event_members')
           .select('event_id, user_id, profiles_public!inner(profile_photo_url)')
@@ -192,9 +197,46 @@ export function useChatList() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
-          const eid = (payload.new as any)?.event_id;
-          if (eid && hasChatsRef.current && eventIdsRef.current.has(eid)) fetchChats(true);
+        async (payload) => {
+          const msg = payload.new as any;
+          const eid = msg?.event_id;
+          if (!eid || !hasChatsRef.current || !eventIdsRef.current.has(eid)) return;
+
+          // Incremental update: patch the affected chat instead of full refetch
+          try {
+            const isOwn = userIdRef.current === msg.user_id;
+            let senderName: string | null = isOwn ? 'You' : null;
+            if (!isOwn && msg.user_id) {
+              const { data: profile } = await supabase
+                .from('profiles_public')
+                .select('first_name_display')
+                .eq('id', msg.user_id)
+                .maybeSingle();
+              senderName = profile?.first_name_display ?? null;
+            }
+            const text = msg.image_url ? 'sent a photo' : msg.content;
+            const preview = senderName ? `${senderName}: ${text}` : text;
+
+            setChats(prev => {
+              const updated = prev.map(c => {
+                if (c.eventId !== eid) return c;
+                return {
+                  ...c,
+                  last_message: preview,
+                  last_message_at: msg.created_at,
+                  unread_count: isOwn ? c.unread_count : c.unread_count + 1,
+                };
+              });
+              // Re-sort: active chats by last_message_at desc
+              const active = updated.filter(c => !c.is_past).sort((a, b) =>
+                (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
+              const past = updated.filter(c => c.is_past);
+              return [...active, ...past];
+            });
+          } catch {
+            // Fallback: full refetch on error
+            fetchChats(true);
+          }
         },
       )
       .subscribe();

@@ -71,6 +71,7 @@ const brand = {
   goldAccent: '#D4BF82',     // Gold decorative accent (quote borders)
   quoteText: '#6B5D50',      // Creator message text
   dividerWarm: '#F5EDE0',    // Card footer border, subtle dividers
+  warmTint: '#FFF8F5',       // Subtle warm background tint (active reaction badge)
 
   // ── Legacy alias (keep so old references don't break immediately) ─────────
   primaryOrange: '#B5522E',

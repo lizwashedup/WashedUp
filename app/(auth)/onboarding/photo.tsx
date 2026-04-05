@@ -1,4 +1,4 @@
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useRouter } from 'expo-router';
@@ -104,7 +104,7 @@ export default function OnboardingPhotoScreen() {
   };
 
   const pickImage = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
@@ -132,7 +132,7 @@ export default function OnboardingPhotoScreen() {
 
   const handleContinue = async () => {
     if (!imageBase64) return; // should never happen — button is disabled without it
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setLoading(true);
     try {
       const {
@@ -193,7 +193,7 @@ export default function OnboardingPhotoScreen() {
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               routerBack.back();
             }}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -260,7 +260,7 @@ export default function OnboardingPhotoScreen() {
             (!imageUri || !imageBase64 || loading) && styles.primaryButtonDisabled,
           ]}
           onPress={handleContinue}
-          onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+          onPressIn={() => hapticLight()}
           activeOpacity={0.9}
           disabled={!imageUri || !imageBase64 || loading}
         >

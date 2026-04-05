@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Search, Users, MessageCircle } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../lib/haptics';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../constants/Typography';
 
@@ -53,12 +53,12 @@ export default function WelcomeModal({
   );
 
   const handleBrowse = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     onDismiss();
   }, [onDismiss]);
 
   const handlePost = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     onPostPlan();
   }, [onPostPlan]);
 

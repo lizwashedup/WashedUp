@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import * as Location from 'expo-location';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -348,7 +348,7 @@ export default function PostScreen() {
   };
 
   const toggleAgeRange = (range: AgeRange) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     if (range === 'All Ages') {
       setAgeRanges(['All Ages']);
       return;
@@ -404,7 +404,7 @@ export default function PostScreen() {
       setAlertInfo({ title: 'Add a title', message: 'Give your plan a title before saving as a draft.' });
       return;
     }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
     const draft: PlanDraft = {
       id: Date.now().toString(),
       title: title.trim(),
@@ -421,7 +421,7 @@ export default function PostScreen() {
   }, [title, location, locationLat, locationLng, ticketUrl, category, genderPref, ageRanges, description, creatorMessage, groupSize, imageUrl, drafts]);
 
   const loadDraft = useCallback((draft: PlanDraft) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setTitle(draft.title);
     setLocation(draft.location);
     setLocationRaw(draft.location);
@@ -467,7 +467,7 @@ export default function PostScreen() {
     setDateYear(tempYear);
     setDateSelected(true);
     setShowDatePicker(false);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
   };
 
   // ─── Time picker ─────────────────────────────────────────────────────────────
@@ -485,7 +485,7 @@ export default function PostScreen() {
     setTimePeriod(tempPeriod);
     setTimeSelected(true);
     setShowTimePicker(false);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
   };
 
   // ─── Submit ───────────────────────────────────────────────────────────────────
@@ -506,7 +506,7 @@ export default function PostScreen() {
       return;
     }
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
     setLoading(true);
 
     try {
@@ -583,7 +583,7 @@ export default function PostScreen() {
         }
       }
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setPostedPlanId(insertedEvent?.id ?? null);
       setPostedPlanTitle(title.trim());
       setPostedSpotsLeft(groupSize);
@@ -632,7 +632,7 @@ export default function PostScreen() {
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
         <ScrollView
@@ -791,7 +791,7 @@ export default function PostScreen() {
                     } catch {}
                   })();
                 }
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                hapticLight();
               }}
               query={{
                 key: GOOGLE_MAPS_API_KEY,
@@ -887,7 +887,7 @@ export default function PostScreen() {
                     key={opt.value}
                     style={[styles.genderPill, genderPref === opt.value && styles.pillSelected]}
                     onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      hapticLight();
                       setGenderPref(opt.value);
                     }}
                     activeOpacity={0.8}
@@ -971,7 +971,7 @@ export default function PostScreen() {
                 style={[styles.stepperBtn, groupSize <= (MIN_GROUP - 1) && styles.stepperBtnDisabled]}
                 onPress={() => {
                   if (groupSize > (MIN_GROUP - 1)) {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                     setGroupSize(g => g - 1);
                   }
                 }}
@@ -987,7 +987,7 @@ export default function PostScreen() {
                 style={[styles.stepperBtn, groupSize >= (MAX_GROUP - 1) && styles.stepperBtnDisabled]}
                 onPress={() => {
                   if (groupSize < (MAX_GROUP - 1)) {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                     setGroupSize(g => g + 1);
                   }
                 }}
@@ -1196,7 +1196,7 @@ export default function PostScreen() {
                     category === cat && styles.categoryItemSelected,
                   ]}
                   onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                     setCategory(cat);
                     setShowCategoryPicker(false);
                   }}

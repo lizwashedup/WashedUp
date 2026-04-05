@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '../../lib/haptics';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -557,24 +557,26 @@ export default function PlanDetailScreen() {
         }
       }
 
-      await supabase.from('messages').insert({
+      const { error: sysError } = await supabase.from('messages').insert({
         event_id: id,
         user_id: currentUserId,
         content: 'joined the plan',
         message_type: 'system',
       });
+      if (sysError) console.warn('[WashedUp] System message insert failed:', sysError);
 
       if (greeting && greeting.trim().length > 0) {
-        await supabase.from('messages').insert({
+        const { error: greetError } = await supabase.from('messages').insert({
           event_id: id,
           user_id: currentUserId,
           content: greeting.trim(),
           message_type: 'user',
         });
+        if (greetError) console.warn('[WashedUp] Greeting insert failed:', greetError);
       }
     },
     onSuccess: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setJoinModalVisible(false);
       setJoinMessage('');
       setJoinConfirmed(false);
@@ -611,7 +613,7 @@ export default function PlanDetailScreen() {
       });
     },
     onSuccess: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      hapticWarning();
       queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
@@ -689,7 +691,7 @@ export default function PlanDetailScreen() {
 
       if (error) throw error;
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setManageModalVisible(false);
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
@@ -731,7 +733,7 @@ export default function PlanDetailScreen() {
                 message_type: 'system',
               });
 
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              hapticWarning();
               setManageModalVisible(false);
               queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
               queryClient.invalidateQueries({ queryKey: ['my-plans'] });
@@ -749,7 +751,7 @@ export default function PlanDetailScreen() {
 
   const toggleWishlist = useCallback(async () => {
     if (!currentUserId || !id) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     const next = !isWishlisted;
     setIsWishlisted(next);
     if (!next) {
@@ -765,7 +767,7 @@ export default function PlanDetailScreen() {
   const handleJoinWaitlist = useCallback(async () => {
     if (waitlistLoading || !currentUserId || !id) return;
     setWaitlistLoading(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
 
     try {
       if (isOnWaitlist) {
@@ -797,7 +799,7 @@ export default function PlanDetailScreen() {
 
   const handleShare = useCallback(async () => {
     if (!plan) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     try {
       await Share.share({
         message: `Check out "${plan.title}" on WashedUp!\n${plan.slug ? `https://washedup.app/plans/${plan.slug}` : `https://washedup.app/e/${plan.id}`}`,
@@ -1154,7 +1156,7 @@ export default function PlanDetailScreen() {
             <TouchableOpacity
               style={styles.declineInviteButton}
               onPress={async () => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                hapticLight();
                 try {
                   await supabase
                     .from('plan_invites')
@@ -1179,7 +1181,7 @@ export default function PlanDetailScreen() {
             <TouchableOpacity
               style={styles.acceptInviteButton}
               onPress={async () => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                hapticMedium();
                 try {
                   await supabase
                     .from('plan_invites')
@@ -1202,7 +1204,7 @@ export default function PlanDetailScreen() {
           <TouchableOpacity
             style={styles.joinButton}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              hapticMedium();
               setJoinModalVisible(true);
             }}
             activeOpacity={0.9}
@@ -1392,7 +1394,7 @@ export default function PlanDetailScreen() {
                     setEditLocation(name || data.description);
                     setEditLocationLat(lat);
                     setEditLocationLng(lng);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                   }}
                   query={{
                     key: GOOGLE_MAPS_API_KEY,
@@ -1434,7 +1436,7 @@ export default function PlanDetailScreen() {
                       key={cat}
                       style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
                       onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        hapticLight();
                         setEditCategory(cat);
                       }}
                       activeOpacity={0.8}
@@ -1455,7 +1457,7 @@ export default function PlanDetailScreen() {
                       key={opt.value}
                       style={[manageStyles.genderPill, isSelected && manageStyles.pillSelected]}
                       onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        hapticLight();
                         setEditGenderRule(opt.value);
                       }}
                       activeOpacity={0.8}
@@ -1473,7 +1475,7 @@ export default function PlanDetailScreen() {
                   style={[manageStyles.stepperBtn, editGroupSize <= (MIN_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
                     if (editGroupSize > (MIN_GROUP - 1)) {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      hapticLight();
                       setEditGroupSize((g) => g - 1);
                     }
                   }}
@@ -1489,7 +1491,7 @@ export default function PlanDetailScreen() {
                   style={[manageStyles.stepperBtn, editGroupSize >= (MAX_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
                     if (editGroupSize < (MAX_GROUP - 1)) {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      hapticLight();
                       setEditGroupSize((g) => g + 1);
                     }
                   }}

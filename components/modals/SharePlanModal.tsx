@@ -9,7 +9,7 @@ import {
   Share,
   Platform,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { Share2 } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -43,7 +43,7 @@ export function SharePlanModal({
       : `I just joined ${planTitle} on WashedUp! Come with us!\n${shareUrl}`;
 
   const handleShare = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
     try {
       await Share.share({ message: shareText.replace(shareUrl, '').trim(), url: shareUrl });
     } catch {}

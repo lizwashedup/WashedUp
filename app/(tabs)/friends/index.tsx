@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { MoreHorizontal, QrCode, Search, Send, Share2, UserPlus, Users, X } from 'lucide-react-native';
@@ -228,7 +228,7 @@ export default function YourPeopleScreen() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['friends', userId] });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
     },
     onError: (err: any) => {
       if (err?.code === '23505') {
@@ -241,7 +241,7 @@ export default function YourPeopleScreen() {
 
   const removeFriend = useCallback(
     (friend: Friend) => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      hapticLight();
       setFriendToRemove(friend);
     },
     [],
@@ -249,7 +249,7 @@ export default function YourPeopleScreen() {
 
   const confirmRemoveFriend = useCallback(async () => {
     if (!userId || !friendToRemove) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
     try {
       await supabase.rpc('remove_friend', { p_friend_id: friendToRemove.friend_id });
       queryClient.invalidateQueries({ queryKey: ['friends', userId] });
@@ -278,7 +278,7 @@ export default function YourPeopleScreen() {
       if (!userId) throw new Error('Not authenticated');
       const { error } = await supabase.from('profiles').update({ handle: raw }).eq('id', userId);
       if (error) throw error;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setHandleInput('');
       refetchProfile();
     } catch (err: any) {
@@ -293,7 +293,7 @@ export default function YourPeopleScreen() {
   const shareHandle = useCallback(async () => {
     const h = myProfile?.handle;
     if (!h) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     try {
       await Share.share({
         message: `Add me on WashedUp — @${h}\nhttps://washedup.app/u/${h}`,
@@ -360,7 +360,7 @@ export default function YourPeopleScreen() {
   }, [userId]);
 
   const handleInvite = useCallback((friend: Friend) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     if (myActivePlans.length === 0) {
       setAlertInfo({ title: 'No active plans', message: 'Post a plan first, then invite your people.' });
       return;
@@ -385,7 +385,7 @@ export default function YourPeopleScreen() {
         }
         throw error;
       }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setAlertInfo({ title: 'Invite sent!', message: `You invited ${name} to "${plan.title}"` });
     } catch (e: any) {
       setAlertInfo({ title: 'Could not send invite', message: e?.message ?? 'Something went wrong. Try again.' });
@@ -397,7 +397,7 @@ export default function YourPeopleScreen() {
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
 
   const handleUserMenu = useCallback((targetId: string, targetName: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setUserMenuTarget({ id: targetId, name: targetName });
   }, []);
 
@@ -473,7 +473,7 @@ export default function YourPeopleScreen() {
                 return (
                   <View style={styles.searchRow}>
                     <View style={styles.searchRowLeft}>
-                      <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMiniProfileUserId(item.id); }}>
+                      <Pressable onPress={() => { hapticLight(); setMiniProfileUserId(item.id); }}>
                         {item.profile_photo_url ? (
                           <Image source={{ uri: item.profile_photo_url }} style={styles.searchAvatar} contentFit="cover" />
                         ) : (
@@ -592,7 +592,7 @@ export default function YourPeopleScreen() {
                   onLongPress={() => removeFriend(item)}
                   activeOpacity={0.7}
                 >
-                  <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMiniProfileUserId(item.friend_id); }}>
+                  <Pressable onPress={() => { hapticLight(); setMiniProfileUserId(item.friend_id); }}>
                     {item.profile_photo_url ? (
                       <Image source={{ uri: item.profile_photo_url }} style={styles.friendAvatar} contentFit="cover" />
                     ) : (

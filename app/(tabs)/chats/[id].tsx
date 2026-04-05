@@ -21,7 +21,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Clipboard from 'expo-clipboard';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
@@ -32,7 +34,7 @@ import { capDisplayCount } from '../../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { openUrl } from '../../../lib/url';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
-import { useChat, ChatMessage, MessageReaction } from '../../../hooks/useChat';
+import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
@@ -166,8 +168,10 @@ function openLocationInMaps(lat: number, lng: number, address: string) {
     ? `maps://app?ll=${lat},${lng}&q=${encoded}`
     : `geo:${lat},${lng}?q=${encoded}`;
   Linking.openURL(url).catch(() => {
-    // fallback: Apple Maps web URL works on iOS even without the Maps app
-    Linking.openURL(`https://maps.apple.com/?ll=${lat},${lng}&q=${encoded}`).catch(() => {});
+    const fallback = Platform.OS === 'ios'
+      ? `https://maps.apple.com/?ll=${lat},${lng}&q=${encoded}`
+      : `https://www.google.com/maps?q=${lat},${lng}`;
+    Linking.openURL(fallback).catch(() => {});
   });
 }
 
@@ -182,15 +186,13 @@ interface BubbleProps {
   currentUserId: string;
   planTitle?: string;
   onPhotoPress?: (url: string) => void;
-  onReaction?: (messageId: string) => void;
-  onDelete?: (messageId: string) => void;
+  onReaction?: (messageId: string, emoji?: string) => void;
+  onMessageLongPress?: (message: ChatMessage, isOwn: boolean) => void;
+  onReplyTap?: (messageId: string) => void;
 }
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, planTitle, onPhotoPress, onReaction, onDelete }: BubbleProps) {
-  const lastTapRef = React.useRef(0);
-
+const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, planTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap }: BubbleProps) {
   if (message.message_type === 'system') {
-    // Replace generic "the plan" references with the actual plan title
     let displayContent = message.content;
     if (planTitle) {
       displayContent = displayContent
@@ -204,45 +206,27 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
     );
   }
 
-  const handleDoubleTap = () => {
-    const now = Date.now();
-    if (now - lastTapRef.current < 300) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      onReaction?.(message.id);
-      lastTapRef.current = 0;
-    } else {
-      lastTapRef.current = now;
-    }
-  };
-
   const handleLongPress = () => {
-    if (!isOwn || !onDelete) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Delete Message', 'Cancel'],
-          destructiveButtonIndex: 0,
-          cancelButtonIndex: 1,
-        },
-        (idx) => { if (idx === 0) onDelete(message.id); },
-      );
-    } else {
-      Alert.alert('Message', '', [
-        { text: 'Delete Message', style: 'destructive', onPress: () => onDelete(message.id) },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
+    hapticMedium();
+    onMessageLongPress?.(message, isOwn);
   };
 
   const reactions = message.reactions ?? [];
-  const heartCount = reactions.filter(r => r.reaction === 'heart').length;
-  const iHearted = reactions.some(r => r.reaction === 'heart' && r.user_id === currentUserId);
+  const totalReactions = reactions.length;
+  // Collect unique emojis in order of first appearance
+  const uniqueEmojis: string[] = [];
+  const seen = new Set<string>();
+  for (const r of reactions) {
+    if (!seen.has(r.reaction)) {
+      seen.add(r.reaction);
+      uniqueEmojis.push(r.reaction);
+    }
+  }
+  const iReacted = reactions.some(r => r.user_id === currentUserId);
 
   const borderRadius = isOwn
-    ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 4 }
-    : { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 4, borderBottomRightRadius: 18 };
+    ? { borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottomLeftRadius: 16, borderBottomRightRadius: 3 }
+    : { borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottomLeftRadius: 3, borderBottomRightRadius: 16 };
 
   return (
     <View style={[bubbleStyles.row, isOwn ? bubbleStyles.rowOwn : bubbleStyles.rowOther]}>
@@ -272,15 +256,12 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
         )}
 
         <Pressable
-          onPress={handleDoubleTap}
-          onLongPress={!message.image_url && message.message_type !== 'location' ? handleLongPress : undefined}
+          onLongPress={handleLongPress}
           delayLongPress={400}
         >
           {!!message.image_url ? (
             <Pressable
               onPress={() => onPhotoPress?.(message.image_url!)}
-              onLongPress={handleLongPress}
-              delayLongPress={400}
             >
               <Image
                 source={{ uri: message.image_url }}
@@ -297,8 +278,6 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
             return (
               <Pressable
                 onPress={() => openLocationInMaps(lat, lng, address)}
-                onLongPress={handleLongPress}
-                delayLongPress={400}
                 style={[
                   bubbleStyles.bubble,
                   bubbleStyles.locationBubble,
@@ -327,6 +306,20 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
               borderRadius,
             ]}>
+              {message.reply_to && (
+                <TouchableOpacity
+                  onPress={() => onReplyTap?.(message.reply_to!.id)}
+                  style={[bubbleStyles.replyQuote, isOwn ? bubbleStyles.replyQuoteOwn : bubbleStyles.replyQuoteOther]}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[bubbleStyles.replyQuoteName, isOwn && bubbleStyles.replyQuoteNameOwn]}>
+                    {message.reply_to.sender_name ?? 'Someone'}
+                  </Text>
+                  <Text style={[bubbleStyles.replyQuoteText, isOwn && bubbleStyles.replyQuoteTextOwn]} numberOfLines={2}>
+                    {message.reply_to.content}
+                  </Text>
+                </TouchableOpacity>
+              )}
               <LinkedText
                 text={message.content}
                 style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn]}
@@ -335,13 +328,15 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
             </View>
           )}
 
-          {heartCount > 0 && (
-            <View style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther]}>
-              <Text style={[bubbleStyles.reactionHeart, iHearted && bubbleStyles.reactionHeartActive]}>
-                {iHearted ? '\u2764\uFE0F' : '\u2661'}
-              </Text>
-              {heartCount > 1 && (
-                <Text style={bubbleStyles.reactionCount}>{heartCount}</Text>
+          {totalReactions > 0 && (
+            <View style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther, iReacted && bubbleStyles.reactionBadgeMine]}>
+              {uniqueEmojis.map((emoji) => (
+                <Text key={emoji} style={bubbleStyles.reactionEmoji}>
+                  {emoji === 'heart' ? '\u2764\uFE0F' : emoji}
+                </Text>
+              ))}
+              {totalReactions > 1 && (
+                <Text style={bubbleStyles.reactionCount}>{totalReactions}</Text>
               )}
             </View>
           )}
@@ -360,22 +355,22 @@ const bubbleStyles = StyleSheet.create({
   avatar: { width: 28, height: 28, borderRadius: 14 },
   avatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
   avatarInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
-  bubbleWrapper: { maxWidth: '75%', gap: 3 },
+  bubbleWrapper: { maxWidth: '80%', gap: 3 },
   wrapperOwn: { alignItems: 'flex-end' },
   wrapperOther: { alignItems: 'flex-start' },
   senderLine: { marginBottom: 2, marginLeft: 4 },
-  senderName: { fontWeight: '700', fontSize: 12, color: '#B5522E' },
-  senderDot: { fontSize: 10, color: '#A09385' },
-  senderTime: { fontSize: 10, color: '#78695C' },
+  senderName: { fontWeight: '700', fontSize: 12, color: Colors.terracotta },
+  senderDot: { fontSize: 10, color: Colors.tertiary },
+  senderTime: { fontSize: 10, color: Colors.secondary },
   bubble: { overflow: 'hidden' },
-  bubbleText: { paddingHorizontal: 13, paddingVertical: 9 },
-  bubbleOwn: { backgroundColor: '#B5522E' },
+  bubbleText: { paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleOwn: { backgroundColor: Colors.terracotta },
   bubbleOther: {
-    backgroundColor: '#F5EDE0',
+    backgroundColor: Colors.dividerWarm,
   },
-  messageText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: '#2C1810', lineHeight: 21 },
-  messageTextOwn: { color: '#FFFFFF' },
-  inlineTime: { fontSize: 10, color: '#A09385', textAlign: 'right', marginTop: 3 },
+  messageText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 22 },
+  messageTextOwn: { color: Colors.white },
+  inlineTime: { fontSize: 10, color: Colors.tertiary, textAlign: 'right', marginTop: 3 },
   inlineTimeOwn: { color: 'rgba(255,255,255,0.6)' },
   linkOther: { textDecorationLine: 'underline' as const, color: Colors.terracotta },
   linkOwn: { textDecorationLine: 'underline' as const, color: Colors.white },
@@ -384,7 +379,7 @@ const bubbleStyles = StyleSheet.create({
   systemText: {
     fontFamily: Fonts.sans,
     fontSize: 11,
-    color: '#A09385',
+    color: Colors.tertiary,
     backgroundColor: Colors.inputBg,
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -395,28 +390,62 @@ const bubbleStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 12,
     paddingHorizontal: 6,
-    paddingVertical: 2,
-    position: 'absolute',
-    bottom: -10,
+    paddingVertical: 3,
     gap: 2,
+    position: 'absolute',
+    bottom: -12,
     shadowColor: Colors.shadowBlack,
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   reactionBadgeOwn: { right: 4 },
   reactionBadgeOther: { left: 4 },
-  reactionHeart: { fontSize: FontSizes.bodySM },
-  reactionHeartActive: { color: Colors.errorRed },
+  reactionBadgeMine: {
+    backgroundColor: Colors.warmTint,
+  },
+  reactionEmoji: { fontSize: 13 },
   reactionCount: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.caption,
     color: Colors.textMedium,
+    marginLeft: 1,
+  },
+  replyQuote: {
+    borderLeftWidth: 3,
+    paddingLeft: 8,
+    paddingVertical: 4,
+    marginBottom: 6,
+    borderRadius: 4,
+  },
+  replyQuoteOwn: {
+    borderLeftColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  replyQuoteOther: {
+    borderLeftColor: Colors.terracotta,
+    backgroundColor: 'rgba(0,0,0,0.04)',
+  },
+  replyQuoteName: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 12,
+    color: Colors.terracotta,
+    marginBottom: 1,
+  },
+  replyQuoteNameOwn: {
+    color: 'rgba(255,255,255,0.85)',
+  },
+  replyQuoteText: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: Colors.textMedium,
+    lineHeight: 16,
+  },
+  replyQuoteTextOwn: {
+    color: 'rgba(255,255,255,0.7)',
   },
   locationBubble: { paddingHorizontal: 13, paddingVertical: 10, minWidth: 180 },
   locationPinRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
@@ -451,9 +480,11 @@ export default function ChatScreen() {
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [overlayMessage, setOverlayMessage] = useState<{ message: ChatMessage; isOwn: boolean } | null>(null);
   const listRef = useRef<FlatList>(null);
-
-  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction, refetch } = useChat(id);
+  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, editMessage, toggleReaction, refetch } = useChat(id);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -575,8 +606,14 @@ export default function ChatScreen() {
     const text = inputText.trim();
     if (!text || uploading) return;
     setInputText('');
-    sendMessage(text);  // fire-and-forget for instant feel
-  }, [inputText, uploading, sendMessage]);
+    if (editingMessageId) {
+      editMessage(editingMessageId, text);
+      setEditingMessageId(null);
+    } else {
+      sendMessage(text, undefined, replyingTo?.id);
+      setReplyingTo(null);
+    }
+  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo]);
 
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
@@ -806,14 +843,29 @@ export default function ChatScreen() {
             data={enrichedItems}
             keyExtractor={item => item.id}
             inverted={true}
+            style={{ flex: 1 }}
             contentContainerStyle={chatStyles.messageList}
             showsVerticalScrollIndicator={false}
+            automaticallyAdjustContentInsets={false}
+            contentInsetAdjustmentBehavior="never"
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
             initialNumToRender={20}
             windowSize={10}
             maxToRenderPerBatch={15}
             maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            onScrollToIndexFailed={(info) => {
+              listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
+              setTimeout(() => {
+                listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+              }, 300);
+            }}
+            ListEmptyComponent={
+              <View style={chatStyles.emptyState}>
+                <Text style={chatStyles.emptyEmoji}>{'\uD83D\uDC4B'}</Text>
+                <Text style={chatStyles.emptyText}>Say hi to the group!</Text>
+              </View>
+            }
             ListFooterComponent={event ? (
               <TouchableOpacity
                 style={chatStyles.pinnedCard}
@@ -823,7 +875,7 @@ export default function ChatScreen() {
                 <Text style={chatStyles.pinnedTitle} numberOfLines={1}>{event.title}</Text>
                 <View style={chatStyles.pinnedRow}>
                   <View style={chatStyles.pinnedDetail}>
-                    <Ionicons name="calendar-outline" size={12} color="#B5522E" />
+                    <Ionicons name="calendar-outline" size={12} color={Colors.terracotta} />
                     <Text style={chatStyles.pinnedDetailText}>{formatEventDate(event.start_time)}</Text>
                   </View>
                   <TouchableOpacity
@@ -879,7 +931,7 @@ export default function ChatScreen() {
               const showName = !isOwn && !isGroupedWithOlder;
 
               return (
-                <View style={{ marginBottom: isGroupedWithOlder ? 1 : (msg.reactions?.length ? 16 : 10) }}>
+                <View style={{ marginBottom: isGroupedWithOlder ? 1 : (msg.reactions?.length ? 18 : 10) }}>
                   <MessageBubble
                     message={msg}
                     isOwn={isOwn}
@@ -889,8 +941,14 @@ export default function ChatScreen() {
                     currentUserId={currentUserId}
                     planTitle={event?.title}
                     onPhotoPress={setPhotoViewUrl}
-                    onReaction={toggleReaction}
-                    onDelete={deleteMessage}
+                    onReaction={(msgId, emoji) => toggleReaction(msgId, emoji ?? 'heart')}
+                    onMessageLongPress={(msg, own) => setOverlayMessage({ message: msg, isOwn: own })}
+                    onReplyTap={(msgId) => {
+                      const idx = enrichedItems.findIndex(item => !('type' in item) && item.id === msgId);
+                      if (idx >= 0) {
+                        listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+                      }
+                    }}
                   />
                 </View>
               );
@@ -904,6 +962,30 @@ export default function ChatScreen() {
             <Text style={chatStyles.readOnlyText}>This chat is read-only — {event?.title ?? 'the plan'} has ended</Text>
           </View>
         ) : (
+          <View style={{ backgroundColor: Colors.white }}>
+            {replyingTo && (
+              <View style={chatStyles.replyBar}>
+                <View style={chatStyles.replyBarLeft}>
+                  <Ionicons name="arrow-undo-outline" size={16} color={Colors.terracotta} />
+                  <View style={chatStyles.replyBarContent}>
+                    <Text style={chatStyles.replyBarName}>{replyingTo.senderName}</Text>
+                    <Text style={chatStyles.replyBarText} numberOfLines={1}>{replyingTo.content}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setReplyingTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close" size={18} color={Colors.warmGray} />
+                </TouchableOpacity>
+              </View>
+            )}
+            {editingMessageId && (
+              <View style={chatStyles.editingBar}>
+                <Ionicons name="create-outline" size={16} color={Colors.terracotta} />
+                <Text style={chatStyles.editingText}>Editing message</Text>
+                <TouchableOpacity onPress={() => { setEditingMessageId(null); setInputText(''); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close" size={18} color={Colors.warmGray} />
+                </TouchableOpacity>
+              </View>
+            )}
           <View style={[chatStyles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
             <TouchableOpacity onPress={handleAttachPress} style={chatStyles.cameraBtn} disabled={uploading}>
               {uploading ? (
@@ -933,6 +1015,7 @@ export default function ChatScreen() {
             >
               <Ionicons name="arrow-up" size={18} color={Colors.white} />
             </TouchableOpacity>
+          </View>
           </View>
         )}
       </KeyboardAvoidingView>
@@ -981,6 +1064,120 @@ export default function ChatScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+
+      {/* Message interaction overlay */}
+      <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)}>
+        <Pressable style={overlayStyles.backdrop} onPress={() => setOverlayMessage(null)}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={overlayStyles.container}>
+            {/* Emoji reaction row — only for other people's messages */}
+            {!overlayMessage?.isOwn && (
+            <View style={overlayStyles.emojiRow}>
+              {['\uD83D\uDC4D', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDE2E', '\uD83D\uDE22', '\uD83D\uDE4F'].map((emoji) => (
+                <EmojiReactionButton
+                  key={emoji}
+                  emoji={emoji}
+                  onSelect={(e) => {
+                    const reactionKey = e === '\u2764\uFE0F' ? 'heart' : e;
+                    toggleReaction(overlayMessage!.message.id, reactionKey);
+                    setOverlayMessage(null);
+                  }}
+                />
+              ))}
+            </View>
+            )}
+
+            {/* Action menu */}
+            <View style={overlayStyles.actionMenu}>
+              {overlayMessage?.message.message_type === 'user' && (
+                <>
+                  <TouchableOpacity
+                    style={overlayStyles.actionRow}
+                    onPress={() => {
+                      hapticLight();
+                      const msg = overlayMessage.message;
+                      setReplyingTo({
+                        id: msg.id,
+                        content: msg.content,
+                        senderName: msg.sender?.first_name ?? 'Someone',
+                      });
+                      setEditingMessageId(null);
+                      setOverlayMessage(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={overlayStyles.actionText}>Reply</Text>
+                    <Ionicons name="arrow-undo-outline" size={18} color={Colors.asphalt} />
+                  </TouchableOpacity>
+                  <View style={overlayStyles.actionDivider} />
+                </>
+              )}
+
+              <TouchableOpacity
+                style={overlayStyles.actionRow}
+                onPress={() => {
+                  const msg = overlayMessage?.message;
+                  if (msg) {
+                    let copyText = msg.content;
+                    if (msg.image_url) {
+                      copyText = msg.image_url;
+                    } else if (msg.message_type === 'location') {
+                      try { copyText = JSON.parse(msg.content).address ?? msg.content; } catch {}
+                    }
+                    Clipboard.setStringAsync(copyText).catch(() => {});
+                  }
+                  hapticLight();
+                  setOverlayMessage(null);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={overlayStyles.actionText}>Copy</Text>
+                <Ionicons name="copy-outline" size={18} color={Colors.asphalt} />
+              </TouchableOpacity>
+
+              {overlayMessage?.isOwn && overlayMessage.message.message_type === 'user' && !overlayMessage.message.image_url && (
+                <>
+                  <View style={overlayStyles.actionDivider} />
+                  <TouchableOpacity
+                    style={overlayStyles.actionRow}
+                    onPress={() => {
+                      hapticLight();
+                      setEditingMessageId(overlayMessage.message.id);
+                      setReplyingTo(null);
+                      setInputText(overlayMessage.message.content);
+                      setOverlayMessage(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={overlayStyles.actionText}>Edit</Text>
+                    <Ionicons name="create-outline" size={18} color={Colors.asphalt} />
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {overlayMessage?.isOwn && (
+                <>
+                  <View style={overlayStyles.actionDivider} />
+                  <TouchableOpacity
+                    style={overlayStyles.actionRow}
+                    onPress={() => {
+                      hapticMedium();
+                      setOverlayMessage(null);
+                      Alert.alert('Delete this message?', '', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: () => deleteMessage(overlayMessage.message.id) },
+                      ]);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={overlayStyles.actionTextDelete}>Delete</Text>
+                    <Ionicons name="trash-outline" size={18} color={Colors.errorRed} />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -996,16 +1193,16 @@ const chatStyles = StyleSheet.create({
   },
   backBtn: { padding: 2 },
   headerCenter: { flex: 1 },
-  headerTitle: { fontSize: 16, fontWeight: '700' as const, color: '#2C1810' },
-  headerSub: { fontSize: 11, color: '#78695C', marginTop: 1 },
+  headerTitle: { fontSize: 16, fontWeight: '700' as const, color: Colors.darkWarm },
+  headerSub: { fontSize: 11, color: Colors.secondary, marginTop: 1 },
   viewPlanBtn: {
     borderWidth: 1.5,
-    borderColor: '#B5522E',
+    borderColor: Colors.terracotta,
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  viewPlanText: { fontSize: 12, fontWeight: '600' as const, color: '#B5522E' },
+  viewPlanText: { fontSize: 12, fontWeight: '600' as const, color: Colors.terracotta },
   ellipsisBtn: {
     padding: 4,
   },
@@ -1017,7 +1214,7 @@ const chatStyles = StyleSheet.create({
     gap: 8,
     backgroundColor: Colors.white,
     borderBottomWidth: 0.5,
-    borderBottomColor: '#E8DDD0',
+    borderBottomColor: Colors.border,
   },
   memberItem: {
     alignItems: 'center',
@@ -1029,31 +1226,31 @@ const chatStyles = StyleSheet.create({
     borderRadius: 16,
   },
   memberAvatarFallback: {
-    backgroundColor: '#F5EDE0',
+    backgroundColor: Colors.dividerWarm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   memberInitial: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#B5522E',
+    color: Colors.terracotta,
   },
   memberName: {
     fontSize: 9,
-    color: '#78695C',
+    color: Colors.secondary,
     marginTop: 2,
     textAlign: 'center',
     maxWidth: 40,
   },
   memberOverflow: {
-    backgroundColor: '#FAF5EC',
+    backgroundColor: Colors.cream,
     alignItems: 'center',
     justifyContent: 'center',
   },
   memberOverflowText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#B5522E',
+    color: Colors.terracotta,
   },
 
   ticketBanner: {
@@ -1074,10 +1271,10 @@ const chatStyles = StyleSheet.create({
 
 
   pinnedCard: {
-    backgroundColor: '#FAF5EC',
+    backgroundColor: Colors.cream,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E8DDD0',
+    borderColor: Colors.border,
     padding: 10,
     marginHorizontal: 16,
     marginBottom: 8,
@@ -1086,7 +1283,7 @@ const chatStyles = StyleSheet.create({
   pinnedTitle: {
     fontWeight: '700',
     fontSize: 14,
-    color: '#2C1810',
+    color: Colors.darkWarm,
     marginBottom: 6,
   },
   pinnedRow: {
@@ -1101,26 +1298,41 @@ const chatStyles = StyleSheet.create({
   },
   pinnedDetailText: {
     fontSize: 11,
-    color: '#78695C',
+    color: Colors.secondary,
   },
   pinnedCalLink: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#B5522E',
+    color: Colors.terracotta,
   },
   pinnedSpots: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#78695C',
+    color: Colors.secondary,
   },
   pinnedCountdown: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#B5522E',
+    color: Colors.terracotta,
     marginTop: 6,
   },
 
-  messageList: { paddingVertical: 12 },
+  messageList: { paddingTop: 4, paddingBottom: 12 },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    transform: [{ scaleY: -1 }],
+  },
+  emptyEmoji: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+  emptyText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.tertiary,
+  },
 
   inputBar: {
     flexDirection: 'row',
@@ -1141,7 +1353,7 @@ const chatStyles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    backgroundColor: '#F5F0E8',
+    backgroundColor: Colors.inputBg,
     borderRadius: 20,
     paddingLeft: 10,
     paddingRight: 10,
@@ -1161,8 +1373,8 @@ const chatStyles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 2,
   },
-  sendBtnActive: { backgroundColor: '#B5522E' },
-  sendBtnDisabled: { backgroundColor: '#C5C0B8' },
+  sendBtnActive: { backgroundColor: Colors.terracotta },
+  sendBtnDisabled: { backgroundColor: Colors.iconMuted },
 
   readOnlyBar: {
     alignItems: 'center',
@@ -1173,6 +1385,49 @@ const chatStyles = StyleSheet.create({
     borderTopColor: Colors.inputBg,
   },
   readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, fontStyle: 'italic' },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.inputBg,
+  },
+  replyBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  replyBarContent: {
+    flex: 1,
+  },
+  replyBarName: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+  },
+  replyBarText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.warmGray,
+  },
+  editingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.inputBg,
+    gap: 8,
+  },
+  editingText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+    flex: 1,
+  },
 
   photoModal: {
     flex: 1,
@@ -1193,3 +1448,99 @@ const chatStyles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+const overlayStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  container: {
+    width: '100%',
+    maxWidth: 320,
+    alignItems: 'center',
+    gap: 10,
+  },
+  emojiRow: {
+    flexDirection: 'row',
+    backgroundColor: Colors.white,
+    borderRadius: 28,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 2,
+    shadowColor: Colors.shadowBlack,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  emojiBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emojiText: {
+    fontSize: 28,
+  },
+  actionMenu: {
+    backgroundColor: Colors.white,
+    borderRadius: 14,
+    width: '100%',
+    overflow: 'hidden',
+    shadowColor: Colors.shadowBlack,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  actionText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  actionTextDelete: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.errorRed,
+  },
+  actionDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginHorizontal: 18,
+  },
+});
+
+// Animated emoji button with scale bounce on tap
+function EmojiReactionButton({ emoji, onSelect }: { emoji: string; onSelect: (emoji: string) => void }) {
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  return (
+    <TouchableOpacity
+      style={overlayStyles.emojiBtn}
+      onPress={() => {
+        hapticLight();
+        scale.value = withSpring(1.3, { damping: 8, stiffness: 300 }, () => {
+          scale.value = withSpring(1);
+        });
+        setTimeout(() => onSelect(emoji), 150);
+      }}
+      activeOpacity={1}
+    >
+      <Animated.View style={animStyle}>
+        <Text style={overlayStyles.emojiText}>{emoji}</Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}

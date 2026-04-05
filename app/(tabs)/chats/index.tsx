@@ -68,23 +68,11 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
             style={styles.avatar}
             contentFit="cover"
           />
-        ) : chat.member_avatars.length >= 4 ? (
-          <View style={styles.avatarGrid}>
-            {chat.member_avatars.slice(0, 4).map((url, i) => (
-              <Image key={i} source={{ uri: url }} style={styles.gridPhoto} contentFit="cover" />
-            ))}
-          </View>
-        ) : chat.member_avatars.length >= 2 ? (
-          <View style={styles.avatarDuo}>
-            {chat.member_avatars.slice(0, 2).map((url, i) => (
-              <Image key={i} source={{ uri: url }} style={[styles.duoPhoto, i === 1 && { marginLeft: -6 }]} contentFit="cover" />
-            ))}
-          </View>
-        ) : chat.member_avatars.length === 1 ? (
-          <Image source={{ uri: chat.member_avatars[0] }} style={styles.avatarSingle} contentFit="cover" />
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Ionicons name="people-outline" size={22} color="#A09385" />
+            <Text style={styles.avatarLetter}>
+              {(chat.title ?? '?').charAt(0).toUpperCase()}
+            </Text>
           </View>
         )}
       </View>
@@ -308,38 +296,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarGrid: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    overflow: 'hidden',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  gridPhoto: {
-    width: 26,
-    height: 26,
-  },
-  avatarDuo: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    overflow: 'hidden',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  duoPhoto: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-  avatarSingle: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
+  avatarLetter: {
+    fontFamily: Fonts.displayBold,
+    fontSize: 24,
+    color: '#B5522E',
   },
 
   rowContent: { flex: 1, gap: 2 },

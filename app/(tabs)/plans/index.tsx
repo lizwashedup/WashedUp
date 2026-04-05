@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -298,7 +298,7 @@ export default function PlansScreen() {
       queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
     },
     onError: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      hapticError();
     },
   });
 
@@ -314,7 +314,7 @@ export default function PlansScreen() {
           events (
             id, title, start_time, location_text, location_lat, location_lng,
             image_url, primary_vibe, gender_rule, max_invites, min_invites,
-            member_count, status, creator_user_id, host_message
+            member_count, status, creator_user_id, host_message, neighborhood, slug
           )
         `)
         .eq('user_id', userId)
@@ -324,7 +324,7 @@ export default function PlansScreen() {
 
       const { data: created } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug')
         .eq('creator_user_id', userId)
         .in('status', ['forming', 'active', 'full', 'completed']);
 
@@ -398,7 +398,7 @@ export default function PlansScreen() {
       // Step 2: fetch the actual events
       const { data: eventsData } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug')
         .in('id', eventIds)
         .in('status', ['forming', 'active', 'full']);
 
@@ -519,7 +519,7 @@ export default function PlansScreen() {
         return (
           <TouchableOpacity
             style={styles.pastSectionHeader}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPastExpanded((v) => !v); }}
+            onPress={() => { hapticLight(); setPastExpanded((v) => !v); }}
             activeOpacity={0.7}
           >
             <Text style={styles.sectionHeader}>{section.title}</Text>
@@ -536,7 +536,7 @@ export default function PlansScreen() {
         return (
           <TouchableOpacity
             style={styles.pastSectionHeader}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWaitlistExpanded((v) => !v); }}
+            onPress={() => { hapticLight(); setWaitlistExpanded((v) => !v); }}
             activeOpacity={0.7}
           >
             <Text style={styles.sectionHeader}>{section.title}</Text>
@@ -637,7 +637,7 @@ export default function PlansScreen() {
             key={tab}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               setActiveTab(tab);
             }}
           >
@@ -658,7 +658,7 @@ export default function PlansScreen() {
           <TouchableOpacity
             style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               setWhenSheetOpen(true);
             }}
           >
@@ -670,7 +670,7 @@ export default function PlansScreen() {
           <TouchableOpacity
             style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               setCategorySheetOpen(true);
             }}
           >
@@ -682,7 +682,7 @@ export default function PlansScreen() {
           <TouchableOpacity
             style={[styles.savedPill, heartFilter && styles.savedPillActive]}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               setHeartFilter((v) => !v);
             }}
           >
@@ -693,7 +693,7 @@ export default function PlansScreen() {
           <TouchableOpacity
             style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
             onPress={() => {
-              Haptics.selectionAsync();
+              hapticSelection();
               setMapView((v) => !v);
             }}
             accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
@@ -716,7 +716,7 @@ export default function PlansScreen() {
           <TouchableOpacity
             style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
             onPress={() => {
-              Haptics.selectionAsync();
+              hapticSelection();
               setMapView((v) => !v);
             }}
             accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}

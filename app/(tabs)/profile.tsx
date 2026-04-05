@@ -18,7 +18,7 @@ import { Camera } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
@@ -227,7 +227,7 @@ export default function ProfileScreen() {
   };
 
   const pickEditPhoto = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setAlertInfo({
       title: 'Change photo',
       message: 'Choose how to add your photo',
@@ -240,7 +240,7 @@ export default function ProfileScreen() {
   };
 
   const handleSaveProfile = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     Keyboard.dismiss();
     const trimmedName = editName.trim();
     if (!trimmedName) {

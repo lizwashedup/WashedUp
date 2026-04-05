@@ -6,7 +6,7 @@ import { router, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import * as Notifications from 'expo-notifications';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
@@ -29,7 +29,7 @@ export default function OnboardingVibesScreen() {
   const selectedCount = Object.keys(selected).filter(k => selected[k]).length;
 
   const toggle = (tag: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setSelected((prev) => {
       const next = { ...prev };
       if (next[tag]) delete next[tag];
@@ -42,7 +42,7 @@ export default function OnboardingVibesScreen() {
 
   const handleLetsGo = async () => {
     if (!canContinue || loading) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -89,7 +89,7 @@ export default function OnboardingVibesScreen() {
         </View>
         <View style={styles.headerRow}>
           <TouchableOpacity
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); routerBack.back(); }}
+            onPress={() => { hapticLight(); routerBack.back(); }}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={styles.backButton}
           >
@@ -133,7 +133,7 @@ export default function OnboardingVibesScreen() {
             (!canContinue || loading) && styles.primaryButtonDisabled,
           ]}
           onPress={handleLetsGo}
-          onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+          onPressIn={() => hapticLight()}
           activeOpacity={0.9}
           disabled={!canContinue || loading}
         >

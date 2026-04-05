@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { Heart, Calendar, MapPin, Map, LayoutList, ChevronDown } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
@@ -154,14 +154,14 @@ const SceneCard = React.memo(function SceneCard({
   const isFree = !event.ticket_price || (typeof event.ticket_price === 'string' && (event.ticket_price.trim() === '' || event.ticket_price.trim().toLowerCase() === 'free'));
 
   const handlePress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     router.push(`/event/${event.id}`);
   }, [event.id]);
 
   const handleCta = useCallback(
     (e: any) => {
       e.stopPropagation();
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      hapticLight();
       if (event.external_url) {
         Linking.openURL(event.external_url);
       } else {
@@ -182,7 +182,7 @@ const SceneCard = React.memo(function SceneCard({
   const handleShare = useCallback(
     (e: any) => {
       e.stopPropagation();
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      hapticLight();
       Share.share({
         message: `Check out ${event.title} in LA on WashedUp!\nhttps://washedup.app/e/${event.id}`,
       }).catch(() => {});
@@ -194,7 +194,7 @@ const SceneCard = React.memo(function SceneCard({
     (e: any) => {
       e.stopPropagation();
       if (event.plans_count > 0) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        hapticLight();
         router.push(`/event/${event.id}`);
       }
     },
@@ -564,7 +564,7 @@ export default function SceneScreen() {
       queryClient.invalidateQueries({ queryKey: ['explore-wishlists', userId] });
     },
     onError: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      hapticError();
     },
   });
 
@@ -641,7 +641,7 @@ export default function SceneScreen() {
             <TouchableOpacity
               style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
               onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                hapticLight();
                 setWhenSheetOpen(true);
               }}
             >
@@ -654,7 +654,7 @@ export default function SceneScreen() {
             <TouchableOpacity
               style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
               onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                hapticLight();
                 setCategorySheetOpen(true);
               }}
             >
@@ -667,7 +667,7 @@ export default function SceneScreen() {
             <TouchableOpacity
               style={[styles.heartFilterPill, heartFilter && styles.heartFilterPillActive]}
               onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                hapticLight();
                 setHeartFilter((v) => !v);
               }}
             >
@@ -684,7 +684,7 @@ export default function SceneScreen() {
             <TouchableOpacity
               style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
               onPress={() => {
-                Haptics.selectionAsync();
+                hapticSelection();
                 setMapView((v) => !v);
               }}
               accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}

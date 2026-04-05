@@ -24,6 +24,10 @@ export function hapticSuccess() {
   try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
 }
 
+export function hapticWarning() {
+  try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch {}
+}
+
 export function hapticError() {
   try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); } catch {}
 }

@@ -13,7 +13,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight, MoreHorizontal } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
@@ -100,7 +100,7 @@ export default function EventDetailScreen() {
 
   const handleCreatorMenu = useCallback((creatorId: string, creatorName: string) => {
     if (creatorId === userId) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setAlertInfo({
       title: creatorName,
       buttons: [
@@ -214,7 +214,7 @@ export default function EventDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['explore-wishlist-check', id] });
     },
     onError: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      hapticError();
     },
   });
 
@@ -282,7 +282,7 @@ export default function EventDetailScreen() {
           <TouchableOpacity
             style={[styles.circleButton, { top: insets.top + 8, right: 60 }]}
             onPress={async () => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               try {
                 await Share.share({
                   message: `Check out "${event.title}" in LA on WashedUp!\nhttps://washedup.app/e/${event.id}`,
@@ -297,7 +297,7 @@ export default function EventDetailScreen() {
           <TouchableOpacity
             style={[styles.circleButton, { top: insets.top + 8, right: 16 }]}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               wishlistMutation.mutate();
             }}
           >
@@ -429,7 +429,7 @@ export default function EventDetailScreen() {
         <TouchableOpacity
           style={styles.postPlanButton}
           onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            hapticMedium();
             router.push({
               pathname: '/(tabs)/post',
               params: {

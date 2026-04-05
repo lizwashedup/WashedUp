@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -29,7 +29,7 @@ export default function OnboardingWaitlistedScreen() {
   }, []);
 
   const handleSignOut = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     await supabase.auth.signOut();
   };
 
@@ -49,7 +49,7 @@ export default function OnboardingWaitlistedScreen() {
         <TouchableOpacity
           style={styles.signOutButton}
           onPress={handleSignOut}
-          onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+          onPressIn={() => hapticLight()}
           activeOpacity={0.8}
         >
           <Text style={styles.signOutText}>Sign out</Text>
