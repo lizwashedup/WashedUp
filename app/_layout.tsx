@@ -16,7 +16,7 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Linking, LogBox } from 'react-native';
+import { Alert, AppState, Linking, LogBox } from 'react-native';
 import 'react-native-reanimated';
 
 // Suppress push notification entitlement error on simulators
@@ -28,6 +28,7 @@ import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useSessionLogger } from '../hooks/useSessionLogger';
+import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -91,6 +92,68 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   usePushNotifications(authedUserId);
   useSessionLogger(authedUserId);
 
+  // ── Post-plan survey ────────────────────────────────────────────────────
+  const [surveyPlan, setSurveyPlan] = useState<SurveyPlan | null>(null);
+  const [surveyMembers, setSurveyMembers] = useState<SurveyMember[]>([]);
+  const surveyCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (!authedUserId || !authResolved || surveyCheckedRef.current) return;
+    surveyCheckedRef.current = true;
+
+    (async () => {
+      try {
+        // Find the most recent completed plan the user attended with no feedback yet
+        const { data: plans } = await supabase
+          .from('event_members')
+          .select('event_id, events!inner(id, title, image_url, status, start_time)')
+          .eq('user_id', authedUserId)
+          .eq('status', 'joined')
+          .eq('events.status', 'completed')
+          .order('events(start_time)', { ascending: false })
+          .limit(5);
+
+        if (!plans || plans.length === 0) return;
+
+        // Check which ones already have feedback
+        const eventIds = plans.map((p: any) => p.event_id);
+        const { data: existing } = await supabase
+          .from('plan_feedback')
+          .select('event_id')
+          .eq('user_id', authedUserId)
+          .in('event_id', eventIds);
+
+        const feedbackSet = new Set((existing ?? []).map((r: any) => r.event_id));
+        const needsSurvey = plans.find((p: any) => !feedbackSet.has(p.event_id));
+        if (!needsSurvey) return;
+
+        const event = (needsSurvey as any).events;
+        setSurveyPlan({
+          id: event.id,
+          title: event.title,
+          image_url: event.image_url ?? null,
+        });
+
+        // Fetch members for this plan
+        const { data: memberData } = await supabase
+          .from('event_members')
+          .select('user_id, profiles_public!inner(id, first_name_display, profile_photo_url)')
+          .eq('event_id', event.id)
+          .eq('status', 'joined');
+
+        if (memberData) {
+          setSurveyMembers(
+            memberData.map((m: any) => ({
+              id: m.profiles_public.id,
+              first_name_display: m.profiles_public.first_name_display,
+              profile_photo_url: m.profiles_public.profile_photo_url,
+            }))
+          );
+        }
+      } catch {}
+    })();
+  }, [authedUserId, authResolved]);
+
   useEffect(() => {
     if (authResolved && !splashHiddenRef.current) {
       splashHiddenRef.current = true;
@@ -109,6 +172,16 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
       } else if (data?.eventId) {
         router.push(`/(tabs)/chats/${data.eventId}` as any);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Clear app icon badge when app comes to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        Notifications.setBadgeCountAsync(0).catch(() => {});
       }
     });
     return () => sub.remove();
@@ -283,6 +356,15 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.parchment }}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
+      )}
+      {surveyPlan && authedUserId && (
+        <PostPlanSurvey
+          visible={!!surveyPlan}
+          plan={surveyPlan}
+          members={surveyMembers}
+          userId={authedUserId}
+          onComplete={() => setSurveyPlan(null)}
+        />
       )}
     </View>
   );

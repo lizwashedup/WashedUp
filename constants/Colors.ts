@@ -61,6 +61,17 @@ const brand = {
   categorySports: '#5C7CBF',
   categoryWellness: '#5CBF9C',
 
+  // ── Q2 palette ───────────────────────────────────────────────────────────
+  darkWarm: '#2C1810',       // Primary text (warm dark)
+  secondary: '#78695C',      // Secondary text (dates, locations, metadata)
+  tertiary: '#A09385',       // Tertiary text (muted labels, inactive tabs)
+  iconMuted: '#C5C0B8',      // Muted icon color
+  cream: '#FAF5EC',          // Screen background (cream)
+  accentSubtle: '#F5E8E2',   // Vibe tag pill background
+  goldAccent: '#D4BF82',     // Gold decorative accent (quote borders)
+  quoteText: '#6B5D50',      // Creator message text
+  dividerWarm: '#F5EDE0',    // Card footer border, subtle dividers
+
   // ── Legacy alias (keep so old references don't break immediately) ─────────
   primaryOrange: '#B5522E',
   backgroundCream: '#F8F5F0',

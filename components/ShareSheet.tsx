@@ -16,12 +16,13 @@ interface Props {
   visible: boolean;
   planId: string;
   planTitle: string;
+  slug?: string | null;
   onClose: () => void;
 }
 
-export function ShareSheet({ visible, planId, planTitle, onClose }: Props) {
+export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props) {
   const router = useRouter();
-  const deepLink = `https://washedup.app/e/${planId}`;
+  const deepLink = slug ? `https://washedup.app/plans/${slug}` : `https://washedup.app/e/${planId}`;
 
   const handleSendToFriend = () => {
     hapticLight();

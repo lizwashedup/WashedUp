@@ -996,7 +996,7 @@ export default function PostScreen() {
                 <Text style={styles.stepperBtnText}>+</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.stepperHint}>You + {groupSize} others (3–8 including you)</Text>
+            <Text style={styles.stepperHint}>including you</Text>
           </View>
 
           {/* Bottom spacer so content isn't hidden behind sticky button */}
@@ -1064,6 +1064,7 @@ export default function PostScreen() {
         }}
         planTitle={postedPlanTitle}
         planId={postedPlanId || ''}
+        slug={null}
         spotsLeft={postedSpotsLeft}
         genderLabel={postedGenderLabel}
         variant="posted"

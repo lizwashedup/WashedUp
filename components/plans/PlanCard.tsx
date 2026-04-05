@@ -8,10 +8,13 @@ import {
   ActionSheetIOS,
   Platform,
   Alert,
+  Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Colors from '../../constants/Colors';
+import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight, hapticMedium } from '../../lib/haptics';
 import Animated, {
   FadeInUp,
@@ -24,20 +27,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 
-// ─── Design tokens ───────────────────────────────────────────────────────────
-const C = {
-  terracotta: '#B5522E',
-  dark: '#2C1810',
-  warmGray: '#78695C',
-  lightGray: '#A09385',
-  iconMuted: '#C5C0B8',
-  cream: '#FAF5EC',
-  surface: '#FFFFFF',
-  accentSubtle: '#F5E8E2',
-  goldLight: '#D4BF82',
-  quoteText: '#6B5D50',
-  divider: '#F5EDE0',
-};
 
 interface PlanCardProps {
   plan: {
@@ -47,10 +36,12 @@ interface PlanCardProps {
     start_time: string;
     location_text: string | null;
     neighborhood?: string | null;
+    slug?: string | null;
     category: string | null;
     max_invites: number;
     member_count: number;
     creator: {
+      id?: string;
       first_name_display: string;
       profile_photo_url: string | null;
       member_since?: string;
@@ -63,6 +54,7 @@ interface PlanCardProps {
   onWishlist?: (planId: string, current: boolean) => void;
   onReport?: (planId: string) => void;
   onBlock?: (planId: string) => void;
+  onCreatorPress?: (creatorId: string) => void;
   isPast?: boolean;
 }
 
@@ -83,7 +75,7 @@ function formatDateTimeForCard(dateString: string): string {
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, isPast = false }) => {
+export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, onCreatorPress, isPast = false }) => {
   const router = useRouter();
 
   // ── Bookmark scale animation (declared early so handleWishlist can reference it) ──
@@ -182,10 +174,6 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     ? `"${plan.host_message}"`
     : null;
 
-  const spotsText = isFull
-    ? `${going} of ${totalCapacity} spots`
-    : `${going} of ${totalCapacity} spots`;
-
   return (
     <Animated.View entering={FadeInUp.duration(300).easing(Easing.out(Easing.ease))}>
     <TouchableOpacity
@@ -199,7 +187,18 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     >
       {/* A. Creator row */}
       <View style={styles.creatorRow}>
-        <View style={styles.creatorLeft}>
+        <TouchableOpacity
+          style={styles.creatorLeft}
+          disabled={!onCreatorPress || !plan.creator?.id}
+          activeOpacity={onCreatorPress && plan.creator?.id ? 0.7 : 1}
+          onPress={(e) => {
+            if (onCreatorPress && plan.creator?.id) {
+              e.stopPropagation();
+              hapticLight();
+              onCreatorPress(plan.creator.id);
+            }
+          }}
+        >
           {plan.creator?.profile_photo_url ? (
             <Image
               source={{ uri: plan.creator.profile_photo_url }}
@@ -209,7 +208,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             />
           ) : (
             <View style={styles.creatorAvatarPlaceholder}>
-              <Ionicons name="person-outline" size={18} color={C.lightGray} />
+              <Ionicons name="person-outline" size={18} color={Colors.tertiary} />
             </View>
           )}
           <View style={styles.creatorDetails}>
@@ -218,7 +217,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             </Text>
             <Text style={styles.creatorSubtext}>posted</Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.headerRight}>
           {showSpotsLeftBadge && (
             <Animated.View style={pulseAnimatedStyle}>
@@ -227,6 +226,18 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               </View>
             </Animated.View>
           )}
+          <TouchableOpacity
+            onPress={(e) => {
+              e.stopPropagation();
+              hapticLight();
+              Share.share({ message: `Check out "${plan.title}" on WashedUp!\n${plan.slug ? `https://washedup.app/plans/${plan.slug}` : `https://washedup.app/e/${plan.id}`}` });
+            }}
+            style={styles.iconBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Share plan"
+          >
+            <Ionicons name="share-outline" size={18} color={Colors.asphalt} />
+          </TouchableOpacity>
           {onWishlist && (
             <TouchableOpacity
               onPress={handleWishlist}
@@ -238,7 +249,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
                 <Ionicons
                   name={isWishlisted ? 'bookmark' : 'bookmark-outline'}
                   size={18}
-                  color={isWishlisted ? '#B5522E' : '#78695C'}
+                  color={isWishlisted ? Colors.terracotta : Colors.asphalt}
                 />
               </Animated.View>
             </TouchableOpacity>
@@ -274,7 +285,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         <View style={styles.logisticsBlock}>
           {plan.start_time && (
             <View style={styles.logisticsLine}>
-              <Ionicons name="calendar-outline" size={13} color={C.terracotta} />
+              <Ionicons name="calendar-outline" size={13} color={Colors.terracotta} />
               <Text style={styles.logisticsText}>
                 {formatDateTimeForCard(plan.start_time)}
               </Text>
@@ -282,7 +293,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
           )}
           {locationDisplay && (
             <View style={[styles.logisticsLine, plan.start_time && { marginTop: 4 }]}>
-              <Ionicons name="location-outline" size={13} color={C.terracotta} />
+              <Ionicons name="location-outline" size={13} color={Colors.terracotta} />
               <Text style={styles.logisticsText} numberOfLines={1}>
                 {locationDisplay}
               </Text>
@@ -300,12 +311,12 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         <View style={styles.ctaSpacer} />
         {isPast ? (
           <View style={styles.completedBadge}>
-            <Ionicons name="checkmark-circle-outline" size={14} color={C.warmGray} />
+            <Ionicons name="checkmark-circle-outline" size={14} color={Colors.secondary} />
             <Text style={styles.completedText}>Completed</Text>
           </View>
         ) : (
           <AnimatedPressable
-            style={[styles.ctaButton, buttonAnimatedStyle]}
+            style={[isFull && !isMember ? styles.ctaButtonOutline : styles.ctaButton, buttonAnimatedStyle]}
             onPress={() => {
               hapticLight();
               handlePress();
@@ -313,8 +324,8 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             onPressIn={handleButtonPressIn}
             onPressOut={handleButtonPressOut}
           >
-            <Text style={styles.ctaButtonText}>
-              {"Let's Go \u2192"}
+            <Text style={isFull && !isMember ? styles.ctaButtonOutlineText : styles.ctaButtonText}>
+              {isFull && !isMember ? "Waitlist \u2192" : "Let's Go \u2192"}
             </Text>
           </AnimatedPressable>
         )}
@@ -328,12 +339,12 @@ PlanCard.displayName = 'PlanCard';
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: C.surface,
+    backgroundColor: Colors.cardBg,
     borderRadius: 16,
     padding: 16,
-    shadowColor: 'rgba(181, 82, 46, 0.08)',
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
+    shadowOpacity: 0.08,
     shadowRadius: 12,
     elevation: 3,
   },
@@ -363,7 +374,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: C.accentSubtle,
+    backgroundColor: Colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -373,15 +384,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   creatorName: {
-    fontFamily: 'DMSans_700Bold',
+    fontFamily: Fonts.sansBold,
     fontSize: 14,
-    color: C.dark,
+    color: Colors.darkWarm,
     lineHeight: 18,
   },
   creatorSubtext: {
-    fontFamily: 'DMSans_400Regular',
+    fontFamily: Fonts.sans,
     fontSize: 12,
-    color: C.lightGray,
+    color: Colors.tertiary,
     lineHeight: 16,
   },
   headerRight: {
@@ -390,15 +401,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   spotsLeftBadge: {
-    backgroundColor: C.terracotta,
+    backgroundColor: Colors.terracotta,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
   },
   spotsLeftBadgeText: {
-    fontFamily: 'DMSans_700Bold',
+    fontFamily: Fonts.sansBold,
     fontSize: 10,
-    color: '#FFFFFF',
+    color: Colors.white,
     lineHeight: 14,
   },
   iconBtn: {
@@ -407,9 +418,9 @@ const styles = StyleSheet.create({
 
   // ── Body ──
   title: {
-    fontFamily: 'DMSans_700Bold',
+    fontFamily: Fonts.sansBold,
     fontSize: 18,
-    color: C.dark,
+    color: Colors.darkWarm,
     lineHeight: 24,
     marginBottom: 6,
   },
@@ -420,28 +431,28 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   categoryPill: {
-    backgroundColor: C.accentSubtle,
+    backgroundColor: Colors.accentSubtle,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
   },
   categoryPillText: {
-    fontFamily: 'DMSans_700Bold',
+    fontFamily: Fonts.sansBold,
     fontSize: 10,
-    color: C.terracotta,
+    color: Colors.terracotta,
     textTransform: 'capitalize',
     letterSpacing: 0.2,
   },
   quoteBlock: {
     borderLeftWidth: 2,
-    borderLeftColor: C.goldLight,
+    borderLeftColor: Colors.goldAccent,
     paddingLeft: 10,
     marginBottom: 10,
   },
   quoteText: {
     fontStyle: 'italic',
     fontSize: 13,
-    color: C.quoteText,
+    color: Colors.quoteText,
     lineHeight: 19,
   },
   logisticsBlock: {
@@ -453,9 +464,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   logisticsText: {
-    fontFamily: 'DMSans_400Regular',
+    fontFamily: Fonts.sans,
     fontSize: 12,
-    color: C.warmGray,
+    color: Colors.secondary,
     flex: 1,
     lineHeight: 16,
   },
@@ -465,39 +476,52 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: C.divider,
+    borderTopColor: Colors.dividerWarm,
     paddingTop: 12,
     gap: 8,
   },
   spotsLabel: {
-    fontFamily: 'DMSans_400Regular',
+    fontFamily: Fonts.sans,
     fontSize: 13,
-    color: C.warmGray,
+    color: Colors.secondary,
   },
   spotsNumber: {
-    fontFamily: 'DMSans_700Bold',
-    color: C.dark,
+    fontFamily: Fonts.sansBold,
+    color: Colors.darkWarm,
   },
   ctaSpacer: {
     flex: 1,
   },
   ctaButton: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.white,
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: C.terracotta,
-    shadowColor: '#B5522E',
+    borderColor: Colors.terracotta,
+    shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 4,
   },
   ctaButtonText: {
-    fontSize: 13,
-    fontWeight: '700' as const,
-    color: C.terracotta,
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
+  ctaButtonOutline: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+  },
+  ctaButtonOutlineText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
   },
   completedBadge: {
     flexDirection: 'row',
@@ -505,12 +529,12 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: C.divider,
+    backgroundColor: Colors.dividerWarm,
     borderRadius: 999,
   },
   completedText: {
-    fontFamily: 'DMSans_500Medium',
+    fontFamily: Fonts.sansMedium,
     fontSize: 13,
-    color: C.warmGray,
+    color: Colors.secondary,
   },
 });

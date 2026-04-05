@@ -19,6 +19,7 @@ export interface SharePlanModalProps {
   onClose: () => void;
   planTitle: string;
   planId: string;
+  slug?: string | null;
   spotsLeft?: number;
   genderLabel?: string;
   variant: 'posted' | 'joined';
@@ -29,11 +30,12 @@ export function SharePlanModal({
   onClose,
   planTitle,
   planId,
+  slug,
   spotsLeft,
   genderLabel,
   variant,
 }: SharePlanModalProps) {
-  const shareUrl = planId ? `https://washedup.app/e/${planId}` : 'https://washedup.app';
+  const shareUrl = slug ? `https://washedup.app/plans/${slug}` : planId ? `https://washedup.app/e/${planId}` : 'https://washedup.app';
 
   const shareText =
     variant === 'posted'

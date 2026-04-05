@@ -83,6 +83,7 @@ interface PlanDetail {
   target_age_max: number | null;
   end_time: string | null;
   neighborhood: string | null;
+  slug: string | null;
   status: string;
   creator_user_id: string;
   tickets_url: string | null;
@@ -186,7 +187,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
-      status, member_count, creator_user_id, tickets_url, neighborhood
+      status, member_count, creator_user_id, tickets_url, neighborhood, slug
     `)
     .eq('id', id)
     .single();
@@ -232,6 +233,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     target_age_min: row.target_age_min ?? null,
     target_age_max: row.target_age_max ?? null,
     neighborhood: row.neighborhood ?? null,
+    slug: row.slug ?? null,
     status: row.status,
     creator_user_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
@@ -798,7 +800,7 @@ export default function PlanDetailScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
       await Share.share({
-        message: `Join me for "${plan.title}" on WashedUp!\nhttps://washedup.app/e/${plan.id}`,
+        message: `Check out "${plan.title}" on WashedUp!\n${plan.slug ? `https://washedup.app/plans/${plan.slug}` : `https://washedup.app/e/${plan.id}`}`,
       });
     } catch {}
   }, [plan]);
@@ -887,6 +889,13 @@ export default function PlanDetailScreen() {
           <Text style={styles.backButtonText}>Plans</Text>
         </TouchableOpacity>
         <View style={styles.headerIcons}>
+          <TouchableOpacity
+            onPress={(e) => { e.stopPropagation(); handleShare(); }}
+            style={styles.headerIconButton}
+            accessibilityLabel="Share plan"
+          >
+            <Ionicons name="share-outline" size={22} color={Colors.asphalt} />
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={toggleWishlist}
             style={styles.headerIconButton}
@@ -1276,6 +1285,7 @@ export default function PlanDetailScreen() {
         }}
         planTitle={plan?.title || ''}
         planId={id as string}
+        slug={plan?.slug}
         variant="joined"
       />
 
@@ -1472,8 +1482,8 @@ export default function PlanDetailScreen() {
                   <Text style={manageStyles.stepperBtnText}>−</Text>
                 </TouchableOpacity>
                 <View style={manageStyles.stepperValue}>
-                  <Text style={manageStyles.stepperValueText}>{editGroupSize}</Text>
-                  <Text style={manageStyles.stepperValueSub}>people + you</Text>
+                  <Text style={manageStyles.stepperValueText}>{editGroupSize + 1}</Text>
+                  <Text style={manageStyles.stepperValueSub}>people total</Text>
                 </View>
                 <TouchableOpacity
                   style={[manageStyles.stepperBtn, editGroupSize >= (MAX_GROUP - 1) && manageStyles.stepperBtnDisabled]}
@@ -1488,6 +1498,7 @@ export default function PlanDetailScreen() {
                   <Text style={manageStyles.stepperBtnText}>+</Text>
                 </TouchableOpacity>
               </View>
+              <Text style={manageStyles.stepperValueSub}>including you</Text>
 
               {/* Save button */}
               <TouchableOpacity

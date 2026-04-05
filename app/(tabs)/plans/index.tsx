@@ -19,6 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
 import { SkeletonFeed } from '../../../components/SkeletonCard';
+import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { PlanCard } from '../../../components/plans/PlanCard';
 import { SaveSnackbar } from '../../../components/SaveSnackbar';
@@ -57,10 +58,12 @@ interface PlanCardPlan {
   start_time: string;
   location_text: string | null;
   neighborhood: string | null;
+  slug: string | null;
   category: string | null;
   max_invites: number;
   member_count: number;
   creator: {
+    id: string;
     first_name_display: string;
     profile_photo_url: string | null;
     member_since?: string;
@@ -78,10 +81,12 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
     start_time: plan.start_time,
     location_text: plan.location_text ?? null,
     neighborhood: plan.neighborhood ?? null,
+    slug: plan.slug ?? null,
     category: plan.category ?? null,
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
     creator: {
+      id: plan.creator?.id ?? '',
       first_name_display: plan.creator?.first_name_display ?? 'Creator',
       profile_photo_url: plan.creator?.profile_photo_url ?? null,
       plans_posted: plan.creator?.plans_posted ?? undefined,
@@ -181,8 +186,9 @@ export default function PlansScreen() {
   const [whenFilter, setWhenFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<CategoryOption[]>([]);
   const [reportTarget, setReportTarget] = useState<{ userId: string; userName: string; eventId: string } | null>(null);
+  const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ planId: string; planTitle: string } | null>(null);
-  const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string } | null>(null);
+  const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string; slug: string | null } | null>(null);
 
   const [userId, setUserId] = React.useState<string | null>(null);
   const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
@@ -586,6 +592,7 @@ export default function PlansScreen() {
           }}
           onReport={handleReport}
           onBlock={handleBlock}
+          onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
           isPast={item.status === 'completed'}
         />
       </View>
@@ -868,6 +875,20 @@ export default function PlansScreen() {
         />
       )}
 
+      <MiniProfileCard
+        visible={!!miniProfileUserId}
+        userId={miniProfileUserId}
+        onClose={() => setMiniProfileUserId(null)}
+        onReport={(uid, uname) => {
+          setMiniProfileUserId(null);
+          setReportTarget({ userId: uid, userName: uname, eventId: '' });
+        }}
+        onBlock={(uid, uname) => {
+          setMiniProfileUserId(null);
+          blockUser(uid, uname);
+        }}
+      />
+
       <SaveSnackbar
         visible={!!snackbar}
         planId={snackbar?.planId ?? ''}
@@ -875,7 +896,7 @@ export default function PlansScreen() {
         onShare={(id) => {
           setSnackbar(null);
           const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find(p => p.id === id);
-          setShareSheet({ planId: id, planTitle: plan?.title ?? '' });
+          setShareSheet({ planId: id, planTitle: plan?.title ?? '', slug: plan?.slug ?? null });
         }}
         onDismiss={() => setSnackbar(null)}
       />
@@ -884,6 +905,7 @@ export default function PlansScreen() {
         visible={!!shareSheet}
         planId={shareSheet?.planId ?? ''}
         planTitle={shareSheet?.planTitle ?? ''}
+        slug={shareSheet?.slug}
         onClose={() => setShareSheet(null)}
       />
 

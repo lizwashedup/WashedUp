@@ -55,6 +55,19 @@ Deno.serve(async (req) => {
     .update({ push_sent: true })
     .in('id', ids);
 
+  // Count all unread notifications per user for badge
+  const affectedUserIds = [...new Set(notifications.map((n: any) => n.user_id))];
+  const { data: unreadRows } = await supabase
+    .from('app_notifications')
+    .select('user_id')
+    .eq('status', 'unread')
+    .in('user_id', affectedUserIds);
+
+  const badgeCounts: Record<string, number> = {};
+  for (const row of unreadRows ?? []) {
+    badgeCounts[row.user_id] = (badgeCounts[row.user_id] || 0) + 1;
+  }
+
   // Build Expo messages
   const messages = notifications
     .filter((n: any) => tokenMap[n.user_id])
@@ -64,6 +77,7 @@ Deno.serve(async (req) => {
       body: n.body,
       data: { type: n.type, eventId: n.event_id },
       sound: 'default',
+      badge: badgeCounts[n.user_id] ?? 1,
     }));
 
   if (messages.length === 0) {
