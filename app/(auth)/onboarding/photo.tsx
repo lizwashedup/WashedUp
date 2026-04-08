@@ -128,16 +128,8 @@ export default function OnboardingPhotoScreen() {
         return;
       }
 
-      let avatarUrl: string | null = null;
-
-      if (imageBase64) {
-        const { data: { session }, error: refreshErr } = await supabase.auth.refreshSession();
-        if (refreshErr) throw new Error('Session expired. Please log in again.');
-        if (!session?.user) throw new Error('Not authenticated');
-
-        const path = `${user.id}/${Date.now()}.jpg`;
-        avatarUrl = await uploadBase64ToStorage('profile-photos', path, imageBase64, { upsert: true });
-      }
+      const path = `${user.id}/${Date.now()}.jpg`;
+      const avatarUrl = await uploadBase64ToStorage('profile-photos', path, imageBase64, { upsert: true });
 
       const { error: updateError } = await supabase
         .from('profiles')
@@ -146,12 +138,9 @@ export default function OnboardingPhotoScreen() {
 
       if (updateError) throw updateError;
 
-      // Invalidate and refetch so ProfileButton gets fresh data when it mounts
+      // Invalidate so ProfileButton refetches when it mounts. Don't await — the
+      // next screen doesn't need the photo, and awaiting just delays navigation.
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
-      await queryClient.refetchQueries({ queryKey: PROFILE_PHOTO_KEY });
-
-      // Brief delay so DB write is visible before navigation
-      await new Promise((r) => setTimeout(r, 400));
 
       router.push('/onboarding/vibes');
     } catch (e: any) {
@@ -189,7 +178,7 @@ export default function OnboardingPhotoScreen() {
 
         <Text style={styles.heading}>Add a profile photo</Text>
         <Text style={styles.subtext}>
-          People are 3× more likely to join plans when they can see who's going.
+          please upload a profile picture so people can get excited about meeting you
         </Text>
         <View style={styles.gap32} />
 

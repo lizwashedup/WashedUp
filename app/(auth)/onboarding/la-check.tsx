@@ -38,9 +38,9 @@ export default function OnboardingLACheckScreen() {
         await supabase.auth.signOut();
         return;
       }
-      const { error } = await supabase.from('profiles').update({ city: 'Los Angeles', onboarding_status: 'photo' }).eq('id', user.id);
+      const { error } = await supabase.from('profiles').update({ city: 'Los Angeles', onboarding_status: 'referral' }).eq('id', user.id);
       if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
-      router.push('/onboarding/photo');
+      router.push('/onboarding/referral');
     } finally {
       setLoading(false);
     }

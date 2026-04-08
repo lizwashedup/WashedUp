@@ -72,6 +72,7 @@ function onboardingDest(status: string | null | undefined): string {
     case 'complete': return '/(tabs)/plans';
     case 'vibes': return '/onboarding/vibes';
     case 'photo': return '/onboarding/photo';
+    case 'referral': return '/onboarding/referral';
     case 'la_check': return '/onboarding/la-check';
     case 'waitlisted': return '/onboarding/waitlisted';
     default: return '/onboarding/basics';
