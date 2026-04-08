@@ -26,7 +26,6 @@ import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../../components/BrandedAlert';
 import MemoriesTab from '../../../components/MemoriesTab';
-import MomentsTab from '../../../components/MomentsTab';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import ProfileButton from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
@@ -103,7 +102,7 @@ export default function YourPeopleScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string } | null>(null);
   const [userMenuTarget, setUserMenuTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'people' | 'memories' | 'moments'>('people');
+  const [activeTab, setActiveTab] = useState<'people' | 'memories'>('people');
 
   // Debounce search
   React.useEffect(() => {
@@ -616,7 +615,7 @@ export default function YourPeopleScreen() {
 
       {/* Tabs */}
       <View style={styles.tabBar}>
-        {(['people', 'memories', 'moments'] as const).map(tab => (
+        {(['people', 'memories'] as const).map(tab => (
           <TouchableOpacity
             key={tab}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
@@ -624,7 +623,7 @@ export default function YourPeopleScreen() {
             activeOpacity={0.7}
           >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab === 'people' ? 'People' : tab === 'memories' ? 'Memories' : 'Moments'}
+              {tab === 'people' ? 'People' : 'Photos'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -632,8 +631,6 @@ export default function YourPeopleScreen() {
 
       {activeTab === 'memories' && userId ? (
         <MemoriesTab userId={userId} />
-      ) : activeTab === 'moments' && userId ? (
-        <MomentsTab userId={userId} />
       ) : (
       <>
       {/* Search bar */}

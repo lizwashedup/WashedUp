@@ -71,10 +71,9 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <Image
-              source={require('../../../assets/wave-icon.png')}
+              source={require('../../../assets/images/w-logo-full.png')}
               style={styles.avatarIcon}
               contentFit="contain"
-              tintColor="#B5522E"
             />
           </View>
         )}
@@ -298,11 +297,11 @@ const styles = StyleSheet.create({
   avatarPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
   avatarIcon: {
-    width: 28,
-    height: 28,
-    opacity: 0.6,
+    width: 44,
+    height: 44,
   },
 
   rowContent: { flex: 1, gap: 2 },

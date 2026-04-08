@@ -812,9 +812,9 @@ export default function PlansScreen() {
         ))}
       </View>
 
-      {/* Row 2: When, Category, Heart, Map — same layout as Scene tab */}
+      {/* Row 2: When, Category, Heart, Map — fixed-row layout, no scrolling */}
       {activeTab === 'plans' && !mapView && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        <View style={styles.filterRow}>
           <TouchableOpacity
             style={[styles.filterPill, whenActive && styles.filterPillActive]}
             onPress={() => {
@@ -866,7 +866,7 @@ export default function PlansScreen() {
               {mapView ? 'List' : 'Map'}
             </Text>
           </TouchableOpacity>
-        </ScrollView>
+        </View>
       )}
 
       {/* Row 2b: Map toggle for My Plans */}
@@ -1150,12 +1150,11 @@ const styles = StyleSheet.create({
   // ── Filters ──
   filterRow: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 4,
-    gap: 8,
     marginTop: 4,
     marginBottom: 12,
-    alignItems: 'center',
   },
   myPlansFilterRow: {
     flexDirection: 'row',
@@ -1171,7 +1170,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     height: 36,
     borderRadius: 20,
     backgroundColor: '#F5EDE0',

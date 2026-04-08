@@ -1295,6 +1295,14 @@ export default function PlanDetailScreen() {
                 <Text style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
+            <TouchableOpacity
+              style={styles.creatorCancelLink}
+              onPress={handleCancelPlan}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.creatorCancelLinkText}>Cancel this plan</Text>
+            </TouchableOpacity>
           </View>
         ) : isMember ? (
           <View>
@@ -2281,6 +2289,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   manageButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  creatorCancelLink: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 6,
+  },
+  creatorCancelLinkText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.cancelRed,
+    textDecorationLine: 'underline',
+  },
 });
 
 const joinStyles = StyleSheet.create({
