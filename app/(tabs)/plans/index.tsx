@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
@@ -6,7 +7,9 @@ import { ChevronDown, ChevronRight, Heart, LayoutList, Map } from 'lucide-react-
 import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
+    FlatList,
     RefreshControl,
+    ScrollView,
     SectionList,
     StyleSheet,
     Text,
@@ -18,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
 import { ReportModal } from '../../../components/modals/ReportModal';
+import { FeaturedEventCard } from '../../../components/plans/FeaturedEventCard';
 import { PlanCard } from '../../../components/plans/PlanCard';
 import ProfileButton from '../../../components/ProfileButton';
 import WelcomeModal from '../../../components/WelcomeModal';
@@ -53,12 +57,17 @@ interface PlanCardPlan {
   category: string | null;
   max_invites: number;
   member_count: number;
+  is_featured?: boolean;
   creator: {
     first_name_display: string;
     profile_photo_url: string | null;
     member_since?: string;
     plans_posted?: number;
   };
+}
+
+interface FeaturedPlan extends PlanCardPlan {
+  attendees: { profile_photo_url: string | null }[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -73,6 +82,7 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
     category: plan.category ?? null,
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
+    is_featured: plan.is_featured ?? false,
     creator: {
       first_name_display: plan.creator?.first_name_display ?? 'Creator',
       profile_photo_url: plan.creator?.profile_photo_url ?? null,
@@ -284,6 +294,76 @@ export default function PlansScreen() {
     onError: () => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     },
+  });
+
+  // ── Featured events query ────────────────────────────────────────────────────
+  const { data: featuredPlans = [] } = useQuery<FeaturedPlan[]>({
+    queryKey: ['events', 'featured'],
+    queryFn: async () => {
+      const { data: events, error } = await supabase
+        .from('events')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, is_featured')
+        .eq('is_featured', true)
+        .in('status', ['forming', 'active', 'full'])
+        .gt('start_time', new Date().toISOString())
+        .order('start_time', { ascending: true });
+
+      if (error || !events || events.length === 0) return [];
+
+      const creatorIds = [...new Set(events.map((e: any) => e.creator_user_id).filter(Boolean))];
+      const eventIds = events.map((e: any) => e.id);
+
+      const [{ data: profiles }, { data: members }, realCounts] = await Promise.all([
+        creatorIds.length > 0
+          ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', creatorIds)
+          : Promise.resolve({ data: [] as any[] }),
+        supabase.from('event_members').select('event_id, user_id, status').in('event_id', eventIds).eq('status', 'joined'),
+        fetchRealMemberCounts(eventIds),
+      ]);
+
+      const profileMap: Record<string, any> = {};
+      (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+
+      // Gather member user IDs per event for avatar fetch
+      const membersByEvent: Record<string, string[]> = {};
+      (members ?? []).forEach((m: any) => {
+        if (!membersByEvent[m.event_id]) membersByEvent[m.event_id] = [];
+        membersByEvent[m.event_id].push(m.user_id);
+      });
+
+      const allMemberIds = [...new Set((members ?? []).map((m: any) => m.user_id))];
+      const { data: memberProfiles } = allMemberIds.length > 0
+        ? await supabase.from('profiles_public').select('id, profile_photo_url').in('id', allMemberIds)
+        : { data: [] as any[] };
+
+      const memberPhotoMap: Record<string, string | null> = {};
+      (memberProfiles ?? []).forEach((p: any) => { memberPhotoMap[p.id] = p.profile_photo_url ?? null; });
+
+      return events.map((e: any) => {
+        const hp = profileMap[e.creator_user_id] ?? null;
+        const eventMembers = membersByEvent[e.id] ?? [];
+        return {
+          id: e.id,
+          title: e.title,
+          host_message: e.host_message ?? null,
+          start_time: e.start_time,
+          location_text: e.location_text ?? null,
+          category: e.primary_vibe ?? null,
+          max_invites: e.max_invites ?? 0,
+          member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
+          is_featured: true,
+          creator: {
+            first_name_display: hp?.first_name_display ?? 'Creator',
+            profile_photo_url: hp?.profile_photo_url ?? null,
+          },
+          attendees: eventMembers.map((uid: string) => ({
+            profile_photo_url: memberPhotoMap[uid] ?? null,
+          })),
+        } as FeaturedPlan;
+      });
+    },
+    enabled: !!userId,
+    staleTime: 60_000,
   });
 
   const { data: myPlans = [], isLoading: myPlansLoading } = useQuery<Plan[]>({
@@ -580,6 +660,52 @@ export default function PlansScreen() {
     router.push('/(tabs)/post');
   }, [userId]);
 
+  // ── Featured events section ──────────────────────────────────────────────────
+  const featuredSection = useMemo(() => {
+    if (featuredPlans.length === 0) return null;
+    const solo = featuredPlans.length === 1;
+    return (
+      <View style={styles.featuredSection}>
+        <View style={styles.featuredHeaderRow}>
+          <Ionicons name="star" size={14} color={Colors.goldenAmber} />
+          <Text style={styles.featuredHeaderText}>washedup events</Text>
+        </View>
+        {solo ? (
+          <View style={styles.featuredSoloWrap}>
+            <FeaturedEventCard
+              plan={featuredPlans[0]}
+              isMember={!!memberIdSet[featuredPlans[0].id]}
+              isWishlisted={!!wishlistedSet[featuredPlans[0].id]}
+              onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+              onReport={handleReport}
+              onBlock={handleBlock}
+              solo
+            />
+          </View>
+        ) : (
+          <FlatList
+            horizontal
+            data={featuredPlans}
+            keyExtractor={(item) => item.id}
+            showsHorizontalScrollIndicator={false}
+            style={styles.featuredScroll}
+            contentContainerStyle={styles.featuredScrollContent}
+            renderItem={({ item }) => (
+              <FeaturedEventCard
+                plan={item}
+                isMember={!!memberIdSet[item.id]}
+                isWishlisted={!!wishlistedSet[item.id]}
+                onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+                onReport={handleReport}
+                onBlock={handleBlock}
+              />
+            )}
+          />
+        )}
+      </View>
+    );
+  }, [featuredPlans, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock]);
+
   const listEmpty = sections.length === 0;
   const emptyMessage = heartFilter
     ? 'When you save a plan it shows up here'
@@ -757,18 +883,28 @@ export default function PlansScreen() {
               </TouchableOpacity>
             </View>
           ) : listEmpty ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>{emptyMessage}</Text>
-              <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
-                <Text style={styles.emptyButtonText}>Post a Plan</Text>
-              </TouchableOpacity>
-            </View>
+            <ScrollView
+              contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20 }}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />
+              }
+            >
+              {featuredSection}
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>{emptyMessage}</Text>
+                <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
+                  <Text style={styles.emptyButtonText}>Post a Plan</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           ) : (
             <SectionList
               sections={sectionListData}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
               renderSectionHeader={renderSectionHeader}
+              ListHeaderComponent={featuredSection}
               stickySectionHeadersEnabled={false}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
@@ -1003,6 +1139,29 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 20,
     paddingBottom: 32,
+  },
+  featuredSection: {
+    marginBottom: 20,
+  },
+  featuredHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  featuredHeaderText: {
+    fontFamily: 'Cochin',
+    fontSize: 16,
+    color: Colors.asphalt,
+  },
+  featuredSoloWrap: {
+  },
+  featuredScroll: {
+    marginHorizontal: -20,
+  },
+  featuredScrollContent: {
+    paddingHorizontal: 20,
+    gap: 12,
   },
   sectionHeader: {
     fontFamily: Fonts.sansBold,
