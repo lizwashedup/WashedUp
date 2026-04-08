@@ -28,6 +28,7 @@ interface PlanCardProps {
     category: string | null;
     max_invites: number;
     member_count: number;
+    is_featured?: boolean;
     creator: {
       first_name_display: string;
       profile_photo_url: string | null;
@@ -112,11 +113,14 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   }, [plan.id, plan.title]);
 
   // Creator always counts as 1 — member_count should never display as 0
-  const going = Math.max(1, capDisplayCount(plan.member_count));
-  const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
+  const isFeatured = plan.is_featured ?? false;
+  const going = Math.max(1, capDisplayCount(plan.member_count, isFeatured));
+  const totalCapacity = isFeatured
+    ? (plan.max_invites ?? 99) + 1
+    : Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
   const spotsLeft = Math.max(0, totalCapacity - going);
   const isFull = going >= totalCapacity;
-  const oneSpotLeft = spotsLeft === 1;
+  const oneSpotLeft = !isFeatured && spotsLeft === 1;
 
   const planCount = plan.creator?.plans_posted ?? 0;
   const creatorLine2 = planCount === 1 ? 'First plan' : '';
@@ -130,9 +134,11 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     ? `"${plan.host_message}"`
     : null;
 
-  const countText = isFull
-    ? `${going} of ${totalCapacity} · Full`
-    : `${going} of ${totalCapacity}`;
+  const countText = isFeatured
+    ? `${going} going`
+    : isFull
+      ? `${going} of ${totalCapacity} · Full`
+      : `${going} of ${totalCapacity}`;
 
   return (
     <TouchableOpacity
