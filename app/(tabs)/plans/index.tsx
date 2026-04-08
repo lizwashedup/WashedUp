@@ -239,6 +239,11 @@ export default function PlansScreen() {
             if (!cancelled) {
               setWelcomeName(profile?.first_name_display ?? '');
               setShowWelcome(true);
+              // Persist the "seen" flag immediately, before the user can dismiss.
+              // This guarantees the modal only shows once per user even if they
+              // force-quit the app, lose connection, or close it before the
+              // dismiss handler's userId-state closure has hydrated.
+              try { await AsyncStorage.setItem(key, '1'); } catch {}
             }
           }
         } catch {}

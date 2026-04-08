@@ -137,6 +137,26 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     }
   }, [refetchNotifs, router, queryClient, userId, onClose]);
 
+  const handleClearAll = useCallback(async () => {
+    if (!userId || appNotifications.length === 0) return;
+    hapticLight();
+    try {
+      // Mark every visible app_notification as read in one query.
+      // Mirrors the query filter above so we never touch invites or chat pings.
+      await supabase
+        .from('app_notifications')
+        .update({ status: 'read' })
+        .eq('user_id', userId)
+        .eq('status', 'unread')
+        .neq('type', 'plan_invite')
+        .neq('type', 'new_message');
+      refetchNotifs();
+      queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+    } catch {
+      setAlertInfo({ title: 'Something went wrong', message: 'Please try again.' });
+    }
+  }, [userId, appNotifications.length, refetchNotifs, queryClient]);
+
   if (!visible) return null;
 
   return (
@@ -144,12 +164,23 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       <Pressable style={s.overlay} onPress={onClose}>
         <Pressable style={s.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={s.handle} />
-          <Text style={s.title}>Notifications</Text>
+          <View style={s.headerRow}>
+            <Text style={s.title}>Notifications</Text>
+            {appNotifications.length > 0 && (
+              <TouchableOpacity
+                onPress={handleClearAll}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={s.clearAllBtn}
+              >
+                <Text style={s.clearAllText}>Clear all</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           {loadingInvites || loadingNotifs ? (
             <ActivityIndicator color={Colors.terracotta} style={{ paddingVertical: 32 }} />
           ) : totalInboxCount === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-              <Bell size={36} color={Colors.textLight} />
+              <Bell size={36} color={Colors.terracotta} />
               <Text style={[s.meta, { marginTop: 12, textAlign: 'center' }]}>
                 {'Invites, waitlist notifications\n& fun updates will show up here'}
               </Text>
@@ -290,7 +321,10 @@ const s = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: Colors.overlayDark, justifyContent: 'flex-end' },
   sheet: { backgroundColor: Colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingBottom: 40, height: '70%' },
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#D5CCC2', alignSelf: 'center', marginTop: 10, marginBottom: 12 },
-  title: { fontSize: 17, fontWeight: '700' as const, color: '#2C1810', marginBottom: 16, textAlign: 'center' },
+  headerRow: { position: 'relative', justifyContent: 'center', marginBottom: 16, minHeight: 22 },
+  title: { fontSize: 17, fontWeight: '700' as const, color: '#2C1810', textAlign: 'center' },
+  clearAllBtn: { position: 'absolute', right: 0, top: 0, bottom: 0, justifyContent: 'center' },
+  clearAllText: { fontSize: 13, fontFamily: Fonts.sansMedium, color: Colors.textLight },
   list: { flex: 1 },
   inviteCard: { borderBottomWidth: 1, borderBottomColor: Colors.border },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
