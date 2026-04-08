@@ -27,7 +27,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
 import { supabase } from '../../lib/supabase';
 
-const SOCIAL_PROOF = '800+ people in LA already joined';
+const SOCIAL_PROOF = '1000+ people in LA already joined';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
