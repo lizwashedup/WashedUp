@@ -334,7 +334,8 @@ export default function PostScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      await supabase.auth.refreshSession();
+      const { error: refreshErr } = await supabase.auth.refreshSession();
+      if (refreshErr) throw refreshErr;
 
       const fileName = `${user.id}/${Date.now()}.jpg`;
       const publicUrl = await uploadBase64ToStorage('event-images', fileName, base64);

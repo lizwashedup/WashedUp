@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { Image } from 'expo-image';
@@ -14,6 +15,17 @@ function PostTabIcon() {
       <Ionicons name="add" size={28} color={Colors.white} />
     </View>
   );
+}
+
+async function fetchHasPendingInvites(): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { count } = await supabase
+    .from('plan_invites')
+    .select('id', { count: 'exact', head: true })
+    .eq('recipient_id', user.id)
+    .eq('status', 'pending');
+  return (count ?? 0) > 0;
 }
 
 async function fetchUnreadChatCount(): Promise<number> {
@@ -31,11 +43,32 @@ async function fetchUnreadChatCount(): Promise<number> {
 }
 
 export default function TabLayout() {
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUserId(session?.user?.id ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
   const { data: unreadChats = 0 } = useQuery({
     queryKey: UNREAD_CHATS_KEY,
     queryFn: fetchUnreadChatCount,
+    enabled: !!userId,
     staleTime: 15_000,
     refetchInterval: 30_000,
+  });
+
+  const { data: hasPendingInvites = false } = useQuery({
+    queryKey: ['pending-invites-badge'],
+    queryFn: fetchHasPendingInvites,
+    enabled: !!userId,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 
   return (
@@ -106,7 +139,12 @@ export default function TabLayout() {
         options={{
           title: 'Your People',
           tabBarLabel: 'People',
-          tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={24} color={color} />,
+          tabBarIcon: ({ color }) => (
+            <View>
+              <Ionicons name="people-outline" size={24} color={color} />
+              {hasPendingInvites && <View style={styles.inviteDot} />}
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
@@ -125,6 +163,15 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
+  inviteDot: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.terracotta,
+  },
   postButton: {
     width: 48,
     height: 48,

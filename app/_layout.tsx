@@ -31,6 +31,7 @@ import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
 import AppStoreReviewAsk from '../components/AppStoreReviewAsk';
+import MarkEarnedModal from '../components/marks/MarkEarnedModal';
 import VideoSplash from '../components/VideoSplash';
 
 export { ErrorBoundary } from 'expo-router';
@@ -237,7 +238,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       const data = response.notification.request.content.data as Record<string, any>;
       const type = data?.type as string | undefined;
 
-      if (type === 'plan_invite' && data?.eventId) {
+      if ((type === 'plan_invite' || type === 'waitlist_spot') && data?.eventId) {
         router.push(`/plan/${data.eventId}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
@@ -448,6 +449,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           visible={showReviewAsk && !surveyPlan}
           onClose={() => setShowReviewAsk(false)}
         />
+      )}
+      {authedUserId && surveyCheckDone && !surveyPlan && !showReviewAsk && (
+        <MarkEarnedModal userId={authedUserId} />
       )}
     </View>
   );

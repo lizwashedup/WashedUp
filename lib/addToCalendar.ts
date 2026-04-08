@@ -13,7 +13,7 @@ function buildGoogleCalendarUrl(title: string, startTime: string, endTime?: stri
     text: title,
     dates: `${fmt(start)}/${fmt(end)}`,
     location: location || '',
-    details: 'WashedUp plan — washedup.app',
+    details: 'washedup plan — washedup.app',
   });
   return `https://calendar.google.com/calendar/event?${params.toString()}`;
 }
@@ -53,7 +53,7 @@ async function addToAppleCalendar(
       startDate: start,
       endDate: end,
       location: location || undefined,
-      notes: 'WashedUp plan — washedup.app',
+      notes: 'washedup plan — washedup.app',
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
 

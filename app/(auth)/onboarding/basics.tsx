@@ -80,7 +80,7 @@ export default function OnboardingBasicsScreen() {
     if (tempYear === null || tempMonth === null || tempDay === null) return;
     const d = new Date(tempYear, tempMonth, Math.min(tempDay, daysInMonth));
     setBirthday(d);
-    setDateError(!is18Plus(d) ? 'You must be 18 or older to use WashedUp' : null);
+    setDateError(!is18Plus(d) ? 'You must be 18 or older to use washedup' : null);
     setShowDatePicker(false);
   };
 

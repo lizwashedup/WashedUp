@@ -16,6 +16,8 @@ import { useRouter } from 'expo-router';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight, hapticMedium } from '../../lib/haptics';
+import { buildPlanShareContent } from '../../lib/sharePlan';
+import MarkIcon from '../marks/MarkIcons';
 import Animated, {
   FadeInUp,
   Easing,
@@ -46,6 +48,9 @@ interface PlanCardProps {
       profile_photo_url: string | null;
       member_since?: string;
       plans_posted?: number;
+      milestone_slug?: string | null;
+      milestone_name?: string | null;
+      milestone_icon?: string | null;
     };
     attendees?: { profile_photo_url: string | null }[];
   };
@@ -215,7 +220,15 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             <Text style={styles.creatorName} numberOfLines={1}>
               {plan.creator?.first_name_display ?? 'Creator'}
             </Text>
-            <Text style={styles.creatorSubtext}>posted</Text>
+            <View style={styles.creatorSubRow}>
+              <Text style={styles.creatorSubtext}>posted</Text>
+              {plan.creator?.milestone_slug && plan.creator?.milestone_icon && (
+                <View style={styles.creatorMark}>
+                  <MarkIcon iconName={plan.creator.milestone_icon} size={11} />
+                  <Text style={styles.creatorMarkText}>{plan.creator.milestone_name}</Text>
+                </View>
+              )}
+            </View>
           </View>
         </TouchableOpacity>
         <View style={styles.headerRight}>
@@ -230,7 +243,8 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             onPress={(e) => {
               e.stopPropagation();
               hapticLight();
-              Share.share({ message: `Check out "${plan.title}" on WashedUp!\n${plan.slug ? `https://washedup.app/plans/${plan.slug}` : `https://washedup.app/e/${plan.id}`}` });
+              const share = buildPlanShareContent(plan);
+              Share.share({ message: share.message, url: share.url });
             }}
             style={styles.iconBtn}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -307,6 +321,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         <Text style={styles.spotsLabel}>
           <Text style={styles.spotsNumber}>{going}</Text>
           {` of ${totalCapacity} spots`}
+          {isFull && ' \u00B7 Full'}
         </Text>
         <View style={styles.ctaSpacer} />
         {isPast ? (
@@ -389,11 +404,27 @@ const styles = StyleSheet.create({
     color: Colors.darkWarm,
     lineHeight: 18,
   },
+  creatorSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   creatorSubtext: {
     fontFamily: Fonts.sans,
     fontSize: 12,
     color: Colors.tertiary,
     lineHeight: 16,
+  },
+  creatorMark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  creatorMarkText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 10,
+    color: '#D97746',
+    lineHeight: 14,
   },
   headerRight: {
     flexDirection: 'row',

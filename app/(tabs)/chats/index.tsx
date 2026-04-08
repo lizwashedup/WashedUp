@@ -70,9 +70,12 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
           />
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Text style={styles.avatarLetter}>
-              {(chat.title ?? '?').charAt(0).toUpperCase()}
-            </Text>
+            <Image
+              source={require('../../../assets/wave-icon.png')}
+              style={styles.avatarIcon}
+              contentFit="contain"
+              tintColor="#B5522E"
+            />
           </View>
         )}
       </View>
@@ -296,10 +299,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarLetter: {
-    fontFamily: Fonts.displayBold,
-    fontSize: 24,
-    color: '#B5522E',
+  avatarIcon: {
+    width: 28,
+    height: 28,
+    opacity: 0.6,
   },
 
   rowContent: { flex: 1, gap: 2 },

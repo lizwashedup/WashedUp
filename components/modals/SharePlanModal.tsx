@@ -37,10 +37,8 @@ export function SharePlanModal({
 }: SharePlanModalProps) {
   const shareUrl = slug ? `https://washedup.app/plans/${slug}` : planId ? `https://washedup.app/e/${planId}` : 'https://washedup.app';
 
-  const shareText =
-    variant === 'posted'
-      ? `Join me on WashedUp!: ${planTitle}${spotsLeft !== undefined ? ` ${spotsLeft} spots left` : ''}\n${shareUrl}`
-      : `I just joined ${planTitle} on WashedUp! Come with us!\n${shareUrl}`;
+  const spotsText = spotsLeft !== undefined && spotsLeft > 0 ? `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : 'Waitlist open';
+  const shareText = `${planTitle}\n${spotsText} \u00B7 ${shareUrl}`;
 
   const handleShare = async () => {
     hapticMedium();

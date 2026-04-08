@@ -1,15 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '../../lib/haptics';
+import { buildPlanShareContent } from '../../lib/sharePlan';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
     ArrowLeft,
     Calendar,
+    Camera,
     MapPin,
     MessageCircle,
     MoreHorizontal,
+    Pen,
     Ticket,
     Users
 } from 'lucide-react-native';
@@ -46,6 +49,8 @@ import { openUrl } from '../../lib/url';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 import { showLocation } from 'react-native-map-link';
 import { MapView, Marker } from '../../components/MapView';
+import AlbumUploadFlow from '../../components/AlbumUploadFlow';
+import PlanAlbum from '../../components/PlanAlbum';
 
 // Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
 // Falls back to the hard-coded key so autocomplete works in preview/CI builds
@@ -143,7 +148,7 @@ function buildCalendarUrl(title: string, startTime: string, endTime?: string | n
     text: title,
     dates: `${fmt(start)}/${fmt(end)}`,
     location: location || '',
-    details: 'WashedUp plan — washedup.app',
+    details: 'washedup plan — washedup.app',
   });
   return `https://calendar.google.com/calendar/event?${params.toString()}`;
 }
@@ -322,6 +327,7 @@ export default function PlanDetailScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
+  const albumUploadRef = React.useRef<import('../components/AlbumUploadFlow').AlbumUploadFlowHandle>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [mapCoords, setMapCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [joinModalVisible, setJoinModalVisible] = useState(false);
@@ -444,16 +450,22 @@ export default function PlanDetailScreen() {
   }, [currentUserId, id]);
 
   // Waitlist check
+  const [waitlistNotified, setWaitlistNotified] = useState(false);
   useEffect(() => {
     if (!currentUserId || !id) return;
     let cancelled = false;
     supabase
       .from('event_waitlist')
-      .select('id')
+      .select('id, notified')
       .eq('event_id', id)
       .eq('user_id', currentUserId)
       .maybeSingle()
-      .then(({ data }) => { if (!cancelled) setIsOnWaitlist(!!data); });
+      .then(({ data }) => {
+        if (!cancelled) {
+          setIsOnWaitlist(!!data);
+          setWaitlistNotified(data?.notified === true);
+        }
+      });
     return () => { cancelled = true; };
   }, [currentUserId, id]);
 
@@ -480,6 +492,41 @@ export default function PlanDetailScreen() {
   const totalCapacity = Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
+  const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
+
+  // Post-plan prompt: check if user has uploaded photos and written a moment
+  const { data: hasUploadedPhotos = false } = useQuery({
+    queryKey: ['has-uploaded-photos', id, currentUserId],
+    queryFn: async () => {
+      if (!currentUserId) return false;
+      const { count } = await supabase
+        .from('plan_photos')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_id', id)
+        .eq('uploaded_by', currentUserId);
+      return (count ?? 0) > 0;
+    },
+    enabled: isPastPlan && (isMember || isCreator) && !!currentUserId,
+  });
+
+  const { data: hasWrittenMoment = false } = useQuery({
+    queryKey: ['has-written-moment', id, currentUserId],
+    queryFn: async () => {
+      if (!currentUserId) return false;
+      const { count } = await supabase
+        .from('plan_moments')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_id', id)
+        .eq('user_id', currentUserId);
+      return (count ?? 0) > 0;
+    },
+    enabled: isPastPlan && (isMember || isCreator) && !!currentUserId,
+  });
+
+  const showPostPlanPrompt = isPastPlan && (isMember || isCreator) && (!hasUploadedPhotos || !hasWrittenMoment);
+
+  const [momentText, setMomentText] = useState('');
+  const [momentSubmitting, setMomentSubmitting] = useState(false);
 
   const manageGenderOptions = useMemo(() => {
     const opts: { label: string; value: string }[] = [
@@ -585,6 +632,11 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
       queryClient.invalidateQueries({ queryKey: ['wishlists'] });
+      queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
+
+      // Clear local waitlist state since the trigger deleted the row
+      setIsOnWaitlist(false);
+      setWaitlistNotified(false);
 
       setShareAfterJoinVisible(true);
     },
@@ -801,9 +853,16 @@ export default function PlanDetailScreen() {
     if (!plan) return;
     hapticLight();
     try {
-      await Share.share({
-        message: `Check out "${plan.title}" on WashedUp!\n${plan.slug ? `https://washedup.app/plans/${plan.slug}` : `https://washedup.app/e/${plan.id}`}`,
+      const share = buildPlanShareContent({
+        id: plan.id,
+        title: plan.title,
+        start_time: plan.start_time,
+        location_text: plan.location_text,
+        slug: plan.slug,
+        member_count: plan.member_count,
+        max_invites: plan.max_invites,
       });
+      await Share.share({ message: share.message, url: share.url });
     } catch {}
   }, [plan]);
 
@@ -934,6 +993,74 @@ export default function PlanDetailScreen() {
             transition={200}
           />
         ) : null}
+
+        {/* Post-plan prompt */}
+        {showPostPlanPrompt && currentUserId && (
+          <View style={styles.postPlanPrompt}>
+            <Text style={styles.postPlanTitle}>How'd it go?</Text>
+            {!hasUploadedPhotos && (
+              <TouchableOpacity
+                style={styles.postPlanRow}
+                onPress={() => albumUploadRef.current?.startFlow()}
+                activeOpacity={0.8}
+              >
+                <View style={styles.postPlanIcon}>
+                  <Camera size={18} color={Colors.terracotta} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.postPlanRowTitle}>Add your photos</Text>
+                  <Text style={styles.postPlanRowSub}>They'll develop overnight and reveal at 9am</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            {!hasWrittenMoment && (
+              <View style={styles.postPlanMomentWrap}>
+                <View style={styles.postPlanRow}>
+                  <View style={styles.postPlanIcon}>
+                    <Pen size={16} color={Colors.terracotta} />
+                  </View>
+                  <Text style={styles.postPlanRowTitle}>Write a moment</Text>
+                </View>
+                <TextInput
+                  style={styles.postPlanInput}
+                  placeholder="What happened, how it felt..."
+                  placeholderTextColor={Colors.textLight}
+                  value={momentText}
+                  onChangeText={setMomentText}
+                  multiline
+                  maxLength={500}
+                  textAlignVertical="top"
+                />
+                {momentText.trim().length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.postPlanSubmit, momentSubmitting && { opacity: 0.5 }]}
+                    onPress={async () => {
+                      if (momentSubmitting || !momentText.trim()) return;
+                      setMomentSubmitting(true);
+                      try {
+                        await supabase.from('plan_moments').insert({
+                          event_id: id,
+                          user_id: currentUserId,
+                          content: momentText.trim(),
+                          is_public: true,
+                        });
+                        hapticSuccess();
+                        setMomentText('');
+                        queryClient.invalidateQueries({ queryKey: ['has-written-moment', id, currentUserId] });
+                        queryClient.invalidateQueries({ queryKey: ['user-moments', currentUserId] });
+                      } catch {}
+                      setMomentSubmitting(false);
+                    }}
+                    disabled={momentSubmitting}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.postPlanSubmitText}>Share moment</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* A. Creator Info */}
         <View style={styles.creatorBlock}>
@@ -1076,7 +1203,17 @@ export default function PlanDetailScreen() {
           ))}
         </View>
 
-        {/* G. CTA hints (button is in sticky bar) */}
+        {/* G. Album for past plans */}
+        {isPastPlan && currentUserId && (
+          <PlanAlbum
+            eventId={plan!.id}
+            currentUserId={currentUserId}
+            isPast={isPastPlan}
+            onAddPhotos={() => albumUploadRef.current?.startFlow()}
+          />
+        )}
+
+        {/* H. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && isEligible && !isFull && (
           <View style={styles.ctaBlock}>
             {spotsLeft > 0 && spotsLeft <= 2 && (
@@ -1092,7 +1229,18 @@ export default function PlanDetailScreen() {
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
       <View style={styles.stickyBar}>
-        {isCreator ? (
+        {isPastPlan && (isMember || isCreator) && currentUserId ? (
+          <View style={styles.memberActions}>
+            <AlbumUploadFlow ref={albumUploadRef} eventId={plan!.id} currentUserId={currentUserId} members={members} />
+            <TouchableOpacity
+              style={styles.openChatButton}
+              onPress={() => router.push(`/(tabs)/chats/${plan!.id}` as any)}
+            >
+              <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
+              <Text style={styles.openChatText}>Open Chat</Text>
+            </TouchableOpacity>
+          </View>
+        ) : isCreator ? (
           <View>
             <View style={styles.memberActions}>
               <TouchableOpacity
@@ -1130,6 +1278,14 @@ export default function PlanDetailScreen() {
             <Text style={styles.ineligibleText}>This plan isn't available for you</Text>
             <Text style={styles.ineligibleSub}>It's restricted by age or gender</Text>
           </View>
+        ) : waitlistNotified ? (
+          <TouchableOpacity
+            style={styles.claimSpotButton}
+            onPress={() => { hapticSuccess(); setJoinModalVisible(true); }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.claimSpotText}>Claim Your Spot</Text>
+          </TouchableOpacity>
         ) : isFull ? (
           <TouchableOpacity
             style={[
@@ -1147,7 +1303,7 @@ export default function PlanDetailScreen() {
                 styles.waitlistButtonText,
                 isOnWaitlist && styles.waitlistButtonTextActive,
               ]}>
-                {isOnWaitlist ? 'On Waitlist ✓' : 'Join Waitlist'}
+                {isOnWaitlist ? 'On Waitlist \u2713' : 'Join Waitlist'}
               </Text>
             )}
           </TouchableOpacity>
@@ -1232,7 +1388,7 @@ export default function PlanDetailScreen() {
             </Text>
 
             <View style={joinStyles.infoBox}>
-              <Text style={joinStyles.infoTitle}>WashedUp groups are small on purpose.</Text>
+              <Text style={joinStyles.infoTitle}>washedup groups are small on purpose.</Text>
               <Text style={joinStyles.infoText}>You're not just a number.</Text>
               <Text style={joinStyles.infoText}>You're part of the plan.</Text>
             </View>
@@ -1620,6 +1776,74 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 140,
   },
+  // Post-plan prompt
+  postPlanPrompt: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  postPlanTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+    marginBottom: 12,
+  },
+  postPlanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  postPlanIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: `${Colors.terracotta}10`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  postPlanRowTitle: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  postPlanRowSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
+  postPlanMomentWrap: {
+    marginTop: 4,
+  },
+  postPlanInput: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 64,
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  postPlanSubmit: {
+    alignSelf: 'flex-end',
+    backgroundColor: Colors.terracotta,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    marginTop: 10,
+  },
+  postPlanSubmitText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.white,
+  },
+
   creatorBlock: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1918,6 +2142,22 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   openChatText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
+  claimSpotButton: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    backgroundColor: Colors.terracotta,
+    shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  claimSpotText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.white,
+  },
   waitlistButton: {
     borderRadius: 14,
     paddingVertical: 16,

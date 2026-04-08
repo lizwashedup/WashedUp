@@ -62,7 +62,7 @@ export default function AppStoreReviewAsk({ visible, onClose }: Props) {
           />
 
           <Text style={styles.heading}>
-            Would you review WashedUp on {STORE_NAME}?
+            Would you review washedup on {STORE_NAME}?
           </Text>
 
           <Text style={styles.body}>
@@ -118,6 +118,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     marginBottom: 24,
+    tintColor: Colors.terracotta,
   },
   heading: {
     fontFamily: Fonts.displayBold,

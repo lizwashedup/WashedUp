@@ -42,7 +42,7 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
     onClose();
     setTimeout(() => {
       Share.share({
-        message: `Check out "${planTitle}" on WashedUp!\n${deepLink}`,
+        message: `${planTitle}\n${deepLink}`,
       });
     }, 300);
   };
@@ -61,7 +61,7 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
               <Ionicons name="people-outline" size={20} color="#B5522E" />
             </View>
             <View style={styles.optionText}>
-              <Text style={styles.optionLabel}>Send to a friend on WashedUp</Text>
+              <Text style={styles.optionLabel}>Send to a friend on washedup</Text>
               <Text style={styles.optionSub}>Pick from your People list</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color="#A09385" />

@@ -41,7 +41,7 @@ export function ShareLinkModal({
     hapticLight();
     try {
       await Share.share({
-        message: shareMessage ?? `Join me on WashedUp!\n${shareUrl}`,
+        message: shareMessage ?? shareUrl,
         title: shareTitle,
         url: shareUrl,
       });

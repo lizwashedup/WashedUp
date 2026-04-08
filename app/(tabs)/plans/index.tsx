@@ -8,6 +8,7 @@ import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     RefreshControl,
+    ScrollView,
     SectionList,
     StyleSheet,
     Text,
@@ -68,12 +69,19 @@ interface PlanCardPlan {
     profile_photo_url: string | null;
     member_since?: string;
     plans_posted?: number;
+    milestone_slug?: string | null;
+    milestone_name?: string | null;
+    milestone_icon?: string | null;
   };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Creator milestone marks cache — populated by feed queries
+let _creatorMarksMap: Record<string, { slug: string; name: string; icon: string }> = {};
+
 function toPlanCardPlan(plan: Plan): PlanCardPlan {
+  const mark = _creatorMarksMap[plan.creator?.id ?? ''];
   return {
     id: plan.id,
     title: plan.title,
@@ -90,6 +98,9 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
       first_name_display: plan.creator?.first_name_display ?? 'Creator',
       profile_photo_url: plan.creator?.profile_photo_url ?? null,
       plans_posted: plan.creator?.plans_posted ?? undefined,
+      milestone_slug: mark?.slug ?? null,
+      milestone_name: mark?.name ?? null,
+      milestone_icon: mark?.icon ?? null,
     },
   };
 }
@@ -355,6 +366,16 @@ export default function PlansScreen() {
 
       const realCounts = await fetchRealMemberCounts(allEvents.map((e: any) => e.id));
 
+      // Fetch creator milestone marks
+      if (uniqueCreatorIds.length > 0) {
+        const { data: marksData } = await supabase.rpc('get_creator_milestone_marks', { p_user_ids: uniqueCreatorIds });
+        if (marksData) {
+          (marksData as any[]).forEach((m: any) => {
+            _creatorMarksMap[m.user_id] = { slug: m.mark_slug, name: m.mark_name, icon: m.mark_icon_name };
+          });
+        }
+      }
+
       return allEvents.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
         return {
@@ -414,6 +435,16 @@ export default function PlansScreen() {
       (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
       const realCounts = await fetchRealMemberCounts(active.map((e: any) => e.id));
+
+      // Fetch creator milestone marks
+      if (creatorIds.length > 0) {
+        const { data: marksData } = await supabase.rpc('get_creator_milestone_marks', { p_user_ids: creatorIds });
+        if (marksData) {
+          (marksData as any[]).forEach((m: any) => {
+            _creatorMarksMap[m.user_id] = { slug: m.mark_slug, name: m.mark_name, icon: m.mark_icon_name };
+          });
+        }
+      }
 
       return active.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
@@ -653,45 +684,44 @@ export default function PlansScreen() {
       </View>
 
       {/* Row 2: When, Category, Heart, Map — same layout as Scene tab */}
-      {activeTab === 'plans' && (
-        <View style={styles.filterRow}>
+      {activeTab === 'plans' && !mapView && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
           <TouchableOpacity
-            style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
+            style={[styles.filterPill, whenActive && styles.filterPillActive]}
             onPress={() => {
               hapticLight();
               setWhenSheetOpen(true);
             }}
           >
-            <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
+            <Text style={[styles.filterPillText, whenActive && styles.filterPillTextActive]} numberOfLines={1}>
               {whenLabel}
             </Text>
-            <ChevronDown size={13} color={whenActive ? '#FFFFFF' : '#2C1810'} strokeWidth={2.5} />
+            <ChevronDown size={10} color={whenActive ? '#FFFFFF' : '#78695C'} strokeWidth={2.5} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
+            style={[styles.filterPill, categoryActive && styles.filterPillActive]}
             onPress={() => {
               hapticLight();
               setCategorySheetOpen(true);
             }}
           >
-            <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
+            <Text style={[styles.filterPillText, categoryActive && styles.filterPillTextActive]} numberOfLines={1}>
               {categoryLabel}
             </Text>
-            <ChevronDown size={13} color={categoryActive ? '#FFFFFF' : '#2C1810'} strokeWidth={2.5} />
+            <ChevronDown size={10} color={categoryActive ? '#FFFFFF' : '#78695C'} strokeWidth={2.5} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.savedPill, heartFilter && styles.savedPillActive]}
+            style={[styles.filterPill, heartFilter && styles.filterPillActive]}
             onPress={() => {
               hapticLight();
               setHeartFilter((v) => !v);
             }}
           >
-            <Ionicons name={heartFilter ? 'bookmark' : 'bookmark-outline'} size={14} color={heartFilter ? '#FFFFFF' : '#2C1810'} />
-            <Text style={[styles.savedPillText, heartFilter && styles.savedPillTextActive]}>Saved</Text>
+            <Ionicons name={heartFilter ? 'bookmark' : 'bookmark-outline'} size={14} color={heartFilter ? '#FFFFFF' : '#78695C'} />
+            <Text style={[styles.filterPillText, heartFilter && styles.filterPillTextActive]}>Saved</Text>
           </TouchableOpacity>
-          <View style={styles.filterSpacer} />
           <TouchableOpacity
-            style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
+            style={[styles.filterPill, mapView && styles.filterPillActive]}
             onPress={() => {
               hapticSelection();
               setMapView((v) => !v);
@@ -699,22 +729,22 @@ export default function PlansScreen() {
             accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
           >
             {mapView ? (
-              <LayoutList size={14} color={'#FFFFFF'} strokeWidth={2} />
+              <LayoutList size={14} color={Colors.white} strokeWidth={2} />
             ) : (
-              <Map size={14} color={'#2C1810'} strokeWidth={2} />
+              <Map size={14} color={'#78695C'} strokeWidth={2} />
             )}
-            <Text style={[styles.mapToggleLabel, mapView && styles.mapToggleLabelActive]}>
+            <Text style={[styles.filterPillText, mapView && styles.filterPillTextActive]}>
               {mapView ? 'List' : 'Map'}
             </Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       )}
 
       {/* Row 2b: Map toggle for My Plans */}
-      {activeTab === 'myplans' && (
+      {activeTab === 'myplans' && !mapView && (
         <View style={styles.myPlansFilterRow}>
           <TouchableOpacity
-            style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
+            style={[styles.filterPill, mapView && styles.filterPillActive]}
             onPress={() => {
               hapticSelection();
               setMapView((v) => !v);
@@ -722,11 +752,11 @@ export default function PlansScreen() {
             accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
           >
             {mapView ? (
-              <LayoutList size={14} color={'#FFFFFF'} strokeWidth={2} />
+              <LayoutList size={14} color={Colors.white} strokeWidth={2} />
             ) : (
-              <Map size={14} color={'#2C1810'} strokeWidth={2} />
+              <Map size={14} color={'#78695C'} strokeWidth={2} />
             )}
-            <Text style={[styles.mapToggleLabel, mapView && styles.mapToggleLabelActive]}>
+            <Text style={[styles.filterPillText, mapView && styles.filterPillTextActive]}>
               {mapView ? 'List' : 'Map'}
             </Text>
           </TouchableOpacity>
@@ -981,91 +1011,44 @@ const styles = StyleSheet.create({
   // ── Filters ──
   filterRow: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    gap: 10,
-    marginBottom: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 12,
     alignItems: 'center',
   },
-  filterSpacer: { flexGrow: 1, flexShrink: 0, minWidth: 4 },
   myPlansFilterRow: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    marginTop: 4,
+    marginBottom: 12,
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
-  dropdownPill: {
+  filterPill: {
     flexDirection: 'row',
-    alignItems: 'center',
-    flexShrink: 1,
-    gap: 5,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5DDD1',
-  },
-  dropdownPillActive: {
-    backgroundColor: TC,
-    borderColor: TC,
-  },
-  dropdownText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: '#2C1810',
-  },
-  dropdownTextActive: {
-    color: '#FFFFFF',
-  },
-  savedPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5DDD1',
-  },
-  savedPillActive: {
-    backgroundColor: '#B5522E',
-    borderColor: '#B5522E',
-  },
-  savedPillText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#2C1810',
-  },
-  savedPillTextActive: {
-    color: '#FFFFFF',
-  },
-  mapTogglePill: {
-    flexShrink: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5DDD1',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 1,
+    gap: 5,
+    paddingHorizontal: 16,
+    height: 36,
+    borderRadius: 20,
+    backgroundColor: '#F5EDE0',
   },
-  mapTogglePillActive: {
-    backgroundColor: '#2C1810',
-    borderColor: '#2C1810',
+  filterPillActive: {
+    backgroundColor: '#B5522E',
   },
-  mapToggleLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.micro,
-    color: '#2C1810',
+  filterPillText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 13,
+    color: '#78695C',
+    includeFontPadding: false,
   },
-  mapToggleLabelActive: {
+  filterPillTextActive: {
     color: '#FFFFFF',
   },
-
   // ── List ──
   listContent: {
     paddingHorizontal: 20,

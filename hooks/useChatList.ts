@@ -147,7 +147,7 @@ export function useChatList() {
           category: event.primary_vibe ?? null,
           image_url: event.image_url ?? null,
           start_time: event.start_time,
-          member_count: event.member_count ?? 0,
+          member_count: realCounts[event.id] ?? event.member_count ?? 0,
           ticket_url: event.tickets_url ?? null,
           last_message: lastMsg
             ? (() => {

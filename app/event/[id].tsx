@@ -285,8 +285,7 @@ export default function EventDetailScreen() {
               hapticLight();
               try {
                 await Share.share({
-                  message: `Check out "${event.title}" in LA on WashedUp!\nhttps://washedup.app/e/${event.id}`,
-                  title: 'Share this event',
+                  message: `${event.title}\nhttps://washedup.app/e/${event.id}`,
                 });
               } catch {}
             }}
@@ -359,7 +358,7 @@ export default function EventDetailScreen() {
           <View style={styles.plansSection}>
             <View style={styles.plansSectionHeader}>
               <Users size={18} color={Colors.asphalt} strokeWidth={2} />
-              <Text style={styles.plansSectionTitle}>People Going With WashedUp</Text>
+              <Text style={styles.plansSectionTitle}>People Going With washedup</Text>
             </View>
 
             {linkedPlans.length === 0 ? (

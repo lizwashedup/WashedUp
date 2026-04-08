@@ -568,7 +568,7 @@ export default function ProfileScreen() {
             ) : handleAvailable === false ? (
               <Text style={styles.handleTaken}>Taken</Text>
             ) : null}
-            <Text style={styles.editHelp}>This is how people find you on WashedUp</Text>
+            <Text style={styles.editHelp}>This is how people find you on washedup</Text>
           </View>
 
           <View style={styles.editFieldGroup}>
@@ -794,7 +794,7 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.footer}>WashedUp · hello@washedup.app</Text>
+        <Text style={styles.footer}>washedup · hello@washedup.app</Text>
       </ScrollView>
     </SafeAreaView>
       <BrandedAlert

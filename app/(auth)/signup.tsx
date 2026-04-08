@@ -39,6 +39,7 @@ export default function SignupScreen() {
   const [error, setError] = useState<string | null>(null);
   const [validationTouched, setValidationTouched] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const emailInputRef = useRef<TextInput>(null);
   const passwordInputRef = useRef<TextInput>(null);
 
@@ -142,7 +143,6 @@ export default function SignupScreen() {
   const [firstNameFocused, setFirstNameFocused] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [socialLoading, setSocialLoading] = useState<'apple' | 'google' | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
   const showGoogle = isGoogleAuthConfigured();
@@ -218,7 +218,7 @@ export default function SignupScreen() {
               entering={FadeIn.duration(400).delay(100)}
               style={styles.formSection}
             >
-              <Text style={styles.formTitle}>Join WashedUp</Text>
+              <Text style={styles.formTitle}>Join washedup</Text>
               <Text style={styles.formSubtitle}>Takes 30 seconds. No, really.</Text>
               <View style={styles.gap20} />
 

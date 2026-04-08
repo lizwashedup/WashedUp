@@ -42,7 +42,7 @@ export default function OnboardingPhotoScreen() {
       if (status !== 'granted') {
         setAlertInfo({
           title: 'Permission needed',
-          message: 'WashedUp needs access to your photos to set a profile picture.',
+          message: 'washedup needs access to your photos to set a profile picture.',
           buttons: [
             { text: 'Open Settings', onPress: () => Linking.openSettings() },
             { text: 'Cancel', style: 'cancel' },
@@ -69,7 +69,7 @@ export default function OnboardingPhotoScreen() {
       if (status !== 'granted') {
         setAlertInfo({
           title: 'Permission needed',
-          message: 'WashedUp needs access to your camera to take a profile photo.',
+          message: 'washedup needs access to your camera to take a profile photo.',
           buttons: [
             { text: 'Open Settings', onPress: () => Linking.openSettings() },
             { text: 'Cancel', style: 'cancel' },

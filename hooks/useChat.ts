@@ -222,8 +222,11 @@ export function useChat(eventId: string) {
     if (reactionInFlightRef.current.has(messageId)) return;
     reactionInFlightRef.current.add(messageId);
 
+    // Snapshot current reactions for rollback on failure
+    const snapshot = messagesRef.current.find(m => m.id === messageId)?.reactions ?? [];
+
     try {
-    const { data: existingRows } = await supabase
+    const { data: existingRows, error: fetchErr } = await supabase
       .from('message_reactions')
       .select('id, reaction')
       .eq('message_id', messageId)
@@ -231,33 +234,38 @@ export function useChat(eventId: string) {
       .order('created_at', { ascending: false })
       .limit(1);
 
+    if (fetchErr) throw fetchErr;
+
     const existing = existingRows?.[0] ?? null;
 
     if (existing && existing.reaction === reaction) {
-      await supabase.from('message_reactions').delete().eq('id', existing.id);
       setMessages(prev => prev.map(m =>
         m.id === messageId
           ? { ...m, reactions: (m.reactions ?? []).filter(r => r.user_id !== userId) }
           : m,
       ));
+      const { error: delErr } = await supabase.from('message_reactions').delete().eq('id', existing.id);
+      if (delErr) throw delErr;
     } else if (existing) {
-      await supabase.from('message_reactions').update({ reaction }).eq('id', existing.id);
       setMessages(prev => prev.map(m =>
         m.id === messageId
           ? { ...m, reactions: (m.reactions ?? []).map(r => r.user_id === userId ? { ...r, reaction } : r) }
           : m,
       ));
+      const { error: updErr } = await supabase.from('message_reactions').update({ reaction }).eq('id', existing.id);
+      if (updErr) throw updErr;
     } else {
-      await supabase.from('message_reactions').insert({
-        message_id: messageId,
-        user_id: userId,
-        reaction,
-      });
       setMessages(prev => prev.map(m =>
         m.id === messageId
           ? { ...m, reactions: [...(m.reactions ?? []), { user_id: userId, reaction }] }
           : m,
       ));
+      const { error: insErr } = await supabase.from('message_reactions').insert({
+        message_id: messageId,
+        user_id: userId,
+        reaction,
+      });
+      if (insErr) throw insErr;
     }
 
     // Send push notification (only for new/replaced reactions, not removals)
@@ -294,6 +302,11 @@ export function useChat(eventId: string) {
         }
       } catch (e) { console.warn('[WashedUp] Reaction notification failed:', e); }
     }
+    } catch (err) {
+      console.warn('[WashedUp] Reaction toggle failed, rolling back:', err);
+      setMessages(prev => prev.map(m =>
+        m.id === messageId ? { ...m, reactions: snapshot } : m,
+      ));
     } finally {
       reactionInFlightRef.current.delete(messageId);
     }
@@ -363,7 +376,7 @@ export function useChat(eventId: string) {
       message_type: 'user',
       image_url: imageUrl ?? null,
     };
-    if (replyToId) insertData.reply_to_message_id = replyToId;
+    if (replyToId && replyTo) insertData.reply_to_message_id = replyToId;
 
     const { data: inserted, error } = await supabase.from('messages').insert(insertData).select('id, created_at').single();
 

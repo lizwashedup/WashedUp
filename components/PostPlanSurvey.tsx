@@ -71,13 +71,14 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
   // ── DB helpers ──────────────────────────────────────────────────────────
 
   const insertFeedback = useCallback(async (attended: boolean, rating: string | null, feedbackComment: string | null) => {
-    await supabase.from('plan_feedback').insert({
+    const { error } = await supabase.from('plan_feedback').insert({
       event_id: plan.id,
       user_id: userId,
       attended,
       rating,
       comment: feedbackComment || null,
     });
+    if (error) console.warn('[WashedUp] Failed to insert feedback:', error);
   }, [plan.id, userId]);
 
   const insertNoShowReports = useCallback(async (noShowUserIds: string[]) => {
@@ -86,7 +87,8 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
       reporter_user_id: userId,
       no_show_user_id: uid,
     }));
-    await supabase.from('no_show_reports').insert(rows);
+    const { error } = await supabase.from('no_show_reports').insert(rows);
+    if (error) console.warn('[WashedUp] Failed to insert no-show reports:', error);
   }, [plan.id, userId]);
 
   const finish = useCallback(() => {
@@ -225,7 +227,7 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
             <View style={[styles.content, { paddingBottom: insets.bottom + 32 }]}>
               <Text style={styles.planTitle}>{plan.title}</Text>
               <Text style={styles.bodyText}>
-                No worries, but please remember WashedUp is different and people were expecting you. If you can't go, next time please leave the plan. We are new and trying to create accountability for no shows.
+                No worries, but please remember washedup is different and people were expecting you. If you can't go, next time please leave the plan. We are new and trying to create accountability for no shows.
               </Text>
               <View style={styles.buttonGroup}>
                 <TouchableOpacity style={styles.primaryButton} onPress={handleGotIt} activeOpacity={0.85} disabled={submitting}>

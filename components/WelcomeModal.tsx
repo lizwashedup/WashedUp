@@ -46,7 +46,7 @@ export default function WelcomeModal({
 
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const idx = Math.round(e.nativeEvent.contentOffset.x / CARD_WIDTH);
+      const idx = Math.min(Math.max(0, Math.round(e.nativeEvent.contentOffset.x / CARD_WIDTH)), TOTAL_CARDS - 1);
       setActiveIndex(idx);
     },
     [],

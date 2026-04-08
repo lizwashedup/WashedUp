@@ -2,13 +2,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { MoreHorizontal, QrCode, Search, Send, Share2, UserPlus, Users, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Calendar, MoreHorizontal, QrCode, Search, Send, Share2, UserPlus, Users, X } from 'lucide-react-native';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+    ActionSheetIOS,
     ActivityIndicator,
+    Alert,
     FlatList,
     Keyboard,
     Modal,
+    Platform,
     Pressable,
     ScrollView,
     Share,
@@ -21,6 +25,8 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../../components/BrandedAlert';
+import MemoriesTab from '../../../components/MemoriesTab';
+import MomentsTab from '../../../components/MomentsTab';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import ProfileButton from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
@@ -38,14 +44,28 @@ interface Friend {
   friend_id: string;
   first_name_display: string | null;
   profile_photo_url: string | null;
-  handle: string | null;
+}
+
+interface PeopleWithHistory {
+  id: string;
+  first_name_display: string | null;
+  profile_photo_url: string | null;
+  shared_plan_count: number;
+  last_plan_title: string | null;
+  last_plan_date: string | null;
+  activity_categories: string[];
+}
+
+interface PinnedPerson {
+  id: string;
+  pinned_user_id: string;
+  pin_order: number;
 }
 
 interface SearchResult {
   id: string;
   first_name_display: string | null;
   profile_photo_url: string | null;
-  handle: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -83,6 +103,7 @@ export default function YourPeopleScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string } | null>(null);
   const [userMenuTarget, setUserMenuTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'people' | 'memories' | 'moments'>('people');
 
   // Debounce search
   React.useEffect(() => {
@@ -170,21 +191,131 @@ export default function YourPeopleScreen() {
       const ids = rows.map((r: any) => r.friend_id);
       const { data: profiles } = await supabase
         .from('profiles_public')
-        .select('id, first_name_display, profile_photo_url, handle')
+        .select('id, first_name_display, profile_photo_url')
         .in('id', ids);
       const map = new Map((profiles ?? []).map((p: any) => [p.id, p]));
-      return rows.map((r: any) => ({
-        id: r.id,
-        friend_id: r.friend_id,
-        first_name_display: map.get(r.friend_id)?.first_name_display ?? null,
-        profile_photo_url: map.get(r.friend_id)?.profile_photo_url ?? null,
-        handle: map.get(r.friend_id)?.handle ?? null,
-      }));
+      return rows
+        .filter((r: any) => map.get(r.friend_id)?.first_name_display)
+        .map((r: any) => ({
+          id: r.id,
+          friend_id: r.friend_id,
+          first_name_display: map.get(r.friend_id)?.first_name_display ?? null,
+          profile_photo_url: map.get(r.friend_id)?.profile_photo_url ?? null,
+        }));
     },
     enabled: !!userId,
   });
 
+  // People with plan history (for pinned section)
+  const { data: peopleWithHistory = [] } = useQuery({
+    queryKey: ['people-history', userId],
+    queryFn: async (): Promise<PeopleWithHistory[]> => {
+      if (!userId) return [];
+      const { data, error } = await supabase.rpc('get_people_with_plan_history', { p_user_id: userId });
+      if (error) { console.warn('[washedup] People history failed:', error); return []; }
+      return (data ?? []) as PeopleWithHistory[];
+    },
+    enabled: !!userId,
+  });
+
+  // Pinned people
+  const { data: pinnedPeople = [] } = useQuery({
+    queryKey: ['pinned-people', userId],
+    queryFn: async (): Promise<PinnedPerson[]> => {
+      if (!userId) return [];
+      const { data, error } = await supabase
+        .from('pinned_people')
+        .select('id, pinned_user_id, pin_order')
+        .eq('user_id', userId)
+        .order('pin_order', { ascending: true });
+      if (error) return [];
+      return (data ?? []) as PinnedPerson[];
+    },
+    enabled: !!userId,
+  });
+
+  // Pending invites from friends
+  const [dismissedInviteIds, setDismissedInviteIds] = useState<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    if (!userId) return;
+    AsyncStorage.getItem(`dismissed_invites_${userId}`).then((raw) => {
+      if (raw) setDismissedInviteIds(new Set(JSON.parse(raw)));
+    }).catch(() => {});
+  }, [userId]);
+
+  const dismissInvite = useCallback(async (inviteId: string) => {
+    hapticLight();
+    setDismissedInviteIds(prev => {
+      const next = new Set(prev);
+      next.add(inviteId);
+      if (userId) AsyncStorage.setItem(`dismissed_invites_${userId}`, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, [userId]);
+
+  const { data: pendingInvites = [] } = useQuery({
+    queryKey: ['pending-invites-people', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      try {
+        const { data: inviteRows } = await supabase
+          .from('plan_invites')
+          .select('id, event_id, sender_id, status, created_at, events (id, title, start_time, status, member_count, max_invites)')
+          .eq('recipient_id', userId)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false });
+
+        const active = (inviteRows ?? []).filter((inv: any) =>
+          inv.events && ['forming', 'active', 'full'].includes(inv.events.status) &&
+          new Date(inv.events.start_time) > new Date()
+        );
+        if (active.length === 0) return [];
+
+        const senderIds = [...new Set(active.map((inv: any) => inv.sender_id).filter(Boolean))];
+        const { data: profiles } = await supabase
+          .from('profiles_public')
+          .select('id, first_name_display, profile_photo_url')
+          .in('id', senderIds);
+
+        const profileMap: Record<string, any> = {};
+        (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+
+        return active.map((inv: any) => ({ ...inv, sender: profileMap[inv.sender_id] ?? null }));
+      } catch { return []; }
+    },
+    enabled: !!userId,
+  });
+
+  const visibleInvites = useMemo(() =>
+    pendingInvites.filter((inv: any) => !dismissedInviteIds.has(inv.id)),
+    [pendingInvites, dismissedInviteIds],
+  );
+
+  // Build pinned friends list with history data
+  const pinnedFriends = useMemo(() => {
+    if (!pinnedPeople.length) return [];
+    const historyMap = new Map(peopleWithHistory.map(p => [p.id, p]));
+    return pinnedPeople
+      .map(pin => historyMap.get(pin.pinned_user_id))
+      .filter((p): p is PeopleWithHistory => !!p);
+  }, [pinnedPeople, peopleWithHistory]);
+
   const filteredFriends = useMemo(() => friends.filter((f) => !blockedSet.has(f.friend_id)), [friends, blockedSet]);
+
+  const pinnedIds = useMemo(() => new Set(pinnedPeople.map(p => p.pinned_user_id)), [pinnedPeople]);
+
+  // Friends list enriched with history, excluding pinned, sorted by shared plan count
+  const enrichedFriends = useMemo(() => {
+    const historyMap = new Map(peopleWithHistory.map(p => [p.id, p]));
+    return filteredFriends
+      .filter(f => !pinnedIds.has(f.friend_id))
+      .map(f => ({
+        ...f,
+        history: historyMap.get(f.friend_id) ?? null,
+      }))
+      .sort((a, b) => (b.history?.shared_plan_count ?? 0) - (a.history?.shared_plan_count ?? 0));
+  }, [filteredFriends, peopleWithHistory, pinnedIds]);
 
   // Friend IDs set for O(1) lookup
   const friendIds = useMemo(() => new Set(filteredFriends.map((f) => f.friend_id)), [filteredFriends]);
@@ -196,14 +327,12 @@ export default function YourPeopleScreen() {
     queryFn: async (): Promise<SearchResult[]> => {
       if (!userId || cleanQuery.length < 2) return [];
       const { data, error } = await supabase
-        .from('profiles_public')
-        .select('id, first_name_display, profile_photo_url, handle')
-        .ilike('handle', `%${cleanQuery}%`)
-        .neq('id', userId)
-        .limit(20);
+        .rpc('search_users_by_handle', {
+          p_query: cleanQuery,
+          p_user_id: userId,
+        });
       if (error) return [];
-      const results = (data ?? []) as SearchResult[];
-      return results.filter((r) => !blockedSet.has(r.id));
+      return (data ?? []).filter((r: any) => !blockedSet.has(r.id)) as SearchResult[];
     },
     enabled: !!userId && cleanQuery.length >= 2,
   });
@@ -212,11 +341,13 @@ export default function YourPeopleScreen() {
     useCallback(() => {
       refetchFriends();
       refetchProfile();
+      // Clear the pending-invites badge dot when the People tab is visited
+      queryClient.setQueryData(['pending-invites-badge'], false);
       return () => {
         setSearchQuery('');
         Keyboard.dismiss();
       };
-    }, [refetchFriends, refetchProfile]),
+    }, [refetchFriends, refetchProfile, queryClient]),
   );
 
   // Add friend mutation (symmetric via RPC — RLS blocks direct insert of other user's row)
@@ -259,6 +390,60 @@ export default function YourPeopleScreen() {
     setFriendToRemove(null);
   }, [userId, friendToRemove, queryClient]);
 
+  const pinFriend = useCallback(async (friendId: string) => {
+    if (!userId) return;
+    hapticSuccess();
+    const maxOrder = pinnedPeople.length > 0
+      ? Math.max(...pinnedPeople.map(p => p.pin_order)) + 1
+      : 0;
+    await supabase.from('pinned_people').insert({
+      user_id: userId,
+      pinned_user_id: friendId,
+      pin_order: maxOrder,
+    }).catch(() => {});
+    queryClient.invalidateQueries({ queryKey: ['pinned-people', userId] });
+  }, [userId, pinnedPeople, queryClient]);
+
+  const unpinFriend = useCallback(async (friendId: string) => {
+    if (!userId) return;
+    hapticLight();
+    await supabase.from('pinned_people')
+      .delete()
+      .eq('user_id', userId)
+      .eq('pinned_user_id', friendId)
+      .catch(() => {});
+    queryClient.invalidateQueries({ queryKey: ['pinned-people', userId] });
+  }, [userId, queryClient]);
+
+  const showFriendMenu = useCallback((friend: Friend) => {
+    hapticMedium();
+    const isPinned = pinnedIds.has(friend.friend_id);
+    const options = isPinned
+      ? ['Unpin', 'Remove from Your People', 'Cancel']
+      : ['Pin to top', 'Remove from Your People', 'Cancel'];
+    const cancelIndex = 2;
+    const destructiveIndex = 1;
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
+        (idx) => {
+          if (idx === 0) {
+            if (isPinned) unpinFriend(friend.friend_id);
+            else pinFriend(friend.friend_id);
+          }
+          if (idx === 1) removeFriend(friend);
+        },
+      );
+    } else {
+      Alert.alert('', '', [
+        { text: isPinned ? 'Unpin' : 'Pin to top', onPress: () => isPinned ? unpinFriend(friend.friend_id) : pinFriend(friend.friend_id) },
+        { text: 'Remove from Your People', style: 'destructive', onPress: () => removeFriend(friend) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  }, [pinnedIds, pinFriend, unpinFriend, removeFriend]);
+
   // Save handle
   const saveHandle = useCallback(async () => {
     const raw = handleInput.trim().toLowerCase();
@@ -296,8 +481,8 @@ export default function YourPeopleScreen() {
     hapticLight();
     try {
       await Share.share({
-        message: `Add me on WashedUp — @${h}\nhttps://washedup.app/u/${h}`,
-        title: 'Add me on WashedUp',
+        message: `Add me on washedup — @${h}\nhttps://washedup.app/u/${h}`,
+        title: 'Add me on washedup',
       });
     } catch {}
   }, [myProfile?.handle]);
@@ -411,9 +596,7 @@ export default function YourPeopleScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>
-            <Text style={styles.headerTitleItalic}>Your</Text> People
-          </Text>
+          <Text style={styles.headerTitle}>yours</Text>
           <ProfileButton />
         </View>
         <View style={styles.centered}>
@@ -427,12 +610,32 @@ export default function YourPeopleScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>
-          <Text style={styles.headerTitleItalic}>Your</Text> People
-        </Text>
+        <Text style={styles.headerTitle}>yours</Text>
         <ProfileButton />
       </View>
 
+      {/* Tabs */}
+      <View style={styles.tabBar}>
+        {(['people', 'memories', 'moments'] as const).map(tab => (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.tabActive]}
+            onPress={() => { hapticLight(); setActiveTab(tab); }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+              {tab === 'people' ? 'People' : tab === 'memories' ? 'Memories' : 'Moments'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {activeTab === 'memories' && userId ? (
+        <MemoriesTab userId={userId} />
+      ) : activeTab === 'moments' && userId ? (
+        <MomentsTab userId={userId} />
+      ) : (
+      <>
       {/* Search bar */}
       <View style={styles.searchWrap}>
         <Search size={18} color={Colors.textLight} style={styles.searchIcon} />
@@ -452,7 +655,7 @@ export default function YourPeopleScreen() {
         )}
       </View>
       {!isSearching && (
-        <Text style={styles.searchHint}>People can only find you by your @handle</Text>
+        <Text style={styles.searchHint}>your @handle is private. only people you share it with can find you here.</Text>
       )}
 
       {isSearching ? (
@@ -484,7 +687,6 @@ export default function YourPeopleScreen() {
                       </Pressable>
                       <View>
                         <Text style={styles.searchRowName}>{item.first_name_display ?? 'Unknown'}</Text>
-                        {item.handle && <Text style={styles.searchRowHandle}>@{item.handle}</Text>}
                       </View>
                     </View>
                     <View style={styles.searchRowActions}>
@@ -512,7 +714,73 @@ export default function YourPeopleScreen() {
           )}
         </View>
       ) : (
-        <>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 32 }} keyboardDismissMode="on-drag">
+          {/* Pending invite cards */}
+          {visibleInvites.length > 0 && (
+            <View style={styles.inviteCardsSection}>
+              <Text style={styles.inviteCardsSectionTitle}>INVITES</Text>
+              {visibleInvites.map((inv: any) => {
+                const event = inv.events;
+                const sender = inv.sender;
+                const dateStr = event?.start_time
+                  ? new Date(event.start_time).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                  : null;
+                const timeStr = event?.start_time
+                  ? new Date(event.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                  : null;
+
+                return (
+                  <View key={inv.id} style={styles.inviteCard}>
+                    <View style={styles.inviteCardTop}>
+                      {sender?.profile_photo_url ? (
+                        <Image source={{ uri: sender.profile_photo_url }} style={styles.inviteCardAvatar} contentFit="cover" />
+                      ) : (
+                        <View style={[styles.inviteCardAvatar, styles.inviteCardAvatarFallback]}>
+                          <Text style={styles.inviteCardAvatarInitial}>
+                            {(sender?.first_name_display ?? '?')[0].toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={styles.inviteCardInfo}>
+                        <Text style={styles.inviteCardFrom}>
+                          {sender?.first_name_display ?? 'Someone'} invited you
+                        </Text>
+                        <Text style={styles.inviteCardTitle} numberOfLines={1}>{event?.title ?? 'A plan'}</Text>
+                        {(dateStr || timeStr) && (
+                          <View style={styles.inviteCardDateRow}>
+                            <Calendar size={12} color={Colors.terracotta} />
+                            <Text style={styles.inviteCardDate}>
+                              {dateStr}{timeStr ? ` · ${timeStr}` : ''}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    <View style={styles.inviteCardActions}>
+                      <TouchableOpacity
+                        style={styles.inviteCardViewBtn}
+                        onPress={() => {
+                          hapticLight();
+                          router.push(`/plan/${event?.id}` as any);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.inviteCardViewBtnText}>View Plan</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.inviteCardDismissBtn}
+                        onPress={() => dismissInvite(inv.id)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.inviteCardDismissBtnText}>Dismiss</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
           {/* Handle card */}
           <View style={styles.handleCard}>
             {myHandle ? (
@@ -568,56 +836,185 @@ export default function YourPeopleScreen() {
             )}
           </View>
 
+          {/* Pinned section */}
+          {pinnedFriends.length > 0 && (
+            <>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="star" size={14} color={Colors.goldAccent} style={{ marginRight: 4 }} />
+                <Text style={styles.sectionTitle}>Pinned</Text>
+                <Text style={styles.sectionCount}> · {pinnedFriends.length}</Text>
+              </View>
+              {pinnedFriends.map((person) => {
+                const nameParts = (person.first_name_display ?? 'Unknown').split(' ');
+                const displayName = nameParts.length > 1
+                  ? `${nameParts[0]} ${nameParts[nameParts.length - 1][0]}.`
+                  : nameParts[0];
+                const lastPlanDate = person.last_plan_date
+                  ? new Date(person.last_plan_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  : null;
+
+                return (
+                  <Pressable
+                    key={person.id}
+                    style={styles.pinnedRow}
+                    onPress={() => setMiniProfileUserId(person.id)}
+                    onLongPress={() => {
+                      hapticMedium();
+                      if (Platform.OS === 'ios') {
+                        ActionSheetIOS.showActionSheetWithOptions(
+                          { options: ['Unpin', 'Cancel'], cancelButtonIndex: 1 },
+                          (idx) => { if (idx === 0) unpinFriend(person.id); },
+                        );
+                      } else {
+                        Alert.alert('', '', [
+                          { text: 'Unpin', onPress: () => unpinFriend(person.id) },
+                          { text: 'Cancel', style: 'cancel' },
+                        ]);
+                      }
+                    }}
+                    delayLongPress={400}
+                  >
+                    {/* Avatar */}
+                    {person.profile_photo_url ? (
+                      <Image source={{ uri: person.profile_photo_url }} style={styles.pinnedAvatar} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.pinnedAvatar, styles.pinnedAvatarFallback]}>
+                        <Text style={styles.pinnedAvatarInitial}>
+                          {(person.first_name_display ?? '?')[0].toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Star badge */}
+                    <View style={styles.pinnedStar}>
+                      <Ionicons name="star" size={10} color={Colors.goldAccent} />
+                    </View>
+
+                    {/* Info */}
+                    <View style={styles.pinnedInfo}>
+                      <Text style={styles.pinnedName}>{displayName}</Text>
+                      {person.shared_plan_count > 0 && (
+                        <Text style={styles.pinnedMeta}>
+                          {person.shared_plan_count} plan{person.shared_plan_count !== 1 ? 's' : ''} together
+                        </Text>
+                      )}
+                      {person.last_plan_title && (
+                        <Text style={styles.pinnedLastPlan} numberOfLines={1}>
+                          {person.last_plan_title}{lastPlanDate ? ` · ${lastPlanDate}` : ''}
+                        </Text>
+                      )}
+                      {person.activity_categories.length > 0 && (
+                        <View style={styles.pinnedTags}>
+                          {person.activity_categories.slice(0, 3).map(cat => (
+                            <View key={cat} style={styles.pinnedTag}>
+                              <Text style={styles.pinnedTagText}>{cat}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Invite button */}
+                    <TouchableOpacity
+                      style={styles.pinnedInviteBtn}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleInvite({
+                          id: '',
+                          friend_id: person.id,
+                          first_name_display: person.first_name_display,
+                          profile_photo_url: person.profile_photo_url,
+                        });
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Send size={12} color={Colors.white} />
+                      <Text style={styles.pinnedInviteBtnText}>Invite</Text>
+                    </TouchableOpacity>
+                  </Pressable>
+                );
+              })}
+            </>
+          )}
+
           {/* Friends list */}
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Your People</Text>
-            <Text style={styles.sectionCount}> · {filteredFriends.length}</Text>
+            <Text style={styles.sectionCount}> · {enrichedFriends.length}</Text>
           </View>
 
-          {filteredFriends.length === 0 ? (
+          {enrichedFriends.length === 0 && filteredFriends.length === 0 ? (
             <View style={styles.emptyState}>
-              <Users size={48} color={Colors.terracotta} />
-              <Text style={[styles.emptyTitle, { textAlign: 'center' }]}>Add people here to invite them to your plans.</Text>
-              <Text style={styles.emptyHint}>Search by @handle to find people</Text>
+              <View style={styles.emptyGlow} />
+              <View style={styles.emptyIconWrap}>
+                <Users size={40} color={Colors.terracotta} />
+              </View>
+              <Text style={styles.emptyHeading}>no one here yet</Text>
+              <Text style={styles.emptyBody}>
+                your people will show up here after your first plan. share your @handle with someone you meet and they can find you.
+              </Text>
+              <TouchableOpacity style={styles.emptyShareBtn} onPress={shareHandle} activeOpacity={0.8}>
+                <Text style={styles.emptyShareBtnText}>share your @handle</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.emptyQrBtn} onPress={() => setShowQr(true)} activeOpacity={0.8}>
+                <Text style={styles.emptyQrBtnText}>show QR code</Text>
+              </TouchableOpacity>
+              <Text style={styles.emptyNote}>
+                when you do plans together, your shared history shows up here automatically
+              </Text>
             </View>
           ) : (
-            <FlatList
-              data={filteredFriends}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.friendsList}
-              keyboardDismissMode="on-drag"
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.friendRow}
-                  onLongPress={() => removeFriend(item)}
-                  activeOpacity={0.7}
-                >
-                  <Pressable onPress={() => { hapticLight(); setMiniProfileUserId(item.friend_id); }}>
-                    {item.profile_photo_url ? (
-                      <Image source={{ uri: item.profile_photo_url }} style={styles.friendAvatar} contentFit="cover" />
-                    ) : (
-                      <View style={[styles.friendAvatar, styles.avatarFallback]}>
-                        <Text style={styles.friendAvatarInitial}>{item.first_name_display?.[0] ?? '?'}</Text>
-                      </View>
-                    )}
-                  </Pressable>
-                  <View style={styles.friendInfo}>
-                    <Text style={styles.friendName}>{item.first_name_display ?? 'Unknown'}</Text>
-                    {item.handle && <Text style={styles.friendHandle}>@{item.handle}</Text>}
-                  </View>
+            <>
+              {enrichedFriends.map((item) => {
+                const nameParts = (item.first_name_display ?? 'Unknown').split(' ');
+                const displayName = nameParts.length > 1
+                  ? `${nameParts[0]} ${nameParts[nameParts.length - 1][0]}.`
+                  : nameParts[0];
+                const planCount = item.history?.shared_plan_count ?? 0;
+                const lastPlan = item.history?.last_plan_title;
+                const metaLine = planCount > 0
+                  ? `${planCount} plan${planCount !== 1 ? 's' : ''}${lastPlan ? ` \u00B7 ${lastPlan}` : ''}`
+                  : null;
+
+                return (
                   <TouchableOpacity
-                    style={styles.inviteBtn}
-                    onPress={() => handleInvite(item)}
-                    activeOpacity={0.8}
+                    key={item.id}
+                    style={styles.friendRow}
+                    onLongPress={() => showFriendMenu(item)}
+                    delayLongPress={400}
+                    activeOpacity={0.7}
                   >
-                    <Send size={14} color={Colors.terracotta} />
-                    <Text style={styles.inviteBtnText}>Invite</Text>
+                    <Pressable onPress={() => { hapticLight(); setMiniProfileUserId(item.friend_id); }}>
+                      {item.profile_photo_url ? (
+                        <Image source={{ uri: item.profile_photo_url }} style={styles.friendAvatar} contentFit="cover" />
+                      ) : (
+                        <View style={[styles.friendAvatar, styles.avatarFallback]}>
+                          <Text style={styles.friendAvatarInitial}>{item.first_name_display?.[0] ?? '?'}</Text>
+                        </View>
+                      )}
+                    </Pressable>
+                    <View style={styles.friendInfo}>
+                      <Text style={styles.friendName}>{displayName}</Text>
+                      {metaLine && (
+                        <Text style={styles.friendMeta} numberOfLines={1}>{metaLine}</Text>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      style={styles.inviteBtn}
+                      onPress={() => handleInvite(item)}
+                      activeOpacity={0.8}
+                    >
+                      <Send size={14} color={Colors.terracotta} />
+                      <Text style={styles.inviteBtnText}>Invite</Text>
+                    </TouchableOpacity>
                   </TouchableOpacity>
-                </TouchableOpacity>
-              )}
-            />
+                );
+              })}
+            </>
           )}
-        </>
+        </ScrollView>
+      )}
+      </>
       )}
 
       {/* Report Modal */}
@@ -700,7 +1097,7 @@ export default function YourPeopleScreen() {
             <View style={styles.handlePromptIconWrap}>
               <UserPlus size={32} color={Colors.terracotta} />
             </View>
-            <Text style={styles.handlePromptTitle}>Create your WashedUp handle</Text>
+            <Text style={styles.handlePromptTitle}>Create your washedup handle</Text>
             <Text style={styles.handlePromptBody}>
               Your handle is how people find you and invite you to things after you've met. Set one below to get started.
             </Text>
@@ -792,13 +1189,37 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
-  headerTitle: {
-    fontSize: FontSizes.displayLG,
-    fontWeight: '700',
-    color: '#2C1810',
+  tabBar: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 4,
+    backgroundColor: Colors.cardBg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
-  headerTitleItalic: {
-    fontWeight: '700',
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  tabActive: {
+    borderBottomWidth: 3,
+    borderBottomColor: Colors.terracotta,
+  },
+  tabText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.warmGray,
+  },
+  tabTextActive: {
+    fontFamily: Fonts.sansBold,
+    color: Colors.terracotta,
+  },
+
+  headerTitle: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.displayLG,
+    color: Colors.asphalt,
   },
 
   searchWrap: {
@@ -853,7 +1274,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.terracotta,
     paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 12,
   },
   addBtnText: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sansMedium, color: Colors.white },
   addedBtn: { backgroundColor: Colors.inputBg },
@@ -875,7 +1296,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     backgroundColor: Colors.terracotta,
-    borderRadius: 10,
+    borderRadius: 12,
     height: 40,
     paddingHorizontal: 16,
   },
@@ -887,7 +1308,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderWidth: 1,
     borderColor: Colors.terracotta,
-    borderRadius: 10,
+    borderRadius: 12,
     height: 40,
     paddingHorizontal: 16,
   },
@@ -919,7 +1340,7 @@ const styles = StyleSheet.create({
   saveHandleBtn: {
     backgroundColor: Colors.terracotta,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
   },
   saveHandleBtnText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.white },
@@ -942,6 +1363,7 @@ const styles = StyleSheet.create({
   friendAvatarInitial: { fontSize: FontSizes.displaySM, fontFamily: Fonts.sansBold, color: Colors.terracotta },
   friendInfo: { flex: 1, marginLeft: 12 },
   friendName: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansMedium, color: Colors.asphalt },
+  friendMeta: { fontSize: FontSizes.caption, fontFamily: Fonts.sans, color: Colors.secondary, marginTop: 2 },
   friendHandle: { fontSize: FontSizes.bodySM, color: Colors.textLight, marginTop: 1 },
   removeBtn: {
     marginLeft: 10,
@@ -955,13 +1377,13 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
-    borderRadius: 10,
+    borderRadius: 12,
   },
   inviteBtnText: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sansMedium, color: Colors.terracotta },
   searchHint: {
     fontSize: FontSizes.caption,
     fontFamily: Fonts.sans,
-    color: Colors.textLight,
+    color: Colors.warmGray,
     textAlign: 'center',
     marginBottom: 8,
     marginTop: -4,
@@ -1135,7 +1557,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.terracotta,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 14,
+    borderRadius: 12,
   },
   inboxViewBtnText: {
     fontFamily: Fonts.sansBold,
@@ -1182,10 +1604,114 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,
-    gap: 12,
   },
-  emptyTitle: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.textMedium },
-  emptyHint: { fontSize: FontSizes.bodyMD, color: Colors.terracotta, fontFamily: Fonts.sansMedium },
+  emptyGlow: { position: 'absolute', width: 300, height: 300, borderRadius: 150, backgroundColor: 'rgba(242,163,45,0.05)' },
+  emptyIconWrap: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.emptyIconBg, alignItems: 'center', justifyContent: 'center' },
+  emptyHeading: { fontFamily: Fonts.display, fontSize: FontSizes.displaySM, color: Colors.asphalt, textAlign: 'center', marginTop: 16 },
+  emptyBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, textAlign: 'center', lineHeight: 20, maxWidth: 280, marginTop: 8 },
+  emptyShareBtn: { backgroundColor: Colors.terracotta, paddingVertical: 14, borderRadius: 12, alignItems: 'center', maxWidth: 240, width: '100%', marginTop: 20 },
+  emptyShareBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.white },
+  emptyQrBtn: { borderWidth: 1.5, borderColor: Colors.terracotta, paddingVertical: 12, borderRadius: 12, alignItems: 'center', maxWidth: 240, width: '100%', marginTop: 10 },
+  emptyQrBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  emptyNote: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray, textAlign: 'center', lineHeight: 16, maxWidth: 260, marginTop: 16 },
+
+  // ── Invite cards section ──
+  inviteCardsSection: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  inviteCardsSectionTitle: {
+    fontSize: FontSizes.caption,
+    fontWeight: '600',
+    color: Colors.terracotta,
+    letterSpacing: 1.5,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  inviteCard: {
+    backgroundColor: `${Colors.terracotta}0A`,
+    borderWidth: 1,
+    borderColor: `${Colors.terracotta}20`,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+  },
+  inviteCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inviteCardAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  inviteCardAvatarFallback: {
+    backgroundColor: Colors.accentSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inviteCardAvatarInitial: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
+  inviteCardInfo: {
+    flex: 1,
+    marginLeft: 12,
+    gap: 2,
+  },
+  inviteCardFrom: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.secondary,
+  },
+  inviteCardTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+  },
+  inviteCardDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  inviteCardDate: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.secondary,
+  },
+  inviteCardActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  inviteCardViewBtn: {
+    flex: 1,
+    backgroundColor: Colors.terracotta,
+    borderRadius: 12,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  inviteCardViewBtnText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.white,
+  },
+  inviteCardDismissBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inviteCardDismissBtnText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
+  },
 
   qrOverlay: {
     flex: 1,
@@ -1249,6 +1775,105 @@ const styles = StyleSheet.create({
   handlePromptBtnText: {
     fontSize: FontSizes.bodyMD,
     fontFamily: Fonts.sansMedium,
+    color: Colors.white,
+  },
+
+  // ── Pinned section ──
+  pinnedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    backgroundColor: Colors.white,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 14,
+    shadowColor: '#2C1810',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  pinnedAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  pinnedAvatarFallback: {
+    backgroundColor: Colors.accentSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinnedAvatarInitial: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.terracotta,
+  },
+  pinnedStar: {
+    position: 'absolute',
+    left: 48,
+    top: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: 'rgba(120,90,50,1)',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  pinnedInfo: {
+    flex: 1,
+    marginLeft: 12,
+    gap: 2,
+  },
+  pinnedName: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+  },
+  pinnedMeta: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+  },
+  pinnedLastPlan: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.secondary,
+  },
+  pinnedTags: {
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 4,
+  },
+  pinnedTag: {
+    backgroundColor: Colors.accentSubtle,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  pinnedTagText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 10,
+    color: Colors.terracotta,
+    textTransform: 'capitalize',
+  },
+  pinnedInviteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+  },
+  pinnedInviteBtnText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
     color: Colors.white,
   },
 });

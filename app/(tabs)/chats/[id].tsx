@@ -225,8 +225,8 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
   const iReacted = reactions.some(r => r.user_id === currentUserId);
 
   const borderRadius = isOwn
-    ? { borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottomLeftRadius: 16, borderBottomRightRadius: 3 }
-    : { borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottomLeftRadius: 3, borderBottomRightRadius: 16 };
+    ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 2 }
+    : { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 2, borderBottomRightRadius: 18 };
 
   return (
     <View style={[bubbleStyles.row, isOwn ? bubbleStyles.rowOwn : bubbleStyles.rowOther]}>

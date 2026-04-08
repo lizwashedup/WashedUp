@@ -238,10 +238,14 @@ export default function AdminEventsScreen() {
           style: ev.status === 'Live' ? 'destructive' : 'default',
           onPress: async () => {
             const newStatus = ev.status === 'Live' ? 'Archived' : 'Live';
-            await supabase.rpc('admin_update_explore_event', {
+            const { error } = await supabase.rpc('admin_update_explore_event', {
               p_event_id: ev.id,
               p_status: newStatus,
             });
+            if (error) {
+              setAlertInfo({ title: 'Error', message: 'Could not update event status.' });
+              return;
+            }
             queryClient.invalidateQueries({ queryKey: ['admin-scene-events'] });
           },
         },

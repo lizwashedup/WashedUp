@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { ArrowLeft, MapPin, Calendar, Users, Heart, ChevronDown } from 'lucide-react-native';
+import { ArrowLeft, MapPin, Calendar, Users, ChevronDown } from 'lucide-react-native';
 import { hapticLight, hapticSelection } from '../../lib/haptics';
 import * as Location from 'expo-location';
 import { MapView, Marker } from '../MapView.native';
@@ -23,19 +23,8 @@ const LA_REGION = {
   longitudeDelta: 0.4,
 };
 
-const CATEGORY_COLORS: Record<string, string> = {
-  music: Colors.categoryMusic,
-  film: Colors.categoryFilm,
-  nightlife: Colors.categoryNightlife,
-  food: Colors.categoryFood,
-  outdoors: Colors.categoryOutdoors,
-  fitness: Colors.categoryFitness,
-  art: Colors.categoryArt,
-  comedy: Colors.terracotta,
-  sports: Colors.categorySports,
-  wellness: Colors.categoryWellness,
-  community: Colors.terracotta,
-};
+const PIN_COLOR = '#B5522E';
+const PIN_COLOR_SELECTED = '#A84B2A';
 
 function formatDateShort(dateString: string): string {
   const d = new Date(dateString);
@@ -117,8 +106,8 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         onPress={handleMapPress}
       >
         {filteredPlans.map((plan) => {
-          const catColor = CATEGORY_COLORS[plan.category?.toLowerCase() ?? ''] ?? Colors.terracotta;
           const isSelected = selectedPlan?.id === plan.id;
+          const pinBg = isSelected ? PIN_COLOR_SELECTED : PIN_COLOR;
           return (
             <Marker
               key={plan.id}
@@ -127,12 +116,12 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
               tracksViewChanges={false}
               stopPropagation
             >
-              <View style={[styles.pin, { backgroundColor: catColor }, isSelected && styles.pinSelected]} pointerEvents="none">
+              <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]} pointerEvents="none">
                 <Text style={styles.pinText} numberOfLines={1}>
                   {plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title}
                 </Text>
               </View>
-              <View style={[styles.pinArrow, { borderTopColor: catColor }]} pointerEvents="none" />
+              <View style={[styles.pinArrow, { borderTopColor: pinBg }]} pointerEvents="none" />
             </Marker>
           );
         })}
@@ -174,11 +163,10 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
             }}
             activeOpacity={0.8}
           >
-            <Heart
+            <Ionicons
+              name={heartFilter ? 'bookmark' : 'bookmark-outline'}
               size={16}
               color={heartFilter ? Colors.white : Colors.asphalt}
-              fill={heartFilter ? Colors.white : 'transparent'}
-              strokeWidth={2}
             />
           </TouchableOpacity>
         </View>
@@ -200,7 +188,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
           )}
           <View style={styles.cardContent}>
             {selectedPlan.category && (
-              <View style={[styles.cardCatBadge, { backgroundColor: CATEGORY_COLORS[selectedPlan.category.toLowerCase()] ?? Colors.terracotta }]}>
+              <View style={styles.cardCatBadge}>
                 <Text style={styles.cardCatText}>{selectedPlan.category}</Text>
               </View>
             )}
@@ -233,11 +221,10 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
                   }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Heart
+                  <Ionicons
+                    name={wishlistedSet[selectedPlan.id] ? 'bookmark' : 'bookmark-outline'}
                     size={18}
-                    color={wishlistedSet[selectedPlan.id] ? Colors.errorRed : Colors.asphalt}
-                    fill={wishlistedSet[selectedPlan.id] ? Colors.errorRed : 'transparent'}
-                    strokeWidth={2}
+                    color={wishlistedSet[selectedPlan.id] ? Colors.terracotta : Colors.asphalt}
                   />
                 </TouchableOpacity>
               )}
@@ -424,6 +411,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 12,
     marginBottom: 2,
+    backgroundColor: Colors.terracotta,
   },
   cardCatText: {
     fontFamily: Fonts.sansMedium,

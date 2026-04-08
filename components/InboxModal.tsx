@@ -120,9 +120,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     hapticLight();
     try {
       await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
-      if (notifType === 'waitlist_spot' && eventId && userId) {
-        try { await supabase.from('event_waitlist').delete().eq('event_id', eventId).eq('user_id', userId); } catch {}
-      }
+      // Don't delete waitlist row here — let cleanup_waitlist_on_join trigger handle it
+      // when the user actually joins on the plan detail page
       refetchNotifs();
       queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
       if (action === 'acted' && eventId) {

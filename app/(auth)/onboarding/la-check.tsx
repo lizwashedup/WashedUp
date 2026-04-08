@@ -125,10 +125,10 @@ export default function OnboardingLACheckScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.waitlistHeading}>WashedUp is only in LA right now.</Text>
+                <Text style={styles.waitlistHeading}>washedup is only in LA right now.</Text>
                 <View style={styles.gap16} />
                 <Text style={styles.notLaText}>
-                  We&apos;re expanding as fast as we can. If you&apos;d like WashedUp in your city, add it below to be added to the waitlist!
+                  We&apos;re expanding as fast as we can. If you&apos;d like washedup in your city, add it below to be added to the waitlist!
                 </Text>
                 <View style={styles.gap24} />
                 <TextInput

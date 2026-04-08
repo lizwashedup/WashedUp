@@ -31,6 +31,7 @@ export function usePushNotifications(userId?: string | null) {
       if (token) setExpoPushToken(token);
     }).catch(() => {});
 
+    notificationListener.current?.remove();
     notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
 
     return () => {

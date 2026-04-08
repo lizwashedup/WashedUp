@@ -42,8 +42,8 @@ export default function OnboardingWaitlistedScreen() {
           <View style={styles.gap20} />
           <Text style={styles.body}>
             {city
-              ? `We'll let you know when WashedUp comes to ${city}. We're working hard to bring it to you soon!`
-              : `We'll let you know when WashedUp expands to your city. We're working hard to bring it to you soon!`}
+              ? `We'll let you know when washedup comes to ${city}. We're working hard to bring it to you soon!`
+              : `We'll let you know when washedup expands to your city. We're working hard to bring it to you soon!`}
           </Text>
         </View>
         <TouchableOpacity
