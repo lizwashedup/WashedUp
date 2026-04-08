@@ -16,7 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
-import { hapticLight } from '../../../lib/haptics';
+import * as Haptics from 'expo-haptics';
 import { ChevronLeft } from 'lucide-react-native';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
@@ -65,7 +65,7 @@ export default function OnboardingReferralScreen() {
     selected !== null && (!isOther || otherText.trim().length > 0);
 
   const handleSelect = (value: string) => {
-    hapticLight();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setSelected(value);
   };
@@ -79,7 +79,7 @@ export default function OnboardingReferralScreen() {
 
   const handleContinue = async () => {
     if (!canContinue || loading) return;
-    hapticLight();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setLoading(true);
     try {
       const {
@@ -143,7 +143,7 @@ export default function OnboardingReferralScreen() {
           <View style={styles.headerRow}>
             <TouchableOpacity
               onPress={() => {
-                hapticLight();
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 routerBack.back();
               }}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -213,7 +213,7 @@ export default function OnboardingReferralScreen() {
             ]}
             onPress={handleContinue}
             onPressIn={() => {
-              if (canContinue) hapticLight();
+              if (canContinue) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }}
             activeOpacity={0.9}
             disabled={!canContinue || loading}
