@@ -42,6 +42,7 @@ export interface Plan {
   member_count: number;
   status: string;
   host_message: string | null;
+  is_featured: boolean;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -68,6 +69,7 @@ function mapRowToPlan(item: any): Plan {
     member_count: item.member_count ?? 0,
     status: item.status ?? 'forming',
     host_message: item.host_message ?? null,
+    is_featured: item.is_featured ?? false,
     creator: (item.creator_user_id ?? item.host_id)
       ? {
           id: item.creator_user_id ?? item.host_id,

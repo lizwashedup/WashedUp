@@ -42,6 +42,7 @@ interface PlanCardProps {
     category: string | null;
     max_invites: number;
     member_count: number;
+    is_featured?: boolean;
     creator: {
       id?: string;
       first_name_display: string;
@@ -133,11 +134,14 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   }, [plan.id, plan.creator?.profile_photo_url, router]);
 
   // Creator always counts as 1 — member_count should never display as 0
-  const going = Math.max(1, capDisplayCount(plan.member_count));
-  const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
+  const isFeatured = plan.is_featured ?? false;
+  const going = Math.max(1, capDisplayCount(plan.member_count, isFeatured));
+  const totalCapacity = isFeatured
+    ? (plan.max_invites ?? 99) + 1
+    : Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
   const spotsLeft = Math.max(0, totalCapacity - going);
   const isFull = going >= totalCapacity;
-  const showSpotsLeftBadge = spotsLeft >= 1 && spotsLeft <= 2 && !isFull;
+  const showSpotsLeftBadge = !isFeatured && spotsLeft >= 1 && spotsLeft <= 2 && !isFull;
 
   // ── Spots-left pulse animation ──
   const pulseScale = useSharedValue(1);
@@ -224,7 +228,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               <Text style={styles.creatorSubtext}>posted</Text>
               {plan.creator?.milestone_slug && plan.creator?.milestone_icon && (
                 <View style={styles.creatorMark}>
-                  <MarkIcon iconName={plan.creator.milestone_icon} size={11} />
+                  <MarkIcon iconName={plan.creator.milestone_icon} size={16} />
                   <Text style={styles.creatorMarkText}>{plan.creator.milestone_name}</Text>
                 </View>
               )}
@@ -320,8 +324,8 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
       <View style={styles.footer}>
         <Text style={styles.spotsLabel}>
           <Text style={styles.spotsNumber}>{going}</Text>
-          {` of ${totalCapacity} spots`}
-          {isFull && ' \u00B7 Full'}
+          {isFeatured ? ' going' : ` of ${totalCapacity} spots`}
+          {!isFeatured && isFull && ' \u00B7 Full'}
         </Text>
         <View style={styles.ctaSpacer} />
         {isPast ? (

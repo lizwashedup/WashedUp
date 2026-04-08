@@ -28,6 +28,7 @@ import {
     ScrollView,
     Share,
     StyleSheet,
+    Switch,
     Text,
     TextInput,
     TouchableOpacity,
@@ -40,7 +41,7 @@ import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import Colors from '../../constants/Colors';
-import { capDisplayCount, MAX_GROUP, MIN_GROUP } from '../../constants/GroupLimits';
+import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_MAX_CAPACITY, FEATURED_DEFAULT_CAPACITY } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
@@ -92,6 +93,7 @@ interface PlanDetail {
   status: string;
   creator_user_id: string;
   tickets_url: string | null;
+  is_featured: boolean;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -192,7 +194,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
-      status, member_count, creator_user_id, tickets_url, neighborhood, slug
+      status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured
     `)
     .eq('id', id)
     .single();
@@ -242,6 +244,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     status: row.status,
     creator_user_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
+    is_featured: row.is_featured ?? false,
     member_count: row.member_count ?? 0,
     creator,
   };
@@ -361,6 +364,10 @@ export default function PlanDetailScreen() {
     buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
   }>({ visible: false, title: '' });
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
+  const [isOfficialCreator, setIsOfficialCreator] = useState(false);
+  const [featuredToggle, setFeaturedToggle] = useState(false);
+  const [featuredCapacity, setFeaturedCapacity] = useState(FEATURED_DEFAULT_CAPACITY);
+  const [featuredSaving, setFeaturedSaving] = useState(false);
 
   const { blockUser } = useBlock();
 
@@ -372,11 +379,12 @@ export default function PlanDetailScreen() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('gender, birthday')
+        .select('gender, birthday, is_official_host')
         .eq('id', user.id)
         .single();
 
       if (profile?.gender) setUserGender(profile.gender);
+      if (profile?.is_official_host) setIsOfficialCreator(true);
       if (profile?.birthday) {
         const [by, bm, bd] = profile.birthday.split('-').map(Number);
         const birth = new Date(by, bm - 1, bd); // local time — avoids UTC midnight timezone shift
@@ -402,6 +410,15 @@ export default function PlanDetailScreen() {
     enabled: !!id,
     staleTime: 60_000,
   });
+
+  // Sync featured state with plan data
+  useEffect(() => {
+    if (!plan) return;
+    setFeaturedToggle(plan.is_featured);
+    if (plan.is_featured) {
+      setFeaturedCapacity((plan.max_invites ?? 99) + 1);
+    }
+  }, [plan?.id, plan?.is_featured, plan?.max_invites]);
 
   // Resolve map coordinates — use stored coords, or geocode from location_text
   useEffect(() => {
@@ -487,9 +504,12 @@ export default function PlanDetailScreen() {
 
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
+  const isFeatured = plan?.is_featured ?? false;
   // Use actual member count when available — member_count can be out of sync
-  const displayMemberCount = members.length > 0 ? capDisplayCount(members.length) : capDisplayCount(plan?.member_count ?? 0);
-  const totalCapacity = Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
+  const displayMemberCount = members.length > 0 ? capDisplayCount(members.length, isFeatured) : capDisplayCount(plan?.member_count ?? 0, isFeatured);
+  const totalCapacity = isFeatured
+    ? (plan?.max_invites ?? 99) + 1
+    : Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
   const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
@@ -724,20 +744,34 @@ export default function PlanDetailScreen() {
 
     setEditSaving(true);
     try {
+      const updatePayload: Record<string, any> = {
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        host_message: editCreatorMessage.trim() || null,
+        location_text: editLocation.trim() || null,
+        location_lat: editLocationLat,
+        location_lng: editLocationLng,
+        tickets_url: editTicketUrl.trim() || null,
+        primary_vibe: editCategory?.toLowerCase() ?? null,
+        gender_rule: editGenderRule,
+        max_invites: editGroupSize,
+      };
+
+      // Official creators can toggle featured status
+      if (isOfficialCreator) {
+        updatePayload.is_featured = featuredToggle;
+        if (featuredToggle) {
+          updatePayload.max_invites = featuredCapacity - 1; // max_invites = capacity - 1 (creator counts as 1)
+        } else if (plan.is_featured && !featuredToggle) {
+          // Toggled off — reset to normal max
+          updatePayload.max_invites = Math.min(editGroupSize, MAX_GROUP - 1);
+          updatePayload.is_featured = false;
+        }
+      }
+
       const { error } = await supabase
         .from('events')
-        .update({
-          title: editTitle.trim(),
-          description: editDescription.trim() || null,
-          host_message: editCreatorMessage.trim() || null,
-          location_text: editLocation.trim() || null,
-          location_lat: editLocationLat,
-          location_lng: editLocationLng,
-          tickets_url: editTicketUrl.trim() || null,
-          primary_vibe: editCategory?.toLowerCase() ?? null,
-          gender_rule: editGenderRule,
-          max_invites: editGroupSize,
-        })
+        .update(updatePayload)
         .eq('id', plan.id)
         .eq('creator_user_id', currentUserId);
 
@@ -932,7 +966,7 @@ export default function PlanDetailScreen() {
       genderLabel,
     ].filter(Boolean);
 
-  const groupSizeLabel = totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
+  const groupSizeLabel = isFeatured ? 'WashedUp Event' : totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -1188,7 +1222,11 @@ export default function PlanDetailScreen() {
             <Users size={18} color={Colors.terracotta} strokeWidth={2} />
             <View style={styles.logisticsContent}>
               <Text style={styles.logisticsMain}>
-                {`${displayMemberCount} of ${totalCapacity} spots filled`}
+                {isFeatured
+                  ? (isCreator && isOfficialCreator
+                    ? `${displayMemberCount} of ${totalCapacity} spots filled`
+                    : `${displayMemberCount} going`)
+                  : `${displayMemberCount} of ${totalCapacity} spots filled`}
               </Text>
               <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
             </View>
@@ -1216,7 +1254,7 @@ export default function PlanDetailScreen() {
         {/* H. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && isEligible && !isFull && (
           <View style={styles.ctaBlock}>
-            {spotsLeft > 0 && spotsLeft <= 2 && (
+            {!isFeatured && spotsLeft > 0 && spotsLeft <= 2 && (
               <Text style={styles.ctaInfo}>
                 {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left — group closes soon
               </Text>
@@ -1657,6 +1695,65 @@ export default function PlanDetailScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={manageStyles.stepperValueSub}>including you</Text>
+
+              {/* Featured Event toggle — official creators only */}
+              {isCreator && isOfficialCreator && (
+                <View style={manageStyles.featuredSection}>
+                  <View style={manageStyles.featuredRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={manageStyles.label}>Feature as WashedUp Event</Text>
+                      <Text style={manageStyles.hint}>Allows custom capacity (50–500)</Text>
+                    </View>
+                    <Switch
+                      value={featuredToggle}
+                      onValueChange={(val) => {
+                        hapticLight();
+                        setFeaturedToggle(val);
+                        if (val) {
+                          setFeaturedCapacity(plan?.is_featured ? (plan.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
+                        }
+                      }}
+                      trackColor={{ false: Colors.border, true: Colors.goldenAmber }}
+                      thumbColor={Colors.white}
+                    />
+                  </View>
+                  {featuredToggle && (
+                    <View style={manageStyles.capacitySection}>
+                      <Text style={manageStyles.capacityValue}>{featuredCapacity} people</Text>
+                      <View style={manageStyles.stepperRow}>
+                        <TouchableOpacity
+                          style={[manageStyles.stepperBtn, featuredCapacity <= FEATURED_MIN_CAPACITY && manageStyles.stepperBtnDisabled]}
+                          onPress={() => {
+                            if (featuredCapacity > FEATURED_MIN_CAPACITY) {
+                              hapticLight();
+                              setFeaturedCapacity((c) => Math.max(FEATURED_MIN_CAPACITY, c - 50));
+                            }
+                          }}
+                          disabled={featuredCapacity <= FEATURED_MIN_CAPACITY}
+                        >
+                          <Text style={manageStyles.stepperBtnText}>−</Text>
+                        </TouchableOpacity>
+                        <View style={manageStyles.stepperValue}>
+                          <Text style={manageStyles.stepperValueText}>{featuredCapacity}</Text>
+                          <Text style={manageStyles.stepperValueSub}>capacity</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[manageStyles.stepperBtn, featuredCapacity >= FEATURED_MAX_CAPACITY && manageStyles.stepperBtnDisabled]}
+                          onPress={() => {
+                            if (featuredCapacity < FEATURED_MAX_CAPACITY) {
+                              hapticLight();
+                              setFeaturedCapacity((c) => Math.min(FEATURED_MAX_CAPACITY, c + 50));
+                            }
+                          }}
+                          disabled={featuredCapacity >= FEATURED_MAX_CAPACITY}
+                        >
+                          <Text style={manageStyles.stepperBtnText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
 
               {/* Save button */}
               <TouchableOpacity
@@ -2552,4 +2649,25 @@ const manageStyles = StyleSheet.create({
     marginTop: 8,
   },
   cancelBtnText: { color: Colors.cancelRed, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
+  featuredSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  featuredRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  capacitySection: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  capacityValue: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+    marginBottom: 8,
+  },
 });

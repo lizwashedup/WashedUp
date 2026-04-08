@@ -102,7 +102,7 @@ export default function MarkEarnedModal({ userId }: Props) {
 
           {/* Icon container */}
           <View style={[styles.iconContainer, isIdentity ? styles.iconSquare : styles.iconCircle]}>
-            <MarkIcon iconName={current.icon_name} size={72} />
+            <MarkIcon iconName={current.icon_name} size={48} />
           </View>
 
           {/* Mark name */}

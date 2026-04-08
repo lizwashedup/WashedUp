@@ -23,6 +23,7 @@ import * as Location from 'expo-location';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { ImagePlus, X, FileText, Trash2 } from 'lucide-react-native';
+import FirstPlanCelebration from '../../../components/FirstPlanCelebration';
 import { SharePlanModal } from '../../../components/modals/SharePlanModal';
 import ProfileButton from '../../../components/ProfileButton';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
@@ -387,6 +388,7 @@ export default function PostScreen() {
   // Submit
   const [loading, setLoading] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [firstPlanCelebrationVisible, setFirstPlanCelebrationVisible] = useState(false);
   const [postedPlanId, setPostedPlanId] = useState<string | null>(null);
   const [postedPlanTitle, setPostedPlanTitle] = useState('');
   const [postedSpotsLeft, setPostedSpotsLeft] = useState<number | undefined>();
@@ -593,6 +595,20 @@ export default function PostScreen() {
         genderPref === 'men_only' ? 'Men only' :
         genderPref === 'nonbinary_only' ? 'Nonbinary only' : undefined
       );
+
+      // Check if this is the user's first plan ever — show celebration once
+      const hasSeen = await AsyncStorage.getItem('hasSeenFirstPlanCelebration');
+      if (!hasSeen) {
+        const { count } = await supabase
+          .from('events')
+          .select('id', { count: 'exact', head: true })
+          .eq('creator_user_id', user.id);
+        if (count === 1) {
+          setFirstPlanCelebrationVisible(true);
+          await AsyncStorage.setItem('hasSeenFirstPlanCelebration', '1');
+        }
+      }
+
       setShareModalVisible(true);
       setImageUrl(null);
       setTitle(''); setLocation(''); setLocationRaw(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
@@ -1047,6 +1063,11 @@ export default function PostScreen() {
           )}
         </View>
       </KeyboardAvoidingView>
+
+      <FirstPlanCelebration
+        visible={firstPlanCelebrationVisible}
+        onDismiss={() => setFirstPlanCelebrationVisible(false)}
+      />
 
       <SharePlanModal
         visible={shareModalVisible}

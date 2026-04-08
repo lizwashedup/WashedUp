@@ -170,7 +170,7 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
                 {/* Milestone mark pill */}
                 {marks?.highest_milestone_slug && marks.highest_milestone_icon && (
                   <View style={styles.milestonePill}>
-                    <MarkIcon iconName={marks.highest_milestone_icon} size={14} />
+                    <MarkIcon iconName={marks.highest_milestone_icon} size={20} />
                     <Text style={styles.milestonePillText}>{marks.highest_milestone_name}</Text>
                   </View>
                 )}
@@ -192,7 +192,7 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
                   activeOpacity={0.7}
                 >
                   <View style={styles.identityPill}>
-                    <MarkIcon iconName={marks.pinned_identity_icon} size={16} />
+                    <MarkIcon iconName={marks.pinned_identity_icon} size={20} />
                     <Text style={styles.identityPillText}>{marks.pinned_identity_name}</Text>
                   </View>
                   {identityExpanded && (
