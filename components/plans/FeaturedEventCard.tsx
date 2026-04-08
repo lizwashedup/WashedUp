@@ -114,8 +114,10 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
       accessibilityLabel={`${plan.title} WashedUp Event`}
       accessibilityRole="button"
     >
-      {/* WashedUp Event label */}
-      <Text style={styles.featuredLabel}>WASHEDUP EVENT</Text>
+      {/* WashedUp Event pill */}
+      <View style={styles.featuredPill}>
+        <Text style={styles.featuredPillText}>washedup event</Text>
+      </View>
 
       {/* Creator Info */}
       <View style={styles.creatorRow}>
@@ -239,12 +241,19 @@ const styles = StyleSheet.create({
   cardSolo: {
     width: '100%' as any,
   },
-  featuredLabel: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: 10,
-    letterSpacing: 1.2,
-    color: Colors.goldenAmber,
+  featuredPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.goldenAmberTint15,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
     marginBottom: 10,
+  },
+  featuredPillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: Colors.goldenAmber,
+    letterSpacing: 0.2,
   },
   creatorRow: {
     flexDirection: 'row',

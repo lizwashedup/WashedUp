@@ -7,6 +7,7 @@ const brand = {
   // ── Primary palette ──────────────────────────────────────────────────────
   terracotta: '#D97746', // Primary accent — buttons, active states, CTA
   goldenAmber: '#F2A32D', // Secondary accent — badges, highlights
+  goldenAmberTint15: 'rgba(242,163,45,0.15)', // goldenAmber @ 15% — pill backgrounds on featured cards
   parchment: '#F8F5F0', // App background
   asphalt: '#1E1E1E', // Primary text
   white: '#FFFFFF',
