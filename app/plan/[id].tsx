@@ -964,8 +964,14 @@ export default function PlanDetailScreen() {
         {/* B. Plan Title */}
         <Text style={styles.planTitle}>{plan.title}</Text>
 
-        {/* C. Category Tags */}
-        {categoryTags.length > 0 && (
+        {/* C. Category Tags — "washedup event" pill for featured plans, otherwise regular category */}
+        {isFeatured ? (
+          <View style={styles.categoryTagsRow}>
+            <View style={styles.featuredPill}>
+              <Text style={styles.featuredPillText}>washedup event</Text>
+            </View>
+          </View>
+        ) : categoryTags.length > 0 ? (
           <View style={styles.categoryTagsRow}>
             {categoryTags.map((tag) => (
               <View key={tag} style={styles.categoryTag}>
@@ -973,7 +979,7 @@ export default function PlanDetailScreen() {
               </View>
             ))}
           </View>
-        )}
+        ) : null}
 
         {/* D. Description */}
         {plan.description && (
@@ -1709,6 +1715,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  featuredPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.goldenAmberTint15,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  featuredPillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.goldenAmber,
+    letterSpacing: 0.2,
   },
   categoryTagText: {
     fontFamily: Fonts.sans,

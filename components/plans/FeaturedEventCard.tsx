@@ -7,6 +7,7 @@ import {
   ActionSheetIOS,
   Platform,
   Alert,
+  Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +16,7 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { buildPlanShareContent } from '../../lib/sharePlan';
 
 interface FeaturedEventCardProps {
   plan: {
@@ -26,6 +28,7 @@ interface FeaturedEventCardProps {
     category: string | null;
     max_invites: number;
     member_count: number;
+    slug?: string | null;
     is_featured?: boolean;
     creator: {
       first_name_display: string;
@@ -92,6 +95,21 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
     onWishlist?.(plan.id, isWishlisted);
   }, [plan.id, isWishlisted, onWishlist]);
 
+  const handleShare = useCallback((e: any) => {
+    e?.stopPropagation?.();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const share = buildPlanShareContent({
+      id: plan.id,
+      title: plan.title,
+      start_time: plan.start_time,
+      location_text: plan.location_text,
+      slug: plan.slug ?? null,
+      member_count: plan.member_count,
+      max_invites: plan.max_invites,
+    });
+    Share.share({ message: share.message, url: share.url });
+  }, [plan.id, plan.title, plan.start_time, plan.location_text, plan.slug, plan.member_count, plan.max_invites]);
+
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(`/plan/${plan.id}`);
@@ -114,9 +132,32 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
       accessibilityLabel={`${plan.title} WashedUp Event`}
       accessibilityRole="button"
     >
-      {/* WashedUp Event pill */}
-      <View style={styles.featuredPill}>
-        <Text style={styles.featuredPillText}>washedup event</Text>
+      {/* Top row: pill on left, share + heart icons in the top-right corner */}
+      <View style={styles.topRow}>
+        <View style={styles.featuredPill}>
+          <Text style={styles.featuredPillText}>washedup event</Text>
+        </View>
+        <View style={styles.topRowIcons}>
+          <TouchableOpacity
+            onPress={handleShare}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Share plan"
+          >
+            <Ionicons name="share-outline" size={18} color={Colors.asphalt} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleWishlist}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={isWishlisted ? 'Remove from saved' : 'Save plan'}
+          >
+            <Heart
+              size={18}
+              color={isWishlisted ? Colors.errorRed : Colors.asphalt}
+              fill={isWishlisted ? Colors.errorRed : 'transparent'}
+              strokeWidth={2}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Creator Info */}
@@ -137,16 +178,6 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
           <Text style={styles.creatorName} numberOfLines={1}>
             {`Posted by ${plan.creator?.first_name_display ?? 'Creator'}`}
           </Text>
-        </View>
-        <View style={styles.headerIcons}>
-          <TouchableOpacity onPress={handleWishlist} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Heart
-              size={18}
-              color={isWishlisted ? Colors.errorRed : Colors.warmGray}
-              fill={isWishlisted ? Colors.errorRed : 'transparent'}
-              strokeWidth={2}
-            />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -241,13 +272,23 @@ const styles = StyleSheet.create({
   cardSolo: {
     width: '100%' as any,
   },
+  topRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  topRowIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
   featuredPill: {
     alignSelf: 'flex-start',
     backgroundColor: Colors.goldenAmberTint15,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-    marginBottom: 10,
   },
   featuredPillText: {
     fontFamily: Fonts.sansBold,
@@ -285,10 +326,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.asphalt,
     flex: 1,
-  },
-  headerIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   title: {
     fontFamily: Fonts.displayBold,

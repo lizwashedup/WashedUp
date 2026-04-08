@@ -57,6 +57,7 @@ interface PlanCardPlan {
   category: string | null;
   max_invites: number;
   member_count: number;
+  slug?: string | null;
   is_featured?: boolean;
   creator: {
     first_name_display: string;
@@ -302,7 +303,7 @@ export default function PlansScreen() {
     queryFn: async () => {
       const { data: events, error } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, is_featured')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured')
         .eq('is_featured', true)
         .in('status', ['forming', 'active', 'full'])
         .gt('start_time', new Date().toISOString())
@@ -351,6 +352,7 @@ export default function PlansScreen() {
           category: e.primary_vibe ?? null,
           max_invites: e.max_invites ?? 0,
           member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
+          slug: e.slug ?? null,
           is_featured: true,
           creator: {
             first_name_display: hp?.first_name_display ?? 'Creator',
