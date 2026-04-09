@@ -193,9 +193,10 @@ interface BubbleProps {
   onReaction?: (messageId: string, emoji?: string) => void;
   onMessageLongPress?: (message: ChatMessage, isOwn: boolean) => void;
   onReplyTap?: (messageId: string) => void;
+  onAvatarPress?: (userId: string) => void;
 }
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, planTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap }: BubbleProps) {
+const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, planTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap, onAvatarPress }: BubbleProps) {
   if (message.message_type === 'system') {
     let displayContent = message.content;
     if (planTitle) {
@@ -246,15 +247,22 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
       {!isOwn && (
         <View style={bubbleStyles.avatarSlot}>
           {showAvatar ? (
-            message.sender?.avatar_url ? (
-              <Image source={{ uri: message.sender.avatar_url }} style={bubbleStyles.avatar} contentFit="cover" />
-            ) : (
-              <View style={[bubbleStyles.avatar, bubbleStyles.avatarFallback]}>
-                <Text style={bubbleStyles.avatarInitial}>
-                  {message.sender?.first_name?.[0]?.toUpperCase() ?? '?'}
-                </Text>
-              </View>
-            )
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => onAvatarPress?.(message.user_id)}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              accessibilityLabel={`View ${message.sender?.first_name ?? 'member'}'s profile`}
+            >
+              {message.sender?.avatar_url ? (
+                <Image source={{ uri: message.sender.avatar_url }} style={bubbleStyles.avatar} contentFit="cover" />
+              ) : (
+                <View style={[bubbleStyles.avatar, bubbleStyles.avatarFallback]}>
+                  <Text style={bubbleStyles.avatarInitial}>
+                    {message.sender?.first_name?.[0]?.toUpperCase() ?? '?'}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
           ) : null}
         </View>
       )}
@@ -848,11 +856,16 @@ export default function ChatScreen() {
               </TouchableOpacity>
             ))}
             {event.members.length > 5 && (
-              <View style={chatStyles.memberItem}>
+              <TouchableOpacity
+                style={chatStyles.memberItem}
+                onPress={() => router.push(`/plan/${id}` as any)}
+                activeOpacity={0.7}
+                accessibilityLabel="View all members"
+              >
                 <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
                   <Text style={chatStyles.memberOverflowText}>+{event.members.length - 4}</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
             )}
           </View>
         )}
@@ -981,6 +994,7 @@ export default function ChatScreen() {
                         listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
                       }
                     }}
+                    onAvatarPress={(uid) => setMiniProfileUserId(uid)}
                   />
                 </View>
               );
