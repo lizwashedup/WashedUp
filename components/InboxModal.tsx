@@ -3,7 +3,8 @@ import { hapticLight } from '../lib/haptics';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Bell, Clock, Send } from 'lucide-react-native';
-import React, { useCallback, useState } from 'react';
+import * as Notifications from 'expo-notifications';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -30,6 +31,16 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   const queryClient = useQueryClient();
   const router = useRouter();
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+
+  // Clear the home-screen badge whenever the inbox is opened. The act of
+  // viewing the inbox is the user's "I've seen these" signal — even if they
+  // don't tap Clear All. The next push from the backend will recompute the
+  // correct badge based on remaining unread state.
+  useEffect(() => {
+    if (visible) {
+      Notifications.setBadgeCountAsync(0).catch(() => {});
+    }
+  }, [visible]);
 
   const { data: pendingInvites = [], refetch: refetchInvites, isLoading: loadingInvites } = useQuery({
     queryKey: ['pending-invites', userId],

@@ -250,8 +250,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     return () => sub.remove();
   }, []);
 
-  // Clear app icon badge when app comes to foreground
+  // Clear the app icon badge on cold launch and on every foreground
+  // transition. AppState 'change' does NOT fire for the initial 'active'
+  // state on a cold launch, so we also call setBadgeCountAsync once on
+  // mount — otherwise the badge persists from the last push until the
+  // user backgrounds and refocuses the app. Works on iOS (native badge)
+  // and Android (where the launcher supports app badges).
   useEffect(() => {
+    Notifications.setBadgeCountAsync(0).catch(() => {});
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         Notifications.setBadgeCountAsync(0).catch(() => {});
