@@ -10,6 +10,12 @@ export interface MessageReaction {
   reaction: string;
 }
 
+export interface ReplyTo {
+  id: string;
+  content: string;
+  sender_name: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   event_id: string;
@@ -18,6 +24,8 @@ export interface ChatMessage {
   message_type: 'user' | 'system' | 'location';
   image_url?: string | null;
   created_at: string;
+  reply_to_message_id?: string | null;
+  reply_to?: ReplyTo | null;
   reactions?: MessageReaction[];
   sender?: {
     id: string;
@@ -60,6 +68,8 @@ export function useChat(eventId: string) {
   const currentUserIdRef = useRef<string>('');
   // Ref so the real-time channel closure always has the latest blocked set
   const blockedIdsRef = useRef<Record<string, boolean>>({});
+  const reactionInFlightRef = useRef<Set<string>>(new Set());
+  const messagesRef = useRef<ChatMessage[]>([]);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -70,6 +80,9 @@ export function useChat(eventId: string) {
       }
     });
   }, []);
+
+  // Keep messagesRef in sync for stable callbacks
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   const cancelledRef = useRef(false);
 
@@ -89,12 +102,30 @@ export function useChat(eventId: string) {
           const enriched = await attachSenders([newMsg]);
           if (!cancelledRef.current) {
             setMessages(prev => {
-              // Drop optimistic placeholders from the same user (real row now confirmed)
               const deduped = prev.filter(m => !(m.id.startsWith('optimistic-') && m.user_id === newMsg.user_id));
-              // Guard against duplicate real rows
               if (deduped.some(m => m.id === enriched[0].id)) return deduped;
-              return [...deduped, enriched[0]];
+              let msg = enriched[0];
+              // Resolve reply reference from existing messages
+              if (msg.reply_to_message_id) {
+                const parent = deduped.find(m => m.id === msg.reply_to_message_id);
+                if (parent) {
+                  msg = { ...msg, reply_to: { id: parent.id, content: parent.content, sender_name: parent.sender?.first_name ?? null } };
+                }
+              }
+              return [...deduped, msg];
             });
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
+        (payload) => {
+          const updated = payload.new as any;
+          if (updated?.id && !cancelledRef.current) {
+            setMessages(prev => prev.map(m =>
+              m.id === updated.id ? { ...m, content: updated.content, image_url: updated.image_url } : m,
+            ));
           }
         },
       )
@@ -119,7 +150,7 @@ export function useChat(eventId: string) {
       const [{ data }, { data: { user } }] = await Promise.all([
         supabase
           .from('messages')
-          .select('id, event_id, user_id, content, message_type, image_url, created_at')
+          .select('id, event_id, user_id, content, message_type, image_url, created_at, reply_to_message_id')
           .eq('event_id', eventId)
           .order('created_at', { ascending: true }),
         supabase.auth.getUser(),
@@ -160,7 +191,18 @@ export function useChat(eventId: string) {
 
         const filtered = (data ?? []).filter((msg: any) => !blockedLookup[msg.user_id]);
         const enriched = await attachSenders(filtered);
-        if (!cancelledRef.current) setMessages(enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] })));
+        const withReactions = enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] }));
+        // Resolve reply references from the same message array
+        const msgMap: Record<string, ChatMessage> = {};
+        withReactions.forEach(m => { msgMap[m.id] = m; });
+        const withReplies = withReactions.map(m => {
+          if (m.reply_to_message_id && msgMap[m.reply_to_message_id]) {
+            const parent = msgMap[m.reply_to_message_id];
+            return { ...m, reply_to: { id: parent.id, content: parent.content, sender_name: parent.sender?.first_name ?? null } };
+          }
+          return m;
+        });
+        if (!cancelledRef.current) setMessages(withReplies);
       } else {
         if (data) {
           const enriched = await attachSenders(data);
@@ -173,59 +215,123 @@ export function useChat(eventId: string) {
   }, [eventId]);
 
   const toggleReaction = useCallback(async (messageId: string, reaction = 'heart') => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const userId = currentUserIdRef.current;
+    if (!userId) return;
 
-    const { data: existing } = await supabase
+    // Prevent concurrent reaction toggles on the same message
+    if (reactionInFlightRef.current.has(messageId)) return;
+    reactionInFlightRef.current.add(messageId);
+
+    // Snapshot current reactions for rollback on failure
+    const snapshot = messagesRef.current.find(m => m.id === messageId)?.reactions ?? [];
+
+    try {
+    const { data: existingRows, error: fetchErr } = await supabase
       .from('message_reactions')
-      .select('id')
+      .select('id, reaction')
       .eq('message_id', messageId)
-      .eq('user_id', user.id)
-      .eq('reaction', reaction)
-      .maybeSingle();
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1);
 
-    if (existing) {
-      await supabase.from('message_reactions').delete().eq('id', existing.id);
+    if (fetchErr) throw fetchErr;
+
+    const existing = existingRows?.[0] ?? null;
+
+    if (existing && existing.reaction === reaction) {
       setMessages(prev => prev.map(m =>
         m.id === messageId
-          ? { ...m, reactions: (m.reactions ?? []).filter(r => !(r.user_id === user.id && r.reaction === reaction)) }
+          ? { ...m, reactions: (m.reactions ?? []).filter(r => r.user_id !== userId) }
           : m,
       ));
+      const { error: delErr } = await supabase.from('message_reactions').delete().eq('id', existing.id);
+      if (delErr) throw delErr;
+    } else if (existing) {
+      setMessages(prev => prev.map(m =>
+        m.id === messageId
+          ? { ...m, reactions: (m.reactions ?? []).map(r => r.user_id === userId ? { ...r, reaction } : r) }
+          : m,
+      ));
+      const { error: updErr } = await supabase.from('message_reactions').update({ reaction }).eq('id', existing.id);
+      if (updErr) throw updErr;
     } else {
-      await supabase.from('message_reactions').insert({
+      setMessages(prev => prev.map(m =>
+        m.id === messageId
+          ? { ...m, reactions: [...(m.reactions ?? []), { user_id: userId, reaction }] }
+          : m,
+      ));
+      const { error: insErr } = await supabase.from('message_reactions').insert({
         message_id: messageId,
-        user_id: user.id,
+        user_id: userId,
         reaction,
       });
-      setMessages(prev => prev.map(m =>
-        m.id === messageId
-          ? { ...m, reactions: [...(m.reactions ?? []), { user_id: user.id, reaction }] }
-          : m,
-      ));
+      if (insErr) throw insErr;
     }
-  }, []);
+
+    // Send push notification (only for new/replaced reactions, not removals)
+    if (!(existing && existing.reaction === reaction)) {
+      try {
+        const msg = messagesRef.current.find(m => m.id === messageId);
+        if (msg && msg.user_id !== userId) {
+          // Dedup: skip if we already notified for this message in the last 60s
+          const { count } = await supabase
+            .from('app_notifications')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', msg.user_id)
+            .eq('event_id', eventId)
+            .eq('type', 'new_message')
+            .gte('created_at', new Date(Date.now() - 60000).toISOString())
+            .like('title', `%reacted%`);
+
+          if ((count ?? 0) === 0) {
+            const { data: profile } = await supabase
+              .from('profiles_public')
+              .select('first_name_display')
+              .eq('id', userId)
+              .maybeSingle();
+            const name = profile?.first_name_display ?? 'Someone';
+            const emojiDisplay = reaction === 'heart' ? '\u2764\uFE0F' : reaction;
+            await supabase.from('app_notifications').insert({
+              user_id: msg.user_id,
+              type: 'new_message',
+              title: `${name} reacted ${emojiDisplay}`,
+              body: msg.content?.slice(0, 80) || 'to your message',
+              event_id: eventId,
+            });
+          }
+        }
+      } catch (e) { console.warn('[WashedUp] Reaction notification failed:', e); }
+    }
+    } catch (err) {
+      console.warn('[WashedUp] Reaction toggle failed, rolling back:', err);
+      setMessages(prev => prev.map(m =>
+        m.id === messageId ? { ...m, reactions: snapshot } : m,
+      ));
+    } finally {
+      reactionInFlightRef.current.delete(messageId);
+    }
+  }, [eventId]);
 
   const deleteMessage = useCallback(async (messageId: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const userId = currentUserIdRef.current;
+    if (!userId) return;
 
-    // Capture state for rollback before optimistic removal
-    let previousMessages: typeof messages = [];
+    let previousMessages: ChatMessage[] = [];
     setMessages(prev => { previousMessages = prev; return prev.filter(m => m.id !== messageId); });
 
     const { error } = await supabase
       .from('messages')
       .delete()
       .eq('id', messageId)
-      .eq('user_id', user.id);
+      .eq('user_id', userId);
 
     if (error) {
       setMessages(previousMessages);
       Alert.alert('Could not delete', 'Something went wrong. Please try again.');
     }
-  }, [messages]);
+  }, []);
 
-  const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
+  const sendMessage = useCallback(async (content: string, imageUrl?: string, replyToId?: string) => {
     const filter = checkContent(content);
     if (!filter.ok) {
       Alert.alert('Content not allowed', filter.reason ?? 'Please revise your message.');
@@ -238,6 +344,15 @@ export function useChat(eventId: string) {
 
     // Optimistic insert — synchronous, appears immediately with zero lag
     const optimisticId = `optimistic-${Date.now()}`;
+    // Build reply_to for optimistic display
+    let replyTo: ReplyTo | null = null;
+    if (replyToId) {
+      const parentMsg = messagesRef.current.find(m => m.id === replyToId);
+      if (parentMsg) {
+        replyTo = { id: parentMsg.id, content: parentMsg.content, sender_name: parentMsg.sender?.first_name ?? null };
+      }
+    }
+
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
       event_id: eventId,
@@ -246,19 +361,24 @@ export function useChat(eventId: string) {
       message_type: 'user',
       image_url: imageUrl ?? null,
       created_at: new Date().toISOString(),
+      reply_to_message_id: replyToId ?? null,
+      reply_to: replyTo,
       reactions: [],
       sender: null,
     };
     setMessages(prev => [...prev, optimisticMsg]);
 
     // Insert and select back the real row so we can confirm the message even if real-time is slow
-    const { data: inserted, error } = await supabase.from('messages').insert({
+    const insertData: any = {
       event_id: eventId,
       user_id: userId,
       content: content || '',
       message_type: 'user',
       image_url: imageUrl ?? null,
-    }).select('id, created_at').single();
+    };
+    if (replyToId && replyTo) insertData.reply_to_message_id = replyToId;
+
+    const { data: inserted, error } = await supabase.from('messages').insert(insertData).select('id, created_at').single();
 
     if (error) {
       setMessages(prev => prev.filter(m => m.id !== optimisticId));
@@ -310,5 +430,26 @@ export function useChat(eventId: string) {
     }
   }, [eventId]);
 
-  return { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction, refetch: fetchMessages };
+  const editMessage = useCallback(async (messageId: string, newContent: string) => {
+    const userId = currentUserIdRef.current;
+    if (!userId) return;
+
+    // Optimistic update
+    setMessages(prev => prev.map(m =>
+      m.id === messageId ? { ...m, content: newContent } : m,
+    ));
+
+    const { error } = await supabase
+      .from('messages')
+      .update({ content: newContent })
+      .eq('id', messageId)
+      .eq('user_id', userId);
+
+    if (error) {
+      fetchMessages(true);
+      Alert.alert('Could not edit', 'Something went wrong. Please try again.');
+    }
+  }, [fetchMessages]);
+
+  return { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, editMessage, toggleReaction, refetch: fetchMessages };
 }

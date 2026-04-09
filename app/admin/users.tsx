@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticWarning, hapticSuccess } from '../../lib/haptics';
 import { ArrowLeft, Search, UserX } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
@@ -79,7 +79,7 @@ export default function AdminUsersScreen() {
           style: 'destructive',
           onPress: async () => {
             setRemoving(user.id);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            hapticWarning();
             try {
               const { data: { session } } = await supabase.auth.getSession();
               if (!session) throw new Error('Not authenticated');
@@ -90,7 +90,7 @@ export default function AdminUsersScreen() {
               if (fnError) throw fnError;
               if (fnData?.error) throw new Error(fnData.error);
 
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              hapticSuccess();
               queryClient.invalidateQueries({ queryKey: ['admin-users'] });
               Alert.alert('Done', `${name} has been deleted and banned.`);
             } catch (e: any) {

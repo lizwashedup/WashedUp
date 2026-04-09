@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -80,7 +80,7 @@ export default function OnboardingBasicsScreen() {
     if (tempYear === null || tempMonth === null || tempDay === null) return;
     const d = new Date(tempYear, tempMonth, Math.min(tempDay, daysInMonth));
     setBirthday(d);
-    setDateError(!is18Plus(d) ? 'You must be 18 or older to use WashedUp' : null);
+    setDateError(!is18Plus(d) ? 'You must be 18 or older to use washedup' : null);
     setShowDatePicker(false);
   };
 
@@ -114,7 +114,7 @@ export default function OnboardingBasicsScreen() {
         })
         .eq('id', user.id);
       if (error) throw error;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      hapticLight();
       router.push('/onboarding/la-check');
     } catch (e: unknown) {
       const message = e && typeof e === 'object' && 'message' in e ? String((e as { message: string }).message) : 'Something went wrong. Please try again.';
@@ -125,7 +125,7 @@ export default function OnboardingBasicsScreen() {
   };
 
   const selectGender = (g: Gender) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setGender(g);
   };
 
@@ -186,7 +186,7 @@ export default function OnboardingBasicsScreen() {
         <TouchableOpacity
           style={[styles.primaryButton, (!canContinue || loading) && styles.primaryButtonDisabled]}
           onPress={handleContinue}
-          onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+          onPressIn={() => hapticLight()}
           activeOpacity={0.9}
           disabled={!canContinue || loading}
         >

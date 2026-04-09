@@ -18,7 +18,7 @@ import { Camera } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
@@ -227,7 +227,7 @@ export default function ProfileScreen() {
   };
 
   const pickEditPhoto = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setAlertInfo({
       title: 'Change photo',
       message: 'Choose how to add your photo',
@@ -240,7 +240,7 @@ export default function ProfileScreen() {
   };
 
   const handleSaveProfile = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     Keyboard.dismiss();
     const trimmedName = editName.trim();
     if (!trimmedName) {
@@ -568,7 +568,7 @@ export default function ProfileScreen() {
             ) : handleAvailable === false ? (
               <Text style={styles.handleTaken}>Taken</Text>
             ) : null}
-            <Text style={styles.editHelp}>This is how people find you on WashedUp</Text>
+            <Text style={styles.editHelp}>This is how people find you on washedup</Text>
           </View>
 
           <View style={styles.editFieldGroup}>
@@ -794,7 +794,7 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.footer}>WashedUp · hello@washedup.app</Text>
+        <Text style={styles.footer}>washedup · hello@washedup.app</Text>
       </ScrollView>
     </SafeAreaView>
       <BrandedAlert
@@ -829,9 +829,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
+    fontWeight: '700',
+    color: '#2C1810',
   },
 
   // Profile section — avatar 100px, display name displaySmall, handle bodySmall
@@ -855,7 +855,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarInitial: {
-    fontFamily: Fonts.displayBold,
+    fontWeight: '700',
     fontSize: FontSizes.displayLG,
     color: Colors.terracotta,
   },
@@ -963,7 +963,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 8,
   },
-  deleteTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt, textAlign: 'center' },
+  deleteTitle: { fontWeight: '700', fontSize: FontSizes.displayMD, color: '#2C1810', textAlign: 'center' },
   deleteBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center', lineHeight: 22 },
   deleteListRow: {
     flexDirection: 'row',

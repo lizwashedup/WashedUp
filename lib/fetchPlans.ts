@@ -37,6 +37,8 @@ export interface Plan {
   gender_rule: string | null;
   max_invites: number | null;
   min_invites: number | null;
+  neighborhood: string | null;
+  slug: string | null;
   member_count: number;
   status: string;
   host_message: string | null;
@@ -59,6 +61,8 @@ function mapRowToPlan(item: any): Plan {
     location_lng: item.location_lng ?? null,
     image_url: item.image_url ?? null,
     category: item.primary_vibe ?? null,
+    neighborhood: item.neighborhood ?? null,
+    slug: item.slug ?? null,
     gender_rule: item.gender_rule ?? null,
     max_invites: item.max_invites ?? null,
     min_invites: item.min_invites ?? null,

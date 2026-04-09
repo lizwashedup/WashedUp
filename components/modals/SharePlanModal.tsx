@@ -9,7 +9,7 @@ import {
   Share,
   Platform,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { Share2 } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -19,6 +19,7 @@ export interface SharePlanModalProps {
   onClose: () => void;
   planTitle: string;
   planId: string;
+  slug?: string | null;
   spotsLeft?: number;
   genderLabel?: string;
   variant: 'posted' | 'joined';
@@ -29,19 +30,18 @@ export function SharePlanModal({
   onClose,
   planTitle,
   planId,
+  slug,
   spotsLeft,
   genderLabel,
   variant,
 }: SharePlanModalProps) {
-  const shareUrl = planId ? `https://washedup.app/e/${planId}` : 'https://washedup.app';
+  const shareUrl = slug ? `https://washedup.app/plans/${slug}` : planId ? `https://washedup.app/e/${planId}` : 'https://washedup.app';
 
-  const shareText =
-    variant === 'posted'
-      ? `Join me on WashedUp!: ${planTitle}${spotsLeft !== undefined ? ` ${spotsLeft} spots left` : ''}\n${shareUrl}`
-      : `I just joined ${planTitle} on WashedUp! Come with us!\n${shareUrl}`;
+  const spotsText = spotsLeft !== undefined && spotsLeft > 0 ? `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : 'Waitlist open';
+  const shareText = `${planTitle}\n${spotsText} \u00B7 ${shareUrl}`;
 
   const handleShare = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
     try {
       await Share.share({ message: shareText.replace(shareUrl, '').trim(), url: shareUrl });
     } catch {}

@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { ChevronLeft } from 'lucide-react-native';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
@@ -29,7 +29,7 @@ export default function OnboardingLACheckScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const handleYes = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -47,12 +47,12 @@ export default function OnboardingLACheckScreen() {
   };
 
   const handleNo = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setChoseNo(true);
   };
 
   const handleContinueFromNo = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -80,7 +80,7 @@ export default function OnboardingLACheckScreen() {
       <StatusBar style="dark" />
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -90,7 +90,7 @@ export default function OnboardingLACheckScreen() {
             </View>
             <View style={styles.headerRow}>
               <TouchableOpacity
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); routerBack.back(); }}
+                onPress={() => { hapticLight(); routerBack.back(); }}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 style={styles.backButton}
               >
@@ -106,7 +106,7 @@ export default function OnboardingLACheckScreen() {
                 <TouchableOpacity
                   style={styles.primaryButton}
                   onPress={handleYes}
-                  onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                  onPressIn={() => hapticLight()}
                   activeOpacity={0.9}
                   disabled={loading}
                 >
@@ -116,7 +116,7 @@ export default function OnboardingLACheckScreen() {
                 <TouchableOpacity
                   style={styles.secondaryButton}
                   onPress={handleNo}
-                  onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                  onPressIn={() => hapticLight()}
                   activeOpacity={0.9}
                   disabled={loading}
                 >
@@ -125,10 +125,10 @@ export default function OnboardingLACheckScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.waitlistHeading}>WashedUp is only in LA right now.</Text>
+                <Text style={styles.waitlistHeading}>washedup is only in LA right now.</Text>
                 <View style={styles.gap16} />
                 <Text style={styles.notLaText}>
-                  We&apos;re expanding as fast as we can. If you&apos;d like WashedUp in your city, add it below to be added to the waitlist!
+                  We&apos;re expanding as fast as we can. If you&apos;d like washedup in your city, add it below to be added to the waitlist!
                 </Text>
                 <View style={styles.gap24} />
                 <TextInput
@@ -144,7 +144,7 @@ export default function OnboardingLACheckScreen() {
                 <TouchableOpacity
                   style={styles.primaryButton}
                   onPress={handleContinueFromNo}
-                  onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                  onPressIn={() => hapticLight()}
                   activeOpacity={0.9}
                   disabled={loading}
                 >

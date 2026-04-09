@@ -7,6 +7,10 @@
     {
       "source": "/u/:handle",
       "destination": "https://upstjumasqblszevlgik.supabase.co/functions/v1/og-profile?handle=:handle"
+    },
+    {
+      "source": "/m/:code",
+      "destination": "https://upstjumasqblszevlgik.supabase.co/functions/v1/og-moment?code=:code"
     }
   ],
   "headers": [

@@ -1,0 +1,3 @@
+-- Fix retention to use session-based (industry standard), strangers-to-friends to completed only, add D1
+-- Applied via execute_sql; this file is for record-keeping
+-- See get_command_center_stats() function body for full implementation

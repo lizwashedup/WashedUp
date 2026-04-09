@@ -13,17 +13,20 @@ export interface ChatPreview {
   unread_count: number;
   is_past: boolean;
   ticket_url: string | null;
+  member_avatars: string[];
 }
 
 export function useChatList() {
   const [chats, setChats] = useState<ChatPreview[]>([]);
   const [loading, setLoading] = useState(true);
+  const userIdRef = useRef<string | null>(null);
 
   const fetchChats = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const user = (await supabase.auth.getUser()).data?.user;
       if (!user) return;
+      userIdRef.current = user.id;
 
       const { data: memberships, error: membershipsError } = await supabase
         .from('event_members')
@@ -63,13 +66,14 @@ export function useChatList() {
 
       const eventIds = eligible.map((m: any) => m.events.id);
 
-      // Run all 3 queries in parallel — they only need eventIds + user.id
-      const [{ data: allMessages }, { data: allReads }, { data: otherMessages }] = await Promise.all([
+      // Run all 4 queries in parallel — they only need eventIds + user.id
+      const [{ data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = await Promise.all([
         supabase
           .from('messages')
           .select('event_id, content, created_at, image_url, user_id')
           .in('event_id', eventIds)
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .limit(eventIds.length * 3),
         supabase
           .from('chat_reads')
           .select('event_id, last_read_at')
@@ -79,7 +83,14 @@ export function useChatList() {
           .from('messages')
           .select('event_id, created_at')
           .in('event_id', eventIds)
-          .neq('user_id', user.id),
+          .neq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(eventIds.length * 20),
+        supabase
+          .from('event_members')
+          .select('event_id, user_id, profiles_public!inner(profile_photo_url)')
+          .in('event_id', eventIds)
+          .eq('status', 'joined'),
       ]);
 
       const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; user_id: string }> = {};
@@ -101,6 +112,16 @@ export function useChatList() {
           if (p.first_name_display) senderNameMap[p.id] = p.first_name_display;
         });
       }
+
+      // Build member avatar map: eventId -> array of avatar URLs (up to 4)
+      const avatarMap: Record<string, string[]> = {};
+      (memberRows2 ?? []).forEach((r: any) => {
+        const url = (r.profiles_public as any)?.profile_photo_url;
+        if (url && r.event_id) {
+          if (!avatarMap[r.event_id]) avatarMap[r.event_id] = [];
+          if (avatarMap[r.event_id].length < 4) avatarMap[r.event_id].push(url);
+        }
+      });
 
       const readMap: Record<string, string> = {};
       (allReads ?? []).forEach((r: any) => {
@@ -126,7 +147,7 @@ export function useChatList() {
           category: event.primary_vibe ?? null,
           image_url: event.image_url ?? null,
           start_time: event.start_time,
-          member_count: event.member_count ?? 0,
+          member_count: realCounts[event.id] ?? event.member_count ?? 0,
           ticket_url: event.tickets_url ?? null,
           last_message: lastMsg
             ? (() => {
@@ -139,6 +160,7 @@ export function useChatList() {
           last_message_at: lastMsg?.created_at ?? null,
           unread_count: unreadMap[event.id] ?? 0,
           is_past: isPast,
+          member_avatars: avatarMap[event.id] ?? [],
         };
       });
 
@@ -175,9 +197,46 @@ export function useChatList() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
-          const eid = (payload.new as any)?.event_id;
-          if (eid && hasChatsRef.current && eventIdsRef.current.has(eid)) fetchChats(true);
+        async (payload) => {
+          const msg = payload.new as any;
+          const eid = msg?.event_id;
+          if (!eid || !hasChatsRef.current || !eventIdsRef.current.has(eid)) return;
+
+          // Incremental update: patch the affected chat instead of full refetch
+          try {
+            const isOwn = userIdRef.current === msg.user_id;
+            let senderName: string | null = isOwn ? 'You' : null;
+            if (!isOwn && msg.user_id) {
+              const { data: profile } = await supabase
+                .from('profiles_public')
+                .select('first_name_display')
+                .eq('id', msg.user_id)
+                .maybeSingle();
+              senderName = profile?.first_name_display ?? null;
+            }
+            const text = msg.image_url ? 'sent a photo' : msg.content;
+            const preview = senderName ? `${senderName}: ${text}` : text;
+
+            setChats(prev => {
+              const updated = prev.map(c => {
+                if (c.eventId !== eid) return c;
+                return {
+                  ...c,
+                  last_message: preview,
+                  last_message_at: msg.created_at,
+                  unread_count: isOwn ? c.unread_count : c.unread_count + 1,
+                };
+              });
+              // Re-sort: active chats by last_message_at desc
+              const active = updated.filter(c => !c.is_past).sort((a, b) =>
+                (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
+              const past = updated.filter(c => c.is_past);
+              return [...active, ...past];
+            });
+          } catch {
+            // Fallback: full refetch on error
+            fetchChats(true);
+          }
         },
       )
       .subscribe();

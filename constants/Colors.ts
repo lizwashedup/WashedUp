@@ -5,7 +5,7 @@
 
 const brand = {
   // ── Primary palette ──────────────────────────────────────────────────────
-  terracotta: '#D97746', // Primary accent — buttons, active states, CTA
+  terracotta: '#B5522E', // Primary accent — buttons, active states, CTA
   goldenAmber: '#F2A32D', // Secondary accent — badges, highlights
   goldenAmberTint15: 'rgba(242,163,45,0.15)', // goldenAmber @ 15% — pill backgrounds on featured cards
   parchment: '#F8F5F0', // App background
@@ -35,7 +35,7 @@ const brand = {
   overlayDark40: 'rgba(0,0,0,0.4)',
   overlayDark60: 'rgba(0,0,0,0.6)',
   overlayDark25: 'rgba(0,0,0,0.25)',
-  overlayWarm: 'rgba(217,119,70,0.18)',
+  overlayWarm: 'rgba(181,82,46,0.18)',
   overlayDarker: 'rgba(0,0,0,0.95)',
   overlayLight: 'rgba(255,255,255,0.15)',
   overlayWhite: 'rgba(255,255,255,0.6)',
@@ -58,12 +58,24 @@ const brand = {
   categoryOutdoors: '#5CBF7C',
   categoryFitness: '#5CBFBF',
   categoryArt: '#BF5CBF',
-  categoryComedy: '#D97746',
+  categoryComedy: '#B5522E',
   categorySports: '#5C7CBF',
   categoryWellness: '#5CBF9C',
 
+  // ── Q2 palette ───────────────────────────────────────────────────────────
+  darkWarm: '#2C1810',       // Primary text (warm dark)
+  secondary: '#78695C',      // Secondary text (dates, locations, metadata)
+  tertiary: '#A09385',       // Tertiary text (muted labels, inactive tabs)
+  iconMuted: '#C5C0B8',      // Muted icon color
+  cream: '#FAF5EC',          // Screen background (cream)
+  accentSubtle: '#F5E8E2',   // Vibe tag pill background
+  goldAccent: '#D4BF82',     // Gold decorative accent (quote borders)
+  quoteText: '#6B5D50',      // Creator message text
+  dividerWarm: '#F5EDE0',    // Card footer border, subtle dividers
+  warmTint: '#FFF8F5',       // Subtle warm background tint (active reaction badge)
+
   // ── Legacy alias (keep so old references don't break immediately) ─────────
-  primaryOrange: '#D97746',
+  primaryOrange: '#B5522E',
   backgroundCream: '#F8F5F0',
   textDark: '#1E1E1E',
   cardBackground: '#FFFFFF',

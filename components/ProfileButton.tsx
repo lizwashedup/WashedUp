@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { Mail, User } from 'lucide-react-native';
+import { Bell, User } from 'lucide-react-native';
 import React, { useRef, useState } from 'react';
 import { AppState, AppStateStatus, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors from '../constants/Colors';
@@ -128,7 +128,7 @@ export default function ProfileButton() {
         accessibilityLabel="Inbox"
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
-        <Mail size={20} color={Colors.asphalt} />
+        <Bell size={20} color={inboxCount > 0 ? '#B5522E' : '#78695C'} strokeWidth={1.5} />
         {inboxCount > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{inboxCount > 9 ? '9+' : inboxCount}</Text>

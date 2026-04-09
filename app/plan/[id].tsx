@@ -1,16 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '../../lib/haptics';
+import { buildPlanShareContent } from '../../lib/sharePlan';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
     ArrowLeft,
     Calendar,
-    Heart,
+    Camera,
     MapPin,
     MessageCircle,
     MoreHorizontal,
+    Pen,
     Ticket,
     Users
 } from 'lucide-react-native';
@@ -45,6 +47,11 @@ import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import { showAddToCalendar } from '../../lib/addToCalendar';
+import { showLocation } from 'react-native-map-link';
+import { MapView, Marker } from '../../components/MapView';
+import AlbumUploadFlow from '../../components/AlbumUploadFlow';
+import PlanAlbum from '../../components/PlanAlbum';
 
 // Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
 // Falls back to the hard-coded key so autocomplete works in preview/CI builds
@@ -81,6 +88,8 @@ interface PlanDetail {
   target_age_min: number | null;
   target_age_max: number | null;
   end_time: string | null;
+  neighborhood: string | null;
+  slug: string | null;
   status: string;
   creator_user_id: string;
   tickets_url: string | null;
@@ -141,7 +150,7 @@ function buildCalendarUrl(title: string, startTime: string, endTime?: string | n
     text: title,
     dates: `${fmt(start)}/${fmt(end)}`,
     location: location || '',
-    details: 'WashedUp plan — washedup.app',
+    details: 'washedup plan — washedup.app',
   });
   return `https://calendar.google.com/calendar/event?${params.toString()}`;
 }
@@ -154,14 +163,25 @@ function formatGenderLabel(gender_rule: string | null): string | null {
   return null;
 }
 
-function openDirections(locationText: string) {
-  const encoded = encodeURIComponent(locationText);
-  const url = Platform.OS === 'ios'
-    ? `maps://?q=${encoded}`
-    : `geo:0,0?q=${encoded}`;
-  Linking.openURL(url).catch(() => {
-    Linking.openURL(`https://maps.google.com/?q=${encoded}`);
-  });
+function openDirections(locationText: string, coords?: { latitude: number; longitude: number } | null) {
+  if (coords) {
+    showLocation({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      title: locationText,
+      dialogTitle: 'Get Directions',
+      dialogMessage: 'Choose your maps app',
+      cancelText: 'Cancel',
+    });
+  } else {
+    const encoded = encodeURIComponent(locationText);
+    const url = Platform.OS === 'ios'
+      ? `maps://?q=${encoded}`
+      : `geo:0,0?q=${encoded}`;
+    Linking.openURL(url).catch(() => {
+      Linking.openURL(`https://maps.google.com/?q=${encoded}`);
+    });
+  }
 }
 
 // ─── Data Fetching ────────────────────────────────────────────────────────────
@@ -174,7 +194,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
-      status, member_count, creator_user_id, tickets_url, is_featured
+      status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured
     `)
     .eq('id', id)
     .single();
@@ -219,6 +239,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     min_invites: row.min_invites ?? null,
     target_age_min: row.target_age_min ?? null,
     target_age_max: row.target_age_max ?? null,
+    neighborhood: row.neighborhood ?? null,
+    slug: row.slug ?? null,
     status: row.status,
     creator_user_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
@@ -308,6 +330,7 @@ export default function PlanDetailScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
+  const albumUploadRef = React.useRef<import('../components/AlbumUploadFlow').AlbumUploadFlowHandle>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [mapCoords, setMapCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [joinModalVisible, setJoinModalVisible] = useState(false);
@@ -444,16 +467,22 @@ export default function PlanDetailScreen() {
   }, [currentUserId, id]);
 
   // Waitlist check
+  const [waitlistNotified, setWaitlistNotified] = useState(false);
   useEffect(() => {
     if (!currentUserId || !id) return;
     let cancelled = false;
     supabase
       .from('event_waitlist')
-      .select('id')
+      .select('id, notified')
       .eq('event_id', id)
       .eq('user_id', currentUserId)
       .maybeSingle()
-      .then(({ data }) => { if (!cancelled) setIsOnWaitlist(!!data); });
+      .then(({ data }) => {
+        if (!cancelled) {
+          setIsOnWaitlist(!!data);
+          setWaitlistNotified(data?.notified === true);
+        }
+      });
     return () => { cancelled = true; };
   }, [currentUserId, id]);
 
@@ -483,6 +512,41 @@ export default function PlanDetailScreen() {
     : Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
+  const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
+
+  // Post-plan prompt: check if user has uploaded photos and written a moment
+  const { data: hasUploadedPhotos = false } = useQuery({
+    queryKey: ['has-uploaded-photos', id, currentUserId],
+    queryFn: async () => {
+      if (!currentUserId) return false;
+      const { count } = await supabase
+        .from('plan_photos')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_id', id)
+        .eq('uploaded_by', currentUserId);
+      return (count ?? 0) > 0;
+    },
+    enabled: isPastPlan && (isMember || isCreator) && !!currentUserId,
+  });
+
+  const { data: hasWrittenMoment = false } = useQuery({
+    queryKey: ['has-written-moment', id, currentUserId],
+    queryFn: async () => {
+      if (!currentUserId) return false;
+      const { count } = await supabase
+        .from('plan_moments')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_id', id)
+        .eq('user_id', currentUserId);
+      return (count ?? 0) > 0;
+    },
+    enabled: isPastPlan && (isMember || isCreator) && !!currentUserId,
+  });
+
+  const showPostPlanPrompt = isPastPlan && (isMember || isCreator) && (!hasUploadedPhotos || !hasWrittenMoment);
+
+  const [momentText, setMomentText] = useState('');
+  const [momentSubmitting, setMomentSubmitting] = useState(false);
 
   const manageGenderOptions = useMemo(() => {
     const opts: { label: string; value: string }[] = [
@@ -560,24 +624,26 @@ export default function PlanDetailScreen() {
         }
       }
 
-      await supabase.from('messages').insert({
+      const { error: sysError } = await supabase.from('messages').insert({
         event_id: id,
         user_id: currentUserId,
         content: 'joined the plan',
         message_type: 'system',
       });
+      if (sysError) console.warn('[WashedUp] System message insert failed:', sysError);
 
       if (greeting && greeting.trim().length > 0) {
-        await supabase.from('messages').insert({
+        const { error: greetError } = await supabase.from('messages').insert({
           event_id: id,
           user_id: currentUserId,
           content: greeting.trim(),
           message_type: 'user',
         });
+        if (greetError) console.warn('[WashedUp] Greeting insert failed:', greetError);
       }
     },
     onSuccess: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setJoinModalVisible(false);
       setJoinMessage('');
       setJoinConfirmed(false);
@@ -586,6 +652,11 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
       queryClient.invalidateQueries({ queryKey: ['wishlists'] });
+      queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
+
+      // Clear local waitlist state since the trigger deleted the row
+      setIsOnWaitlist(false);
+      setWaitlistNotified(false);
 
       setShareAfterJoinVisible(true);
     },
@@ -614,7 +685,7 @@ export default function PlanDetailScreen() {
       });
     },
     onSuccess: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      hapticWarning();
       queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
@@ -706,7 +777,7 @@ export default function PlanDetailScreen() {
 
       if (error) throw error;
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setManageModalVisible(false);
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
@@ -748,7 +819,7 @@ export default function PlanDetailScreen() {
                 message_type: 'system',
               });
 
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              hapticWarning();
               setManageModalVisible(false);
               queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
               queryClient.invalidateQueries({ queryKey: ['my-plans'] });
@@ -766,7 +837,7 @@ export default function PlanDetailScreen() {
 
   const toggleWishlist = useCallback(async () => {
     if (!currentUserId || !id) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     const next = !isWishlisted;
     setIsWishlisted(next);
     if (!next) {
@@ -782,7 +853,7 @@ export default function PlanDetailScreen() {
   const handleJoinWaitlist = useCallback(async () => {
     if (waitlistLoading || !currentUserId || !id) return;
     setWaitlistLoading(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
 
     try {
       if (isOnWaitlist) {
@@ -814,11 +885,18 @@ export default function PlanDetailScreen() {
 
   const handleShare = useCallback(async () => {
     if (!plan) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     try {
-      await Share.share({
-        message: `Join me for "${plan.title}" on WashedUp!\nhttps://washedup.app/e/${plan.id}`,
+      const share = buildPlanShareContent({
+        id: plan.id,
+        title: plan.title,
+        start_time: plan.start_time,
+        location_text: plan.location_text,
+        slug: plan.slug,
+        member_count: plan.member_count,
+        max_invites: plan.max_invites,
       });
+      await Share.share({ message: share.message, url: share.url });
     } catch {}
   }, [plan]);
 
@@ -851,7 +929,7 @@ export default function PlanDetailScreen() {
   if (planLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <Stack.Screen options={{ headerShown: false }} />
+        <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
@@ -862,7 +940,7 @@ export default function PlanDetailScreen() {
   if (planError || !plan) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <Stack.Screen options={{ headerShown: false }} />
+        <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
         <View style={styles.centered}>
           <Text style={styles.errorText}>Couldn't load this plan.</Text>
           <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 12 }}>
@@ -877,9 +955,11 @@ export default function PlanDetailScreen() {
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
-  const creatorMeta = [
-      plan.location_text,
-    ].filter(Boolean).join(' • ');
+  // Show short location under creator name — venue name only (before first comma), or neighborhood
+  const shortLocation = plan.location_text?.split(',')[0] ?? null;
+  const creatorMeta = plan.neighborhood
+    ? `${shortLocation ?? plan.neighborhood}`
+    : shortLocation ?? '';
 
   const categoryTags = [
       plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null,
@@ -890,7 +970,7 @@ export default function PlanDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
 
       {/* Custom Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
@@ -905,9 +985,9 @@ export default function PlanDetailScreen() {
         </TouchableOpacity>
         <View style={styles.headerIcons}>
           <TouchableOpacity
-            onPress={handleShare}
+            onPress={(e) => { e.stopPropagation(); handleShare(); }}
             style={styles.headerIconButton}
-            accessibilityLabel="Share this plan"
+            accessibilityLabel="Share plan"
           >
             <Ionicons name="share-outline" size={22} color={Colors.asphalt} />
           </TouchableOpacity>
@@ -916,11 +996,10 @@ export default function PlanDetailScreen() {
             style={styles.headerIconButton}
             accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
           >
-            <Heart
+            <Ionicons
+              name={isWishlisted ? 'bookmark' : 'bookmark-outline'}
               size={20}
-              color={isWishlisted ? Colors.errorRed : Colors.asphalt}
-              fill={isWishlisted ? Colors.errorRed : 'transparent'}
-              strokeWidth={2}
+              color={isWishlisted ? '#B5522E' : '#78695C'}
             />
           </TouchableOpacity>
           {!isCreator && plan?.creator && (
@@ -939,6 +1018,84 @@ export default function PlanDetailScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+        {/* Hero image */}
+        {plan.image_url ? (
+          <Image
+            source={{ uri: plan.image_url }}
+            style={styles.heroImage}
+            contentFit="cover"
+            transition={200}
+          />
+        ) : null}
+
+        {/* Post-plan prompt */}
+        {showPostPlanPrompt && currentUserId && (
+          <View style={styles.postPlanPrompt}>
+            <Text style={styles.postPlanTitle}>How'd it go?</Text>
+            {!hasUploadedPhotos && (
+              <TouchableOpacity
+                style={styles.postPlanRow}
+                onPress={() => albumUploadRef.current?.startFlow()}
+                activeOpacity={0.8}
+              >
+                <View style={styles.postPlanIcon}>
+                  <Camera size={18} color={Colors.terracotta} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.postPlanRowTitle}>Add your photos</Text>
+                  <Text style={styles.postPlanRowSub}>They'll develop overnight and reveal at 9am</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            {!hasWrittenMoment && (
+              <View style={styles.postPlanMomentWrap}>
+                <View style={styles.postPlanRow}>
+                  <View style={styles.postPlanIcon}>
+                    <Pen size={16} color={Colors.terracotta} />
+                  </View>
+                  <Text style={styles.postPlanRowTitle}>Write a moment</Text>
+                </View>
+                <TextInput
+                  style={styles.postPlanInput}
+                  placeholder="What happened, how it felt..."
+                  placeholderTextColor={Colors.textLight}
+                  value={momentText}
+                  onChangeText={setMomentText}
+                  multiline
+                  maxLength={500}
+                  textAlignVertical="top"
+                />
+                {momentText.trim().length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.postPlanSubmit, momentSubmitting && { opacity: 0.5 }]}
+                    onPress={async () => {
+                      if (momentSubmitting || !momentText.trim()) return;
+                      setMomentSubmitting(true);
+                      try {
+                        await supabase.from('plan_moments').insert({
+                          event_id: id,
+                          user_id: currentUserId,
+                          content: momentText.trim(),
+                          is_public: true,
+                        });
+                        hapticSuccess();
+                        setMomentText('');
+                        queryClient.invalidateQueries({ queryKey: ['has-written-moment', id, currentUserId] });
+                        queryClient.invalidateQueries({ queryKey: ['user-moments', currentUserId] });
+                      } catch {}
+                      setMomentSubmitting(false);
+                    }}
+                    disabled={momentSubmitting}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.postPlanSubmitText}>Share moment</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
         {/* A. Creator Info */}
         <View style={styles.creatorBlock}>
           {plan.creator?.profile_photo_url ? (
@@ -957,7 +1114,7 @@ export default function PlanDetailScreen() {
           <View style={styles.creatorDetails}>
             <Text style={styles.postedBy}>POSTED BY</Text>
             <Text style={styles.creatorNameLarge}>{plan.creator?.first_name_display ?? 'Someone'}</Text>
-            <Text style={styles.creatorMeta}>{creatorMeta}</Text>
+            <Text style={styles.creatorMeta} numberOfLines={1}>{creatorMeta}</Text>
           </View>
         </View>
 
@@ -1005,7 +1162,7 @@ export default function PlanDetailScreen() {
               <Text style={styles.logisticsSub}>{formatFullDate(plan.start_time)}</Text>
             </View>
             <TouchableOpacity
-              onPress={() => Linking.openURL(buildCalendarUrl(plan.title, plan.start_time, plan.end_time, plan.location_text ?? undefined))}
+              onPress={() => showAddToCalendar(plan.title, plan.start_time, plan.end_time, plan.location_text ?? undefined)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Text style={styles.logisticsLink}>Add to Calendar</Text>
@@ -1013,16 +1170,56 @@ export default function PlanDetailScreen() {
           </View>
 
           {plan.location_text && (
+            <>
+              <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
+                <MapPin size={18} color={Colors.terracotta} strokeWidth={2} />
+                <View style={styles.logisticsContent}>
+                  <Text style={styles.logisticsMain}>{plan.neighborhood ? `${plan.location_text} · ${plan.neighborhood}` : plan.location_text}</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => openDirections(plan.location_text!, mapCoords)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.logisticsLink}>Map →</Text>
+                </TouchableOpacity>
+              </View>
+              {mapCoords && (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => openDirections(plan.location_text!, mapCoords)}
+                  style={styles.miniMapWrap}
+                >
+                  <MapView
+                    style={styles.miniMap}
+                    initialRegion={{
+                      ...mapCoords,
+                      latitudeDelta: 0.01,
+                      longitudeDelta: 0.01,
+                    }}
+                    scrollEnabled={false}
+                    zoomEnabled={false}
+                    pitchEnabled={false}
+                    rotateEnabled={false}
+                    pointerEvents="none"
+                  >
+                    <Marker coordinate={mapCoords} />
+                  </MapView>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+
+          {plan.tickets_url && (
             <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
-              <MapPin size={18} color={Colors.terracotta} strokeWidth={2} />
+              <Ionicons name="ticket-outline" size={18} color={Colors.terracotta} />
               <View style={styles.logisticsContent}>
-                <Text style={styles.logisticsMain}>{plan.location_text}</Text>
+                <Text style={styles.logisticsMain}>Tickets required</Text>
               </View>
               <TouchableOpacity
-                onPress={() => openDirections(plan.location_text!)}
+                onPress={() => openUrl(plan.tickets_url!)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={styles.logisticsLink}>Map →</Text>
+                <Text style={styles.logisticsLink}>Get Tickets →</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1050,7 +1247,17 @@ export default function PlanDetailScreen() {
           ))}
         </View>
 
-        {/* G. CTA hints (button is in sticky bar) */}
+        {/* G. Album for past plans */}
+        {isPastPlan && currentUserId && (
+          <PlanAlbum
+            eventId={plan!.id}
+            currentUserId={currentUserId}
+            isPast={isPastPlan}
+            onAddPhotos={() => albumUploadRef.current?.startFlow()}
+          />
+        )}
+
+        {/* H. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && isEligible && !isFull && (
           <View style={styles.ctaBlock}>
             {!isFeatured && spotsLeft > 0 && spotsLeft <= 2 && (
@@ -1066,18 +1273,18 @@ export default function PlanDetailScreen() {
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
       <View style={styles.stickyBar}>
-        {/* Get Tickets — only shown after joining */}
-        {plan.tickets_url && (isMember || isCreator) && (
-          <TouchableOpacity
-            style={styles.ticketButton}
-            onPress={() => openUrl(plan.tickets_url!)}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.ticketButtonText}>Get Tickets →</Text>
-          </TouchableOpacity>
-        )}
-
-        {isCreator ? (
+        {isPastPlan && (isMember || isCreator) && currentUserId ? (
+          <View style={styles.memberActions}>
+            <AlbumUploadFlow ref={albumUploadRef} eventId={plan!.id} currentUserId={currentUserId} members={members} />
+            <TouchableOpacity
+              style={styles.openChatButton}
+              onPress={() => router.push(`/(tabs)/chats/${plan!.id}` as any)}
+            >
+              <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
+              <Text style={styles.openChatText}>Open Chat</Text>
+            </TouchableOpacity>
+          </View>
+        ) : isCreator ? (
           <View>
             <View style={styles.memberActions}>
               <TouchableOpacity
@@ -1094,6 +1301,14 @@ export default function PlanDetailScreen() {
                 <Text style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
+            <TouchableOpacity
+              style={styles.creatorCancelLink}
+              onPress={handleCancelPlan}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.creatorCancelLinkText}>Cancel this plan</Text>
+            </TouchableOpacity>
           </View>
         ) : isMember ? (
           <View>
@@ -1115,6 +1330,14 @@ export default function PlanDetailScreen() {
             <Text style={styles.ineligibleText}>This plan isn't available for you</Text>
             <Text style={styles.ineligibleSub}>It's restricted by age or gender</Text>
           </View>
+        ) : waitlistNotified ? (
+          <TouchableOpacity
+            style={styles.claimSpotButton}
+            onPress={() => { hapticSuccess(); setJoinModalVisible(true); }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.claimSpotText}>Claim Your Spot</Text>
+          </TouchableOpacity>
         ) : isFull ? (
           <TouchableOpacity
             style={[
@@ -1132,7 +1355,7 @@ export default function PlanDetailScreen() {
                 styles.waitlistButtonText,
                 isOnWaitlist && styles.waitlistButtonTextActive,
               ]}>
-                {isOnWaitlist ? 'On Waitlist ✓' : 'Join Waitlist'}
+                {isOnWaitlist ? 'On Waitlist \u2713' : 'Join Waitlist'}
               </Text>
             )}
           </TouchableOpacity>
@@ -1141,7 +1364,7 @@ export default function PlanDetailScreen() {
             <TouchableOpacity
               style={styles.declineInviteButton}
               onPress={async () => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                hapticLight();
                 try {
                   await supabase
                     .from('plan_invites')
@@ -1166,7 +1389,7 @@ export default function PlanDetailScreen() {
             <TouchableOpacity
               style={styles.acceptInviteButton}
               onPress={async () => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                hapticMedium();
                 try {
                   await supabase
                     .from('plan_invites')
@@ -1189,7 +1412,7 @@ export default function PlanDetailScreen() {
           <TouchableOpacity
             style={styles.joinButton}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              hapticMedium();
               setJoinModalVisible(true);
             }}
             activeOpacity={0.9}
@@ -1217,7 +1440,7 @@ export default function PlanDetailScreen() {
             </Text>
 
             <View style={joinStyles.infoBox}>
-              <Text style={joinStyles.infoTitle}>WashedUp groups are small on purpose.</Text>
+              <Text style={joinStyles.infoTitle}>washedup groups are small on purpose.</Text>
               <Text style={joinStyles.infoText}>You're not just a number.</Text>
               <Text style={joinStyles.infoText}>You're part of the plan.</Text>
             </View>
@@ -1272,6 +1495,7 @@ export default function PlanDetailScreen() {
         }}
         planTitle={plan?.title || ''}
         planId={id as string}
+        slug={plan?.slug}
         variant="joined"
       />
 
@@ -1378,7 +1602,7 @@ export default function PlanDetailScreen() {
                     setEditLocation(name || data.description);
                     setEditLocationLat(lat);
                     setEditLocationLng(lng);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                   }}
                   query={{
                     key: GOOGLE_MAPS_API_KEY,
@@ -1420,7 +1644,7 @@ export default function PlanDetailScreen() {
                       key={cat}
                       style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
                       onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        hapticLight();
                         setEditCategory(cat);
                       }}
                       activeOpacity={0.8}
@@ -1441,7 +1665,7 @@ export default function PlanDetailScreen() {
                       key={opt.value}
                       style={[manageStyles.genderPill, isSelected && manageStyles.pillSelected]}
                       onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        hapticLight();
                         setEditGenderRule(opt.value);
                       }}
                       activeOpacity={0.8}
@@ -1459,7 +1683,7 @@ export default function PlanDetailScreen() {
                   style={[manageStyles.stepperBtn, editGroupSize <= (MIN_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
                     if (editGroupSize > (MIN_GROUP - 1)) {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      hapticLight();
                       setEditGroupSize((g) => g - 1);
                     }
                   }}
@@ -1468,14 +1692,14 @@ export default function PlanDetailScreen() {
                   <Text style={manageStyles.stepperBtnText}>−</Text>
                 </TouchableOpacity>
                 <View style={manageStyles.stepperValue}>
-                  <Text style={manageStyles.stepperValueText}>{editGroupSize}</Text>
-                  <Text style={manageStyles.stepperValueSub}>people + you</Text>
+                  <Text style={manageStyles.stepperValueText}>{editGroupSize + 1}</Text>
+                  <Text style={manageStyles.stepperValueSub}>people total</Text>
                 </View>
                 <TouchableOpacity
                   style={[manageStyles.stepperBtn, editGroupSize >= (MAX_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
                     if (editGroupSize < (MAX_GROUP - 1)) {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      hapticLight();
                       setEditGroupSize((g) => g + 1);
                     }
                   }}
@@ -1484,6 +1708,7 @@ export default function PlanDetailScreen() {
                   <Text style={manageStyles.stepperBtnText}>+</Text>
                 </TouchableOpacity>
               </View>
+              <Text style={manageStyles.stepperValueSub}>including you</Text>
 
               {/* Featured Event toggle — official creators only */}
               {isCreator && isOfficialCreator && (
@@ -1496,7 +1721,7 @@ export default function PlanDetailScreen() {
                     <Switch
                       value={featuredToggle}
                       onValueChange={(val) => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        hapticLight();
                         setFeaturedToggle(val);
                         if (val) {
                           setFeaturedCapacity(plan?.is_featured ? (plan.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
@@ -1514,7 +1739,7 @@ export default function PlanDetailScreen() {
                           style={[manageStyles.stepperBtn, featuredCapacity <= FEATURED_MIN_CAPACITY && manageStyles.stepperBtnDisabled]}
                           onPress={() => {
                             if (featuredCapacity > FEATURED_MIN_CAPACITY) {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              hapticLight();
                               setFeaturedCapacity((c) => Math.max(FEATURED_MIN_CAPACITY, c - 50));
                             }
                           }}
@@ -1530,7 +1755,7 @@ export default function PlanDetailScreen() {
                           style={[manageStyles.stepperBtn, featuredCapacity >= FEATURED_MAX_CAPACITY && manageStyles.stepperBtnDisabled]}
                           onPress={() => {
                             if (featuredCapacity < FEATURED_MAX_CAPACITY) {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              hapticLight();
                               setFeaturedCapacity((c) => Math.min(FEATURED_MAX_CAPACITY, c + 50));
                             }
                           }}
@@ -1652,10 +1877,84 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  heroImage: {
+    width: SCREEN_WIDTH,
+    height: 200,
+    marginBottom: 16,
+    marginLeft: -20,
+  },
   scrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 140,
   },
+  // Post-plan prompt
+  postPlanPrompt: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  postPlanTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+    marginBottom: 12,
+  },
+  postPlanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  postPlanIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: `${Colors.terracotta}10`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  postPlanRowTitle: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  postPlanRowSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
+  postPlanMomentWrap: {
+    marginTop: 4,
+  },
+  postPlanInput: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 64,
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  postPlanSubmit: {
+    alignSelf: 'flex-end',
+    backgroundColor: Colors.terracotta,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    marginTop: 10,
+  },
+  postPlanSubmitText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.white,
+  },
+
   creatorBlock: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1709,12 +2008,10 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   categoryTag: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#F5E8E2',
   },
   featuredPill: {
     alignSelf: 'flex-start',
@@ -1730,22 +2027,24 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   categoryTagText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
+    fontWeight: '600',
+    fontSize: 10,
+    color: '#B5522E',
+    textTransform: 'capitalize',
+    letterSpacing: 0.2,
   },
   description: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
     color: Colors.textMedium,
     lineHeight: 22,
-    marginBottom: 20,
+    marginBottom: 12,
   },
   noteBox: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 12,
     borderLeftWidth: 4,
     borderLeftColor: Colors.goldenAmber,
   },
@@ -1799,6 +2098,15 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
     color: Colors.terracotta,
+  },
+  miniMapWrap: {
+    marginTop: 12,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  miniMap: {
+    width: '100%',
+    height: 150,
   },
   whoGoingTitle: {
     fontFamily: Fonts.displayBold,
@@ -1880,8 +2188,8 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     paddingTop: 12,
     backgroundColor: Colors.parchment,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderTopWidth: 0.5,
+    borderTopColor: '#E8DDD0',
   },
   ticketButton: {
     backgroundColor: Colors.cardBg,
@@ -1897,7 +2205,7 @@ const styles = StyleSheet.create({
   joinButton: {
     backgroundColor: Colors.terracotta,
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1958,6 +2266,22 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   openChatText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
+  claimSpotButton: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    backgroundColor: Colors.terracotta,
+    shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  claimSpotText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.white,
+  },
   waitlistButton: {
     borderRadius: 14,
     paddingVertical: 16,
@@ -1984,6 +2308,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   manageButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  creatorCancelLink: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 6,
+  },
+  creatorCancelLinkText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.cancelRed,
+    textDecorationLine: 'underline',
+  },
 });
 
 const joinStyles = StyleSheet.create({

@@ -21,17 +21,20 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Clipboard from 'expo-clipboard';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
+import { showAddToCalendar } from '../../../lib/addToCalendar';
 import Colors from '../../../constants/Colors';
 import { capDisplayCount } from '../../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { openUrl } from '../../../lib/url';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
-import { useChat, ChatMessage, MessageReaction } from '../../../hooks/useChat';
+import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
@@ -165,8 +168,10 @@ function openLocationInMaps(lat: number, lng: number, address: string) {
     ? `maps://app?ll=${lat},${lng}&q=${encoded}`
     : `geo:${lat},${lng}?q=${encoded}`;
   Linking.openURL(url).catch(() => {
-    // fallback: Apple Maps web URL works on iOS even without the Maps app
-    Linking.openURL(`https://maps.apple.com/?ll=${lat},${lng}&q=${encoded}`).catch(() => {});
+    const fallback = Platform.OS === 'ios'
+      ? `https://maps.apple.com/?ll=${lat},${lng}&q=${encoded}`
+      : `https://www.google.com/maps?q=${lat},${lng}`;
+    Linking.openURL(fallback).catch(() => {});
   });
 }
 
@@ -179,64 +184,49 @@ interface BubbleProps {
   showName: boolean;
   isGrouped: boolean;
   currentUserId: string;
+  planTitle?: string;
   onPhotoPress?: (url: string) => void;
-  onReaction?: (messageId: string) => void;
-  onDelete?: (messageId: string) => void;
+  onReaction?: (messageId: string, emoji?: string) => void;
+  onMessageLongPress?: (message: ChatMessage, isOwn: boolean) => void;
+  onReplyTap?: (messageId: string) => void;
 }
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, onPhotoPress, onReaction, onDelete }: BubbleProps) {
-  const lastTapRef = React.useRef(0);
-
+const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, planTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap }: BubbleProps) {
   if (message.message_type === 'system') {
+    let displayContent = message.content;
+    if (planTitle) {
+      displayContent = displayContent
+        .replace(/joined the plan/gi, `joined ${planTitle}`)
+        .replace(/the plan/gi, planTitle);
+    }
     return (
       <View style={bubbleStyles.systemRow}>
-        <Text style={bubbleStyles.systemText}>{message.content}</Text>
+        <Text style={bubbleStyles.systemText}>{displayContent}</Text>
       </View>
     );
   }
 
-  const handleDoubleTap = () => {
-    const now = Date.now();
-    if (now - lastTapRef.current < 300) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      onReaction?.(message.id);
-      lastTapRef.current = 0;
-    } else {
-      lastTapRef.current = now;
-    }
-  };
-
   const handleLongPress = () => {
-    if (!isOwn || !onDelete) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Delete Message', 'Cancel'],
-          destructiveButtonIndex: 0,
-          cancelButtonIndex: 1,
-        },
-        (idx) => { if (idx === 0) onDelete(message.id); },
-      );
-    } else {
-      Alert.alert('Message', '', [
-        { text: 'Delete Message', style: 'destructive', onPress: () => onDelete(message.id) },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
+    hapticMedium();
+    onMessageLongPress?.(message, isOwn);
   };
 
   const reactions = message.reactions ?? [];
-  const heartCount = reactions.filter(r => r.reaction === 'heart').length;
-  const iHearted = reactions.some(r => r.reaction === 'heart' && r.user_id === currentUserId);
+  const totalReactions = reactions.length;
+  // Collect unique emojis in order of first appearance
+  const uniqueEmojis: string[] = [];
+  const seen = new Set<string>();
+  for (const r of reactions) {
+    if (!seen.has(r.reaction)) {
+      seen.add(r.reaction);
+      uniqueEmojis.push(r.reaction);
+    }
+  }
+  const iReacted = reactions.some(r => r.user_id === currentUserId);
 
-  const borderRadius = {
-    borderTopLeftRadius: isOwn ? 18 : (isGrouped ? 6 : 18),
-    borderTopRightRadius: isOwn ? (isGrouped ? 6 : 18) : 18,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 18,
-  };
+  const borderRadius = isOwn
+    ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 2 }
+    : { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 2, borderBottomRightRadius: 18 };
 
   return (
     <View style={[bubbleStyles.row, isOwn ? bubbleStyles.rowOwn : bubbleStyles.rowOther]}>
@@ -258,22 +248,20 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
 
       <View style={[bubbleStyles.bubbleWrapper, isOwn ? bubbleStyles.wrapperOwn : bubbleStyles.wrapperOther]}>
         {!isOwn && showName && (
-          <View style={bubbleStyles.nameTimeRow}>
+          <Text style={bubbleStyles.senderLine}>
             <Text style={bubbleStyles.senderName}>{message.sender?.first_name ?? 'Someone'}</Text>
-            <Text style={bubbleStyles.nameTimestamp}>{formatMessageTime(message.created_at)}</Text>
-          </View>
+            <Text style={bubbleStyles.senderDot}> · </Text>
+            <Text style={bubbleStyles.senderTime}>{formatMessageTime(message.created_at)}</Text>
+          </Text>
         )}
 
         <Pressable
-          onPress={handleDoubleTap}
-          onLongPress={!message.image_url && message.message_type !== 'location' ? handleLongPress : undefined}
+          onLongPress={handleLongPress}
           delayLongPress={400}
         >
           {!!message.image_url ? (
             <Pressable
               onPress={() => onPhotoPress?.(message.image_url!)}
-              onLongPress={handleLongPress}
-              delayLongPress={400}
             >
               <Image
                 source={{ uri: message.image_url }}
@@ -290,8 +278,6 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
             return (
               <Pressable
                 onPress={() => openLocationInMaps(lat, lng, address)}
-                onLongPress={handleLongPress}
-                delayLongPress={400}
                 style={[
                   bubbleStyles.bubble,
                   bubbleStyles.locationBubble,
@@ -320,6 +306,20 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
               borderRadius,
             ]}>
+              {message.reply_to && (
+                <TouchableOpacity
+                  onPress={() => onReplyTap?.(message.reply_to!.id)}
+                  style={[bubbleStyles.replyQuote, isOwn ? bubbleStyles.replyQuoteOwn : bubbleStyles.replyQuoteOther]}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[bubbleStyles.replyQuoteName, isOwn && bubbleStyles.replyQuoteNameOwn]}>
+                    {message.reply_to.sender_name ?? 'Someone'}
+                  </Text>
+                  <Text style={[bubbleStyles.replyQuoteText, isOwn && bubbleStyles.replyQuoteTextOwn]} numberOfLines={2}>
+                    {message.reply_to.content}
+                  </Text>
+                </TouchableOpacity>
+              )}
               <LinkedText
                 text={message.content}
                 style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn]}
@@ -328,23 +328,20 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
             </View>
           )}
 
-          {heartCount > 0 && (
-            <View style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther]}>
-              <Text style={[bubbleStyles.reactionHeart, iHearted && bubbleStyles.reactionHeartActive]}>
-                {iHearted ? '\u2764\uFE0F' : '\u2661'}
-              </Text>
-              {heartCount > 1 && (
-                <Text style={bubbleStyles.reactionCount}>{heartCount}</Text>
+          {totalReactions > 0 && (
+            <View style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther, iReacted && bubbleStyles.reactionBadgeMine]}>
+              {uniqueEmojis.map((emoji) => (
+                <Text key={emoji} style={bubbleStyles.reactionEmoji}>
+                  {emoji === 'heart' ? '\u2764\uFE0F' : emoji}
+                </Text>
+              ))}
+              {totalReactions > 1 && (
+                <Text style={bubbleStyles.reactionCount}>{totalReactions}</Text>
               )}
             </View>
           )}
         </Pressable>
 
-        {(isOwn || !showName) && (
-          <Text style={[bubbleStyles.timestamp, isOwn && bubbleStyles.timestampOwn]}>
-            {formatMessageTime(message.created_at)}
-          </Text>
-        )}
       </View>
     </View>
   );
@@ -358,45 +355,31 @@ const bubbleStyles = StyleSheet.create({
   avatar: { width: 28, height: 28, borderRadius: 14 },
   avatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
   avatarInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
-  bubbleWrapper: { maxWidth: '75%', gap: 3 },
+  bubbleWrapper: { maxWidth: '80%', gap: 3 },
   wrapperOwn: { alignItems: 'flex-end' },
   wrapperOther: { alignItems: 'flex-start' },
-  senderName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt, marginBottom: 0 },
-  nameTimeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginLeft: 4,
-    marginBottom: 2,
-  },
-  nameTimestamp: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.warmGray,
-  },
+  senderLine: { marginBottom: 2, marginLeft: 4 },
+  senderName: { fontWeight: '700', fontSize: 12, color: Colors.terracotta },
+  senderDot: { fontSize: 10, color: Colors.tertiary },
+  senderTime: { fontSize: 10, color: Colors.secondary },
   bubble: { overflow: 'hidden' },
-  bubbleText: { paddingHorizontal: 13, paddingVertical: 9 },
+  bubbleText: { paddingHorizontal: 14, paddingVertical: 10 },
   bubbleOwn: { backgroundColor: Colors.terracotta },
   bubbleOther: {
-    backgroundColor: Colors.white,
-    shadowColor: Colors.shadowBlack,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 1,
+    backgroundColor: Colors.dividerWarm,
   },
-  messageText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.asphalt, lineHeight: 21 },
+  messageText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 22 },
   messageTextOwn: { color: Colors.white },
+  inlineTime: { fontSize: 10, color: Colors.tertiary, textAlign: 'right', marginTop: 3 },
+  inlineTimeOwn: { color: 'rgba(255,255,255,0.6)' },
   linkOther: { textDecorationLine: 'underline' as const, color: Colors.terracotta },
   linkOwn: { textDecorationLine: 'underline' as const, color: Colors.white },
   messageImage: { width: 240, height: 180 },
-  timestamp: { fontFamily: Fonts.sans, fontSize: FontSizes.micro, color: Colors.warmGray, marginLeft: 4 },
-  timestampOwn: { textAlign: 'right', marginRight: 4 },
   systemRow: { alignItems: 'center', marginVertical: 8, paddingHorizontal: 16 },
   systemText: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.warmGray,
+    fontSize: 11,
+    color: Colors.tertiary,
     backgroundColor: Colors.inputBg,
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -407,28 +390,62 @@ const bubbleStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 12,
     paddingHorizontal: 6,
-    paddingVertical: 2,
-    position: 'absolute',
-    bottom: -10,
+    paddingVertical: 3,
     gap: 2,
+    position: 'absolute',
+    bottom: -12,
     shadowColor: Colors.shadowBlack,
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   reactionBadgeOwn: { right: 4 },
   reactionBadgeOther: { left: 4 },
-  reactionHeart: { fontSize: FontSizes.bodySM },
-  reactionHeartActive: { color: Colors.errorRed },
+  reactionBadgeMine: {
+    backgroundColor: Colors.warmTint,
+  },
+  reactionEmoji: { fontSize: 13 },
   reactionCount: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.caption,
     color: Colors.textMedium,
+    marginLeft: 1,
+  },
+  replyQuote: {
+    borderLeftWidth: 3,
+    paddingLeft: 8,
+    paddingVertical: 4,
+    marginBottom: 6,
+    borderRadius: 4,
+  },
+  replyQuoteOwn: {
+    borderLeftColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  replyQuoteOther: {
+    borderLeftColor: Colors.terracotta,
+    backgroundColor: 'rgba(0,0,0,0.04)',
+  },
+  replyQuoteName: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 12,
+    color: Colors.terracotta,
+    marginBottom: 1,
+  },
+  replyQuoteNameOwn: {
+    color: 'rgba(255,255,255,0.85)',
+  },
+  replyQuoteText: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    color: Colors.textMedium,
+    lineHeight: 16,
+  },
+  replyQuoteTextOwn: {
+    color: 'rgba(255,255,255,0.7)',
   },
   locationBubble: { paddingHorizontal: 13, paddingVertical: 10, minWidth: 180 },
   locationPinRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
@@ -463,9 +480,11 @@ export default function ChatScreen() {
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [overlayMessage, setOverlayMessage] = useState<{ message: ChatMessage; isOwn: boolean } | null>(null);
   const listRef = useRef<FlatList>(null);
-
-  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, toggleReaction, refetch } = useChat(id);
+  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, editMessage, toggleReaction, refetch } = useChat(id);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -473,16 +492,6 @@ export default function ChatScreen() {
     }, [refetch]),
   );
 
-  const isNearBottomRef = useRef(true);
-
-  const onScroll = useCallback(({ nativeEvent }: any) => {
-    const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-    isNearBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 80;
-  }, []);
-
-  const onContentSizeChange = useCallback(() => {
-    if (isNearBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
-  }, []);
   const { blockUser } = useBlock();
 
   const { data: event, isError: eventError } = useQuery({
@@ -551,50 +560,60 @@ export default function ChatScreen() {
       name: (p.first_name_display as string | null) ?? 'Unknown',
     }));
 
-    // First alert: pick a member
-    setAlertInfo({
-      title: 'Members',
-      message: 'Select a member',
-      buttons: [
-        ...members.map((member) => ({
-          text: member.name,
-          onPress: () => {
-            // Second alert: show after first closes (BrandedAlert calls onClose automatically)
-            setTimeout(() => {
-              setAlertInfo({
-                title: member.name,
-                message: 'What would you like to do?',
-                buttons: [
-                  {
-                    text: 'Report User',
-                    onPress: () => {
-                      setReportTarget(member);
-                      setShowReport(true);
-                    },
-                  },
-                  {
-                    text: 'Block User',
-                    style: 'destructive' as const,
-                    onPress: () => blockUser(member.id, member.name, () => router.back()),
-                  },
-                  { text: 'Cancel', style: 'cancel' as const },
-                ],
-              });
-            }, 100);
-          },
-        })),
-        { text: 'Cancel', style: 'cancel' as const },
-      ],
-    });
+    // Pick a member, then show report/block options — all via native action sheets
+    const memberNames = members.map(m => m.name);
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: [...memberNames, 'Cancel'], cancelButtonIndex: memberNames.length, title: 'Members' },
+        (idx) => {
+          if (idx >= members.length) return;
+          const member = members[idx];
+          setTimeout(() => {
+            ActionSheetIOS.showActionSheetWithOptions(
+              { options: ['Report User', 'Block User', 'Cancel'], destructiveButtonIndex: 1, cancelButtonIndex: 2, title: member.name },
+              (actionIdx) => {
+                if (actionIdx === 0) { setReportTarget(member); setShowReport(true); }
+                if (actionIdx === 1) blockUser(member.id, member.name, () => router.back());
+              },
+            );
+          }, 300);
+        },
+      );
+    } else {
+      setAlertInfo({
+        title: 'Members',
+        message: 'Select a member',
+        buttons: [
+          ...members.map((member) => ({
+            text: member.name,
+            onPress: () => {
+              setTimeout(() => {
+                Alert.alert(member.name, '', [
+                  { text: 'Report User', onPress: () => { setReportTarget(member); setShowReport(true); } },
+                  { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => router.back()) },
+                  { text: 'Cancel', style: 'cancel' },
+                ]);
+              }, 100);
+            },
+          })),
+          { text: 'Cancel', style: 'cancel' as const },
+        ],
+      });
+    }
   }, [id, currentUserId, blockUser]);
 
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
     if (!text || uploading) return;
     setInputText('');
-    Keyboard.dismiss();
-    await sendMessage(text);
-  }, [inputText, uploading, sendMessage]);
+    if (editingMessageId) {
+      editMessage(editingMessageId, text);
+      setEditingMessageId(null);
+    } else {
+      sendMessage(text, undefined, replyingTo?.id);
+      setReplyingTo(null);
+    }
+  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo]);
 
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
@@ -639,6 +658,38 @@ export default function ChatScreen() {
     }
   }, [currentUserId, sendMessage]);
 
+  const handleLocationSend = useCallback(async () => {
+    if (!currentUserId) return;
+    Keyboard.dismiss();
+
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      setAlertInfo({ title: 'Location access needed', message: 'Please allow location access in Settings to share your location.' });
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = loc.coords;
+
+      const geocoded = await Location.reverseGeocodeAsync({ latitude, longitude });
+      const place = geocoded[0];
+      let address = '';
+      if (place) {
+        const parts = [place.name, place.street, place.city].filter(Boolean);
+        address = parts.join(', ');
+      }
+      if (!address) address = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+
+      await sendLocation(latitude, longitude, address);
+    } catch {
+      setAlertInfo({ title: 'Could not get location', message: 'Something went wrong retrieving your location. Please try again.' });
+    } finally {
+      setUploading(false);
+    }
+  }, [currentUserId, sendLocation]);
+
   const handleAttachPress = useCallback(() => {
     if (!currentUserId) return;
     Keyboard.dismiss();
@@ -676,49 +727,22 @@ export default function ChatScreen() {
     }
   }, [currentUserId, doPhotoAction, handleLocationSend]);
 
-  const handleLocationSend = useCallback(async () => {
-    if (!currentUserId) return;
-    Keyboard.dismiss();
-
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      setAlertInfo({ title: 'Location access needed', message: 'Please allow location access in Settings to share your location.' });
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const { latitude, longitude } = loc.coords;
-
-      const geocoded = await Location.reverseGeocodeAsync({ latitude, longitude });
-      const place = geocoded[0];
-      let address = '';
-      if (place) {
-        const parts = [place.name, place.street, place.city].filter(Boolean);
-        address = parts.join(', ');
-      }
-      if (!address) address = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-
-      await sendLocation(latitude, longitude, address);
-    } catch {
-      setAlertInfo({ title: 'Could not get location', message: 'Something went wrong retrieving your location. Please try again.' });
-    } finally {
-      setUploading(false);
-    }
-  }, [currentUserId, sendLocation]);
-
-  type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string };
+  type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string } | { type: 'time'; label: string; id: string };
   const enrichedItems = useMemo<EnrichedItem[]>(() => {
     const items: EnrichedItem[] = [];
     messages.forEach((msg, i) => {
       const prev = messages[i - 1];
       if (!prev || !isSameDay(prev.created_at, msg.created_at)) {
         items.push({ type: 'date', label: formatChatDate(msg.created_at), id: `date-${msg.id}` });
+      } else if (prev) {
+        const gap = new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime();
+        if (gap >= 10 * 60 * 1000) {
+          items.push({ type: 'time', label: formatMessageTime(msg.created_at), id: `time-${msg.id}` });
+        }
       }
       items.push(msg);
     });
-    return items;
+    return items.reverse();
   }, [messages]);
 
   return (
@@ -742,18 +766,18 @@ export default function ChatScreen() {
           </View>
 
           <TouchableOpacity
+            onPress={() => router.push(`/plan/${id}` as any)}
+            style={chatStyles.viewPlanBtn}
+          >
+            <Text style={chatStyles.viewPlanText}>View Plan</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             onPress={handleReportMenu}
             style={chatStyles.ellipsisBtn}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <Ionicons name="ellipsis-horizontal" size={20} color={Colors.warmGray} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => router.push(`/plan/${id}` as any)}
-            style={chatStyles.viewPlanBtn}
-          >
-            <Text style={chatStyles.viewPlanText}>View Plan</Text>
           </TouchableOpacity>
         </View>
 
@@ -771,50 +795,36 @@ export default function ChatScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Member avatars + names bar */}
+        {/* Member avatars row */}
         {event && event.members.length > 0 && (
-          <View style={chatStyles.membersBar}>
-            <FlatList
-              data={event.members.slice(0, 6)}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={(m) => m.id}
-              contentContainerStyle={chatStyles.membersScroll}
-              renderItem={({ item: member }) => (
-                <TouchableOpacity
-                  style={chatStyles.memberChip}
-                  onPress={() => setMiniProfileUserId(member.id)}
-                  activeOpacity={0.7}
-                >
-                  {member.avatar_url ? (
-                    <Image source={{ uri: member.avatar_url }} style={chatStyles.memberChipImg} contentFit="cover" />
-                  ) : (
-                    <View style={[chatStyles.memberChipImg, chatStyles.memberAvatarFallback]}>
-                      <Text style={chatStyles.memberInitial}>
-                        {member.first_name?.[0]?.toUpperCase() ?? '?'}
-                      </Text>
-                    </View>
-                  )}
-                  <Text style={chatStyles.memberChipName} numberOfLines={1}>
-                    {member.first_name ?? 'Member'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              ListFooterComponent={
-                capDisplayCount(event.member_count) > 6 ? (
-                  <View style={chatStyles.memberChip}>
-                    <View style={[chatStyles.memberChipImg, chatStyles.memberAvatarFallback]}>
-                      <Text style={chatStyles.memberInitial}>+{capDisplayCount(event.member_count) - 6}</Text>
-                    </View>
+          <View style={chatStyles.membersRow}>
+            {event.members.slice(0, event.members.length > 5 ? 4 : 5).map((member) => (
+              <TouchableOpacity
+                key={member.id}
+                style={chatStyles.memberItem}
+                onPress={() => setMiniProfileUserId(member.id)}
+                activeOpacity={0.7}
+              >
+                {member.avatar_url ? (
+                  <Image source={{ uri: member.avatar_url }} style={chatStyles.memberAvatar} contentFit="cover" />
+                ) : (
+                  <View style={[chatStyles.memberAvatar, chatStyles.memberAvatarFallback]}>
+                    <Text style={chatStyles.memberInitial}>{member.first_name?.[0]?.toUpperCase() ?? '?'}</Text>
                   </View>
-                ) : null
-              }
-            />
-            <TouchableOpacity onPress={() => router.push(`/plan/${id}` as any)} activeOpacity={0.7}>
-              <Ionicons name="chevron-forward" size={14} color={Colors.warmGray} style={{ marginLeft: 4 }} />
-            </TouchableOpacity>
+                )}
+                <Text style={chatStyles.memberName} numberOfLines={1}>{member.first_name ?? ''}</Text>
+              </TouchableOpacity>
+            ))}
+            {event.members.length > 5 && (
+              <View style={chatStyles.memberItem}>
+                <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
+                  <Text style={chatStyles.memberOverflowText}>+{event.members.length - 4}</Text>
+                </View>
+              </View>
+            )}
           </View>
         )}
+
       </SafeAreaView>
 
       {/* ── Messages ── */}
@@ -832,18 +842,69 @@ export default function ChatScreen() {
             ref={listRef}
             data={enrichedItems}
             keyExtractor={item => item.id}
+            inverted={true}
+            style={{ flex: 1 }}
             contentContainerStyle={chatStyles.messageList}
             showsVerticalScrollIndicator={false}
+            automaticallyAdjustContentInsets={false}
+            contentInsetAdjustmentBehavior="never"
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
             initialNumToRender={20}
             windowSize={10}
             maxToRenderPerBatch={15}
-            onScroll={onScroll}
-            scrollEventThrottle={100}
-            onContentSizeChange={onContentSizeChange}
+            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            onScrollToIndexFailed={(info) => {
+              listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
+              setTimeout(() => {
+                listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+              }, 300);
+            }}
+            ListEmptyComponent={
+              <View style={chatStyles.emptyState}>
+                <Text style={chatStyles.emptyEmoji}>{'\uD83D\uDC4B'}</Text>
+                <Text style={chatStyles.emptyText}>Say hi to the group!</Text>
+              </View>
+            }
+            ListFooterComponent={event ? (
+              <TouchableOpacity
+                style={chatStyles.pinnedCard}
+                onPress={() => router.push(`/plan/${id}` as any)}
+                activeOpacity={0.8}
+              >
+                <Text style={chatStyles.pinnedTitle} numberOfLines={1}>{event.title}</Text>
+                <View style={chatStyles.pinnedRow}>
+                  <View style={chatStyles.pinnedDetail}>
+                    <Ionicons name="calendar-outline" size={12} color={Colors.terracotta} />
+                    <Text style={chatStyles.pinnedDetailText}>{formatEventDate(event.start_time)}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => showAddToCalendar(event.title, event.start_time)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={chatStyles.pinnedCalLink}>Add to Calendar</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={chatStyles.pinnedRow}>
+                  <Text style={chatStyles.pinnedSpots}>
+                    {capDisplayCount(event.member_count)} going
+                  </Text>
+                </View>
+                {!isPast && (() => {
+                  const diff = new Date(event.start_time).getTime() - Date.now();
+                  const hours = Math.floor(diff / 3600000);
+                  const days = Math.floor(diff / 86400000);
+                  if (diff < 0) return null;
+                  const label = hours < 1 ? 'Starting soon!'
+                    : hours < 24 ? `Tonight at ${new Date(event.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
+                    : days === 1 ? 'Tomorrow!'
+                    : `Happening in ${days} days`;
+                  return <Text style={chatStyles.pinnedCountdown}>{label}</Text>;
+                })()}
+              </TouchableOpacity>
+            ) : null}
             renderItem={({ item, index }) => {
-              if ('type' in item && item.type === 'date') {
+              if ('type' in item && (item.type === 'date' || item.type === 'time')) {
                 return (
                   <View style={bubbleStyles.systemRow}>
                     <Text style={bubbleStyles.systemText}>{item.label}</Text>
@@ -854,26 +915,40 @@ export default function ChatScreen() {
               const msg = item as ChatMessage;
               const isOwn = msg.user_id === currentUserId;
 
-              const prevItem = enrichedItems[index - 1];
-              const prevMsg = prevItem && !('type' in prevItem) ? prevItem as ChatMessage : null;
-              const nextItem = enrichedItems[index + 1];
-              const nextMsg = nextItem && !('type' in nextItem) ? nextItem as ChatMessage : null;
+              // In inverted list: index-1 = newer in time, index+1 = older in time
+              const newerItem = enrichedItems[index - 1];
+              const newerMsg = newerItem && !('type' in newerItem) ? newerItem as ChatMessage : null;
+              const olderItem = enrichedItems[index + 1];
+              const olderMsg = olderItem && !('type' in olderItem) ? olderItem as ChatMessage : null;
 
-              const isGroupedWithPrev = !!(prevMsg?.user_id === msg.user_id && isSameDay(prevMsg.created_at, msg.created_at));
-              const isGroupedWithNext = !!(nextMsg?.user_id === msg.user_id && isSameDay(msg.created_at, nextMsg.created_at));
+              // In inverted list: index-1 = newer in time (below visually), index+1 = older in time (above visually)
+              const isGroupedWithOlder = !!(olderMsg?.user_id === msg.user_id && isSameDay(olderMsg.created_at, msg.created_at));
+              const isGroupedWithNewer = !!(newerMsg?.user_id === msg.user_id && isSameDay(msg.created_at, newerMsg.created_at));
+
+              // Avatar: show on bottom-most message of group (when newer msg is different sender or doesn't exist)
+              const showAvatar = !isOwn && !isGroupedWithNewer;
+              // Name: show above top-most message of group (when older msg is different sender or doesn't exist)
+              const showName = !isOwn && !isGroupedWithOlder;
 
               return (
-                <View style={{ marginBottom: isGroupedWithNext ? 1 : (msg.reactions?.length ? 16 : 10) }}>
+                <View style={{ marginBottom: isGroupedWithOlder ? 1 : (msg.reactions?.length ? 18 : 10) }}>
                   <MessageBubble
                     message={msg}
                     isOwn={isOwn}
-                    showAvatar={!isOwn && !isGroupedWithNext}
-                    showName={!isOwn}
-                    isGrouped={isGroupedWithPrev}
+                    showAvatar={showAvatar}
+                    showName={showName}
+                    isGrouped={isGroupedWithNewer}
                     currentUserId={currentUserId}
+                    planTitle={event?.title}
                     onPhotoPress={setPhotoViewUrl}
-                    onReaction={toggleReaction}
-                    onDelete={deleteMessage}
+                    onReaction={(msgId, emoji) => toggleReaction(msgId, emoji ?? 'heart')}
+                    onMessageLongPress={(msg, own) => setOverlayMessage({ message: msg, isOwn: own })}
+                    onReplyTap={(msgId) => {
+                      const idx = enrichedItems.findIndex(item => !('type' in item) && item.id === msgId);
+                      if (idx >= 0) {
+                        listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+                      }
+                    }}
                   />
                 </View>
               );
@@ -884,9 +959,33 @@ export default function ChatScreen() {
         {/* Input bar */}
         {isPast ? (
           <View style={[chatStyles.readOnlyBar, { paddingBottom: insets.bottom + 8 }]}>
-            <Text style={chatStyles.readOnlyText}>This chat is read-only — the plan has ended</Text>
+            <Text style={chatStyles.readOnlyText}>This chat is read-only — {event?.title ?? 'the plan'} has ended</Text>
           </View>
         ) : (
+          <View style={{ backgroundColor: Colors.white }}>
+            {replyingTo && (
+              <View style={chatStyles.replyBar}>
+                <View style={chatStyles.replyBarLeft}>
+                  <Ionicons name="arrow-undo-outline" size={16} color={Colors.terracotta} />
+                  <View style={chatStyles.replyBarContent}>
+                    <Text style={chatStyles.replyBarName}>{replyingTo.senderName}</Text>
+                    <Text style={chatStyles.replyBarText} numberOfLines={1}>{replyingTo.content}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setReplyingTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close" size={18} color={Colors.warmGray} />
+                </TouchableOpacity>
+              </View>
+            )}
+            {editingMessageId && (
+              <View style={chatStyles.editingBar}>
+                <Ionicons name="create-outline" size={16} color={Colors.terracotta} />
+                <Text style={chatStyles.editingText}>Editing message</Text>
+                <TouchableOpacity onPress={() => { setEditingMessageId(null); setInputText(''); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close" size={18} color={Colors.warmGray} />
+                </TouchableOpacity>
+              </View>
+            )}
           <View style={[chatStyles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
             <TouchableOpacity onPress={handleAttachPress} style={chatStyles.cameraBtn} disabled={uploading}>
               {uploading ? (
@@ -916,6 +1015,7 @@ export default function ChatScreen() {
             >
               <Ionicons name="arrow-up" size={18} color={Colors.white} />
             </TouchableOpacity>
+          </View>
           </View>
         )}
       </KeyboardAvoidingView>
@@ -964,6 +1064,120 @@ export default function ChatScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+
+      {/* Message interaction overlay */}
+      <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)}>
+        <Pressable style={overlayStyles.backdrop} onPress={() => setOverlayMessage(null)}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={overlayStyles.container}>
+            {/* Emoji reaction row — only for other people's messages */}
+            {!overlayMessage?.isOwn && (
+            <View style={overlayStyles.emojiRow}>
+              {['\uD83D\uDC4D', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDE2E', '\uD83D\uDE22', '\uD83D\uDE4F'].map((emoji) => (
+                <EmojiReactionButton
+                  key={emoji}
+                  emoji={emoji}
+                  onSelect={(e) => {
+                    const reactionKey = e === '\u2764\uFE0F' ? 'heart' : e;
+                    toggleReaction(overlayMessage!.message.id, reactionKey);
+                    setOverlayMessage(null);
+                  }}
+                />
+              ))}
+            </View>
+            )}
+
+            {/* Action menu */}
+            <View style={overlayStyles.actionMenu}>
+              {overlayMessage?.message.message_type === 'user' && (
+                <>
+                  <TouchableOpacity
+                    style={overlayStyles.actionRow}
+                    onPress={() => {
+                      hapticLight();
+                      const msg = overlayMessage.message;
+                      setReplyingTo({
+                        id: msg.id,
+                        content: msg.content,
+                        senderName: msg.sender?.first_name ?? 'Someone',
+                      });
+                      setEditingMessageId(null);
+                      setOverlayMessage(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={overlayStyles.actionText}>Reply</Text>
+                    <Ionicons name="arrow-undo-outline" size={18} color={Colors.asphalt} />
+                  </TouchableOpacity>
+                  <View style={overlayStyles.actionDivider} />
+                </>
+              )}
+
+              <TouchableOpacity
+                style={overlayStyles.actionRow}
+                onPress={() => {
+                  const msg = overlayMessage?.message;
+                  if (msg) {
+                    let copyText = msg.content;
+                    if (msg.image_url) {
+                      copyText = msg.image_url;
+                    } else if (msg.message_type === 'location') {
+                      try { copyText = JSON.parse(msg.content).address ?? msg.content; } catch {}
+                    }
+                    Clipboard.setStringAsync(copyText).catch(() => {});
+                  }
+                  hapticLight();
+                  setOverlayMessage(null);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={overlayStyles.actionText}>Copy</Text>
+                <Ionicons name="copy-outline" size={18} color={Colors.asphalt} />
+              </TouchableOpacity>
+
+              {overlayMessage?.isOwn && overlayMessage.message.message_type === 'user' && !overlayMessage.message.image_url && (
+                <>
+                  <View style={overlayStyles.actionDivider} />
+                  <TouchableOpacity
+                    style={overlayStyles.actionRow}
+                    onPress={() => {
+                      hapticLight();
+                      setEditingMessageId(overlayMessage.message.id);
+                      setReplyingTo(null);
+                      setInputText(overlayMessage.message.content);
+                      setOverlayMessage(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={overlayStyles.actionText}>Edit</Text>
+                    <Ionicons name="create-outline" size={18} color={Colors.asphalt} />
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {overlayMessage?.isOwn && (
+                <>
+                  <View style={overlayStyles.actionDivider} />
+                  <TouchableOpacity
+                    style={overlayStyles.actionRow}
+                    onPress={() => {
+                      hapticMedium();
+                      setOverlayMessage(null);
+                      Alert.alert('Delete this message?', '', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: () => deleteMessage(overlayMessage.message.id) },
+                      ]);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={overlayStyles.actionTextDelete}>Delete</Text>
+                    <Ionicons name="trash-outline" size={18} color={Colors.errorRed} />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -973,27 +1187,71 @@ const chatStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.inputBg,
+    paddingVertical: 10,
     backgroundColor: Colors.white,
     gap: 8,
   },
   backBtn: { padding: 2 },
   headerCenter: { flex: 1 },
-  headerTitle: { fontFamily: Fonts.display, fontSize: FontSizes.displayLG, color: Colors.asphalt },
-  headerSub: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginTop: 1 },
-  ellipsisBtn: {
-    padding: 4,
-  },
+  headerTitle: { fontSize: 16, fontWeight: '700' as const, color: Colors.darkWarm },
+  headerSub: { fontSize: 11, color: Colors.secondary, marginTop: 1 },
   viewPlanBtn: {
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
     borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  viewPlanText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  viewPlanText: { fontSize: 12, fontWeight: '600' as const, color: Colors.terracotta },
+  ellipsisBtn: {
+    padding: 4,
+  },
+  membersRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
+    backgroundColor: Colors.white,
+    borderBottomWidth: 0.5,
+    borderBottomColor: Colors.border,
+  },
+  memberItem: {
+    alignItems: 'center',
+    width: 40,
+  },
+  memberAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  memberAvatarFallback: {
+    backgroundColor: Colors.dividerWarm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberInitial: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.terracotta,
+  },
+  memberName: {
+    fontSize: 9,
+    color: Colors.secondary,
+    marginTop: 2,
+    textAlign: 'center',
+    maxWidth: 40,
+  },
+  memberOverflow: {
+    backgroundColor: Colors.cream,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberOverflowText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.terracotta,
+  },
 
   ticketBanner: {
     flexDirection: 'row',
@@ -1011,30 +1269,70 @@ const chatStyles = StyleSheet.create({
   ticketText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   ticketCta: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
 
-  membersBar: {
+
+  pinnedCard: {
+    backgroundColor: Colors.cream,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 10,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  pinnedTitle: {
+    fontWeight: '700',
+    fontSize: 14,
+    color: Colors.darkWarm,
+    marginBottom: 6,
+  },
+  pinnedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingRight: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.inputBg,
-    backgroundColor: Colors.white,
+    justifyContent: 'space-between',
   },
-  membersScroll: { paddingHorizontal: 16, gap: 14 },
-  memberChip: { alignItems: 'center', width: 48 },
-  memberChipImg: { width: 36, height: 36, borderRadius: 18 },
-  memberChipName: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.micro,
-    color: Colors.textMedium,
-    marginTop: 3,
-    textAlign: 'center',
-    maxWidth: 48,
+  pinnedDetail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
-  memberAvatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
-  memberInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
+  pinnedDetailText: {
+    fontSize: 11,
+    color: Colors.secondary,
+  },
+  pinnedCalLink: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.terracotta,
+  },
+  pinnedSpots: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.secondary,
+  },
+  pinnedCountdown: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.terracotta,
+    marginTop: 6,
+  },
 
-  messageList: { paddingVertical: 12 },
+  messageList: { paddingTop: 4, paddingBottom: 12 },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    transform: [{ scaleY: -1 }],
+  },
+  emptyEmoji: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+  emptyText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.tertiary,
+  },
 
   inputBar: {
     flexDirection: 'row',
@@ -1055,12 +1353,10 @@ const chatStyles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    backgroundColor: Colors.parchment,
-    borderWidth: 1,
-    borderColor: Colors.inputBg,
+    backgroundColor: Colors.inputBg,
     borderRadius: 20,
-    paddingLeft: 16,
-    paddingRight: 16,
+    paddingLeft: 10,
+    paddingRight: 10,
     paddingTop: 9,
     paddingBottom: 9,
     fontFamily: Fonts.sans,
@@ -1078,7 +1374,7 @@ const chatStyles = StyleSheet.create({
     marginBottom: 2,
   },
   sendBtnActive: { backgroundColor: Colors.terracotta },
-  sendBtnDisabled: { backgroundColor: Colors.inputBg },
+  sendBtnDisabled: { backgroundColor: Colors.iconMuted },
 
   readOnlyBar: {
     alignItems: 'center',
@@ -1089,6 +1385,49 @@ const chatStyles = StyleSheet.create({
     borderTopColor: Colors.inputBg,
   },
   readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, fontStyle: 'italic' },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.inputBg,
+  },
+  replyBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  replyBarContent: {
+    flex: 1,
+  },
+  replyBarName: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+  },
+  replyBarText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.warmGray,
+  },
+  editingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.inputBg,
+    gap: 8,
+  },
+  editingText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+    flex: 1,
+  },
 
   photoModal: {
     flex: 1,
@@ -1109,3 +1448,99 @@ const chatStyles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+const overlayStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  container: {
+    width: '100%',
+    maxWidth: 320,
+    alignItems: 'center',
+    gap: 10,
+  },
+  emojiRow: {
+    flexDirection: 'row',
+    backgroundColor: Colors.white,
+    borderRadius: 28,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 2,
+    shadowColor: Colors.shadowBlack,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  emojiBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emojiText: {
+    fontSize: 28,
+  },
+  actionMenu: {
+    backgroundColor: Colors.white,
+    borderRadius: 14,
+    width: '100%',
+    overflow: 'hidden',
+    shadowColor: Colors.shadowBlack,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  actionText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  actionTextDelete: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.errorRed,
+  },
+  actionDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginHorizontal: 18,
+  },
+});
+
+// Animated emoji button with scale bounce on tap
+function EmojiReactionButton({ emoji, onSelect }: { emoji: string; onSelect: (emoji: string) => void }) {
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  return (
+    <TouchableOpacity
+      style={overlayStyles.emojiBtn}
+      onPress={() => {
+        hapticLight();
+        scale.value = withSpring(1.3, { damping: 8, stiffness: 300 }, () => {
+          scale.value = withSpring(1);
+        });
+        setTimeout(() => onSelect(emoji), 150);
+      }}
+      activeOpacity={1}
+    >
+      <Animated.View style={animStyle}>
+        <Text style={overlayStyles.emojiText}>{emoji}</Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}

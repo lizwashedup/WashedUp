@@ -18,10 +18,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
+import * as Location from 'expo-location';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { ImagePlus, X, FileText, Trash2 } from 'lucide-react-native';
+import FirstPlanCelebration from '../../../components/FirstPlanCelebration';
 import { SharePlanModal } from '../../../components/modals/SharePlanModal';
 import ProfileButton from '../../../components/ProfileButton';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
@@ -197,6 +199,7 @@ export default function PostScreen() {
   const [locationRaw, setLocationRaw] = useState(''); // always tracks visible input text
   const [locationLat, setLocationLat] = useState<number | null>(null);
   const [locationLng, setLocationLng] = useState<number | null>(null);
+  const [neighborhood, setNeighborhood] = useState('');
   const [ticketUrl, setTicketUrl] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
@@ -332,7 +335,8 @@ export default function PostScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      await supabase.auth.refreshSession();
+      const { error: refreshErr } = await supabase.auth.refreshSession();
+      if (refreshErr) throw refreshErr;
 
       const fileName = `${user.id}/${Date.now()}.jpg`;
       const publicUrl = await uploadBase64ToStorage('event-images', fileName, base64);
@@ -346,7 +350,7 @@ export default function PostScreen() {
   };
 
   const toggleAgeRange = (range: AgeRange) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     if (range === 'All Ages') {
       setAgeRanges(['All Ages']);
       return;
@@ -384,6 +388,7 @@ export default function PostScreen() {
   // Submit
   const [loading, setLoading] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [firstPlanCelebrationVisible, setFirstPlanCelebrationVisible] = useState(false);
   const [postedPlanId, setPostedPlanId] = useState<string | null>(null);
   const [postedPlanTitle, setPostedPlanTitle] = useState('');
   const [postedSpotsLeft, setPostedSpotsLeft] = useState<number | undefined>();
@@ -402,7 +407,7 @@ export default function PostScreen() {
       setAlertInfo({ title: 'Add a title', message: 'Give your plan a title before saving as a draft.' });
       return;
     }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
     const draft: PlanDraft = {
       id: Date.now().toString(),
       title: title.trim(),
@@ -419,7 +424,7 @@ export default function PostScreen() {
   }, [title, location, locationLat, locationLng, ticketUrl, category, genderPref, ageRanges, description, creatorMessage, groupSize, imageUrl, drafts]);
 
   const loadDraft = useCallback((draft: PlanDraft) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setTitle(draft.title);
     setLocation(draft.location);
     setLocationRaw(draft.location);
@@ -465,7 +470,7 @@ export default function PostScreen() {
     setDateYear(tempYear);
     setDateSelected(true);
     setShowDatePicker(false);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
   };
 
   // ─── Time picker ─────────────────────────────────────────────────────────────
@@ -483,7 +488,7 @@ export default function PostScreen() {
     setTimePeriod(tempPeriod);
     setTimeSelected(true);
     setShowTimePicker(false);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
   };
 
   // ─── Submit ───────────────────────────────────────────────────────────────────
@@ -504,7 +509,7 @@ export default function PostScreen() {
       return;
     }
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium();
     setLoading(true);
 
     try {
@@ -546,6 +551,7 @@ export default function PostScreen() {
           city: 'Los Angeles',
           explore_event_id: exploreEventId,
           image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
+          neighborhood: neighborhood.trim() || null,
         })
         .select('id')
         .single();
@@ -580,7 +586,7 @@ export default function PostScreen() {
         }
       }
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setPostedPlanId(insertedEvent?.id ?? null);
       setPostedPlanTitle(title.trim());
       setPostedSpotsLeft(groupSize);
@@ -589,9 +595,23 @@ export default function PostScreen() {
         genderPref === 'men_only' ? 'Men only' :
         genderPref === 'nonbinary_only' ? 'Nonbinary only' : undefined
       );
+
+      // Check if this is the user's first plan ever — show celebration once
+      const hasSeen = await AsyncStorage.getItem('hasSeenFirstPlanCelebration');
+      if (!hasSeen) {
+        const { count } = await supabase
+          .from('events')
+          .select('id', { count: 'exact', head: true })
+          .eq('creator_user_id', user.id);
+        if (count === 1) {
+          setFirstPlanCelebrationVisible(true);
+          await AsyncStorage.setItem('hasSeenFirstPlanCelebration', '1');
+        }
+      }
+
       setShareModalVisible(true);
       setImageUrl(null);
-      setTitle(''); setLocation(''); setLocationRaw(''); setLocationLat(null); setLocationLng(null);
+      setTitle(''); setLocation(''); setLocationRaw(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
       setTicketUrl(''); setCategory(null);
       setGenderPref('mixed'); setAgeRanges([]);
       setDescription(''); setCreatorMessage(''); setGroupSize(6);
@@ -629,7 +649,7 @@ export default function PostScreen() {
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
         <ScrollView
@@ -775,7 +795,20 @@ export default function PostScreen() {
                 setLocationRaw(locationName);
                 setLocationLat(lat);
                 setLocationLng(lng);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                // Auto-detect neighborhood via reverse geocoding
+                if (lat != null && lng != null) {
+                  (async () => {
+                    try {
+                      const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+                      if (results.length > 0) {
+                        const place = results[0];
+                        const area = place.district || place.subregion || place.city || '';
+                        setNeighborhood(area);
+                      }
+                    } catch {}
+                  })();
+                }
+                hapticLight();
               }}
               query={{
                 key: GOOGLE_MAPS_API_KEY,
@@ -804,6 +837,25 @@ export default function PostScreen() {
               enablePoweredByContainer={false}
               debounce={300}
               keepResultsAfterBlur={true}
+            />
+          </View>
+
+          {/* ── Neighborhood ── */}
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#78695C', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Neighborhood</Text>
+            <TextInput
+              style={{
+                backgroundColor: '#F5EDE0',
+                borderRadius: 10,
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                fontSize: 15,
+                color: '#2C1810',
+              }}
+              value={neighborhood}
+              onChangeText={setNeighborhood}
+              placeholder="e.g. Silver Lake, DTLA"
+              placeholderTextColor="#A09385"
             />
           </View>
 
@@ -852,7 +904,7 @@ export default function PostScreen() {
                     key={opt.value}
                     style={[styles.genderPill, genderPref === opt.value && styles.pillSelected]}
                     onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      hapticLight();
                       setGenderPref(opt.value);
                     }}
                     activeOpacity={0.8}
@@ -936,7 +988,7 @@ export default function PostScreen() {
                 style={[styles.stepperBtn, groupSize <= (MIN_GROUP - 1) && styles.stepperBtnDisabled]}
                 onPress={() => {
                   if (groupSize > (MIN_GROUP - 1)) {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                     setGroupSize(g => g - 1);
                   }
                 }}
@@ -952,7 +1004,7 @@ export default function PostScreen() {
                 style={[styles.stepperBtn, groupSize >= (MAX_GROUP - 1) && styles.stepperBtnDisabled]}
                 onPress={() => {
                   if (groupSize < (MAX_GROUP - 1)) {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                     setGroupSize(g => g + 1);
                   }
                 }}
@@ -961,7 +1013,7 @@ export default function PostScreen() {
                 <Text style={styles.stepperBtnText}>+</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.stepperHint}>You + {groupSize} others (3–8 including you)</Text>
+            <Text style={styles.stepperHint}>including you</Text>
           </View>
 
           {/* Bottom spacer so content isn't hidden behind sticky button */}
@@ -1012,6 +1064,11 @@ export default function PostScreen() {
         </View>
       </KeyboardAvoidingView>
 
+      <FirstPlanCelebration
+        visible={firstPlanCelebrationVisible}
+        onDismiss={() => setFirstPlanCelebrationVisible(false)}
+      />
+
       <SharePlanModal
         visible={shareModalVisible}
         onClose={() => {
@@ -1029,6 +1086,7 @@ export default function PostScreen() {
         }}
         planTitle={postedPlanTitle}
         planId={postedPlanId || ''}
+        slug={null}
         spotsLeft={postedSpotsLeft}
         genderLabel={postedGenderLabel}
         variant="posted"
@@ -1160,7 +1218,7 @@ export default function PostScreen() {
                     category === cat && styles.categoryItemSelected,
                   ]}
                   onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    hapticLight();
                     setCategory(cat);
                     setShowCategoryPicker(false);
                   }}
@@ -1240,9 +1298,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   headerTitle: {
-    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
+    fontWeight: '700',
+    color: '#2C1810',
   },
   headerSub: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.textLight, marginTop: 4 },
 

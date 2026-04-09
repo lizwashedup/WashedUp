@@ -1,4 +1,4 @@
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useRouter } from 'expo-router';
@@ -9,8 +9,10 @@ import { StatusBar } from 'expo-status-bar';
 import { Camera, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { useState } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Linking,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -40,7 +42,7 @@ export default function OnboardingPhotoScreen() {
       if (status !== 'granted') {
         setAlertInfo({
           title: 'Permission needed',
-          message: 'WashedUp needs access to your photos to set a profile picture.',
+          message: 'washedup needs access to your photos to set a profile picture.',
           buttons: [
             { text: 'Open Settings', onPress: () => Linking.openSettings() },
             { text: 'Cancel', style: 'cancel' },
@@ -67,7 +69,7 @@ export default function OnboardingPhotoScreen() {
       if (status !== 'granted') {
         setAlertInfo({
           title: 'Permission needed',
-          message: 'WashedUp needs access to your camera to take a profile photo.',
+          message: 'washedup needs access to your camera to take a profile photo.',
           buttons: [
             { text: 'Open Settings', onPress: () => Linking.openSettings() },
             { text: 'Cancel', style: 'cancel' },
@@ -102,21 +104,35 @@ export default function OnboardingPhotoScreen() {
   };
 
   const pickImage = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAlertInfo({
-      title: 'Add a profile photo',
-      message: 'Choose how to add your photo',
-      buttons: [
-        { text: 'Take Photo', onPress: takePhotoFromCamera },
-        { text: 'Choose from Library', onPress: pickImageFromLibrary },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    });
+    hapticLight();
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Take Photo', 'Choose from Library', 'Cancel'],
+          cancelButtonIndex: 2,
+          title: 'Add a profile photo',
+        },
+        (idx) => {
+          if (idx === 0) takePhotoFromCamera();
+          if (idx === 1) pickImageFromLibrary();
+        },
+      );
+    } else {
+      setAlertInfo({
+        title: 'Add a profile photo',
+        message: 'Choose how to add your photo',
+        buttons: [
+          { text: 'Take Photo', onPress: takePhotoFromCamera },
+          { text: 'Choose from Library', onPress: pickImageFromLibrary },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      });
+    }
   };
 
   const handleContinue = async () => {
     if (!imageBase64) return; // should never happen — button is disabled without it
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setLoading(true);
     try {
       const {
@@ -166,7 +182,7 @@ export default function OnboardingPhotoScreen() {
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               routerBack.back();
             }}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -233,7 +249,7 @@ export default function OnboardingPhotoScreen() {
             (!imageUri || !imageBase64 || loading) && styles.primaryButtonDisabled,
           ]}
           onPress={handleContinue}
-          onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+          onPressIn={() => hapticLight()}
           activeOpacity={0.9}
           disabled={!imageUri || !imageBase64 || loading}
         >

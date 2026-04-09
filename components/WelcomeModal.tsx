@@ -12,11 +12,11 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Search, Users, MessageCircle } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../lib/haptics';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../constants/Typography';
 
-const waveIcon = require('../assets/welcome-wave.png');
+const wLogo = require('../assets/images/w-logo-full.png');
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 48;
@@ -46,19 +46,19 @@ export default function WelcomeModal({
 
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const idx = Math.round(e.nativeEvent.contentOffset.x / CARD_WIDTH);
+      const idx = Math.min(Math.max(0, Math.round(e.nativeEvent.contentOffset.x / CARD_WIDTH)), TOTAL_CARDS - 1);
       setActiveIndex(idx);
     },
     [],
   );
 
   const handleBrowse = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     onDismiss();
   }, [onDismiss]);
 
   const handlePost = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     onPostPlan();
   }, [onPostPlan]);
 
@@ -78,8 +78,8 @@ export default function WelcomeModal({
             {/* Card 1: Welcome */}
             <View style={styles.page}>
               <Image
-                source={waveIcon}
-                style={styles.waveIcon}
+                source={wLogo}
+                style={styles.wLogo}
                 contentFit="contain"
               />
               <Text style={styles.displayTitle}>
@@ -173,9 +173,9 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     justifyContent: 'center',
   },
-  waveIcon: {
-    width: 110,
-    height: 72,
+  wLogo: {
+    width: 96,
+    height: 96,
     alignSelf: 'center',
     marginTop: 8,
     marginBottom: 18,

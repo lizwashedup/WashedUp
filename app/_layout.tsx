@@ -16,8 +16,11 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking } from 'react-native';
+import { Alert, AppState, Linking, LogBox } from 'react-native';
 import 'react-native-reanimated';
+
+// Suppress push notification entitlement error on simulators
+LogBox.ignoreLogs(['getRegistrationInfoAsync']);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
@@ -25,6 +28,11 @@ import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useSessionLogger } from '../hooks/useSessionLogger';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
+import AppStoreReviewAsk from '../components/AppStoreReviewAsk';
+import MarkEarnedModal from '../components/marks/MarkEarnedModal';
+import VideoSplash from '../components/VideoSplash';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -50,9 +58,18 @@ export default function RootLayout() {
     ...Ionicons.font,
   });
 
+  const [showVideoSplash, setShowVideoSplash] = useState(true);
+
   useEffect(() => {
     if (error) throw error;
   }, [error]);
+
+  useEffect(() => {
+    // Once fonts are loaded, hide the native splash so the video can play
+    if (loaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [loaded]);
 
   if (!loaded) {
     return null;
@@ -61,7 +78,10 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
-        <RootLayoutNav onReady={() => SplashScreen.hideAsync()} />
+        <RootLayoutNav onReady={() => {}} />
+        {showVideoSplash && (
+          <VideoSplash onFinish={() => setShowVideoSplash(false)} />
+        )}
       </SafeAreaProvider>
     </QueryClientProvider>
   );
@@ -89,10 +109,128 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   usePushNotifications(authedUserId);
   useSessionLogger(authedUserId);
 
+  // ── Post-plan survey ────────────────────────────────────────────────────
+  const [surveyPlan, setSurveyPlan] = useState<SurveyPlan | null>(null);
+  const [surveyMembers, setSurveyMembers] = useState<SurveyMember[]>([]);
+  const surveyCheckedRef = useRef(false);
+  const [surveyCheckDone, setSurveyCheckDone] = useState(false);
+  const prevUserIdRef = useRef<string | null>(null);
+
+  // Reset survey/review state when user changes (sign out + sign in as different user)
+  useEffect(() => {
+    if (authedUserId && authedUserId !== prevUserIdRef.current) {
+      if (prevUserIdRef.current !== null) {
+        surveyCheckedRef.current = false;
+        setSurveyCheckDone(false);
+        setSurveyPlan(null);
+        setShowReviewAsk(false);
+      }
+      prevUserIdRef.current = authedUserId;
+    }
+  }, [authedUserId]);
+
+  useEffect(() => {
+    if (!authedUserId || !authResolved || surveyCheckedRef.current) return;
+    surveyCheckedRef.current = true;
+
+    (async () => {
+      try {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        const { data: plans } = await supabase
+          .from('event_members')
+          .select('event_id, events!inner(id, title, image_url, status, start_time)')
+          .eq('user_id', authedUserId)
+          .eq('status', 'joined')
+          .eq('events.status', 'completed')
+          .gte('events.start_time', sevenDaysAgo.toISOString())
+          .order('events(start_time)', { ascending: false })
+          .limit(5);
+
+        if (!plans || plans.length === 0) return;
+
+        const eventIds = plans.map((p: any) => p.event_id);
+        const { data: existing } = await supabase
+          .from('plan_feedback')
+          .select('event_id')
+          .eq('user_id', authedUserId)
+          .in('event_id', eventIds);
+
+        const feedbackSet = new Set((existing ?? []).map((r: any) => r.event_id));
+        const needsSurvey = plans.find((p: any) => !feedbackSet.has(p.event_id));
+        if (!needsSurvey) return;
+
+        const event = (needsSurvey as any).events;
+        setSurveyPlan({
+          id: event.id,
+          title: event.title,
+          image_url: event.image_url ?? null,
+        });
+
+        const { data: memberData } = await supabase
+          .from('event_members')
+          .select('user_id, profiles_public!inner(id, first_name_display, profile_photo_url)')
+          .eq('event_id', event.id)
+          .eq('status', 'joined');
+
+        if (memberData) {
+          setSurveyMembers(
+            memberData.map((m: any) => ({
+              id: m.profiles_public.id,
+              first_name_display: m.profiles_public.first_name_display,
+              profile_photo_url: m.profiles_public.profile_photo_url,
+            }))
+          );
+        }
+      } catch (e) { console.warn('[WashedUp] Survey check failed:', e); }
+      finally { setSurveyCheckDone(true); }
+    })();
+  }, [authedUserId, authResolved]);
+
+  // ── App Store review ask ────────────────────────────────────────────────
+  const [showReviewAsk, setShowReviewAsk] = useState(false);
+
+  useEffect(() => {
+    if (!authedUserId || !surveyCheckDone || surveyPlan) return;
+
+    (async () => {
+      try {
+        const already = await AsyncStorage.getItem('hasRequestedReview');
+        if (already === 'true') return;
+
+        // Need 2+ completed plans as a joined member
+        const { count } = await supabase
+          .from('event_members')
+          .select('id, events!inner(status)', { count: 'exact', head: true })
+          .eq('user_id', authedUserId)
+          .eq('status', 'joined')
+          .eq('events.status', 'completed');
+
+        if ((count ?? 0) < 2) return;
+
+        // Check feedback: at least one thumbs_up OR zero rows at all
+        const { data: feedback } = await supabase
+          .from('plan_feedback')
+          .select('rating')
+          .eq('user_id', authedUserId)
+          .limit(10);
+
+        const rows = feedback ?? [];
+        const hasThumbsUp = rows.some((r: any) => r.rating === 'thumbs_up');
+        const hasNoFeedback = rows.length === 0;
+
+        if (hasThumbsUp || hasNoFeedback) {
+          setShowReviewAsk(true);
+        }
+      } catch (e) { console.warn('[WashedUp] Review check failed:', e); }
+    })();
+  }, [authedUserId, surveyCheckDone, surveyPlan]);
+
   useEffect(() => {
     if (authResolved && !splashHiddenRef.current) {
       splashHiddenRef.current = true;
-      try { onReady(); } catch {}
+      try { onReady(); } catch (e) { console.warn('[WashedUp] onReady failed:', e); }
     }
   }, [authResolved, onReady]);
 
@@ -101,7 +239,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       const data = response.notification.request.content.data as Record<string, any>;
       const type = data?.type as string | undefined;
 
-      if (type === 'plan_invite' && data?.eventId) {
+      if ((type === 'plan_invite' || type === 'waitlist_spot') && data?.eventId) {
         router.push(`/plan/${data.eventId}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
@@ -259,15 +397,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
         const dest = onboardingDest(data?.onboarding_status);
         const now = Date.now();
-        if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) return;
+        if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {
+          setAuthedUserId(session.user.id);
+          setAuthResolved(true);
+          return;
+        }
         lastNavRef.current = { dest, ts: now };
         setAuthedUserId(session.user.id);
         router.replace(dest as any);
+        setTimeout(() => setAuthResolved(true), 80);
       } catch {
-        // Profile fetch failed (network error, etc.) — don't navigate the user
-        // away from where they are. Just mark auth as resolved with their userId.
+        // Profile fetch failed — navigate to plans as fallback so user isn't stuck
         setAuthedUserId(session.user.id);
-        setAuthResolved(true);
+        lastNavRef.current = { dest: '/(tabs)/plans', ts: Date.now() };
+        router.replace('/(tabs)/plans' as any);
+        setTimeout(() => setAuthResolved(true), 80);
       }
     });
 
@@ -283,7 +427,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="reset-password" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="plan/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="plan/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="admin/events" options={{ headerShown: false }} />
       </Stack>
@@ -291,6 +435,24 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.parchment }}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
+      )}
+      {surveyPlan && authedUserId && (
+        <PostPlanSurvey
+          visible={!!surveyPlan}
+          plan={surveyPlan}
+          members={surveyMembers}
+          userId={authedUserId}
+          onComplete={() => setSurveyPlan(null)}
+        />
+      )}
+      {showReviewAsk && !surveyPlan && (
+        <AppStoreReviewAsk
+          visible={showReviewAsk && !surveyPlan}
+          onClose={() => setShowReviewAsk(false)}
+        />
+      )}
+      {authedUserId && surveyCheckDone && !surveyPlan && !showReviewAsk && (
+        <MarkEarnedModal userId={authedUserId} />
       )}
     </View>
   );

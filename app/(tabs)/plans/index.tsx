@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useNavigation } from 'expo-router';
-import { ChevronDown, ChevronRight, Heart, LayoutList, Map } from 'lucide-react-native';
+import { ChevronDown, ChevronRight, LayoutList, Map } from 'lucide-react-native';
 import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -20,9 +20,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
+import { SkeletonFeed } from '../../../components/SkeletonCard';
+import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { FeaturedEventCard } from '../../../components/plans/FeaturedEventCard';
 import { PlanCard } from '../../../components/plans/PlanCard';
+import { SaveSnackbar } from '../../../components/SaveSnackbar';
+import { ShareSheet } from '../../../components/ShareSheet';
 import ProfileButton from '../../../components/ProfileButton';
 import WelcomeModal from '../../../components/WelcomeModal';
 import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
@@ -32,6 +36,8 @@ import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { supabase } from '../../../lib/supabase';
 import { useBlock } from '../../../hooks/useBlock';
+
+const TC = '#B5522E'; // terracotta primary accent
 
 // Lazy-load map to avoid crash on Expo Go / environments where react-native-maps fails
 const LazyPlansMapView = lazy(() => import('../../../components/plans/PlansMapView'));
@@ -54,16 +60,22 @@ interface PlanCardPlan {
   host_message: string | null;
   start_time: string;
   location_text: string | null;
+  neighborhood: string | null;
+  slug: string | null;
   category: string | null;
   max_invites: number;
   member_count: number;
   slug?: string | null;
   is_featured?: boolean;
   creator: {
+    id: string;
     first_name_display: string;
     profile_photo_url: string | null;
     member_since?: string;
     plans_posted?: number;
+    milestone_slug?: string | null;
+    milestone_name?: string | null;
+    milestone_icon?: string | null;
   };
 }
 
@@ -73,21 +85,31 @@ interface FeaturedPlan extends PlanCardPlan {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Creator milestone marks cache — populated by feed queries
+let _creatorMarksMap: Record<string, { slug: string; name: string; icon: string }> = {};
+
 function toPlanCardPlan(plan: Plan): PlanCardPlan {
+  const mark = _creatorMarksMap[plan.creator?.id ?? ''];
   return {
     id: plan.id,
     title: plan.title,
     host_message: plan.host_message ?? null,
     start_time: plan.start_time,
     location_text: plan.location_text ?? null,
+    neighborhood: plan.neighborhood ?? null,
+    slug: plan.slug ?? null,
     category: plan.category ?? null,
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
     is_featured: plan.is_featured ?? false,
     creator: {
+      id: plan.creator?.id ?? '',
       first_name_display: plan.creator?.first_name_display ?? 'Creator',
       profile_photo_url: plan.creator?.profile_photo_url ?? null,
       plans_posted: plan.creator?.plans_posted ?? undefined,
+      milestone_slug: mark?.slug ?? null,
+      milestone_name: mark?.name ?? null,
+      milestone_icon: mark?.icon ?? null,
     },
   };
 }
@@ -184,6 +206,9 @@ export default function PlansScreen() {
   const [whenFilter, setWhenFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<CategoryOption[]>([]);
   const [reportTarget, setReportTarget] = useState<{ userId: string; userName: string; eventId: string } | null>(null);
+  const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
+  const [snackbar, setSnackbar] = useState<{ planId: string; planTitle: string } | null>(null);
+  const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string; slug: string | null } | null>(null);
 
   const [userId, setUserId] = React.useState<string | null>(null);
   const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
@@ -215,6 +240,11 @@ export default function PlansScreen() {
             if (!cancelled) {
               setWelcomeName(profile?.first_name_display ?? '');
               setShowWelcome(true);
+              // Persist the "seen" flag immediately, before the user can dismiss.
+              // This guarantees the modal only shows once per user even if they
+              // force-quit the app, lose connection, or close it before the
+              // dismiss handler's userId-state closure has hydrated.
+              try { await AsyncStorage.setItem(key, '1'); } catch {}
             }
           }
         } catch {}
@@ -293,7 +323,7 @@ export default function PlansScreen() {
       queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
     },
     onError: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      hapticError();
     },
   });
 
@@ -380,7 +410,7 @@ export default function PlansScreen() {
           events (
             id, title, start_time, location_text, location_lat, location_lng,
             image_url, primary_vibe, gender_rule, max_invites, min_invites,
-            member_count, status, creator_user_id, host_message
+            member_count, status, creator_user_id, host_message, neighborhood, slug
           )
         `)
         .eq('user_id', userId)
@@ -390,7 +420,7 @@ export default function PlansScreen() {
 
       const { data: created } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug')
         .eq('creator_user_id', userId)
         .in('status', ['forming', 'active', 'full', 'completed']);
 
@@ -420,6 +450,16 @@ export default function PlansScreen() {
       (profilesData ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
       const realCounts = await fetchRealMemberCounts(allEvents.map((e: any) => e.id));
+
+      // Fetch creator milestone marks
+      if (uniqueCreatorIds.length > 0) {
+        const { data: marksData } = await supabase.rpc('get_creator_milestone_marks', { p_user_ids: uniqueCreatorIds });
+        if (marksData) {
+          (marksData as any[]).forEach((m: any) => {
+            _creatorMarksMap[m.user_id] = { slug: m.mark_slug, name: m.mark_name, icon: m.mark_icon_name };
+          });
+        }
+      }
 
       return allEvents.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
@@ -464,7 +504,7 @@ export default function PlansScreen() {
       // Step 2: fetch the actual events
       const { data: eventsData } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug')
         .in('id', eventIds)
         .in('status', ['forming', 'active', 'full']);
 
@@ -480,6 +520,16 @@ export default function PlansScreen() {
       (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
       const realCounts = await fetchRealMemberCounts(active.map((e: any) => e.id));
+
+      // Fetch creator milestone marks
+      if (creatorIds.length > 0) {
+        const { data: marksData } = await supabase.rpc('get_creator_milestone_marks', { p_user_ids: creatorIds });
+        if (marksData) {
+          (marksData as any[]).forEach((m: any) => {
+            _creatorMarksMap[m.user_id] = { slug: m.mark_slug, name: m.mark_name, icon: m.mark_icon_name };
+          });
+        }
+      }
 
       return active.map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
@@ -526,13 +576,19 @@ export default function PlansScreen() {
 
   const [waitlistExpanded, setWaitlistExpanded] = useState(false);
 
+  const savedPlans = useMemo(
+    () => allPlans.filter(p => wishlistedSet[p.id]),
+    [allPlans, wishlistedSet],
+  );
+
   const myPlansSections = useMemo(() => {
     const s: { title: string; data: Plan[] }[] = [];
     if (myPlansUpcoming.length > 0) s.push({ title: 'Upcoming', data: myPlansUpcoming });
+    if (savedPlans.length > 0) s.push({ title: 'Saved', data: savedPlans });
     if (waitlistedPlans.length > 0) s.push({ title: 'Waitlisted', data: waitlistExpanded ? waitlistedPlans : [] });
     if (myPlansPast.length > 0) s.push({ title: 'Past', data: pastExpanded ? myPlansPast : [] });
     return s;
-  }, [myPlansUpcoming, myPlansPast, pastExpanded, waitlistedPlans, waitlistExpanded]);
+  }, [myPlansUpcoming, myPlansPast, pastExpanded, waitlistedPlans, waitlistExpanded, savedPlans]);
 
   const displayPlans = useMemo(() => {
     if (!heartFilter) return allPlans;
@@ -579,15 +635,15 @@ export default function PlansScreen() {
         return (
           <TouchableOpacity
             style={styles.pastSectionHeader}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPastExpanded((v) => !v); }}
+            onPress={() => { hapticLight(); setPastExpanded((v) => !v); }}
             activeOpacity={0.7}
           >
             <Text style={styles.sectionHeader}>{section.title}</Text>
             <View style={styles.pastChevronRow}>
               <Text style={styles.pastCount}>{myPlansPast.length}</Text>
               {pastExpanded
-                ? <ChevronDown size={16} color={Colors.textLight} />
-                : <ChevronRight size={16} color={Colors.textLight} />}
+                ? <ChevronDown size={16} color={'#A09385'} />
+                : <ChevronRight size={16} color={'#A09385'} />}
             </View>
           </TouchableOpacity>
         );
@@ -596,15 +652,15 @@ export default function PlansScreen() {
         return (
           <TouchableOpacity
             style={styles.pastSectionHeader}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setWaitlistExpanded((v) => !v); }}
+            onPress={() => { hapticLight(); setWaitlistExpanded((v) => !v); }}
             activeOpacity={0.7}
           >
             <Text style={styles.sectionHeader}>{section.title}</Text>
             <View style={styles.pastChevronRow}>
               <Text style={styles.pastCount}>{waitlistedPlans.length}</Text>
               {waitlistExpanded
-                ? <ChevronDown size={16} color={Colors.textLight} />
-                : <ChevronRight size={16} color={Colors.textLight} />}
+                ? <ChevronDown size={16} color={'#A09385'} />
+                : <ChevronRight size={16} color={'#A09385'} />}
             </View>
           </TouchableOpacity>
         );
@@ -641,14 +697,23 @@ export default function PlansScreen() {
           plan={toPlanCardPlan(item)}
           isMember={!!memberIdSet[item.id]}
           isWishlisted={!!wishlistedSet[item.id]}
-          onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+          onWishlist={(id, current) => {
+            wishlistMutation.mutate({ eventId: id, current });
+            if (!current) {
+              const plan = allPlans.find(p => p.id === id) ?? myPlans.find(p => p.id === id);
+              setSnackbar({ planId: id, planTitle: plan?.title ?? '' });
+            } else {
+              setSnackbar(null);
+            }
+          }}
           onReport={handleReport}
           onBlock={handleBlock}
+          onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
           isPast={item.status === 'completed'}
         />
       </View>
     ),
-    [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock],
+    [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, allPlans, myPlans],
   );
 
   const handleWelcomeDismiss = useCallback(async () => {
@@ -727,76 +792,69 @@ export default function PlansScreen() {
         <ProfileButton />
       </View>
 
-      {/* Row 1: All Plans | My Plans */}
-      <View style={styles.primaryChipsRow}>
-        <View style={styles.primaryChips}>
-          {(['plans', 'myplans'] as const).map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              style={[styles.primaryChip, activeTab === tab && styles.primaryChipActive]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setActiveTab(tab);
-              }}
+      {/* Row 1: All Plans | My Plans — full-width underline tabs */}
+      <View style={styles.tabRow}>
+        {(['plans', 'myplans'] as const).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.tabActive]}
+            onPress={() => {
+              hapticLight();
+              setActiveTab(tab);
+            }}
+          >
+            <Text
+              style={[styles.tabText, activeTab === tab && styles.tabTextActive]}
+              numberOfLines={1}
+              allowFontScaling={false}
             >
-              <Text
-                style={[styles.primaryChipText, activeTab === tab && styles.primaryChipTextActive]}
-                numberOfLines={1}
-                allowFontScaling={false}
-              >
-                {tab === 'plans' ? 'All Plans' : 'My Plans'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+              {tab === 'plans' ? 'All Plans' : 'My Plans'}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {/* Row 2: When, Category, Heart, Map — same layout as Scene tab */}
-      {activeTab === 'plans' && (
+      {/* Row 2: When, Category, Heart, Map — fixed-row layout, no scrolling */}
+      {activeTab === 'plans' && !mapView && (
         <View style={styles.filterRow}>
           <TouchableOpacity
-            style={[styles.dropdownPill, whenActive && styles.dropdownPillActive]}
+            style={[styles.filterPill, whenActive && styles.filterPillActive]}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               setWhenSheetOpen(true);
             }}
           >
-            <Text style={[styles.dropdownText, whenActive && styles.dropdownTextActive]} numberOfLines={1}>
+            <Text style={[styles.filterPillText, whenActive && styles.filterPillTextActive]} numberOfLines={1}>
               {whenLabel}
             </Text>
-            <ChevronDown size={13} color={whenActive ? Colors.white : Colors.asphalt} strokeWidth={2.5} />
+            <ChevronDown size={10} color={whenActive ? '#FFFFFF' : '#78695C'} strokeWidth={2.5} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.dropdownPill, categoryActive && styles.dropdownPillActive]}
+            style={[styles.filterPill, categoryActive && styles.filterPillActive]}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               setCategorySheetOpen(true);
             }}
           >
-            <Text style={[styles.dropdownText, categoryActive && styles.dropdownTextActive]} numberOfLines={1}>
+            <Text style={[styles.filterPillText, categoryActive && styles.filterPillTextActive]} numberOfLines={1}>
               {categoryLabel}
             </Text>
-            <ChevronDown size={13} color={categoryActive ? Colors.white : Colors.asphalt} strokeWidth={2.5} />
+            <ChevronDown size={10} color={categoryActive ? '#FFFFFF' : '#78695C'} strokeWidth={2.5} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.heartFilterPill, heartFilter && styles.heartFilterPillActive]}
+            style={[styles.filterPill, heartFilter && styles.filterPillActive]}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              hapticLight();
               setHeartFilter((v) => !v);
             }}
           >
-            <Heart
-              size={16}
-              color={heartFilter ? Colors.white : Colors.asphalt}
-              fill={heartFilter ? Colors.white : 'transparent'}
-              strokeWidth={2}
-            />
+            <Ionicons name={heartFilter ? 'bookmark' : 'bookmark-outline'} size={14} color={heartFilter ? '#FFFFFF' : '#78695C'} />
+            <Text style={[styles.filterPillText, heartFilter && styles.filterPillTextActive]}>Saved</Text>
           </TouchableOpacity>
-          <View style={styles.filterSpacer} />
           <TouchableOpacity
-            style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
+            style={[styles.filterPill, mapView && styles.filterPillActive]}
             onPress={() => {
-              Haptics.selectionAsync();
+              hapticSelection();
               setMapView((v) => !v);
             }}
             accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
@@ -804,9 +862,9 @@ export default function PlansScreen() {
             {mapView ? (
               <LayoutList size={14} color={Colors.white} strokeWidth={2} />
             ) : (
-              <Map size={14} color={Colors.asphalt} strokeWidth={2} />
+              <Map size={14} color={'#78695C'} strokeWidth={2} />
             )}
-            <Text style={[styles.mapToggleLabel, mapView && styles.mapToggleLabelActive]}>
+            <Text style={[styles.filterPillText, mapView && styles.filterPillTextActive]}>
               {mapView ? 'List' : 'Map'}
             </Text>
           </TouchableOpacity>
@@ -814,12 +872,12 @@ export default function PlansScreen() {
       )}
 
       {/* Row 2b: Map toggle for My Plans */}
-      {activeTab === 'myplans' && (
+      {activeTab === 'myplans' && !mapView && (
         <View style={styles.myPlansFilterRow}>
           <TouchableOpacity
-            style={[styles.mapTogglePill, mapView && styles.mapTogglePillActive]}
+            style={[styles.filterPill, mapView && styles.filterPillActive]}
             onPress={() => {
-              Haptics.selectionAsync();
+              hapticSelection();
               setMapView((v) => !v);
             }}
             accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
@@ -827,9 +885,9 @@ export default function PlansScreen() {
             {mapView ? (
               <LayoutList size={14} color={Colors.white} strokeWidth={2} />
             ) : (
-              <Map size={14} color={Colors.asphalt} strokeWidth={2} />
+              <Map size={14} color={'#78695C'} strokeWidth={2} />
             )}
-            <Text style={[styles.mapToggleLabel, mapView && styles.mapToggleLabelActive]}>
+            <Text style={[styles.filterPillText, mapView && styles.filterPillTextActive]}>
               {mapView ? 'List' : 'Map'}
             </Text>
           </TouchableOpacity>
@@ -840,13 +898,13 @@ export default function PlansScreen() {
       {mapView ? (
         mapLoading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={Colors.terracotta} />
+            <ActivityIndicator size="large" color={TC} />
           </View>
         ) : (
           <MapErrorBoundary onClose={() => setMapView(false)}>
             <Suspense fallback={
               <View style={styles.centered}>
-                <ActivityIndicator size="large" color={Colors.terracotta} />
+                <ActivityIndicator size="large" color={TC} />
               </View>
             }>
               <LazyPlansMapView
@@ -873,9 +931,7 @@ export default function PlansScreen() {
               </TouchableOpacity>
             </View>
           ) : !userId || isLoading || wishlistsLoading || myPlansLoading ? (
-            <View style={styles.centered}>
-              <ActivityIndicator size="large" color={Colors.terracotta} />
-            </View>
+            <SkeletonFeed />
           ) : isError ? (
             <View style={styles.centered}>
               <Text style={styles.errorTitle}>Couldn't load plans</Text>
@@ -914,7 +970,7 @@ export default function PlansScreen() {
               maxToRenderPerBatch={20}
               windowSize={11}
               refreshControl={
-                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />
+                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={TC} />
               }
             />
           )}
@@ -923,7 +979,7 @@ export default function PlansScreen() {
         <View style={{ flex: 1 }}>
           {myPlansLoading ? (
             <View style={styles.centered}>
-              <ActivityIndicator size="large" color={Colors.terracotta} />
+              <ActivityIndicator size="large" color={TC} />
             </View>
           ) : myPlansSections.length === 0 ? (
             <View style={styles.emptyState}>
@@ -990,6 +1046,40 @@ export default function PlansScreen() {
         />
       )}
 
+      <MiniProfileCard
+        visible={!!miniProfileUserId}
+        userId={miniProfileUserId}
+        onClose={() => setMiniProfileUserId(null)}
+        onReport={(uid, uname) => {
+          setMiniProfileUserId(null);
+          setReportTarget({ userId: uid, userName: uname, eventId: '' });
+        }}
+        onBlock={(uid, uname) => {
+          setMiniProfileUserId(null);
+          blockUser(uid, uname);
+        }}
+      />
+
+      <SaveSnackbar
+        visible={!!snackbar}
+        planId={snackbar?.planId ?? ''}
+        planTitle={snackbar?.planTitle ?? ''}
+        onShare={(id) => {
+          setSnackbar(null);
+          const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find(p => p.id === id);
+          setShareSheet({ planId: id, planTitle: plan?.title ?? '', slug: plan?.slug ?? null });
+        }}
+        onDismiss={() => setSnackbar(null)}
+      />
+
+      <ShareSheet
+        visible={!!shareSheet}
+        planId={shareSheet?.planId ?? ''}
+        planTitle={shareSheet?.planTitle ?? ''}
+        slug={shareSheet?.slug}
+        onClose={() => setShareSheet(null)}
+      />
+
     </SafeAreaView>
   );
 }
@@ -997,7 +1087,7 @@ export default function PlansScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
+  container: { flex: 1, backgroundColor: '#FAF5EC' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1012,8 +1102,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   logo: {
-    width: 140,
-    height: 32,
+    width: 122,
+    height: 28,
   },
   headerIcons: {
     flexDirection: 'row',
@@ -1024,120 +1114,82 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: Colors.cardBg,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: '#E5DDD1',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primaryChipsRow: {
+
+  // ── Full-width underline tabs ──
+  tabRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5DDD1',
+    marginHorizontal: 20,
+    marginBottom: 12,
   },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'transparent',
+  },
+  tabActive: {
+    borderBottomColor: TC,
+  },
+  tabText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: '#A09385',
+  },
+  tabTextActive: {
+    color: '#2C1810',
+    fontFamily: Fonts.sansBold,
+  },
+
+  // ── Filters ──
   filterRow: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    gap: 10,
-    marginBottom: 20,
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    marginTop: 4,
+    marginBottom: 12,
   },
-  filterSpacer: { flexGrow: 1, flexShrink: 0, minWidth: 4 },
   myPlansFilterRow: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    marginTop: 4,
+    marginBottom: 12,
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
-  dropdownPill: {
+  filterPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexShrink: 1,
+    justifyContent: 'center',
     gap: 5,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingHorizontal: 12,
+    height: 36,
     borderRadius: 20,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    backgroundColor: '#F5EDE0',
   },
-  dropdownPillActive: {
-    backgroundColor: Colors.terracotta,
-    borderColor: Colors.terracotta,
+  filterPillActive: {
+    backgroundColor: '#B5522E',
   },
-  dropdownText: {
+  filterPillText: {
     fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
+    fontSize: 13,
+    color: '#78695C',
+    includeFontPadding: false,
   },
-  dropdownTextActive: {
-    color: Colors.white,
+  filterPillTextActive: {
+    color: '#FFFFFF',
   },
-  heartFilterPill: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heartFilterPillActive: {
-    backgroundColor: Colors.terracotta,
-    borderColor: Colors.terracotta,
-  },
-  mapTogglePill: {
-    flexShrink: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 18,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 1,
-  },
-  mapTogglePillActive: {
-    backgroundColor: Colors.asphalt,
-    borderColor: Colors.asphalt,
-  },
-  mapToggleLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.micro,
-    color: Colors.asphalt,
-  },
-  mapToggleLabelActive: {
-    color: Colors.white,
-  },
-  primaryChips: {
-    flexDirection: 'row',
-    gap: 0,
-    borderRadius: 24,
-    backgroundColor: Colors.border,
-    padding: 4,
-    flexShrink: 0,
-  },
-  primaryChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 110,
-  },
-  primaryChipActive: {
-    backgroundColor: Colors.asphalt,
-  },
-  primaryChipText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.textMedium,
-  },
-  primaryChipTextActive: {
-    color: Colors.white,
-  },
+  // ── List ──
   listContent: {
     paddingHorizontal: 20,
     paddingBottom: 32,
@@ -1166,10 +1218,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   sectionHeader: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textMedium,
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 11,
+    color: TC,
     textTransform: 'uppercase',
+    letterSpacing: 1.5,
     marginTop: 24,
     marginBottom: 12,
   },
@@ -1188,19 +1241,19 @@ const styles = StyleSheet.create({
   pastCount: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
-    color: Colors.textLight,
+    color: '#A09385',
   },
   cardWrap: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   map: { flex: 1 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
-  emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textMedium, textAlign: 'center', marginBottom: 20 },
-  emptyButton: { backgroundColor: Colors.terracotta, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
-  emptyButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  errorTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, marginBottom: 8, textAlign: 'center' },
-  errorMessage: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, textAlign: 'center', marginBottom: 20, paddingHorizontal: 32 },
-  retryButton: { backgroundColor: Colors.terracotta, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
-  retryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: '#78695C', textAlign: 'center', marginBottom: 20 },
+  emptyButton: { backgroundColor: TC, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
+  emptyButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: '#FFFFFF' },
+  errorTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: '#2C1810', marginBottom: 8, textAlign: 'center' },
+  errorMessage: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: '#78695C', textAlign: 'center', marginBottom: 20, paddingHorizontal: 32 },
+  retryButton: { backgroundColor: TC, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
+  retryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: '#FFFFFF' },
 });

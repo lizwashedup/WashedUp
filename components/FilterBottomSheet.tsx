@@ -10,7 +10,7 @@ import {
   PanResponder,
   Dimensions,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { hapticSelection } from '../lib/haptics';
 import { Check } from 'lucide-react-native';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
@@ -118,7 +118,7 @@ export function FilterBottomSheet({
                 key={opt.key}
                 style={styles.sheetRow}
                 onPress={() => {
-                  Haptics.selectionAsync();
+                  hapticSelection();
                   onToggle(opt.key);
                 }}
                 activeOpacity={0.7}

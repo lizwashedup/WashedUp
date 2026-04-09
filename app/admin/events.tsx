@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { ArrowLeft, Plus, X, Pencil, Trash2, ImagePlus, Users } from 'lucide-react-native';
@@ -77,7 +77,7 @@ export default function AdminEventsScreen() {
         p_body: broadcastBody.trim() || null,
       });
       if (error) throw error;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      hapticSuccess();
       setAlertInfo({ title: 'Sent', message: 'Broadcast delivered to all users.' });
       setBroadcastTitle('');
       setBroadcastBody('');
@@ -166,7 +166,7 @@ export default function AdminEventsScreen() {
   };
 
   const openEdit = (e: SceneEvent) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight();
     setEditingEvent(e);
     setForm({
       title: e.title ?? '',
@@ -238,10 +238,14 @@ export default function AdminEventsScreen() {
           style: ev.status === 'Live' ? 'destructive' : 'default',
           onPress: async () => {
             const newStatus = ev.status === 'Live' ? 'Archived' : 'Live';
-            await supabase.rpc('admin_update_explore_event', {
+            const { error } = await supabase.rpc('admin_update_explore_event', {
               p_event_id: ev.id,
               p_status: newStatus,
             });
+            if (error) {
+              setAlertInfo({ title: 'Error', message: 'Could not update event status.' });
+              return;
+            }
             queryClient.invalidateQueries({ queryKey: ['admin-scene-events'] });
           },
         },
@@ -361,7 +365,7 @@ export default function AdminEventsScreen() {
       {/* Create / Edit modal */}
       <Modal visible={showForm} animationType="slide" presentationStyle="pageSheet">
         <SafeAreaView style={styles.modalContainer} edges={['top', 'bottom']}>
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={() => setShowForm(false)} hitSlop={12}>
                 <X size={22} color={Colors.asphalt} strokeWidth={2} />
