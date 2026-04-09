@@ -42,7 +42,7 @@ export function usePushNotifications(userId?: string | null) {
   return { expoPushToken };
 }
 
-async function registerForPushNotifications(): Promise<string | null> {
+export async function registerForPushNotifications(): Promise<string | null> {
   if (!Device.isDevice) return null;
 
   // Android requires a notification channel before any notification can be shown

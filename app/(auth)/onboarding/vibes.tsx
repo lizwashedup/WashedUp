@@ -10,6 +10,7 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess,
 import * as Notifications from 'expo-notifications';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
+import { registerForPushNotifications } from '../../../hooks/usePushNotifications';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
@@ -69,9 +70,18 @@ export default function OnboardingVibesScreen() {
       await queryClient.refetchQueries({ queryKey: PROFILE_PHOTO_KEY });
 
       // Only request push permission if not already granted
-      const { status } = await Notifications.getPermissionsAsync();
-      if (status !== 'granted') {
-        await Notifications.requestPermissionsAsync().catch(() => {});
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync().catch(() => ({ status: 'denied' as Notifications.PermissionStatus }));
+        finalStatus = status;
+      }
+      // If permission is granted (whether just now or previously), make sure
+      // the Expo push token is fetched and saved to the user's profile.
+      // Without this, users who deny the first prompt and grant the second
+      // never have their token persisted, so push notifications never reach them.
+      if (finalStatus === 'granted') {
+        await registerForPushNotifications().catch(() => {});
       }
 
       router.replace('/(tabs)/plans');
