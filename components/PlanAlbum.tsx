@@ -154,7 +154,7 @@ export default function PlanAlbum({ eventId, currentUserId, isPast, onAddPhotos 
       {developingPhotos.length > 0 && (
         <View style={styles.developingBanner}>
           <Text style={styles.developingText}>
-            📸 {developingPhotos.length} {developingPhotos.length === 1 ? 'photo' : 'photos'} developing — ready at 9am
+            📸 {developingPhotos.length} {developingPhotos.length === 1 ? 'photo' : 'photos'} developing. Ready tomorrow.
           </Text>
         </View>
       )}

@@ -98,6 +98,7 @@ interface PlanDetail {
   creator_user_id: string;
   tickets_url: string | null;
   is_featured: boolean;
+  featured_type: 'washedup_event' | 'birthday_party' | null;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -198,7 +199,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
-      status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured
+      status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured, featured_type
     `)
     .eq('id', id)
     .single();
@@ -249,6 +250,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     creator_user_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
     is_featured: row.is_featured ?? false,
+    featured_type: (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
     member_count: row.member_count ?? 0,
     creator,
   };
@@ -334,7 +336,7 @@ export default function PlanDetailScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
-  const albumUploadRef = React.useRef<import('../components/AlbumUploadFlow').AlbumUploadFlowHandle>(null);
+  const albumUploadRef = React.useRef<import('../../components/AlbumUploadFlow').AlbumUploadFlowHandle>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [mapCoords, setMapCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [joinModalVisible, setJoinModalVisible] = useState(false);
@@ -370,8 +372,14 @@ export default function PlanDetailScreen() {
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
   const [isOfficialCreator, setIsOfficialCreator] = useState(false);
   const [featuredToggle, setFeaturedToggle] = useState(false);
+  const [featuredType, setFeaturedType] = useState<'washedup_event' | 'birthday_party'>('washedup_event');
   const [featuredCapacity, setFeaturedCapacity] = useState(FEATURED_DEFAULT_CAPACITY);
   const [featuredSaving, setFeaturedSaving] = useState(false);
+  // Hide the hero image slot when the URL fails to load. Some legacy plans
+  // have image_url set to a webpage URL (e.g. an Unsplash gallery page)
+  // instead of a real image asset. Without this, the 200px hero container
+  // reserves empty space at the top of the page.
+  const [heroLoadFailed, setHeroLoadFailed] = useState(false);
 
   const { blockUser } = useBlock();
 
@@ -419,10 +427,11 @@ export default function PlanDetailScreen() {
   useEffect(() => {
     if (!plan) return;
     setFeaturedToggle(plan.is_featured);
+    setFeaturedType(plan.featured_type === 'birthday_party' ? 'birthday_party' : 'washedup_event');
     if (plan.is_featured) {
       setFeaturedCapacity((plan.max_invites ?? 99) + 1);
     }
-  }, [plan?.id, plan?.is_featured, plan?.max_invites]);
+  }, [plan?.id, plan?.is_featured, plan?.featured_type, plan?.max_invites]);
 
   // Resolve map coordinates — use stored coords, or geocode from location_text
   useEffect(() => {
@@ -509,6 +518,7 @@ export default function PlanDetailScreen() {
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
   const isFeatured = plan?.is_featured ?? false;
+  const isBirthdayParty = isFeatured && plan?.featured_type === 'birthday_party';
   // Use actual member count when available — member_count can be out of sync
   const displayMemberCount = members.length > 0 ? capDisplayCount(members.length, isFeatured) : capDisplayCount(plan?.member_count ?? 0, isFeatured);
   const totalCapacity = isFeatured
@@ -766,10 +776,12 @@ export default function PlanDetailScreen() {
         updatePayload.is_featured = featuredToggle;
         if (featuredToggle) {
           updatePayload.max_invites = featuredCapacity - 1; // max_invites = capacity - 1 (creator counts as 1)
+          updatePayload.featured_type = featuredType;
         } else if (plan.is_featured && !featuredToggle) {
-          // Toggled off — reset to normal max
+          // Toggled off — reset to normal max and clear the featured type
           updatePayload.max_invites = Math.min(editGroupSize, MAX_GROUP - 1);
           updatePayload.is_featured = false;
+          updatePayload.featured_type = null;
         }
       }
 
@@ -1022,13 +1034,15 @@ export default function PlanDetailScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Hero image */}
-        {plan.image_url ? (
+        {/* Hero image — hide entirely if no URL or if the URL fails to load
+            (some legacy plans store a webpage URL instead of an image asset). */}
+        {plan.image_url && !heroLoadFailed ? (
           <Image
             source={{ uri: plan.image_url }}
             style={styles.heroImage}
             contentFit="cover"
             transition={200}
+            onError={() => setHeroLoadFailed(true)}
           />
         ) : null}
 
@@ -1047,7 +1061,7 @@ export default function PlanDetailScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.postPlanRowTitle}>Add your photos</Text>
-                  <Text style={styles.postPlanRowSub}>They'll develop overnight and reveal at 9am</Text>
+                  <Text style={styles.postPlanRowSub}>They'll develop overnight and be ready tomorrow</Text>
                 </View>
               </TouchableOpacity>
             )}
@@ -1057,11 +1071,11 @@ export default function PlanDetailScreen() {
                   <View style={styles.postPlanIcon}>
                     <Pen size={16} color={Colors.terracotta} />
                   </View>
-                  <Text style={styles.postPlanRowTitle}>Write a moment</Text>
+                  <Text style={styles.postPlanRowTitle}>Write a note</Text>
                 </View>
                 <TextInput
                   style={styles.postPlanInput}
-                  placeholder="What happened, how it felt..."
+                  placeholder="write a note to help remember this plan"
                   placeholderTextColor={Colors.textLight}
                   value={momentText}
                   onChangeText={setMomentText}
@@ -1125,11 +1139,23 @@ export default function PlanDetailScreen() {
         {/* B. Plan Title */}
         <Text style={styles.planTitle}>{plan.title}</Text>
 
-        {/* C. Category Tags — "washedup event" pill for featured plans, otherwise regular category */}
+        {/* C. Category Tags — featured pill ("washedup event" gold or "birthday party" pink) for featured plans, otherwise regular category */}
         {isFeatured ? (
           <View style={styles.categoryTagsRow}>
-            <View style={styles.featuredPill}>
-              <Text style={styles.featuredPillText}>washedup event</Text>
+            <View
+              style={[
+                styles.featuredPill,
+                isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.featuredPillText,
+                  isBirthdayParty && { color: Colors.birthdayPink },
+                ]}
+              >
+                {isBirthdayParty ? 'birthday party' : 'washedup event'}
+              </Text>
             </View>
           </View>
         ) : categoryTags.length > 0 ? (
@@ -1228,19 +1254,21 @@ export default function PlanDetailScreen() {
             </View>
           )}
 
-          <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
-            <Users size={18} color={Colors.terracotta} strokeWidth={2} />
-            <View style={styles.logisticsContent}>
-              <Text style={styles.logisticsMain}>
-                {isFeatured
-                  ? (isCreator && isOfficialCreator
-                    ? `${displayMemberCount} of ${totalCapacity} spots filled`
-                    : `${displayMemberCount} going`)
-                  : `${displayMemberCount} of ${totalCapacity} spots filled`}
-              </Text>
-              <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
+          {!isBirthdayParty && (
+            <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
+              <Users size={18} color={Colors.terracotta} strokeWidth={2} />
+              <View style={styles.logisticsContent}>
+                <Text style={styles.logisticsMain}>
+                  {isFeatured
+                    ? (isCreator && isOfficialCreator
+                      ? `${displayMemberCount} of ${totalCapacity} spots filled`
+                      : `${displayMemberCount} going`)
+                    : `${displayMemberCount} of ${totalCapacity} spots filled`}
+                </Text>
+                <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
+              </View>
             </View>
-          </View>
+          )}
         </View>
 
         {/* F. Who's Going */}
@@ -1719,7 +1747,7 @@ export default function PlanDetailScreen() {
                 <View style={manageStyles.featuredSection}>
                   <View style={manageStyles.featuredRow}>
                     <View style={{ flex: 1 }}>
-                      <Text style={manageStyles.label}>Feature as WashedUp Event</Text>
+                      <Text style={manageStyles.label}>Feature this Plan</Text>
                       <Text style={manageStyles.hint}>Allows custom capacity (50–500)</Text>
                     </View>
                     <Switch
@@ -1731,10 +1759,48 @@ export default function PlanDetailScreen() {
                           setFeaturedCapacity(plan?.is_featured ? (plan.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
                         }
                       }}
-                      trackColor={{ false: Colors.border, true: Colors.goldenAmber }}
+                      trackColor={{ false: Colors.border, true: featuredType === 'birthday_party' ? Colors.birthdayPink : Colors.goldenAmber }}
                       thumbColor={Colors.white}
                     />
                   </View>
+                  {featuredToggle && (
+                    <View style={manageStyles.featuredTypeRow}>
+                      <TouchableOpacity
+                        style={[
+                          manageStyles.featuredTypePill,
+                          { backgroundColor: featuredType === 'washedup_event' ? Colors.goldenAmberTint15 : Colors.inputBg },
+                        ]}
+                        onPress={() => { hapticLight(); setFeaturedType('washedup_event'); }}
+                        activeOpacity={0.85}
+                      >
+                        <Text
+                          style={[
+                            manageStyles.featuredTypePillText,
+                            { color: featuredType === 'washedup_event' ? Colors.goldenAmber : Colors.tertiary },
+                          ]}
+                        >
+                          washedup event
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          manageStyles.featuredTypePill,
+                          { backgroundColor: featuredType === 'birthday_party' ? Colors.birthdayPinkTint15 : Colors.inputBg },
+                        ]}
+                        onPress={() => { hapticLight(); setFeaturedType('birthday_party'); }}
+                        activeOpacity={0.85}
+                      >
+                        <Text
+                          style={[
+                            manageStyles.featuredTypePillText,
+                            { color: featuredType === 'birthday_party' ? Colors.birthdayPink : Colors.tertiary },
+                          ]}
+                        >
+                          birthday party
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                   {featuredToggle && (
                     <View style={manageStyles.capacitySection}>
                       <Text style={manageStyles.capacityValue}>{featuredCapacity} people</Text>
@@ -2702,6 +2768,22 @@ const manageStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  featuredTypeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+    justifyContent: 'center',
+  },
+  featuredTypePill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  featuredTypePillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 11,
+    letterSpacing: 0.3,
   },
   capacitySection: {
     marginTop: 12,

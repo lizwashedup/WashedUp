@@ -227,7 +227,7 @@ export default function MemoriesTab({ userId }: Props) {
           )}
           {album.revealAt && (
             <Text style={styles.developingReveal}>
-              Ready at {formatRevealTime(album.revealAt)}
+              Ready tomorrow
             </Text>
           )}
         </TouchableOpacity>

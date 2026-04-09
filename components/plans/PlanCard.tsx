@@ -43,6 +43,7 @@ interface PlanCardProps {
     max_invites: number;
     member_count: number;
     is_featured?: boolean;
+    featured_type?: 'washedup_event' | 'birthday_party' | null;
     creator: {
       id?: string;
       first_name_display: string;
@@ -135,6 +136,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
 
   // Creator always counts as 1 — member_count should never display as 0
   const isFeatured = plan.is_featured ?? false;
+  const isBirthdayParty = isFeatured && plan.featured_type === 'birthday_party';
   const going = Math.max(1, capDisplayCount(plan.member_count, isFeatured));
   const totalCapacity = isFeatured
     ? (plan.max_invites ?? 99) + 1
@@ -280,14 +282,33 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         {plan.title}
       </Text>
 
-      {/* B2. Category pill */}
-      {plan.category && (
+      {/* B2. Featured pill (gold "washedup event" or pink "birthday party") for
+          featured plans, else regular category pill. */}
+      {isFeatured ? (
+        <View style={styles.categoryRow}>
+          <View
+            style={[
+              styles.featuredPill,
+              isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
+            ]}
+          >
+            <Text
+              style={[
+                styles.featuredPillText,
+                isBirthdayParty && { color: Colors.birthdayPink },
+              ]}
+            >
+              {isBirthdayParty ? 'birthday party' : 'washedup event'}
+            </Text>
+          </View>
+        </View>
+      ) : plan.category ? (
         <View style={styles.categoryRow}>
           <View style={styles.categoryPill}>
             <Text style={styles.categoryPillText}>{plan.category}</Text>
           </View>
         </View>
-      )}
+      ) : null}
 
       {/* C. Creator's Note */}
       {creatorNote && (
@@ -322,11 +343,13 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
 
       {/* E. Footer — spots + CTA */}
       <View style={styles.footer}>
-        <Text style={styles.spotsLabel}>
-          <Text style={styles.spotsNumber}>{going}</Text>
-          {isFeatured ? ' going' : ` of ${totalCapacity} spots`}
-          {!isFeatured && isFull && ' \u00B7 Full'}
-        </Text>
+        {!isBirthdayParty && (
+          <Text style={styles.spotsLabel}>
+            <Text style={styles.spotsNumber}>{going}</Text>
+            {isFeatured ? ' going' : ` of ${totalCapacity} spots`}
+            {!isFeatured && isFull && ' \u00B7 Full'}
+          </Text>
+        )}
         <View style={styles.ctaSpacer} />
         {isPast ? (
           <View style={styles.completedBadge}>
@@ -476,6 +499,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: Colors.terracotta,
     textTransform: 'capitalize',
+    letterSpacing: 0.2,
+  },
+  featuredPill: {
+    backgroundColor: Colors.goldenAmberTint15,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  featuredPillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: Colors.goldenAmber,
     letterSpacing: 0.2,
   },
   quoteBlock: {

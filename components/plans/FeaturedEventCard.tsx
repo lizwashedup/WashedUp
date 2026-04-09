@@ -30,6 +30,7 @@ interface FeaturedEventCardProps {
     member_count: number;
     slug?: string | null;
     is_featured?: boolean;
+    featured_type?: 'washedup_event' | 'birthday_party' | null;
     creator: {
       first_name_display: string;
       profile_photo_url: string | null;
@@ -121,6 +122,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
 
   const creatorNote = plan.host_message ? `\u201C${plan.host_message}\u201D` : null;
   const attendees = plan.attendees ?? [];
+  const isBirthdayParty = plan.featured_type === 'birthday_party';
 
   return (
     <TouchableOpacity
@@ -128,14 +130,30 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
       onLongPress={handleLongPress}
       delayLongPress={500}
       activeOpacity={0.92}
-      style={[styles.card, solo && styles.cardSolo]}
-      accessibilityLabel={`${plan.title} WashedUp Event`}
+      style={[
+        styles.card,
+        solo && styles.cardSolo,
+        isBirthdayParty && { borderColor: Colors.birthdayPink },
+      ]}
+      accessibilityLabel={`${plan.title} ${isBirthdayParty ? 'Birthday Party' : 'WashedUp Event'}`}
       accessibilityRole="button"
     >
       {/* Top row: pill on left, share + heart icons in the top-right corner */}
       <View style={styles.topRow}>
-        <View style={styles.featuredPill}>
-          <Text style={styles.featuredPillText}>washedup event</Text>
+        <View
+          style={[
+            styles.featuredPill,
+            isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
+          ]}
+        >
+          <Text
+            style={[
+              styles.featuredPillText,
+              isBirthdayParty && { color: Colors.birthdayPink },
+            ]}
+          >
+            {isBirthdayParty ? 'birthday party' : 'washedup event'}
+          </Text>
         </View>
         <View style={styles.topRowIcons}>
           <TouchableOpacity

@@ -8,6 +8,8 @@ const brand = {
   terracotta: '#B5522E', // Primary accent — buttons, active states, CTA
   goldenAmber: '#F2A32D', // Secondary accent — badges, highlights
   goldenAmberTint15: 'rgba(242,163,45,0.15)', // goldenAmber @ 15% — pill backgrounds on featured cards
+  birthdayPink: '#E8A0BF', // Birthday party featured tag — pink accent
+  birthdayPinkTint15: 'rgba(232,160,191,0.15)', // birthdayPink @ 15% — pill backgrounds on birthday party cards
   parchment: '#F8F5F0', // App background
   asphalt: '#1E1E1E', // Primary text
   white: '#FFFFFF',

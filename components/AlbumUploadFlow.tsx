@@ -284,7 +284,7 @@ const AlbumUploadFlow = forwardRef<AlbumUploadFlowHandle, Props>(function AlbumU
             <Text style={styles.doneEmoji}>📸</Text>
             <Text style={styles.doneTitle}>Your photos are developing</Text>
             <Text style={styles.doneBody}>
-              They'll be ready tomorrow at 9am — just like the old days.
+              They'll be ready tomorrow.
             </Text>
             <TouchableOpacity style={styles.doneBtn} onPress={dismiss} activeOpacity={0.85}>
               <Text style={styles.doneBtnText}>Got it</Text>

@@ -65,8 +65,8 @@ interface PlanCardPlan {
   category: string | null;
   max_invites: number;
   member_count: number;
-  slug?: string | null;
   is_featured?: boolean;
+  featured_type?: 'washedup_event' | 'birthday_party' | null;
   creator: {
     id: string;
     first_name_display: string;
@@ -102,6 +102,7 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
     is_featured: plan.is_featured ?? false,
+    featured_type: plan.featured_type ?? null,
     creator: {
       id: plan.creator?.id ?? '',
       first_name_display: plan.creator?.first_name_display ?? 'Creator',
@@ -336,7 +337,7 @@ export default function PlansScreen() {
     queryFn: async () => {
       const { data: events, error } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured, featured_type')
         .eq('is_featured', true)
         .in('status', ['forming', 'active', 'full'])
         .gt('start_time', new Date().toISOString())
@@ -387,6 +388,7 @@ export default function PlansScreen() {
           member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
           slug: e.slug ?? null,
           is_featured: true,
+          featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
           creator: {
             first_name_display: hp?.first_name_display ?? 'Creator',
             profile_photo_url: hp?.profile_photo_url ?? null,
@@ -413,7 +415,8 @@ export default function PlansScreen() {
           events (
             id, title, start_time, location_text, location_lat, location_lng,
             image_url, primary_vibe, gender_rule, max_invites, min_invites,
-            member_count, status, creator_user_id, host_message, neighborhood, slug
+            member_count, status, creator_user_id, host_message, neighborhood, slug,
+            is_featured, featured_type
           )
         `)
         .eq('user_id', userId)
@@ -423,9 +426,21 @@ export default function PlansScreen() {
 
       const { data: created } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug')
+        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug, is_featured, featured_type')
         .eq('creator_user_id', userId)
         .in('status', ['forming', 'active', 'full', 'completed']);
+
+      // Fetch event_ids the user has explicitly LEFT. The joined branch above
+      // already filters status='joined', but the created branch pulls events
+      // straight from the events table without checking member status — so a
+      // creator who walks away from their own plan would still see it here.
+      // We exclude any left events from the merged list below.
+      const { data: leftRows } = await supabase
+        .from('event_members')
+        .select('event_id')
+        .eq('user_id', userId)
+        .eq('status', 'left');
+      const leftEventIds = new Set((leftRows ?? []).map((r: any) => r.event_id as string));
 
       const joinedEvents = (memberships ?? [])
         .map((m: any) => m.events)
@@ -434,7 +449,7 @@ export default function PlansScreen() {
       const seen: Record<string, boolean> = {};
       const allEvents: any[] = [];
       [...joinedEvents, ...(created ?? [])].forEach((e: any) => {
-        if (e && !seen[e.id]) {
+        if (e && !seen[e.id] && !leftEventIds.has(e.id)) {
           seen[e.id] = true;
           allEvents.push(e);
         }
@@ -481,6 +496,8 @@ export default function PlansScreen() {
           member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
           status: e.status ?? 'forming',
           host_message: e.host_message ?? null,
+          is_featured: e.is_featured ?? false,
+          featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
           creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
         } as Plan;
       });
@@ -594,8 +611,12 @@ export default function PlansScreen() {
   }, [myPlansUpcoming, myPlansPast, pastExpanded, waitlistedPlans, waitlistExpanded, savedPlans]);
 
   const displayPlans = useMemo(() => {
-    if (!heartFilter) return allPlans;
-    return allPlans.filter((p) => wishlistedSet[p.id]);
+    // Featured plans render in their own carousel section above the
+    // time-bucketed sections — strip them out here so they never
+    // double-appear in "This Week" / "This Weekend" / etc.
+    const nonFeatured = allPlans.filter((p) => !p.is_featured);
+    if (!heartFilter) return nonFeatured;
+    return nonFeatured.filter((p) => wishlistedSet[p.id]);
   }, [allPlans, heartFilter, wishlistedSet]);
 
   const sections = useMemo(

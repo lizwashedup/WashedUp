@@ -71,7 +71,7 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <Image
-              source={require('../../../assets/images/w-logo-full.png')}
+              source={require('../../../assets/images/w-logo.png')}
               style={styles.avatarIcon}
               contentFit="contain"
             />

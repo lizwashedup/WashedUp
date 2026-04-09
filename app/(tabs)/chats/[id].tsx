@@ -606,6 +606,19 @@ export default function ChatScreen() {
     }
   }, [id, currentUserId, blockUser]);
 
+  // Scroll the inverted FlatList to its visual bottom (offset 0 in inverted
+  // coordinates is where the newest message lives). Needed because the list
+  // uses maintainVisibleContentPosition, which keeps existing visible items
+  // stable when new ones are added at index 0 — meaning a freshly-sent
+  // message lands just below the visible area, behind the input bar. Calling
+  // this after every send forces the new message into view. Wrapped in
+  // requestAnimationFrame so layout has flushed before the scroll fires.
+  const scrollToBottom = useCallback(() => {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
+  }, []);
+
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
     if (!text || uploading) return;
@@ -616,8 +629,9 @@ export default function ChatScreen() {
     } else {
       sendMessage(text, undefined, replyingTo?.id);
       setReplyingTo(null);
+      scrollToBottom();
     }
-  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo]);
+  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo, scrollToBottom]);
 
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
@@ -655,12 +669,13 @@ export default function ChatScreen() {
       const publicUrl = await uploadBase64ToStorage('chat-images', fileName, manipulated.base64);
 
       await sendMessage('', publicUrl);
+      scrollToBottom();
     } catch {
       setAlertInfo({ title: 'Could not send photo', message: 'Something went wrong uploading the image. Please try again.' });
     } finally {
       setUploading(false);
     }
-  }, [currentUserId, sendMessage]);
+  }, [currentUserId, sendMessage, scrollToBottom]);
 
   const handleLocationSend = useCallback(async () => {
     if (!currentUserId) return;
@@ -687,12 +702,13 @@ export default function ChatScreen() {
       if (!address) address = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
 
       await sendLocation(latitude, longitude, address);
+      scrollToBottom();
     } catch {
       setAlertInfo({ title: 'Could not get location', message: 'Something went wrong retrieving your location. Please try again.' });
     } finally {
       setUploading(false);
     }
-  }, [currentUserId, sendLocation]);
+  }, [currentUserId, sendLocation, scrollToBottom]);
 
   const handleAttachPress = useCallback(() => {
     if (!currentUserId) return;
