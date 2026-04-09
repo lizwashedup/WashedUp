@@ -25,7 +25,6 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../../components/BrandedAlert';
-import MemoriesTab from '../../../components/MemoriesTab';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import ProfileButton from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
@@ -102,7 +101,6 @@ export default function YourPeopleScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string } | null>(null);
   const [userMenuTarget, setUserMenuTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'people' | 'memories'>('people');
 
   // Debounce search
   React.useEffect(() => {
@@ -613,26 +611,6 @@ export default function YourPeopleScreen() {
         <ProfileButton />
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabBar}>
-        {(['people', 'memories'] as const).map(tab => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => { hapticLight(); setActiveTab(tab); }}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab === 'people' ? 'People' : 'Photos'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {activeTab === 'memories' && userId ? (
-        <MemoriesTab userId={userId} />
-      ) : (
-      <>
       {/* Search bar */}
       <View style={styles.searchWrap}>
         <Search size={18} color={Colors.textLight} style={styles.searchIcon} />
@@ -1011,8 +989,6 @@ export default function YourPeopleScreen() {
           )}
         </ScrollView>
       )}
-      </>
-      )}
 
       {/* Report Modal */}
       {reportTarget && (
@@ -1186,33 +1162,6 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
-  tabBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 4,
-    backgroundColor: Colors.cardBg,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  tabActive: {
-    borderBottomWidth: 3,
-    borderBottomColor: Colors.terracotta,
-  },
-  tabText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.warmGray,
-  },
-  tabTextActive: {
-    fontFamily: Fonts.sansBold,
-    color: Colors.terracotta,
-  },
-
   headerTitle: {
     fontFamily: Fonts.displayItalic,
     fontSize: FontSizes.displayLG,
