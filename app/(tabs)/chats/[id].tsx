@@ -21,7 +21,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
+// Lazy-load expo-clipboard so older production binaries (built before this dep
+// was added) don't crash when this screen's module is imported. Mirrors the
+// pattern in lib/addToCalendar.ts and components/VideoSplash.tsx.
+let Clipboard: typeof import('expo-clipboard') | null = null;
+try { Clipboard = require('expo-clipboard'); } catch {}
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
@@ -1123,7 +1127,7 @@ export default function ChatScreen() {
                     } else if (msg.message_type === 'location') {
                       try { copyText = JSON.parse(msg.content).address ?? msg.content; } catch {}
                     }
-                    Clipboard.setStringAsync(copyText).catch(() => {});
+                    Clipboard?.setStringAsync(copyText).catch(() => {});
                   }
                   hapticLight();
                   setOverlayMessage(null);

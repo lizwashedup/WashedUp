@@ -48,7 +48,11 @@ import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import { showAddToCalendar } from '../../lib/addToCalendar';
-import { showLocation } from 'react-native-map-link';
+// Lazy-load react-native-map-link so older production binaries (built before
+// this dep was added) don't crash when this screen's module is imported.
+// Mirrors the pattern in lib/addToCalendar.ts and components/VideoSplash.tsx.
+let showLocation: typeof import('react-native-map-link').showLocation | null = null;
+try { showLocation = require('react-native-map-link').showLocation; } catch {}
 import { MapView, Marker } from '../../components/MapView';
 import AlbumUploadFlow from '../../components/AlbumUploadFlow';
 import PlanAlbum from '../../components/PlanAlbum';
@@ -164,7 +168,7 @@ function formatGenderLabel(gender_rule: string | null): string | null {
 }
 
 function openDirections(locationText: string, coords?: { latitude: number; longitude: number } | null) {
-  if (coords) {
+  if (coords && showLocation) {
     showLocation({
       latitude: coords.latitude,
       longitude: coords.longitude,
