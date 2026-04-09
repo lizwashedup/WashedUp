@@ -233,7 +233,16 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
     : { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 2, borderBottomRightRadius: 18 };
 
   return (
-    <View style={[bubbleStyles.row, isOwn ? bubbleStyles.rowOwn : bubbleStyles.rowOther]}>
+    <View
+      style={[
+        bubbleStyles.row,
+        isOwn ? bubbleStyles.rowOwn : bubbleStyles.rowOther,
+        // Reaction badge is absolutely positioned at bottom:-12 of the bubble.
+        // Without extra clearance below, it overlaps the sender label of the
+        // next message. Bump marginBottom only when there's a badge to clear.
+        totalReactions > 0 && bubbleStyles.rowWithReaction,
+      ]}
+    >
       {!isOwn && (
         <View style={bubbleStyles.avatarSlot}>
           {showAvatar ? (
@@ -355,6 +364,9 @@ const bubbleStyles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 2, paddingHorizontal: 16 },
   rowOwn: { justifyContent: 'flex-end' },
   rowOther: { justifyContent: 'flex-start' },
+  // Extra clearance below a row that has a reaction badge dangling
+  // 12px below the bubble. 16px = badge offset (12) + breathing room (4).
+  rowWithReaction: { marginBottom: 16 },
   avatarSlot: { width: 28, marginRight: 8, alignSelf: 'flex-end' },
   avatar: { width: 28, height: 28, borderRadius: 14 },
   avatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },

@@ -310,6 +310,11 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         </View>
       ) : null}
 
+      {/* B3. Birthday party subtitle — small italic context line. */}
+      {isBirthdayParty && (
+        <Text style={styles.birthdaySubtitle}>celebrating our OG washedup users</Text>
+      )}
+
       {/* C. Creator's Note */}
       {creatorNote && (
         <View style={styles.quoteBlock}>
@@ -512,6 +517,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: Colors.goldenAmber,
     letterSpacing: 0.2,
+  },
+  birthdaySubtitle: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
+    marginTop: -2,
+    marginBottom: 8,
   },
   quoteBlock: {
     borderLeftWidth: 2,

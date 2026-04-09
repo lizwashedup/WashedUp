@@ -178,6 +178,12 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
         </View>
       </View>
 
+      {/* Birthday party subtitle — small italic line of context between
+          the pink tag and the poster name. Only renders for birthday party. */}
+      {isBirthdayParty && (
+        <Text style={styles.birthdaySubtitle}>celebrating our OG washedup users</Text>
+      )}
+
       {/* Creator Info */}
       <View style={styles.creatorRow}>
         <View style={styles.creatorLeft}>
@@ -313,6 +319,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: Colors.goldenAmber,
     letterSpacing: 0.2,
+  },
+  birthdaySubtitle: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
+    marginTop: -4,
+    marginBottom: 8,
   },
   creatorRow: {
     flexDirection: 'row',

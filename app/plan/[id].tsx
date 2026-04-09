@@ -1270,6 +1270,11 @@ export default function PlanDetailScreen() {
           </View>
         ) : null}
 
+        {/* C2. Birthday party subtitle — small italic context line below the pink tag. */}
+        {isBirthdayParty && (
+          <Text style={styles.birthdaySubtitle}>celebrating our OG washedup users</Text>
+        )}
+
         {/* D. Description */}
         {plan.description && (
           <Text style={styles.description}>{plan.description}</Text>
@@ -2333,6 +2338,13 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.goldenAmber,
     letterSpacing: 0.2,
+  },
+  birthdaySubtitle: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.warmGray,
+    marginTop: 6,
+    marginBottom: 4,
   },
   categoryTagText: {
     fontWeight: '600',
