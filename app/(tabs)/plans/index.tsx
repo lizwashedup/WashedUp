@@ -128,15 +128,18 @@ function getSectionDefs(now: Date): SectionDef[] {
 
   if (day >= 1 && day <= 4) {
     const tomorrowStart = new Date(y, mo, d + 1, 0, 0, 0);
-    const fridayEnd = new Date(y, mo, d + (5 - day), 23, 59, 59, 999);
-    sections.push({ key: 'this-week', title: 'This Week', from: tomorrowStart, to: fridayEnd });
+    // "This Week" ends Friday at 3:59:59.999 PM — Friday plans starting at/after
+    // 4:00 PM belong to "This Weekend" instead.
+    const fridayWeekEnd = new Date(y, mo, d + (5 - day), 15, 59, 59, 999);
+    sections.push({ key: 'this-week', title: 'This Week', from: tomorrowStart, to: fridayWeekEnd });
   }
 
   if (day >= 1 && day <= 4) {
     const daysToFri = 5 - day;
-    const friStart = new Date(y, mo, d + daysToFri, 0, 0, 0);
+    // "This Weekend" starts Friday at 4:00 PM so Friday plans don't double-bucket.
+    const friWeekendStart = new Date(y, mo, d + daysToFri, 16, 0, 0, 0);
     const sunEnd = new Date(y, mo, d + daysToFri + 2, 23, 59, 59, 999);
-    sections.push({ key: 'this-weekend', title: 'This Weekend', from: friStart, to: sunEnd });
+    sections.push({ key: 'this-weekend', title: 'This Weekend', from: friWeekendStart, to: sunEnd });
   } else if (day === 5) {
     const satStart = new Date(y, mo, d + 1, 0, 0, 0);
     const sunEnd = new Date(y, mo, d + 2, 23, 59, 59, 999);
