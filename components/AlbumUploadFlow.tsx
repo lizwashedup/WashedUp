@@ -11,7 +11,11 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+// Use the legacy import path. expo-file-system v19 (SDK 54) replaced the
+// flat module API with File/Directory classes and now THROWS at runtime
+// when you call legacy methods (e.g. readAsStringAsync) from the top-level
+// 'expo-file-system' import. The /legacy subpath preserves the old API.
+import * as FileSystem from 'expo-file-system/legacy';
 import { Camera, Check, X } from 'lucide-react-native';
 import { decode } from 'base64-arraybuffer';
 import { useQueryClient } from '@tanstack/react-query';
@@ -142,9 +146,12 @@ const AlbumUploadFlow = forwardRef<AlbumUploadFlowHandle, Props>(function AlbumU
         const filename = `${Date.now()}_${uploaded}.${ext}`;
         const storagePath = `${eventId}/${currentUserId}/${filename}`;
 
-        // Read file as base64 — no compression
+        // Read file as base64 — no compression. Pass the string literal
+        // 'base64' instead of FileSystem.EncodingType.Base64 because the
+        // EncodingType enum was removed from the top-level expo-file-system
+        // export in v19. The literal is the supported public API.
         const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: 'base64',
         });
 
         const contentType = isVideo
