@@ -73,6 +73,40 @@ const MANAGE_CATEGORIES = [
   'Sports', 'Tech', 'Wellness', 'Other',
 ] as const;
 
+// ─── Date/time picker constants ───────────────────────────────────────────────
+// Mirror the wheel-picker pattern used in post/index.tsx so the manage modal's
+// date/time editor matches the create flow visually.
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+const HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const MINUTE_OPTIONS = ['00', '15', '30', '45'];
+const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
+
+function getDaysInMonth(month: number, year: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function buildDatetime(
+  month: number, day: number, year: number,
+  hour: number, minute: string, period: 'AM' | 'PM',
+): Date {
+  let h = hour;
+  if (period === 'PM' && h !== 12) h += 12;
+  if (period === 'AM' && h === 12) h = 0;
+  return new Date(year, month, day, h, parseInt(minute));
+}
+
+function displayPickerDate(month: number, day: number, year: number): string {
+  return `${MONTHS[month]} ${day}, ${year}`;
+}
+
+function displayPickerTime(hour: number, minute: string, period: 'AM' | 'PM'): string {
+  return `${hour}:${minute} ${period}`;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PlanDetail {
@@ -351,6 +385,21 @@ export default function PlanDetailScreen() {
   const [editLocationLat, setEditLocationLat] = useState<number | null>(null);
   const [editLocationLng, setEditLocationLng] = useState<number | null>(null);
   const [editTicketUrl, setEditTicketUrl] = useState('');
+  // Date / time editing — wheel picker state mirrors the post flow
+  const [editDateMonth, setEditDateMonth] = useState(0);
+  const [editDateDay, setEditDateDay] = useState(1);
+  const [editDateYear, setEditDateYear] = useState(new Date().getFullYear());
+  const [editTimeHour, setEditTimeHour] = useState(7);
+  const [editTimeMinute, setEditTimeMinute] = useState<string>('00');
+  const [editTimePeriod, setEditTimePeriod] = useState<'AM' | 'PM'>('PM');
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const [showEditTimePicker, setShowEditTimePicker] = useState(false);
+  const [tempEditMonth, setTempEditMonth] = useState(0);
+  const [tempEditDay, setTempEditDay] = useState(1);
+  const [tempEditYear, setTempEditYear] = useState(new Date().getFullYear());
+  const [tempEditHour, setTempEditHour] = useState(7);
+  const [tempEditMinute, setTempEditMinute] = useState<string>('00');
+  const [tempEditPeriod, setTempEditPeriod] = useState<'AM' | 'PM'>('PM');
   const managePlacesRef = React.useRef<GooglePlacesAutocompleteRef>(null);
   const [editCategory, setEditCategory] = useState<string | null>(null);
   const [editGenderRule, setEditGenderRule] = useState('mixed');
@@ -743,7 +792,54 @@ export default function PlanDetailScreen() {
     setEditCategory(plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null);
     setEditGenderRule(plan.gender_rule ?? 'mixed');
     setEditGroupSize(plan.max_invites ?? 6);
+    // Seed the date / time pickers from the existing plan.start_time
+    const start = new Date(plan.start_time);
+    setEditDateMonth(start.getMonth());
+    setEditDateDay(start.getDate());
+    setEditDateYear(start.getFullYear());
+    const h24 = start.getHours();
+    const period: 'AM' | 'PM' = h24 >= 12 ? 'PM' : 'AM';
+    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+    setEditTimeHour(h12);
+    // Snap minute to nearest allowed option (00, 15, 30, 45)
+    const m = start.getMinutes();
+    const nearest = MINUTE_OPTIONS.reduce((prev, curr) =>
+      Math.abs(parseInt(curr) - m) < Math.abs(parseInt(prev) - m) ? curr : prev,
+    );
+    setEditTimeMinute(nearest);
+    setEditTimePeriod(period);
     setManageModalVisible(true);
+  };
+
+  // Date picker open / confirm
+  const openEditDatePicker = () => {
+    setTempEditMonth(editDateMonth);
+    setTempEditDay(editDateDay);
+    setTempEditYear(editDateYear);
+    setShowEditDatePicker(true);
+  };
+  const confirmEditDate = () => {
+    const days = getDaysInMonth(tempEditMonth, tempEditYear);
+    setEditDateMonth(tempEditMonth);
+    setEditDateDay(Math.min(tempEditDay, days));
+    setEditDateYear(tempEditYear);
+    setShowEditDatePicker(false);
+    hapticLight();
+  };
+
+  // Time picker open / confirm
+  const openEditTimePicker = () => {
+    setTempEditHour(editTimeHour);
+    setTempEditMinute(editTimeMinute);
+    setTempEditPeriod(editTimePeriod);
+    setShowEditTimePicker(true);
+  };
+  const confirmEditTime = () => {
+    setEditTimeHour(tempEditHour);
+    setEditTimeMinute(tempEditMinute);
+    setEditTimePeriod(tempEditPeriod);
+    setShowEditTimePicker(false);
+    hapticLight();
   };
 
   const handleSaveEdit = async () => {
@@ -758,6 +854,11 @@ export default function PlanDetailScreen() {
 
     setEditSaving(true);
     try {
+      const newStartTime = buildDatetime(
+        editDateMonth, editDateDay, editDateYear,
+        editTimeHour, editTimeMinute, editTimePeriod,
+      );
+
       const updatePayload: Record<string, any> = {
         title: editTitle.trim(),
         description: editDescription.trim() || null,
@@ -769,6 +870,7 @@ export default function PlanDetailScreen() {
         primary_vibe: editCategory?.toLowerCase() ?? null,
         gender_rule: editGenderRule,
         max_invites: editGroupSize,
+        start_time: newStartTime.toISOString(),
       };
 
       // Official creators can toggle featured status
@@ -1594,6 +1696,29 @@ export default function PlanDetailScreen() {
                 placeholderTextColor={Colors.textLight}
               />
 
+              {/* Date & time */}
+              <Text style={manageStyles.label}>Date & time</Text>
+              <View style={manageStyles.dateTimeRow}>
+                <TouchableOpacity
+                  style={[manageStyles.input, manageStyles.dateTimeBtn]}
+                  onPress={() => { hapticLight(); openEditDatePicker(); }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={manageStyles.dateTimeBtnText}>
+                    {displayPickerDate(editDateMonth, editDateDay, editDateYear)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[manageStyles.input, manageStyles.dateTimeBtn, { marginLeft: 8 }]}
+                  onPress={() => { hapticLight(); openEditTimePicker(); }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={manageStyles.dateTimeBtnText}>
+                    {displayPickerTime(editTimeHour, editTimeMinute, editTimePeriod)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
               {/* Description */}
               <Text style={manageStyles.label}>Plan description</Text>
               <TextInput
@@ -1863,6 +1988,119 @@ export default function PlanDetailScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
+          {/* Date picker overlay — child of the manage modal overlay so we
+              avoid the Modal-inside-Modal stacking issue on iOS. */}
+          {showEditDatePicker && (
+            <Pressable
+              style={manageStyles.pickerOverlay}
+              onPress={() => setShowEditDatePicker(false)}
+            >
+              <Pressable style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+                <Text style={manageStyles.pickerTitle}>Select date</Text>
+                <View style={manageStyles.pickerRow}>
+                  <ScrollView style={manageStyles.pickerCol} showsVerticalScrollIndicator={false}>
+                    {MONTHS.map((m, i) => (
+                      <Pressable
+                        key={m}
+                        style={[manageStyles.pickerItem, tempEditMonth === i && manageStyles.pickerItemSelected]}
+                        onPress={() => setTempEditMonth(i)}
+                      >
+                        <Text style={[manageStyles.pickerItemText, tempEditMonth === i && manageStyles.pickerItemTextSel]}>
+                          {m.slice(0, 3)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                  <ScrollView style={manageStyles.pickerColSm} showsVerticalScrollIndicator={false}>
+                    {Array.from({ length: getDaysInMonth(tempEditMonth, tempEditYear) }, (_, i) => i + 1).map((d) => (
+                      <Pressable
+                        key={d}
+                        style={[manageStyles.pickerItem, tempEditDay === d && manageStyles.pickerItemSelected]}
+                        onPress={() => setTempEditDay(d)}
+                      >
+                        <Text style={[manageStyles.pickerItemText, tempEditDay === d && manageStyles.pickerItemTextSel]}>
+                          {d}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                  <ScrollView style={manageStyles.pickerColSm} showsVerticalScrollIndicator={false}>
+                    {[new Date().getFullYear(), new Date().getFullYear() + 1].map((y) => (
+                      <Pressable
+                        key={y}
+                        style={[manageStyles.pickerItem, tempEditYear === y && manageStyles.pickerItemSelected]}
+                        onPress={() => setTempEditYear(y)}
+                      >
+                        <Text style={[manageStyles.pickerItemText, tempEditYear === y && manageStyles.pickerItemTextSel]}>
+                          {y}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+                <TouchableOpacity style={manageStyles.pickerDoneBtn} onPress={confirmEditDate}>
+                  <Text style={manageStyles.pickerDoneBtnText}>Done</Text>
+                </TouchableOpacity>
+              </Pressable>
+            </Pressable>
+          )}
+
+          {/* Time picker overlay */}
+          {showEditTimePicker && (
+            <Pressable
+              style={manageStyles.pickerOverlay}
+              onPress={() => setShowEditTimePicker(false)}
+            >
+              <Pressable style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+                <Text style={manageStyles.pickerTitle}>Select time</Text>
+                <View style={manageStyles.pickerRow}>
+                  <ScrollView style={manageStyles.pickerCol} showsVerticalScrollIndicator={false}>
+                    {HOURS.map((h) => (
+                      <Pressable
+                        key={h}
+                        style={[manageStyles.pickerItem, tempEditHour === h && manageStyles.pickerItemSelected]}
+                        onPress={() => setTempEditHour(h)}
+                      >
+                        <Text style={[manageStyles.pickerItemText, tempEditHour === h && manageStyles.pickerItemTextSel]}>
+                          {h}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                  <ScrollView style={manageStyles.pickerCol} showsVerticalScrollIndicator={false}>
+                    {MINUTE_OPTIONS.map((m) => (
+                      <Pressable
+                        key={m}
+                        style={[manageStyles.pickerItem, tempEditMinute === m && manageStyles.pickerItemSelected]}
+                        onPress={() => setTempEditMinute(m)}
+                      >
+                        <Text style={[manageStyles.pickerItemText, tempEditMinute === m && manageStyles.pickerItemTextSel]}>
+                          :{m}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                  <ScrollView style={manageStyles.pickerCol} showsVerticalScrollIndicator={false}>
+                    {PERIODS.map((p) => (
+                      <Pressable
+                        key={p}
+                        style={[manageStyles.pickerItem, tempEditPeriod === p && manageStyles.pickerItemSelected]}
+                        onPress={() => setTempEditPeriod(p)}
+                      >
+                        <Text style={[manageStyles.pickerItemText, tempEditPeriod === p && manageStyles.pickerItemTextSel]}>
+                          {p}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+                <TouchableOpacity style={manageStyles.pickerDoneBtn} onPress={confirmEditTime}>
+                  <Text style={manageStyles.pickerDoneBtnText}>Done</Text>
+                </TouchableOpacity>
+              </Pressable>
+            </Pressable>
+          )}
+
           {/* BrandedAlert inside the modal so it renders on top, not behind it */}
           <BrandedAlert
             visible={brandedAlert.visible}
@@ -2784,6 +3022,85 @@ const manageStyles = StyleSheet.create({
     fontFamily: Fonts.sansBold,
     fontSize: 11,
     letterSpacing: 0.3,
+  },
+  // Date / time editor in the manage modal
+  dateTimeRow: {
+    flexDirection: 'row',
+    marginTop: 4,
+  },
+  dateTimeBtn: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  dateTimeBtnText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  // Date / time picker overlays (inside the manage modal so they stack
+  // above the form sheet without spawning a nested RN Modal).
+  pickerOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  pickerSheet: {
+    width: '88%',
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 20,
+    maxHeight: '70%',
+  },
+  pickerTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    height: 220,
+    gap: 8,
+  },
+  pickerCol: {
+    flex: 1,
+  },
+  pickerColSm: {
+    flex: 0.7,
+  },
+  pickerItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  pickerItemSelected: {
+    backgroundColor: Colors.terracotta,
+  },
+  pickerItemText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  pickerItemTextSel: {
+    color: Colors.white,
+    fontFamily: Fonts.sansBold,
+  },
+  pickerDoneBtn: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  pickerDoneBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.white,
   },
   capacitySection: {
     marginTop: 12,
