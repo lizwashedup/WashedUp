@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { Platform, AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Colors from '../constants/Colors';
 
@@ -27,22 +27,43 @@ export function usePushNotifications(userId?: string | null) {
 
   useEffect(() => {
     if (!userId) return;
-    registerForPushNotifications().then((token) => {
+
+    // On mount: only register if permission is ALREADY granted. Don't prompt
+    // here — the prompt is shown contextually during onboarding (vibes screen)
+    // so users see it after a meaningful moment instead of cold at launch.
+    // Cold-launching the permission dialog before any context produces a much
+    // higher denial rate, and once denied iOS won't show the prompt again.
+    registerForPushNotifications({ prompt: false }).then((token) => {
       if (token) setExpoPushToken(token);
     }).catch(() => {});
+
+    // Re-check on every foreground transition. This catches the case where
+    // the user denied the prompt but later enabled notifications via iOS
+    // Settings — when they bring the app back to foreground we'll fetch the
+    // token and save it without ever needing to ask again.
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        registerForPushNotifications({ prompt: false }).then((token) => {
+          if (token) setExpoPushToken(token);
+        }).catch(() => {});
+      }
+    });
 
     notificationListener.current?.remove();
     notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
 
     return () => {
       notificationListener.current?.remove();
+      appStateSub.remove();
     };
   }, [userId]);
 
   return { expoPushToken };
 }
 
-export async function registerForPushNotifications(): Promise<string | null> {
+export async function registerForPushNotifications(
+  options: { prompt?: boolean } = {},
+): Promise<string | null> {
   if (!Device.isDevice) return null;
 
   // Android requires a notification channel before any notification can be shown
@@ -60,7 +81,12 @@ export async function registerForPushNotifications(): Promise<string | null> {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     finalStatus = existingStatus;
 
-    if (existingStatus !== 'granted') {
+    // Only show the system permission prompt when the caller explicitly asks
+    // for it (e.g. the vibes screen at the end of onboarding). Other call
+    // sites — cold launch from the hook, foreground re-check — pass
+    // prompt:false because they just want to know whether permission is
+    // already granted, not surface a fresh dialog.
+    if (existingStatus !== 'granted' && options.prompt) {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
@@ -82,13 +108,23 @@ export async function registerForPushNotifications(): Promise<string | null> {
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = tokenData.data;
 
-    // Save token to this user's profile row so the backend can send targeted notifications
+    // Save token to this user's profile row so the backend can send targeted
+    // notifications. Surface upsert failures loudly — this used to silently
+    // fail and we had no way to tell whether tokens were actually landing.
     const { data: { user } } = await supabase.auth.getUser();
     if (user && token) {
-      await supabase
+      const { error: updateError } = await supabase
         .from('profiles')
         .update({ expo_push_token: token })
         .eq('id', user.id);
+      if (updateError) {
+        console.error(
+          '[PushNotifications] Failed to save expo_push_token to profiles:',
+          updateError.message,
+          updateError.code ?? '',
+          updateError.details ?? '',
+        );
+      }
     }
 
     return token;

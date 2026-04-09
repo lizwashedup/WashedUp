@@ -7,7 +7,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
-import * as Notifications from 'expo-notifications';
 import { ChevronLeft } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 import { registerForPushNotifications } from '../../../hooks/usePushNotifications';
@@ -69,20 +68,12 @@ export default function OnboardingVibesScreen() {
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
       await queryClient.refetchQueries({ queryKey: PROFILE_PHOTO_KEY });
 
-      // Only request push permission if not already granted
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync().catch(() => ({ status: 'denied' as Notifications.PermissionStatus }));
-        finalStatus = status;
-      }
-      // If permission is granted (whether just now or previously), make sure
-      // the Expo push token is fetched and saved to the user's profile.
-      // Without this, users who deny the first prompt and grant the second
-      // never have their token persisted, so push notifications never reach them.
-      if (finalStatus === 'granted') {
-        await registerForPushNotifications().catch(() => {});
-      }
+      // Ask for push permission with onboarding context. This is the FIRST
+      // place the prompt is shown — the auth-time hook intentionally does
+      // not prompt, so users see this dialog after they've engaged with the
+      // app rather than coldly at launch. registerForPushNotifications saves
+      // the token to profiles.expo_push_token if the user grants permission.
+      await registerForPushNotifications({ prompt: true }).catch(() => {});
 
       router.replace('/(tabs)/plans');
     } finally {
