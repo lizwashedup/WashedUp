@@ -759,7 +759,7 @@ export default function PlansScreen() {
       <View style={styles.featuredSection}>
         <View style={styles.featuredHeaderRow}>
           <Ionicons name="star" size={14} color={Colors.goldenAmber} />
-          <Text style={styles.featuredHeaderText}>washedup events</Text>
+          <Text style={styles.featuredHeaderText}>featured</Text>
         </View>
         {solo ? (
           <View style={styles.featuredSoloWrap}>
