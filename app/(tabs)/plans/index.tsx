@@ -241,27 +241,51 @@ export default function PlansScreen() {
       const id = data.session?.user?.id ?? null;
 
       if (id) {
-        // Run welcome modal check BEFORE starting data queries.
-        // This gives onboarding profile writes time to fully propagate
-        // in Supabase before the feed RPC reads them for gender/age filtering.
+        // Welcome modal gate. Source of truth is profiles.welcome_seen_at;
+        // AsyncStorage is a fast-path cache so we can skip the Supabase read
+        // on subsequent opens. Name and seen-at are fetched separately so a
+        // missing column on the seen-at check can't null out the whole row
+        // and leave the modal rendering "Welcome, friend".
         try {
           const key = `has_seen_welcome_${id}`;
-          const seen = await AsyncStorage.getItem(key);
-          if (!seen && !cancelled) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('first_name_display')
-              .eq('id', id)
-              .single();
+          const cached = await AsyncStorage.getItem(key);
+          if (!cached && !cancelled) {
+            const [nameRes, seenRes] = await Promise.all([
+              supabase
+                .from('profiles')
+                .select('first_name_display')
+                .eq('id', id)
+                .maybeSingle(),
+              supabase
+                .from('profiles')
+                .select('welcome_seen_at')
+                .eq('id', id)
+                .maybeSingle(),
+            ]);
+            const firstName = (nameRes.data as any)?.first_name_display ?? '';
+            // If the seen-at query errors (column missing, RLS, etc.), treat
+            // it as "unknown" and fall back to the AsyncStorage-only flow —
+            // better to skip a maybe-already-seen modal than show it twice.
+            const seenAt = seenRes.error
+              ? 'unknown'
+              : (seenRes.data as any)?.welcome_seen_at ?? null;
             if (!cancelled) {
-              setWelcomeName(profile?.first_name_display ?? '');
-              setShowWelcome(true);
-              markWelcomeShown();
-              // Persist the "seen" flag immediately, before the user can dismiss.
-              // This guarantees the modal only shows once per user even if they
-              // force-quit the app, lose connection, or close it before the
-              // dismiss handler's userId-state closure has hydrated.
-              try { await AsyncStorage.setItem(key, '1'); } catch {}
+              if (seenAt) {
+                try { await AsyncStorage.setItem(key, '1'); } catch {}
+              } else if (firstName) {
+                setWelcomeName(firstName);
+                setShowWelcome(true);
+                markWelcomeShown();
+                try { await AsyncStorage.setItem(key, '1'); } catch {}
+                supabase
+                  .from('profiles')
+                  .update({ welcome_seen_at: new Date().toISOString() })
+                  .eq('id', id)
+                  .then(() => {});
+              }
+              // else: no name yet (profile still propagating) and not seen.
+              // Deliberately do NOT cache or show — retry next session so
+              // the user gets the modal with their real name, not "friend".
             }
           }
         } catch {}
@@ -814,16 +838,26 @@ export default function PlansScreen() {
     [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, allPlans, myPlans],
   );
 
+  const persistWelcomeSeen = useCallback(async () => {
+    if (!userId) return;
+    try { await AsyncStorage.setItem(`has_seen_welcome_${userId}`, '1'); } catch {}
+    supabase
+      .from('profiles')
+      .update({ welcome_seen_at: new Date().toISOString() })
+      .eq('id', userId)
+      .then(() => {});
+  }, [userId]);
+
   const handleWelcomeDismiss = useCallback(async () => {
     setShowWelcome(false);
-    if (userId) try { await AsyncStorage.setItem(`has_seen_welcome_${userId}`, '1'); } catch {}
-  }, [userId]);
+    await persistWelcomeSeen();
+  }, [persistWelcomeSeen]);
 
   const handleWelcomePost = useCallback(async () => {
     setShowWelcome(false);
-    if (userId) try { await AsyncStorage.setItem(`has_seen_welcome_${userId}`, '1'); } catch {}
+    await persistWelcomeSeen();
     router.push('/(tabs)/post');
-  }, [userId]);
+  }, [persistWelcomeSeen]);
 
   // ── Featured events section ──────────────────────────────────────────────────
   const featuredSection = useMemo(() => {
@@ -1127,13 +1161,16 @@ export default function PlansScreen() {
         onClear={() => setCategoryFilter([])}
       />
 
-      <WelcomeModal
-        visible={showWelcome}
-        firstName={welcomeName}
-        onDismiss={handleWelcomeDismiss}
-        onPostPlan={handleWelcomePost}
-      />
+      {showWelcome && (
+        <WelcomeModal
+          visible={showWelcome}
+          firstName={welcomeName}
+          onDismiss={handleWelcomeDismiss}
+          onPostPlan={handleWelcomePost}
+        />
+      )}
 
+      {showProfileCompletePrompt && (
       <Modal visible={showProfileCompletePrompt} transparent animationType="fade" onRequestClose={dismissProfileCompletePrompt}>
         <Pressable style={styles.profilePromptOverlay} onPress={dismissProfileCompletePrompt}>
           <Pressable style={styles.profilePromptCard} onPress={(e) => e.stopPropagation()}>
@@ -1151,6 +1188,7 @@ export default function PlansScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      )}
 
       {reportTarget && (
         <ReportModal
