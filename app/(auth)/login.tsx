@@ -385,11 +385,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   topSection: {
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     alignItems: 'center',
     paddingBottom: 24,
-    paddingTop: 16,
-    minHeight: 100,
+    paddingTop: 56,
+    minHeight: 160,
   },
   logo: {
     width: 260,

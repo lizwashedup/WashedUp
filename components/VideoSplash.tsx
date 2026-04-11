@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -7,16 +7,17 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 
-// expo-av requires a native rebuild — guard against missing native module
-let Video: any = null;
-let ResizeMode: any = {};
+// expo-video is the supported replacement for expo-av. It works on both
+// platforms under React Native's new architecture; expo-av's Video component
+// silently fails to render on new-arch Android. Guard against missing native
+// module so the app still boots if the dependency isn't available.
+let useVideoPlayer: any = null;
+let VideoView: any = null;
 try {
-  const av = require('expo-av');
-  Video = av.Video;
-  ResizeMode = av.ResizeMode;
+  const ev = require('expo-video');
+  useVideoPlayer = ev.useVideoPlayer;
+  VideoView = ev.VideoView;
 } catch {}
-
-type AVPlaybackStatus = any;
 
 interface Props {
   onFinish: () => void;
@@ -24,39 +25,64 @@ interface Props {
 
 const FADE_MS = 300;
 const TIMEOUT_MS = 6000; // Safety net: auto-dismiss if video never finishes
+const VIDEO_SOURCE = require('../assets/splash-video.mp4');
 
 export default function VideoSplash({ onFinish }: Props) {
-  // If expo-av native module isn't available, skip splash entirely
-  useEffect(() => {
-    if (!Video) onFinish();
-  }, [onFinish]);
+  // If expo-video native module isn't available, skip splash entirely.
+  // Render the inner implementation only if we can; otherwise call onFinish.
+  if (!useVideoPlayer || !VideoView) {
+    return <VideoSplashUnavailable onFinish={onFinish} />;
+  }
+  return <VideoSplashImpl onFinish={onFinish} />;
+}
 
-  const videoRef = useRef<any>(null);
+function VideoSplashUnavailable({ onFinish }: Props) {
+  useEffect(() => {
+    onFinish();
+  }, [onFinish]);
+  return null;
+}
+
+function VideoSplashImpl({ onFinish }: Props) {
   const calledRef = useRef(false);
   const opacity = useSharedValue(1);
+
+  const player = useVideoPlayer(VIDEO_SOURCE, (p: any) => {
+    p.loop = false;
+    p.muted = true;
+    p.play();
+  });
 
   const fadeAndFinish = useCallback(() => {
     if (calledRef.current) return;
     calledRef.current = true;
 
-    // Stop video playback immediately
-    videoRef.current?.stopAsync().catch(() => {});
+    try { player?.pause?.(); } catch {}
 
-    // Fade out, then tell parent to unmount us
     opacity.value = withTiming(0, { duration: FADE_MS }, (done) => {
       if (done) runOnJS(onFinish)();
     });
-  }, [onFinish, opacity]);
+  }, [onFinish, opacity, player]);
 
-  const handleStatus = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-    if (status.didJustFinish) fadeAndFinish();
-  }, [fadeAndFinish]);
+  // Listen for the "playToEnd" event from the player — fires when the
+  // video finishes naturally. Also listen for status errors.
+  useEffect(() => {
+    if (!player) return;
 
-  const handleError = useCallback(() => {
-    // Video failed to load — skip splash immediately
-    fadeAndFinish();
-  }, [fadeAndFinish]);
+    const endSub = player.addListener?.('playToEnd', () => {
+      fadeAndFinish();
+    });
+    const statusSub = player.addListener?.('statusChange', (evt: any) => {
+      if (evt?.status === 'error') {
+        fadeAndFinish();
+      }
+    });
+
+    return () => {
+      try { endSub?.remove?.(); } catch {}
+      try { statusSub?.remove?.(); } catch {}
+    };
+  }, [player, fadeAndFinish]);
 
   // Safety timeout — never leave the user stuck
   useEffect(() => {
@@ -68,21 +94,16 @@ export default function VideoSplash({ onFinish }: Props) {
     opacity: opacity.value,
   }));
 
-  if (!Video) return null;
-
   return (
     <Animated.View style={[styles.container, animatedStyle]}>
       <Pressable style={styles.pressable} onPress={fadeAndFinish}>
-        <Video
-          ref={videoRef}
-          source={require('../assets/splash-video.mp4')}
+        <VideoView
+          player={player}
           style={styles.video}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay
-          isMuted
-          isLooping={false}
-          onPlaybackStatusUpdate={handleStatus}
-          onError={handleError}
+          contentFit="cover"
+          nativeControls={false}
+          allowsFullscreen={false}
+          allowsPictureInPicture={false}
         />
       </Pressable>
     </Animated.View>
@@ -93,7 +114,10 @@ const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 1000,
-    backgroundColor: '#1a8a8a',
+    // Cream to match the native splash + app background. If the video fails
+    // to render for any reason, the user stays on a consistent on-brand
+    // color instead of seeing the old teal flash.
+    backgroundColor: '#FAF5EC',
   },
   pressable: {
     flex: 1,

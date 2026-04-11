@@ -79,12 +79,21 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
   const [heartFilter, setHeartFilter] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
+  // See PlansMapView for the explanation of this flag — tracksViewChanges
+  // starts true so Android's first marker snapshot captures the fully-laid
+  // out pin, then flips to false for performance.
+  const [tracksMarkerChanges, setTracksMarkerChanges] = useState(true);
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       setLocationGranted(status === 'granted');
     });
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setTracksMarkerChanges(false), 1500);
+    return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
@@ -165,15 +174,18 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
               key={event.id}
               coordinate={{ latitude: event.latitude, longitude: event.longitude }}
               onPress={() => handleMarkerPress(event)}
-              tracksViewChanges={false}
+              tracksViewChanges={tracksMarkerChanges || isSelected}
               stopPropagation
+              anchor={{ x: 0.5, y: 1 }}
             >
-              <View style={[styles.pin, { backgroundColor: catColor }, isSelected && styles.pinSelected]} pointerEvents="none">
-                <Text style={styles.pinText} numberOfLines={1}>
-                  {event.title.length > 14 ? event.title.slice(0, 14) + '...' : event.title}
-                </Text>
+              <View style={styles.markerWrap} pointerEvents="none">
+                <View style={[styles.pin, { backgroundColor: catColor }, isSelected && styles.pinSelected]}>
+                  <Text style={styles.pinText} numberOfLines={1}>
+                    {event.title.length > 14 ? event.title.slice(0, 14) + '...' : event.title}
+                  </Text>
+                </View>
+                <View style={[styles.pinArrow, { borderTopColor: catColor }]} />
               </View>
-              <View style={[styles.pinArrow, { borderTopColor: catColor }]} pointerEvents="none" />
             </Marker>
           );
         })}
@@ -442,6 +454,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.terracotta,
   },
 
+  markerWrap: {
+    alignItems: 'center',
+  },
   pin: {
     paddingHorizontal: 10,
     paddingVertical: 5,

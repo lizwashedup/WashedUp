@@ -32,19 +32,11 @@ import { isAdmin } from '../../constants/Admin';
 import { checkContent } from '../../lib/contentFilter';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
-const NEIGHBORHOOD_OPTIONS = [
-  'Atwater Village', 'Beverly Hills', 'Boyle Heights', 'Brentwood', 'Burbank',
-  'Culver City', 'DTLA', 'Eagle Rock', 'East Hollywood', 'Echo Park',
-  'El Segundo', 'Encino', 'Glendale', 'Glassell Park', 'Highland Park',
-  'Hollywood', 'Huntington Park', 'Inglewood', 'Koreatown', 'La Brea',
-  'Larchmont', 'Lincoln Heights', 'Long Beach', 'Los Feliz', 'Manhattan Beach',
-  'Mar Vista', 'Marina Del Rey', 'Mid-City', 'Mid-Wilshire', 'North Hollywood', 'Palms',
-  'Pasadena', 'Playa Vista', 'Redondo Beach', 'San Fernando Valley', 'Santa Monica',
-  'Sherman Oaks', 'Silver Lake', 'South Pasadena', 'Studio City', 'Torrance',
-  'Venice', 'West Adams', 'West Hollywood', 'Westchester', 'Westwood',
-] as const;
-const NEIGHBORHOOD_OTHER = 'Other';
-const NEIGHBORHOOD_SET = new Set<string>(NEIGHBORHOOD_OPTIONS);
+import {
+  NEIGHBORHOOD_OPTIONS,
+  NEIGHBORHOOD_OTHER,
+  NEIGHBORHOOD_SET,
+} from '../../constants/Neighborhoods';
 
 // Uses correct column names from profiles table: first_name_display, profile_photo_url, handle
 interface Profile {

@@ -28,6 +28,12 @@ import { SharePlanModal } from '../../../components/modals/SharePlanModal';
 import ProfileButton from '../../../components/ProfileButton';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
+import {
+  NEIGHBORHOOD_OPTIONS,
+  NEIGHBORHOOD_OTHER,
+  NEIGHBORHOOD_SET,
+} from '../../../constants/Neighborhoods';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
 import Colors from '../../../constants/Colors';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
@@ -200,6 +206,8 @@ export default function PostScreen() {
   const [locationLat, setLocationLat] = useState<number | null>(null);
   const [locationLng, setLocationLng] = useState<number | null>(null);
   const [neighborhood, setNeighborhood] = useState('');
+  const [neighborhoodOther, setNeighborhoodOther] = useState('');
+  const [showNeighborhoodPicker, setShowNeighborhoodPicker] = useState(false);
   const [ticketUrl, setTicketUrl] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
@@ -551,7 +559,9 @@ export default function PostScreen() {
           city: 'Los Angeles',
           explore_event_id: exploreEventId,
           image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
-          neighborhood: neighborhood.trim() || null,
+          neighborhood: (neighborhood === NEIGHBORHOOD_OTHER
+            ? neighborhoodOther.trim()
+            : neighborhood.trim()) || null,
         })
         .select('id')
         .single();
@@ -795,15 +805,25 @@ export default function PostScreen() {
                 setLocationRaw(locationName);
                 setLocationLat(lat);
                 setLocationLng(lng);
-                // Auto-detect neighborhood via reverse geocoding
+                // Auto-detect neighborhood via reverse geocoding. If the
+                // detected area matches a picker option, pre-select it;
+                // otherwise fall back to Other + store the raw string so the
+                // creator can correct it.
                 if (lat != null && lng != null) {
                   (async () => {
                     try {
                       const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
                       if (results.length > 0) {
                         const place = results[0];
-                        const area = place.district || place.subregion || place.city || '';
-                        setNeighborhood(area);
+                        const area = (place.district || place.subregion || place.city || '').trim();
+                        if (!area) return;
+                        if (NEIGHBORHOOD_SET.has(area)) {
+                          setNeighborhood(area);
+                          setNeighborhoodOther('');
+                        } else {
+                          setNeighborhood(NEIGHBORHOOD_OTHER);
+                          setNeighborhoodOther(area);
+                        }
                       }
                     } catch {}
                   })();
@@ -843,20 +863,28 @@ export default function PostScreen() {
           {/* ── Neighborhood ── */}
           <View style={{ marginTop: 12 }}>
             <Text style={{ fontSize: 12, fontWeight: '600', color: '#78695C', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Neighborhood</Text>
-            <TextInput
-              style={{
-                backgroundColor: '#F5EDE0',
-                borderRadius: 10,
-                paddingHorizontal: 14,
-                paddingVertical: 10,
-                fontSize: 15,
-                color: '#2C1810',
-              }}
-              value={neighborhood}
-              onChangeText={setNeighborhood}
-              placeholder="e.g. Silver Lake, DTLA"
-              placeholderTextColor="#A09385"
-            />
+            <TouchableOpacity
+              style={styles.neighborhoodPickerBtn}
+              onPress={() => { hapticLight(); Keyboard.dismiss(); setShowNeighborhoodPicker(true); }}
+              activeOpacity={0.8}
+            >
+              <Text style={neighborhood ? styles.neighborhoodPickerValue : styles.neighborhoodPickerPlaceholder}>
+                {neighborhood || 'Select your neighborhood'}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color={Colors.textLight} />
+            </TouchableOpacity>
+            {neighborhood === NEIGHBORHOOD_OTHER && (
+              <TextInput
+                style={[styles.neighborhoodOtherInput, { marginTop: 8 }]}
+                value={neighborhoodOther}
+                onChangeText={setNeighborhoodOther}
+                placeholder="Where is it?"
+                placeholderTextColor={Colors.textLight}
+                maxLength={40}
+                autoCorrect={false}
+                returnKeyType="done"
+              />
+            )}
           </View>
 
           {/* ── Ticket Link ── */}
@@ -1091,6 +1119,50 @@ export default function PostScreen() {
         genderLabel={postedGenderLabel}
         variant="posted"
       />
+
+      {/* ── Neighborhood Picker Modal ── */}
+      <Modal
+        visible={showNeighborhoodPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowNeighborhoodPicker(false)}
+      >
+        <Pressable style={styles.neighborhoodSheetOverlay} onPress={() => setShowNeighborhoodPicker(false)}>
+          <Pressable style={styles.neighborhoodSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.neighborhoodSheetHeader}>
+              <Text style={styles.neighborhoodSheetTitle}>Select neighborhood</Text>
+              <TouchableOpacity
+                onPress={() => setShowNeighborhoodPicker(false)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                <Ionicons name="close" size={22} color={Colors.asphalt} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.neighborhoodSheetList} showsVerticalScrollIndicator={false}>
+              {[...NEIGHBORHOOD_OPTIONS, NEIGHBORHOOD_OTHER].map((opt) => {
+                const selected = neighborhood === opt;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    style={styles.neighborhoodOption}
+                    onPress={() => {
+                      hapticLight();
+                      setNeighborhood(opt);
+                      setShowNeighborhoodPicker(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.neighborhoodOptionText, selected && styles.neighborhoodOptionTextSelected]}>
+                      {opt}
+                    </Text>
+                    {selected && <Ionicons name="checkmark" size={18} color={Colors.terracotta} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* ── Date Picker Modal ── */}
       <Modal visible={showDatePicker} transparent animationType="slide">
@@ -1551,6 +1623,84 @@ const styles = StyleSheet.create({
   saveDraftBtnText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
+
+  neighborhoodPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5EDE0',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  neighborhoodPickerValue: {
+    fontFamily: Fonts.sans,
+    fontSize: 15,
+    color: '#2C1810',
+    flex: 1,
+  },
+  neighborhoodPickerPlaceholder: {
+    fontFamily: Fonts.sans,
+    fontSize: 15,
+    color: '#A09385',
+    flex: 1,
+  },
+  neighborhoodOtherInput: {
+    backgroundColor: '#F5EDE0',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontFamily: Fonts.sans,
+    fontSize: 15,
+    color: '#2C1810',
+  },
+  neighborhoodSheetOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlayDark,
+    justifyContent: 'flex-end',
+  },
+  neighborhoodSheet: {
+    backgroundColor: Colors.parchment,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
+    maxHeight: '80%',
+  },
+  neighborhoodSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  neighborhoodSheetTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  neighborhoodSheetList: {
+    paddingHorizontal: 12,
+  },
+  neighborhoodOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    borderRadius: 10,
+  },
+  neighborhoodOptionText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  neighborhoodOptionTextSelected: {
+    fontFamily: Fonts.sansBold,
     color: Colors.terracotta,
   },
 });

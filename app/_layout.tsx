@@ -25,6 +25,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { isBannedAppleUser } from '../lib/socialAuth';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useSessionLogger } from '../hooks/useSessionLogger';
@@ -347,6 +348,20 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           return;
         }
 
+        // Apple ban check on session restore — if the restored session
+        // belongs to a banned Apple sub, sign out silently and kick to login.
+        // This stops a banned user from persisting via an already-issued
+        // refresh token even after we've revoked them on the server side.
+        if (await isBannedAppleUser(session.user)) {
+          await supabase.auth.signOut();
+          if (cancelled || isRecoveryRef.current) return;
+          setAuthedUserId(null);
+          lastNavRef.current = { dest: '/login', ts: Date.now() };
+          router.replace('/login');
+          setTimeout(() => setAuthResolved(true), 80);
+          return;
+        }
+
         // Retry profile fetch once on failure — avoids signing out on a network blip
         let profileData: { onboarding_status: string | null; referral_source: string | null } | null = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -398,6 +413,18 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
       if (!session?.user) {
+        setAuthedUserId(null);
+        lastNavRef.current = { dest: '/login', ts: Date.now() };
+        router.replace('/login');
+        return;
+      }
+
+      // Apple ban check — same safety net as checkAuth. Belt-and-suspenders
+      // against the tiny window where SIGNED_IN fires after a fresh Apple
+      // sign-in but before signInWithApple's own ban check has a chance to
+      // run. Also catches any reauthentication flow that bypasses socialAuth.
+      if (await isBannedAppleUser(session.user)) {
+        await supabase.auth.signOut();
         setAuthedUserId(null);
         lastNavRef.current = { dest: '/login', ts: Date.now() };
         router.replace('/login');

@@ -51,12 +51,23 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
   const [heartFilter, setHeartFilter] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
+  // react-native-maps on Android snapshots the marker view on mount when
+  // tracksViewChanges is false. If the snapshot fires before layout settles,
+  // only part of the custom pin renders. Start with tracking enabled, then
+  // flip to false after a short delay so the live pin is captured fully,
+  // after which we stop tracking for performance.
+  const [tracksMarkerChanges, setTracksMarkerChanges] = useState(true);
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       setLocationGranted(status === 'granted');
     });
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setTracksMarkerChanges(false), 1500);
+    return () => clearTimeout(t);
   }, []);
 
   const filteredPlans = plans.filter((p) => {
@@ -111,15 +122,20 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
               key={plan.id}
               coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
               onPress={() => handleMarkerPress(plan)}
-              tracksViewChanges={false}
+              tracksViewChanges={tracksMarkerChanges || isSelected}
               stopPropagation
+              anchor={{ x: 0.5, y: 1 }}
             >
-              <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]} pointerEvents="none">
-                <Text style={styles.pinText} numberOfLines={1}>
-                  {plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title}
-                </Text>
+              {/* Single wrapping View — Android react-native-maps can only
+                  snapshot one direct child of Marker reliably. */}
+              <View style={styles.markerWrap} pointerEvents="none">
+                <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
+                  <Text style={styles.pinText} numberOfLines={1}>
+                    {plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title}
+                  </Text>
+                </View>
+                <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
               </View>
-              <View style={[styles.pinArrow, { borderTopColor: pinBg }]} pointerEvents="none" />
             </Marker>
           );
         })}
@@ -349,6 +365,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.terracotta,
   },
 
+  markerWrap: {
+    alignItems: 'center',
+  },
   pin: {
     paddingHorizontal: 10,
     paddingVertical: 5,

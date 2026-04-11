@@ -9,8 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash-branded.png",
-      "resizeMode": "cover",
+      "image": "./assets/images/splash-logo.png",
+      "resizeMode": "contain",
       "backgroundColor": "#FAF5EC"
     },
     "notification": {
@@ -52,7 +52,7 @@
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#B5522E"
+        "backgroundColor": "#FAF5EC"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -88,6 +88,7 @@
       "@react-native-google-signin/google-signin",
       "expo-font",
       "expo-updates",
+      "expo-video",
       [
         "expo-notifications",
         {

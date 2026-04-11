@@ -469,7 +469,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   topSection: {
-    paddingTop: 24,
+    paddingTop: 56,
     alignItems: 'center',
   },
   logo: {

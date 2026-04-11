@@ -1,7 +1,37 @@
 import { Platform, Alert } from 'react-native';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
+import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+
+/**
+ * Returns true if the given Supabase user is signed in via Apple AND the
+ * Apple `sub` claim is in the server-side banned list. Fails open on any
+ * transient error (RPC unreachable, unexpected payload) so a temporary
+ * DB outage doesn't kick legitimate users out — the ban check runs
+ * opportunistically, not as a hard gate.
+ */
+export async function isBannedAppleUser(user: User | null | undefined): Promise<boolean> {
+  if (!user) return false;
+  const sub = (user.user_metadata as { sub?: unknown } | null | undefined)?.sub;
+  if (typeof sub !== 'string' || !sub) return false;
+  const providerList = [
+    user.app_metadata?.provider,
+    ...((user.app_metadata?.providers as string[] | undefined) ?? []),
+  ].filter((p): p is string => typeof p === 'string');
+  if (!providerList.includes('apple')) return false;
+  try {
+    const { data, error } = await supabase.rpc('check_banned_apple_sub', {
+      p_apple_sub: sub,
+    });
+    if (error) return false;
+    return data === true;
+  } catch {
+    return false;
+  }
+}
+
+export const BANNED_USER_MESSAGE = 'This account has been suspended.';
 
 let GoogleSignin: any = null;
 
@@ -46,6 +76,14 @@ export async function signInWithApple() {
   });
 
   if (error) throw error;
+
+  // Ban check — run BEFORE any profile writes so we don't leak data to a
+  // banned sub. If the user is banned, sign them out and surface a clear
+  // error so the caller can display the suspended message.
+  if (await isBannedAppleUser(data.user)) {
+    await supabase.auth.signOut();
+    throw new Error(BANNED_USER_MESSAGE);
+  }
 
   // Apple only returns the name on the very first sign-in
   if (credential.fullName?.givenName && data.user) {
