@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
 
     const creatorName = creator?.first_name_display ?? 'Unknown';
     const creatorCity = creator?.city ?? '';
-    const planLink = `https://washedup.app/plan/${plan.id}`;
+    const planLink = `https://washedup.app/e/${plan.id}`;
     const postedAt = new Date(plan.created_at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
 
     // ── 1. Send email to liz@washedup.app ──────────────────────────────────────
