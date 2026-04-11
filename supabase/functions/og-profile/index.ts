@@ -3,7 +3,9 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
 const APP_URL = 'https://washedup.app';
-const PLACEHOLDER_IMAGE = `${APP_URL}/assets/images/plan-placeholder.png`;
+// /assets/images/plan-placeholder.png 404s on the webapp — broke every
+// share preview that fell back to this. /og-image.png is served.
+const PLACEHOLDER_IMAGE = `${APP_URL}/og-image.png`;
 
 function escapeHtml(s: string): string {
   return s
