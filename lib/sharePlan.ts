@@ -58,5 +58,5 @@ export function buildPlanShareContent(plan: SharePlanInput): { message: string; 
 
 export function getPlanShareUrl(plan: { id: string; slug?: string | null }): string {
   if (plan.slug) return `https://washedup.app/plans/${plan.slug}`;
-  return `https://washedup.app/plan/${plan.id}`;
+  return `https://washedup.app/e/${plan.id}`;
 }
