@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   TextInput,
   Keyboard,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -30,6 +32,20 @@ import { isAdmin } from '../../constants/Admin';
 import { checkContent } from '../../lib/contentFilter';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
+const NEIGHBORHOOD_OPTIONS = [
+  'Atwater Village', 'Beverly Hills', 'Boyle Heights', 'Brentwood', 'Burbank',
+  'Culver City', 'DTLA', 'Eagle Rock', 'East Hollywood', 'Echo Park',
+  'El Segundo', 'Encino', 'Glendale', 'Glassell Park', 'Highland Park',
+  'Hollywood', 'Huntington Park', 'Inglewood', 'Koreatown', 'La Brea',
+  'Larchmont', 'Lincoln Heights', 'Long Beach', 'Los Feliz', 'Manhattan Beach',
+  'Mar Vista', 'Marina Del Rey', 'Mid-City', 'Mid-Wilshire', 'North Hollywood', 'Palms',
+  'Pasadena', 'Playa Vista', 'Redondo Beach', 'San Fernando Valley', 'Santa Monica',
+  'Sherman Oaks', 'Silver Lake', 'South Pasadena', 'Studio City', 'Torrance',
+  'Venice', 'West Adams', 'West Hollywood', 'Westchester', 'Westwood',
+] as const;
+const NEIGHBORHOOD_OTHER = 'Other';
+const NEIGHBORHOOD_SET = new Set<string>(NEIGHBORHOOD_OPTIONS);
+
 // Uses correct column names from profiles table: first_name_display, profile_photo_url, handle
 interface Profile {
   id: string;
@@ -40,7 +56,7 @@ interface Profile {
   gender: string | null;
   handle: string | null;
   neighborhood: string | null;
-  is_traveling: boolean;
+  is_visitor: boolean;
   fun_fact: string | null;
 }
 
@@ -65,7 +81,9 @@ export default function ProfileScreen() {
   const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
   const [checkingHandle, setCheckingHandle] = useState(false);
   const [editNeighborhood, setEditNeighborhood] = useState('');
-  const [editIsTraveling, setEditIsTraveling] = useState(false);
+  const [editNeighborhoodOther, setEditNeighborhoodOther] = useState('');
+  const [showNeighborhoodPicker, setShowNeighborhoodPicker] = useState(false);
+  const [editIsVisitor, setEditIsVisitor] = useState(false);
   const [editFunFact, setEditFunFact] = useState('');
 
   useEffect(() => {
@@ -125,7 +143,7 @@ export default function ProfileScreen() {
       if (!user) { setLoading(false); return; }
       const { data } = await supabase
         .from('profiles')
-        .select('id, first_name_display, profile_photo_url, bio, city, gender, handle, neighborhood, is_traveling, fun_fact')
+        .select('id, first_name_display, profile_photo_url, bio, city, gender, handle, neighborhood, is_visitor, fun_fact')
         .eq('id', user.id)
         .single();
       if (data) {
@@ -138,7 +156,7 @@ export default function ProfileScreen() {
           gender: data.gender ?? null,
           handle: (data as any).handle ?? null,
           neighborhood: (data as any).neighborhood ?? null,
-          is_traveling: (data as any).is_traveling ?? false,
+          is_visitor: (data as any).is_visitor ?? false,
           fun_fact: (data as any).fun_fact ?? null,
         });
       }
@@ -171,8 +189,18 @@ export default function ProfileScreen() {
     setEditName(profile?.first_name ?? '');
     setEditBio(profile?.bio ?? '');
     setEditHandle(profile?.handle ?? '');
-    setEditNeighborhood(profile?.neighborhood ?? '');
-    setEditIsTraveling(profile?.is_traveling ?? false);
+    const savedNeighborhood = (profile?.neighborhood ?? '').trim();
+    if (!savedNeighborhood) {
+      setEditNeighborhood('');
+      setEditNeighborhoodOther('');
+    } else if (NEIGHBORHOOD_SET.has(savedNeighborhood)) {
+      setEditNeighborhood(savedNeighborhood);
+      setEditNeighborhoodOther('');
+    } else {
+      setEditNeighborhood(NEIGHBORHOOD_OTHER);
+      setEditNeighborhoodOther(savedNeighborhood);
+    }
+    setEditIsVisitor(profile?.is_visitor ?? false);
     setEditFunFact(profile?.fun_fact ?? '');
     setEditPhotoUri(null);
     setEditPhotoBase64(null);
@@ -248,7 +276,12 @@ export default function ProfileScreen() {
       return;
     }
 
-    const filter = checkContent([trimmedName, editNeighborhood, editFunFact].filter(Boolean).join(' '));
+    const resolvedNeighborhood =
+      editNeighborhood === NEIGHBORHOOD_OTHER
+        ? editNeighborhoodOther.trim()
+        : editNeighborhood.trim();
+
+    const filter = checkContent([trimmedName, resolvedNeighborhood, editFunFact].filter(Boolean).join(' '));
     if (!filter.ok) {
       setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your profile and try again.' });
       return;
@@ -271,7 +304,7 @@ export default function ProfileScreen() {
       }
 
       const handleVal = editHandle.trim().toLowerCase() || null;
-      const neighborhoodVal = editNeighborhood.trim() || null;
+      const neighborhoodVal = resolvedNeighborhood || null;
       const funFactVal = editFunFact.trim() || null;
       const { error } = await supabase
         .from('profiles')
@@ -280,7 +313,7 @@ export default function ProfileScreen() {
           profile_photo_url: newPhotoUrl,
           handle: handleVal,
           neighborhood: neighborhoodVal,
-          is_traveling: editIsTraveling,
+          is_visitor: editIsVisitor,
           fun_fact: funFactVal,
         })
         .eq('id', user.id);
@@ -295,7 +328,7 @@ export default function ProfileScreen() {
           avatar_url: newPhotoUrl,
           handle: handleVal,
           neighborhood: neighborhoodVal,
-          is_traveling: editIsTraveling,
+          is_visitor: editIsVisitor,
           fun_fact: funFactVal,
         } : prev,
       );
@@ -553,7 +586,7 @@ export default function ProfileScreen() {
                 style={styles.handleInput}
                 value={editHandle}
                 onChangeText={(t) => setEditHandle(t.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20))}
-                placeholder="yourname"
+                placeholder="yourhandle"
                 placeholderTextColor={Colors.textLight}
                 maxLength={20}
                 autoCapitalize="none"
@@ -577,7 +610,7 @@ export default function ProfileScreen() {
               style={[styles.editInput, styles.editBioInput]}
               value={editFunFact}
               onChangeText={setEditFunFact}
-              placeholder="Something fun about you (e.g. I really love wine and cheese)"
+              placeholder="Something fun about you (e.g. I know every taco spot in Silver Lake)"
               placeholderTextColor={Colors.textLight}
               maxLength={120}
               multiline
@@ -590,16 +623,30 @@ export default function ProfileScreen() {
 
           <View style={styles.editFieldGroup}>
             <Text style={styles.editLabel}>Neighborhood</Text>
-            <TextInput
+            <TouchableOpacity
               style={styles.editInput}
-              value={editNeighborhood}
-              onChangeText={setEditNeighborhood}
-              placeholder="e.g. Silver Lake, West Hollywood"
-              placeholderTextColor={Colors.textLight}
-              maxLength={40}
-              autoCorrect={false}
-              returnKeyType="next"
-            />
+              onPress={() => { hapticLight(); Keyboard.dismiss(); setShowNeighborhoodPicker(true); }}
+              activeOpacity={0.8}
+            >
+              <View style={styles.neighborhoodRow}>
+                <Text style={editNeighborhood ? styles.neighborhoodValue : styles.neighborhoodPlaceholder}>
+                  {editNeighborhood || 'Select your neighborhood'}
+                </Text>
+                <Ionicons name="chevron-down" size={18} color={Colors.textLight} />
+              </View>
+            </TouchableOpacity>
+            {editNeighborhood === NEIGHBORHOOD_OTHER && (
+              <TextInput
+                style={[styles.editInput, { marginTop: 8 }]}
+                value={editNeighborhoodOther}
+                onChangeText={setEditNeighborhoodOther}
+                placeholder="Where are you based?"
+                placeholderTextColor={Colors.textLight}
+                maxLength={40}
+                autoCorrect={false}
+                returnKeyType="done"
+              />
+            )}
             <Text style={styles.editHelp}>Where you're based (shown on your mini profile)</Text>
           </View>
 
@@ -607,21 +654,21 @@ export default function ProfileScreen() {
             <Text style={styles.editLabel}>Do you live in LA?</Text>
             <View style={styles.travelOptions}>
               <TouchableOpacity
-                style={[styles.travelOption, !editIsTraveling && styles.travelOptionActive]}
-                onPress={() => setEditIsTraveling(false)}
+                style={[styles.travelOption, !editIsVisitor && styles.travelOptionActive]}
+                onPress={() => setEditIsVisitor(false)}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.travelOptionText, !editIsTraveling && styles.travelOptionTextActive]}>
+                <Text style={[styles.travelOptionText, !editIsVisitor && styles.travelOptionTextActive]}>
                   Yes, I live here
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.travelOption, editIsTraveling && styles.travelOptionActive]}
-                onPress={() => setEditIsTraveling(true)}
+                style={[styles.travelOption, editIsVisitor && styles.travelOptionActive]}
+                onPress={() => setEditIsVisitor(true)}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.travelOptionText, editIsTraveling && styles.travelOptionTextActive]}>
-                  No, just traveling through
+                <Text style={[styles.travelOptionText, editIsVisitor && styles.travelOptionTextActive]}>
+                  I'm visiting LA
                 </Text>
               </TouchableOpacity>
             </View>
@@ -668,6 +715,48 @@ export default function ProfileScreen() {
           buttons={alertInfo?.buttons}
           onClose={() => setAlertInfo(null)}
         />
+        <Modal
+          visible={showNeighborhoodPicker}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowNeighborhoodPicker(false)}
+        >
+          <Pressable style={styles.neighborhoodSheetOverlay} onPress={() => setShowNeighborhoodPicker(false)}>
+            <Pressable style={styles.neighborhoodSheet} onPress={(e) => e.stopPropagation()}>
+              <View style={styles.neighborhoodSheetHeader}>
+                <Text style={styles.neighborhoodSheetTitle}>Select neighborhood</Text>
+                <TouchableOpacity
+                  onPress={() => setShowNeighborhoodPicker(false)}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
+                  <Ionicons name="close" size={22} color={Colors.asphalt} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.neighborhoodSheetList} showsVerticalScrollIndicator={false}>
+                {[...NEIGHBORHOOD_OPTIONS, NEIGHBORHOOD_OTHER].map((opt) => {
+                  const selected = editNeighborhood === opt;
+                  return (
+                    <TouchableOpacity
+                      key={opt}
+                      style={styles.neighborhoodOption}
+                      onPress={() => {
+                        hapticLight();
+                        setEditNeighborhood(opt);
+                        setShowNeighborhoodPicker(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.neighborhoodOptionText, selected && styles.neighborhoodOptionTextSelected]}>
+                        {opt}
+                      </Text>
+                      {selected && <Ionicons name="checkmark" size={18} color={Colors.terracotta} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </>
     );
   }
@@ -1091,6 +1180,70 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.border,
     borderRadius: 14,
+  },
+  neighborhoodRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  neighborhoodValue: {
+    flex: 1,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  neighborhoodPlaceholder: {
+    flex: 1,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.textLight,
+  },
+  neighborhoodSheetOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlayDark,
+    justifyContent: 'flex-end',
+  },
+  neighborhoodSheet: {
+    backgroundColor: Colors.parchment,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
+    maxHeight: '80%',
+  },
+  neighborhoodSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  neighborhoodSheetTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  neighborhoodSheetList: {
+    paddingHorizontal: 12,
+  },
+  neighborhoodOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    borderRadius: 10,
+  },
+  neighborhoodOptionText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  neighborhoodOptionTextSelected: {
+    fontFamily: Fonts.sansBold,
+    color: Colors.terracotta,
   },
   handlePrefix: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textLight, marginLeft: 16 },
   handleInput: {

@@ -87,7 +87,17 @@ export default function RootLayout() {
   );
 }
 
-function onboardingDest(status: string | null | undefined): string {
+function onboardingDest(
+  status: string | null | undefined,
+  referralSource: string | null | undefined,
+): string {
+  // Backstop: users mid-onboarding on an older client may have reached photo
+  // or vibes without going through the referral step (added April 8). Bounce
+  // them back to referral before letting them continue. 'complete' is
+  // intentionally excluded — don't interrupt active users for a data backfill.
+  if (!referralSource && (status === 'photo' || status === 'vibes')) {
+    return '/onboarding/referral';
+  }
   switch (status) {
     case 'complete': return '/(tabs)/plans';
     case 'vibes': return '/onboarding/vibes';
@@ -338,14 +348,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         }
 
         // Retry profile fetch once on failure — avoids signing out on a network blip
-        let profileData = null;
+        let profileData: { onboarding_status: string | null; referral_source: string | null } | null = null;
         for (let attempt = 0; attempt < 2; attempt++) {
           const { data, error: e } = await supabase
             .from('profiles')
-            .select('onboarding_status')
+            .select('onboarding_status, referral_source')
             .eq('id', session.user.id)
             .single();
-          if (!e && data) { profileData = data; break; }
+          if (!e && data) { profileData = data as any; break; }
           if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
         }
 
@@ -359,7 +369,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         }
 
         setAuthedUserId(session.user.id);
-        const dest = onboardingDest(profileData.onboarding_status);
+        const dest = onboardingDest(profileData.onboarding_status, profileData.referral_source);
         lastNavRef.current = { dest, ts: Date.now() };
         // Navigate first, then lift the overlay — prevents a 1-frame flash
         // where the splash is gone but the destination hasn't rendered yet.
@@ -397,11 +407,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       try {
         const { data } = await supabase
           .from('profiles')
-          .select('onboarding_status')
+          .select('onboarding_status, referral_source')
           .eq('id', session.user.id)
           .single();
 
-        const dest = onboardingDest(data?.onboarding_status);
+        const dest = onboardingDest(data?.onboarding_status, data?.referral_source);
         const now = Date.now();
         if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {
           setAuthedUserId(session.user.id);

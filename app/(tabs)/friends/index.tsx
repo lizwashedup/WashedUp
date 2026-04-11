@@ -34,6 +34,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useBlock } from '../../../hooks/useBlock';
 import { checkContent } from '../../../lib/contentFilter';
 import { supabase } from '../../../lib/supabase';
+import { markHandlePromptShown } from '../../../lib/promptState';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,7 @@ function validateHandle(handle: string): { ok: boolean; error?: string } {
 
 export default function YourPeopleScreen() {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [showQr, setShowQr] = useState(false);
@@ -160,7 +162,10 @@ export default function YourPeopleScreen() {
     if (myProfile.handle) return; // already has a handle
     const key = `has_seen_handle_prompt_${userId}`;
     AsyncStorage.getItem(key).then((seen) => {
-      if (!seen) setShowHandlePrompt(true);
+      if (!seen) {
+        setShowHandlePrompt(true);
+        markHandlePromptShown();
+      }
     }).catch(() => {});
   }, [userId, myProfile]);
 
@@ -170,6 +175,14 @@ export default function YourPeopleScreen() {
       await AsyncStorage.setItem(`has_seen_handle_prompt_${userId}`, '1');
     }
   }, [userId]);
+
+  const confirmHandlePrompt = useCallback(async () => {
+    setShowHandlePrompt(false);
+    if (userId) {
+      await AsyncStorage.setItem(`has_seen_handle_prompt_${userId}`, '1');
+    }
+    router.push('/(tabs)/profile?openEdit=true' as any);
+  }, [userId, router]);
 
   const blockedSet = useMemo(() => new Set(myProfile?.blocked_users ?? []), [myProfile?.blocked_users]);
 
@@ -393,22 +406,25 @@ export default function YourPeopleScreen() {
     const maxOrder = pinnedPeople.length > 0
       ? Math.max(...pinnedPeople.map(p => p.pin_order)) + 1
       : 0;
-    await supabase.from('pinned_people').insert({
-      user_id: userId,
-      pinned_user_id: friendId,
-      pin_order: maxOrder,
-    }).catch(() => {});
+    try {
+      await supabase.from('pinned_people').insert({
+        user_id: userId,
+        pinned_user_id: friendId,
+        pin_order: maxOrder,
+      });
+    } catch {}
     queryClient.invalidateQueries({ queryKey: ['pinned-people', userId] });
   }, [userId, pinnedPeople, queryClient]);
 
   const unpinFriend = useCallback(async (friendId: string) => {
     if (!userId) return;
     hapticLight();
-    await supabase.from('pinned_people')
-      .delete()
-      .eq('user_id', userId)
-      .eq('pinned_user_id', friendId)
-      .catch(() => {});
+    try {
+      await supabase.from('pinned_people')
+        .delete()
+        .eq('user_id', userId)
+        .eq('pinned_user_id', friendId);
+    } catch {}
     queryClient.invalidateQueries({ queryKey: ['pinned-people', userId] });
   }, [userId, queryClient]);
 
@@ -582,8 +598,6 @@ export default function YourPeopleScreen() {
     hapticLight();
     setUserMenuTarget({ id: targetId, name: targetName });
   }, []);
-
-  const router = useRouter();
 
   const isSearching = searchQuery.length > 0;
   const myHandle = myProfile?.handle ?? null;
@@ -1074,7 +1088,7 @@ export default function YourPeopleScreen() {
             <Text style={styles.handlePromptBody}>
               Your handle is how people find you and invite you to things after you've met. Set one below to get started.
             </Text>
-            <TouchableOpacity style={styles.handlePromptBtn} onPress={dismissHandlePrompt}>
+            <TouchableOpacity style={styles.handlePromptBtn} onPress={confirmHandlePrompt}>
               <Text style={styles.handlePromptBtnText}>Got it</Text>
             </TouchableOpacity>
           </Pressable>

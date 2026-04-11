@@ -86,8 +86,7 @@ export default function WelcomeModal({
                 Welcome, {firstName || 'friend'}
               </Text>
               <Text style={styles.bodyText}>
-                You just joined a community of people who actually want to do
-                things.
+                washedup is for people who actually want to get out and do things. browse plans, find your people, and get offline.
               </Text>
               <Text style={styles.swipeHint}>Swipe to continue</Text>
             </View>

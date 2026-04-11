@@ -101,7 +101,9 @@ export default function ScenePage() {
       Animated.spring(notifyScale, { toValue: 1.05, useNativeDriver: true, speed: 50 }),
       Animated.spring(notifyScale, { toValue: 1, useNativeDriver: true, speed: 50 }),
     ]).start();
-    await supabase.from('scene_waitlist').upsert({ user_id: userId }).catch(() => {});
+    try {
+      await supabase.from('scene_waitlist').upsert({ user_id: userId });
+    } catch {}
   }, [userId, onWaitlist]);
 
   const handleSubmit = useCallback(async () => {
@@ -120,7 +122,9 @@ export default function ScenePage() {
     Keyboard.dismiss();
     setSuggestion('');
     setSubmitState('success');
-    await supabase.from('scene_suggestions').insert({ user_id: userId, suggestion: text }).catch(() => {});
+    try {
+      await supabase.from('scene_suggestions').insert({ user_id: userId, suggestion: text });
+    } catch {}
     setTimeout(() => setSubmitState('idle'), 2000);
   }, [userId, suggestion]);
 

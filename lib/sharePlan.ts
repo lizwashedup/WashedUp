@@ -1,7 +1,10 @@
 /**
  * Builds the share content for a plan.
- * Returns separate message and url for iOS share sheet to show a rich preview.
+ * Returns separate message and url — iOS surfaces the url as a rich link
+ * preview in the share sheet. Android's Share API silently drops the url
+ * field, so we bake it into the message there.
  */
+import { Platform } from 'react-native';
 
 interface SharePlanInput {
   id: string;
@@ -46,10 +49,11 @@ export function buildPlanShareContent(plan: SharePlanInput): { message: string; 
 
   const url = getPlanShareUrl(plan);
 
-  return {
-    message: `${firstLine}\n${availabilityText}`,
-    url,
-  };
+  const baseMessage = `${firstLine}\n${availabilityText}`;
+  const message =
+    Platform.OS === 'android' ? `${baseMessage}\n${url}` : baseMessage;
+
+  return { message, url };
 }
 
 export function getPlanShareUrl(plan: { id: string; slug?: string | null }): string {

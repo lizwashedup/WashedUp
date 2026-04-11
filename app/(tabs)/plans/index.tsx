@@ -8,6 +8,8 @@ import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
+    Modal,
+    Pressable,
     RefreshControl,
     ScrollView,
     SectionList,
@@ -36,8 +38,15 @@ import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { supabase } from '../../../lib/supabase';
 import { useBlock } from '../../../hooks/useBlock';
+import {
+  markWelcomeShown,
+  wasHandlePromptShownThisSession,
+  wasWelcomeShownThisSession,
+} from '../../../lib/promptState';
 
 const TC = '#B5522E'; // terracotta primary accent
+
+const wLogo = require('../../../assets/images/w-logo-full.png');
 
 // Lazy-load map to avoid crash on Expo Go / environments where react-native-maps fails
 const LazyPlansMapView = lazy(() => import('../../../components/plans/PlansMapView'));
@@ -63,6 +72,7 @@ interface PlanCardPlan {
   neighborhood: string | null;
   slug: string | null;
   category: string | null;
+  gender_rule?: string | null;
   max_invites: number;
   member_count: number;
   is_featured?: boolean;
@@ -99,6 +109,7 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
     neighborhood: plan.neighborhood ?? null,
     slug: plan.slug ?? null,
     category: plan.category ?? null,
+    gender_rule: plan.gender_rule ?? null,
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
     is_featured: plan.is_featured ?? false,
@@ -218,6 +229,7 @@ export default function PlansScreen() {
   const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const [welcomeName, setWelcomeName] = useState('');
+  const [showProfileCompletePrompt, setShowProfileCompletePrompt] = useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -244,6 +256,7 @@ export default function PlansScreen() {
             if (!cancelled) {
               setWelcomeName(profile?.first_name_display ?? '');
               setShowWelcome(true);
+              markWelcomeShown();
               // Persist the "seen" flag immediately, before the user can dismiss.
               // This guarantees the modal only shows once per user even if they
               // force-quit the app, lose connection, or close it before the
@@ -277,6 +290,67 @@ export default function PlansScreen() {
       clearTimeout(t);
     };
   }, []);
+
+  // ── Profile-complete prompt ─────────────────────────────────────────────────
+  // Fires once ever per user when any of handle/fun_fact/neighborhood is
+  // missing and onboarding is complete. Skipped if the handle prompt or
+  // welcome modal is showing/was shown this session to avoid back-to-back.
+  React.useEffect(() => {
+    if (!userId) return;
+    if (wasHandlePromptShownThisSession()) return;
+    if (wasWelcomeShownThisSession()) return;
+
+    let cancelled = false;
+    let delayTimer: ReturnType<typeof setTimeout> | null = null;
+    const flagKey = `has_seen_profile_complete_prompt_${userId}`;
+
+    (async () => {
+      try {
+        const seen = await AsyncStorage.getItem(flagKey);
+        if (cancelled || seen) return;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('onboarding_status, handle, fun_fact, neighborhood')
+          .eq('id', userId)
+          .single();
+        if (cancelled || !profile) return;
+        if (profile.onboarding_status !== 'complete') return;
+
+        const hasHandle = !!(profile.handle && String(profile.handle).trim());
+        const hasFunFact = !!(profile.fun_fact && String(profile.fun_fact).trim());
+        const hasNeighborhood = !!(profile.neighborhood && String(profile.neighborhood).trim());
+        if (hasHandle && hasFunFact && hasNeighborhood) return;
+
+        delayTimer = setTimeout(() => {
+          if (cancelled) return;
+          // Final check — another prompt may have raced in during the delay.
+          if (wasHandlePromptShownThisSession()) return;
+          setShowProfileCompletePrompt(true);
+        }, 2000);
+      } catch {}
+    })();
+
+    return () => {
+      cancelled = true;
+      if (delayTimer) clearTimeout(delayTimer);
+    };
+  }, [userId]);
+
+  const dismissProfileCompletePrompt = useCallback(async () => {
+    setShowProfileCompletePrompt(false);
+    if (userId) {
+      try { await AsyncStorage.setItem(`has_seen_profile_complete_prompt_${userId}`, '1'); } catch {}
+    }
+  }, [userId]);
+
+  const confirmProfileCompletePrompt = useCallback(async () => {
+    setShowProfileCompletePrompt(false);
+    if (userId) {
+      try { await AsyncStorage.setItem(`has_seen_profile_complete_prompt_${userId}`, '1'); } catch {}
+    }
+    router.push('/(tabs)/profile?openEdit=true' as any);
+  }, [userId]);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -1060,6 +1134,24 @@ export default function PlansScreen() {
         onPostPlan={handleWelcomePost}
       />
 
+      <Modal visible={showProfileCompletePrompt} transparent animationType="fade" onRequestClose={dismissProfileCompletePrompt}>
+        <Pressable style={styles.profilePromptOverlay} onPress={dismissProfileCompletePrompt}>
+          <Pressable style={styles.profilePromptCard} onPress={(e) => e.stopPropagation()}>
+            <Image source={wLogo} style={styles.profilePromptLogo} contentFit="contain" />
+            <Text style={styles.profilePromptTitle}>make your profile yours</Text>
+            <Text style={styles.profilePromptBody}>
+              add a handle, a fun fact, and your neighborhood so people can find you and know where you're coming from.
+            </Text>
+            <TouchableOpacity style={styles.profilePromptPrimaryBtn} onPress={confirmProfileCompletePrompt} activeOpacity={0.9}>
+              <Text style={styles.profilePromptPrimaryBtnText}>finish my profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.profilePromptLaterBtn} onPress={dismissProfileCompletePrompt} activeOpacity={0.7}>
+              <Text style={styles.profilePromptLaterText}>later</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {reportTarget && (
         <ReportModal
           visible
@@ -1280,4 +1372,61 @@ const styles = StyleSheet.create({
   errorMessage: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: '#78695C', textAlign: 'center', marginBottom: 20, paddingHorizontal: 32 },
   retryButton: { backgroundColor: TC, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
   retryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: '#FFFFFF' },
+
+  profilePromptOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlayDark,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profilePromptCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 20,
+    padding: 28,
+    marginHorizontal: 32,
+    alignItems: 'center',
+  },
+  profilePromptLogo: {
+    width: 72,
+    height: 72,
+    marginBottom: 14,
+  },
+  profilePromptTitle: {
+    fontSize: FontSizes.bodyLG,
+    fontFamily: Fonts.sansBold,
+    color: Colors.asphalt,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  profilePromptBody: {
+    fontSize: FontSizes.bodyMD,
+    fontFamily: Fonts.sans,
+    color: Colors.textMedium,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  profilePromptPrimaryBtn: {
+    backgroundColor: Colors.terracotta,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 14,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  profilePromptPrimaryBtnText: {
+    fontSize: FontSizes.bodyMD,
+    fontFamily: Fonts.sansBold,
+    color: Colors.white,
+  },
+  profilePromptLaterBtn: {
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  profilePromptLaterText: {
+    fontSize: FontSizes.bodyMD,
+    fontFamily: Fonts.sansMedium,
+    color: Colors.textMedium,
+  },
 });

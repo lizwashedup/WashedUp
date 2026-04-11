@@ -40,7 +40,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('first_name, last_name, profile_photo_url, handle')
+      .select('first_name_display, profile_photo_url, handle')
       .eq('handle', handle)
       .single();
 
@@ -54,9 +54,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const name = escapeHtml(
-      [profile.first_name, profile.last_name].filter(Boolean).join(' ') || handle
-    );
+    const name = escapeHtml(profile.first_name_display || handle);
     const imageUrl =
       profile.profile_photo_url && profile.profile_photo_url.startsWith('http')
         ? profile.profile_photo_url

@@ -268,40 +268,6 @@ export function useChat(eventId: string) {
       if (insErr) throw insErr;
     }
 
-    // Send push notification (only for new/replaced reactions, not removals)
-    if (!(existing && existing.reaction === reaction)) {
-      try {
-        const msg = messagesRef.current.find(m => m.id === messageId);
-        if (msg && msg.user_id !== userId) {
-          // Dedup: skip if we already notified for this message in the last 60s
-          const { count } = await supabase
-            .from('app_notifications')
-            .select('id', { count: 'exact', head: true })
-            .eq('user_id', msg.user_id)
-            .eq('event_id', eventId)
-            .eq('type', 'new_message')
-            .gte('created_at', new Date(Date.now() - 60000).toISOString())
-            .like('title', `%reacted%`);
-
-          if ((count ?? 0) === 0) {
-            const { data: profile } = await supabase
-              .from('profiles_public')
-              .select('first_name_display')
-              .eq('id', userId)
-              .maybeSingle();
-            const name = profile?.first_name_display ?? 'Someone';
-            const emojiDisplay = reaction === 'heart' ? '\u2764\uFE0F' : reaction;
-            await supabase.from('app_notifications').insert({
-              user_id: msg.user_id,
-              type: 'new_message',
-              title: `${name} reacted ${emojiDisplay}`,
-              body: msg.content?.slice(0, 80) || 'to your message',
-              event_id: eventId,
-            });
-          }
-        }
-      } catch (e) { console.warn('[WashedUp] Reaction notification failed:', e); }
-    }
     } catch (err) {
       console.warn('[WashedUp] Reaction toggle failed, rolling back:', err);
       setMessages(prev => prev.map(m =>

@@ -28,6 +28,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
+import { getPlanPinColor } from '../../lib/planColors';
 
 
 interface PlanCardProps {
@@ -40,6 +41,7 @@ interface PlanCardProps {
     neighborhood?: string | null;
     slug?: string | null;
     category: string | null;
+    gender_rule?: string | null;
     max_invites: number;
     member_count: number;
     is_featured?: boolean;
@@ -302,11 +304,20 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             </Text>
           </View>
         </View>
-      ) : plan.category ? (
+      ) : (plan.category || plan.gender_rule === 'women_only') ? (
         <View style={styles.categoryRow}>
-          <View style={styles.categoryPill}>
-            <Text style={styles.categoryPillText}>{plan.category}</Text>
-          </View>
+          {plan.category && (
+            <View style={styles.categoryPill}>
+              <Text style={[styles.categoryPillText, { color: getPlanPinColor(plan) }]}>
+                {plan.category}
+              </Text>
+            </View>
+          )}
+          {plan.gender_rule === 'women_only' && (
+            <View style={styles.womenOnlyPill}>
+              <Text style={styles.womenOnlyPillText}>Women Only</Text>
+            </View>
+          )}
         </View>
       ) : null}
 
@@ -516,6 +527,18 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansBold,
     fontSize: 10,
     color: Colors.goldenAmber,
+    letterSpacing: 0.2,
+  },
+  womenOnlyPill: {
+    backgroundColor: Colors.birthdayPinkTint15,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  womenOnlyPillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: Colors.birthdayPink,
     letterSpacing: 0.2,
   },
   birthdaySubtitle: {

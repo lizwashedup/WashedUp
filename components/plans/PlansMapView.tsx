@@ -12,6 +12,7 @@ import { FilterBottomSheet } from '../FilterBottomSheet';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
+import { getPlanPinColor } from '../../lib/planColors';
 import type { Plan } from '../../lib/fetchPlans';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -22,9 +23,6 @@ const LA_REGION = {
   latitudeDelta: 0.4,
   longitudeDelta: 0.4,
 };
-
-const PIN_COLOR = '#B5522E';
-const PIN_COLOR_SELECTED = '#A84B2A';
 
 function formatDateShort(dateString: string): string {
   const d = new Date(dateString);
@@ -107,7 +105,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
       >
         {filteredPlans.map((plan) => {
           const isSelected = selectedPlan?.id === plan.id;
-          const pinBg = isSelected ? PIN_COLOR_SELECTED : PIN_COLOR;
+          const pinBg = getPlanPinColor(plan);
           return (
             <Marker
               key={plan.id}
@@ -188,7 +186,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
           )}
           <View style={styles.cardContent}>
             {selectedPlan.category && (
-              <View style={styles.cardCatBadge}>
+              <View style={[styles.cardCatBadge, { backgroundColor: getPlanPinColor(selectedPlan) }]}>
                 <Text style={styles.cardCatText}>{selectedPlan.category}</Text>
               </View>
             )}

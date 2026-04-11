@@ -28,7 +28,7 @@ export default function OnboardingLACheckScreen() {
   const [loading, setLoading] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
-  const handleYes = async () => {
+  const handleLA = async (isVisitor: boolean) => {
     hapticLight();
     setLoading(true);
     try {
@@ -38,7 +38,14 @@ export default function OnboardingLACheckScreen() {
         await supabase.auth.signOut();
         return;
       }
-      const { error } = await supabase.from('profiles').update({ city: 'Los Angeles', onboarding_status: 'referral' }).eq('id', user.id);
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          city: 'Los Angeles',
+          is_visitor: isVisitor,
+          onboarding_status: 'referral',
+        })
+        .eq('id', user.id);
       if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
       router.push('/onboarding/referral');
     } finally {
@@ -105,12 +112,22 @@ export default function OnboardingLACheckScreen() {
               <>
                 <TouchableOpacity
                   style={styles.primaryButton}
-                  onPress={handleYes}
+                  onPress={() => handleLA(false)}
                   onPressIn={() => hapticLight()}
                   activeOpacity={0.9}
                   disabled={loading}
                 >
-                  <Text style={styles.primaryButtonText}>Yes, I&apos;m in LA</Text>
+                  <Text style={styles.primaryButtonText}>Yes, I live here</Text>
+                </TouchableOpacity>
+                <View style={styles.gap16} />
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={() => handleLA(true)}
+                  onPressIn={() => hapticLight()}
+                  activeOpacity={0.9}
+                  disabled={loading}
+                >
+                  <Text style={styles.secondaryButtonText}>I&apos;m visiting LA</Text>
                 </TouchableOpacity>
                 <View style={styles.gap16} />
                 <TouchableOpacity
@@ -120,7 +137,7 @@ export default function OnboardingLACheckScreen() {
                   activeOpacity={0.9}
                   disabled={loading}
                 >
-                  <Text style={styles.secondaryButtonText}>No, somewhere else</Text>
+                  <Text style={styles.secondaryButtonText}>No, bring washedup to my city</Text>
                 </TouchableOpacity>
               </>
             ) : (

@@ -108,11 +108,27 @@ export default function OnboardingReferralScreen() {
       } else {
         referralValue = selected as string;
       }
+      // Smart-advance: in the normal flow the user arrives here with
+      // status='referral' and we advance to 'photo'. When the routing
+      // backstop bounced a mid-flow user here from 'photo' or 'vibes'
+      // (because their older client skipped the referral step), we
+      // preserve their existing status and resume at that step instead
+      // of regressing them.
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('onboarding_status')
+        .eq('id', user.id)
+        .single();
+      const currentStatus = existing?.onboarding_status ?? 'referral';
+      const nextStatus =
+        currentStatus === 'photo' || currentStatus === 'vibes'
+          ? currentStatus
+          : 'photo';
       const { error } = await supabase
         .from('profiles')
         .update({
           referral_source: referralValue,
-          onboarding_status: 'photo',
+          onboarding_status: nextStatus,
         })
         .eq('id', user.id);
       if (error) {
@@ -122,7 +138,9 @@ export default function OnboardingReferralScreen() {
         });
         return;
       }
-      router.push('/onboarding/photo');
+      const destPath =
+        nextStatus === 'vibes' ? '/onboarding/vibes' : '/onboarding/photo';
+      router.push(destPath);
     } finally {
       setLoading(false);
     }

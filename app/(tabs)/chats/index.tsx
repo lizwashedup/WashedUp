@@ -12,8 +12,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { ChevronDown, ChevronRight } from 'lucide-react-native';
+
+const wLogo = require('../../../assets/images/w-logo-full.png');
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
@@ -160,9 +161,7 @@ export default function ChatsScreen() {
 
       {chats.length === 0 ? (
         <View style={styles.emptyState}>
-          <View style={styles.emptyIcon}>
-            <Ionicons name="chatbubbles-outline" size={40} color="#B5522E" />
-          </View>
+          <Image source={wLogo} style={styles.emptyLogo} contentFit="contain" />
           <Text style={styles.emptyTitle}>Join a plan to start chatting</Text>
           <Text style={styles.emptySubtitle}>
             A group chat opens once 2 people are going.
@@ -348,13 +347,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     gap: 12,
   },
-  emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#F5E8E2',
-    alignItems: 'center',
-    justifyContent: 'center',
+  emptyLogo: {
+    width: 96,
+    height: 96,
     marginBottom: 8,
   },
   emptyTitle: { fontWeight: '700', fontSize: 20, color: '#2C1810', textAlign: 'center' },

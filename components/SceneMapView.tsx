@@ -11,6 +11,7 @@ import { CATEGORY_OPTIONS } from '../constants/Categories';
 import { FilterBottomSheet } from './FilterBottomSheet';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
+import { getPlanPinColor } from '../lib/planColors';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -19,20 +20,6 @@ const LA_REGION = {
   longitude: -118.2437,
   latitudeDelta: 0.4,
   longitudeDelta: 0.4,
-};
-
-const CATEGORY_COLORS: Record<string, string> = {
-  music: Colors.categoryMusic,
-  film: Colors.categoryFilm,
-  nightlife: Colors.categoryNightlife,
-  food: Colors.categoryFood,
-  outdoors: Colors.categoryOutdoors,
-  fitness: Colors.categoryFitness,
-  art: Colors.categoryArt,
-  comedy: Colors.terracotta,
-  sports: Colors.categorySports,
-  wellness: Colors.categoryWellness,
-  community: Colors.terracotta,
 };
 
 interface SceneEvent {
@@ -171,7 +158,7 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
         onPress={handleMapPress}
       >
         {filteredEvents.map((event) => {
-          const catColor = CATEGORY_COLORS[event.category?.toLowerCase() ?? ''] ?? Colors.terracotta;
+          const catColor = getPlanPinColor({ category: event.category });
           const isSelected = selectedEvent?.id === event.id;
           return (
             <Marker
@@ -261,7 +248,7 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
           )}
           <View style={styles.cardContent}>
             {selectedEvent.category && (
-              <View style={[styles.cardCatBadge, { backgroundColor: CATEGORY_COLORS[selectedEvent.category.toLowerCase()] ?? Colors.terracotta }]}>
+              <View style={[styles.cardCatBadge, { backgroundColor: getPlanPinColor({ category: selectedEvent.category }) }]}>
                 <Text style={styles.cardCatText}>{selectedEvent.category}</Text>
               </View>
             )}

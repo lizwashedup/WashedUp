@@ -30,6 +30,7 @@ interface MiniProfile {
   is_traveling: boolean;
   fun_fact: string | null;
   city: string | null;
+  is_visitor: boolean;
 }
 
 interface ProfileMarks {
@@ -67,7 +68,7 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
         // Try profiles table first (has the mini-profile fields)
         const { data, error } = await supabase
           .from('profiles')
-          .select('first_name_display, profile_photo_url, neighborhood, is_traveling, fun_fact, city')
+          .select('first_name_display, profile_photo_url, neighborhood, is_traveling, fun_fact, city, is_visitor')
           .eq('id', userId)
           .single();
 
@@ -77,7 +78,7 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
           // Fallback to profiles_public (always readable, but lacks mini-profile fields)
           const { data: pub } = await supabase
             .from('profiles_public')
-            .select('first_name_display, profile_photo_url, city')
+            .select('first_name_display, profile_photo_url, city, is_visitor')
             .eq('id', userId)
             .single();
 
@@ -89,6 +90,7 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
               neighborhood: null,
               is_traveling: false,
               fun_fact: null,
+              is_visitor: (pub as any).is_visitor ?? false,
             });
           }
         }
@@ -109,6 +111,7 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
   const name = profile?.first_name_display ?? 'Member';
   const locationText = profile?.neighborhood ?? profile?.city ?? null;
   const isTraveling = profile?.is_traveling ?? false;
+  const isVisitor = profile?.is_visitor ?? false;
 
   return (
     <Modal visible transparent animationType="fade">
@@ -175,6 +178,15 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
                   </View>
                 )}
               </View>
+
+              {/* Visitor tag */}
+              {isVisitor && (
+                <View style={styles.visitorRow}>
+                  <View style={styles.visitorBubble}>
+                    <Text style={styles.visitorText}>visiting LA</Text>
+                  </View>
+                </View>
+              )}
 
               {/* Fun fact */}
               {profile?.fun_fact ? (
@@ -299,6 +311,23 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
     color: Colors.asphalt,
+  },
+  visitorRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: -6,
+    marginBottom: 14,
+  },
+  visitorBubble: {
+    backgroundColor: Colors.parchment,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  visitorText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
   },
   milestonePill: {
     flexDirection: 'row',

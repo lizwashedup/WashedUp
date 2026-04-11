@@ -32,6 +32,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignupScreen() {
   const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -40,10 +41,12 @@ export default function SignupScreen() {
   const [validationTouched, setValidationTouched] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const lastNameInputRef = useRef<TextInput>(null);
   const emailInputRef = useRef<TextInput>(null);
   const passwordInputRef = useRef<TextInput>(null);
 
   const firstNameInvalid = validationTouched && !firstName.trim();
+  const lastNameInvalid = validationTouched && !lastName.trim();
   const emailInvalid = validationTouched && (!email.trim() || !EMAIL_REGEX.test(email.trim()));
   const passwordInvalid = validationTouched && (password.length < 6 || !password);
 
@@ -58,9 +61,14 @@ export default function SignupScreen() {
     setValidationTouched(true);
 
     const trimmedFirst = firstName.trim();
+    const trimmedLast = lastName.trim();
     const trimmedEmail = email.trim();
     if (!trimmedFirst) {
       setError('Please enter your first name.');
+      return;
+    }
+    if (!trimmedLast) {
+      setError('Please enter your last name.');
       return;
     }
     if (!trimmedEmail) {
@@ -79,9 +87,14 @@ export default function SignupScreen() {
       setError('Please agree to the Terms of Service, Privacy Policy, and Community Guidelines.');
       return;
     }
-    const nameFilter = checkContent(trimmedFirst);
-    if (!nameFilter.ok) {
-      setError(nameFilter.reason ?? 'That name is not allowed. Please try a different one.');
+    const firstFilter = checkContent(trimmedFirst);
+    if (!firstFilter.ok) {
+      setError(firstFilter.reason ?? 'That name is not allowed. Please try a different one.');
+      return;
+    }
+    const lastFilter = checkContent(trimmedLast);
+    if (!lastFilter.ok) {
+      setError(lastFilter.reason ?? 'That name is not allowed. Please try a different one.');
       return;
     }
 
@@ -112,7 +125,7 @@ export default function SignupScreen() {
         for (let attempt = 0; attempt < 2; attempt++) {
           const { error: nameErr } = await supabase
             .from('profiles')
-            .update({ first_name_display: trimmedFirst })
+            .update({ first_name_display: trimmedFirst, last_name: trimmedLast })
             .eq('id', user.id);
           if (!nameErr) break;
           if (attempt === 0) await new Promise(r => setTimeout(r, 800));
@@ -141,6 +154,7 @@ export default function SignupScreen() {
   const triggerHaptic = () => hapticLight();
 
   const [firstNameFocused, setFirstNameFocused] = useState(false);
+  const [lastNameFocused, setLastNameFocused] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [socialLoading, setSocialLoading] = useState<'apple' | 'google' | null>(null);
@@ -222,22 +236,43 @@ export default function SignupScreen() {
               <Text style={styles.formSubtitle}>Takes 30 seconds. No, really.</Text>
               <View style={styles.gap20} />
 
-              <TextInput
-                style={[
-                  styles.input,
-                  inputBorder(firstNameInvalid, firstNameFocused),
-                ]}
-                placeholder="First name"
-                placeholderTextColor={Colors.textMedium}
-                value={firstName}
-                onChangeText={(t) => { setFirstName(t); setError(null); setValidationTouched(false); }}
-                onFocus={() => setFirstNameFocused(true)}
-                onBlur={() => setFirstNameFocused(false)}
-                autoCapitalize="words"
-                returnKeyType="next"
-                onSubmitEditing={() => emailInputRef.current?.focus()}
-                editable={!loading}
-              />
+              <View style={styles.nameRow}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.nameInput,
+                    inputBorder(firstNameInvalid, firstNameFocused),
+                  ]}
+                  placeholder="First name"
+                  placeholderTextColor={Colors.textMedium}
+                  value={firstName}
+                  onChangeText={(t) => { setFirstName(t); setError(null); setValidationTouched(false); }}
+                  onFocus={() => setFirstNameFocused(true)}
+                  onBlur={() => setFirstNameFocused(false)}
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                  onSubmitEditing={() => lastNameInputRef.current?.focus()}
+                  editable={!loading}
+                />
+                <TextInput
+                  ref={lastNameInputRef}
+                  style={[
+                    styles.input,
+                    styles.nameInput,
+                    inputBorder(lastNameInvalid, lastNameFocused),
+                  ]}
+                  placeholder="Last name"
+                  placeholderTextColor={Colors.textMedium}
+                  value={lastName}
+                  onChangeText={(t) => { setLastName(t); setError(null); setValidationTouched(false); }}
+                  onFocus={() => setLastNameFocused(true)}
+                  onBlur={() => setLastNameFocused(false)}
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                  onSubmitEditing={() => emailInputRef.current?.focus()}
+                  editable={!loading}
+                />
+              </View>
               <View style={styles.gap12} />
 
               <TextInput
@@ -483,6 +518,14 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
     textAlign: 'left',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  nameInput: {
+    flex: 1,
+    minWidth: 0,
   },
   inputFocused: {
     borderColor: Colors.terracotta,

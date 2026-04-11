@@ -1081,8 +1081,8 @@ export default function PlanDetailScreen() {
 
   const categoryTags = [
       plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null,
-      genderLabel,
     ].filter(Boolean);
+  const isWomenOnly = plan.gender_rule === 'women_only';
 
   const groupSizeLabel = isFeatured ? 'WashedUp Event' : totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
 
@@ -1218,19 +1218,25 @@ export default function PlanDetailScreen() {
 
         {/* A. Creator Info */}
         <View style={styles.creatorBlock}>
-          {plan.creator?.profile_photo_url ? (
-            <Image
-              source={{ uri: plan.creator?.profile_photo_url ?? '' }}
-              style={styles.creatorAvatarLarge}
-              contentFit="cover"
-              transition={200}
-              priority="high"
-            />
-          ) : (
-            <View style={[styles.creatorAvatarLarge, styles.creatorAvatarPlaceholder]}>
-              <Ionicons name="person-outline" size={32} color={Colors.textLight} />
-            </View>
-          )}
+          <TouchableOpacity
+            onPress={() => plan.creator?.id && setMiniProfileUserId(plan.creator.id)}
+            disabled={!plan.creator?.id}
+            activeOpacity={0.7}
+          >
+            {plan.creator?.profile_photo_url ? (
+              <Image
+                source={{ uri: plan.creator?.profile_photo_url ?? '' }}
+                style={styles.creatorAvatarLarge}
+                contentFit="cover"
+                transition={200}
+                priority="high"
+              />
+            ) : (
+              <View style={[styles.creatorAvatarLarge, styles.creatorAvatarPlaceholder]}>
+                <Ionicons name="person-outline" size={32} color={Colors.textLight} />
+              </View>
+            )}
+          </TouchableOpacity>
           <View style={styles.creatorDetails}>
             <Text style={styles.postedBy}>POSTED BY</Text>
             <Text style={styles.creatorNameLarge}>{plan.creator?.first_name_display ?? 'Someone'}</Text>
@@ -1260,13 +1266,18 @@ export default function PlanDetailScreen() {
               </Text>
             </View>
           </View>
-        ) : categoryTags.length > 0 ? (
+        ) : (categoryTags.length > 0 || isWomenOnly) ? (
           <View style={styles.categoryTagsRow}>
             {categoryTags.map((tag) => (
               <View key={tag} style={styles.categoryTag}>
                 <Text style={styles.categoryTagText}>{tag}</Text>
               </View>
             ))}
+            {isWomenOnly && (
+              <View style={styles.womenOnlyTag}>
+                <Text style={styles.womenOnlyTagText}>Women Only</Text>
+              </View>
+            )}
           </View>
         ) : null}
 
@@ -2325,6 +2336,18 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: '#F5E8E2',
+  },
+  womenOnlyTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: Colors.birthdayPinkTint15,
+  },
+  womenOnlyTagText: {
+    fontWeight: '600',
+    fontSize: 10,
+    color: Colors.birthdayPink,
+    letterSpacing: 0.2,
   },
   featuredPill: {
     alignSelf: 'flex-start',

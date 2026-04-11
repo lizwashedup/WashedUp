@@ -15,6 +15,7 @@ import {
   Modal,
   Pressable,
   Linking,
+  ScrollView,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -509,6 +510,7 @@ export default function ChatScreen() {
   const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, editMessage, toggleReaction, refetch } = useChat(id);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
+  const [membersExpanded, setMembersExpanded] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -836,39 +838,63 @@ export default function ChatScreen() {
         )}
 
         {/* Member avatars row */}
-        {event && event.members.length > 0 && (
-          <View style={chatStyles.membersRow}>
-            {event.members.slice(0, event.members.length > 5 ? 4 : 5).map((member) => (
-              <TouchableOpacity
-                key={member.id}
-                style={chatStyles.memberItem}
-                onPress={() => setMiniProfileUserId(member.id)}
-                activeOpacity={0.7}
-              >
-                {member.avatar_url ? (
-                  <Image source={{ uri: member.avatar_url }} style={chatStyles.memberAvatar} contentFit="cover" />
-                ) : (
-                  <View style={[chatStyles.memberAvatar, chatStyles.memberAvatarFallback]}>
-                    <Text style={chatStyles.memberInitial}>{member.first_name?.[0]?.toUpperCase() ?? '?'}</Text>
+        {event && event.members.length > 0 && (() => {
+          const total = event.members.length;
+          const isOverflow = total > 5;
+          const visibleMembers = !isOverflow || membersExpanded
+            ? event.members
+            : event.members.slice(0, 4);
+          return (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={chatStyles.membersRow}
+              contentContainerStyle={chatStyles.membersRowContent}
+            >
+              {visibleMembers.map((member) => (
+                <TouchableOpacity
+                  key={member.id}
+                  style={chatStyles.memberItem}
+                  onPress={() => setMiniProfileUserId(member.id)}
+                  activeOpacity={0.7}
+                >
+                  {member.avatar_url ? (
+                    <Image source={{ uri: member.avatar_url }} style={chatStyles.memberAvatar} contentFit="cover" />
+                  ) : (
+                    <View style={[chatStyles.memberAvatar, chatStyles.memberAvatarFallback]}>
+                      <Text style={chatStyles.memberInitial}>{member.first_name?.[0]?.toUpperCase() ?? '?'}</Text>
+                    </View>
+                  )}
+                  <Text style={chatStyles.memberName} numberOfLines={1}>{member.first_name ?? ''}</Text>
+                </TouchableOpacity>
+              ))}
+              {isOverflow && !membersExpanded && (
+                <TouchableOpacity
+                  style={chatStyles.memberItem}
+                  onPress={() => setMembersExpanded(true)}
+                  activeOpacity={0.7}
+                  accessibilityLabel={`Show ${total - 4} more members`}
+                >
+                  <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
+                    <Text style={chatStyles.memberOverflowText}>+{total - 4}</Text>
                   </View>
-                )}
-                <Text style={chatStyles.memberName} numberOfLines={1}>{member.first_name ?? ''}</Text>
-              </TouchableOpacity>
-            ))}
-            {event.members.length > 5 && (
-              <TouchableOpacity
-                style={chatStyles.memberItem}
-                onPress={() => router.push(`/plan/${id}` as any)}
-                activeOpacity={0.7}
-                accessibilityLabel="View all members"
-              >
-                <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
-                  <Text style={chatStyles.memberOverflowText}>+{event.members.length - 4}</Text>
-                </View>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
+                </TouchableOpacity>
+              )}
+              {isOverflow && membersExpanded && (
+                <TouchableOpacity
+                  style={chatStyles.memberItem}
+                  onPress={() => setMembersExpanded(false)}
+                  activeOpacity={0.7}
+                  accessibilityLabel="Show fewer members"
+                >
+                  <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
+                    <Ionicons name="chevron-back" size={16} color={Colors.terracotta} />
+                  </View>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          );
+        })()}
 
       </SafeAreaView>
 
@@ -1253,14 +1279,17 @@ const chatStyles = StyleSheet.create({
     padding: 4,
   },
   membersRow: {
+    backgroundColor: Colors.white,
+    borderBottomWidth: 0.5,
+    borderBottomColor: Colors.border,
+    flexGrow: 0,
+  },
+  membersRowContent: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: 16,
     paddingVertical: 8,
     gap: 8,
-    backgroundColor: Colors.white,
-    borderBottomWidth: 0.5,
-    borderBottomColor: Colors.border,
   },
   memberItem: {
     alignItems: 'center',

@@ -1,5 +1,7 @@
 /**
- * Expo app config.
+ * Expo app config — single source of truth for the Google Maps API key.
+ * app.json intentionally does NOT contain a googleMaps key; this file owns it
+ * for both iOS and Android via the spread+override below.
  *
  * Key resolution order (first non-empty value wins):
  *   1. GOOGLE_MAPS_API_KEY       — EAS Secret (production builds, not prefixed so it stays server-side)
@@ -12,7 +14,9 @@
  *   - APIs & Services → Library → "Maps SDK for iOS" → ENABLED
  *   - APIs & Services → Library → "Maps SDK for Android" → ENABLED
  *   - APIs & Services → Credentials → the key → Application restrictions:
- *       Set to "None" (or iOS/Android with correct bundle IDs) — NOT "HTTP referrers"
+ *       Set to "None" — OR both an iOS bundle restriction (com.washedup.app)
+ *       AND an Android package+SHA-1 restriction. Mixing one-platform restriction
+ *       with this shared key will silently break the other platform.
  *   - Quota & billing must be active (Places API requires a billing account)
  */
 const appJson = require('./app.json');

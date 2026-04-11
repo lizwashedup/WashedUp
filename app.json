@@ -11,11 +11,11 @@
     "splash": {
       "image": "./assets/images/splash-branded.png",
       "resizeMode": "cover",
-      "backgroundColor": "#1a8a8a"
+      "backgroundColor": "#FAF5EC"
     },
     "notification": {
       "icon": "./assets/images/app-icon.png",
-      "color": "#D97746"
+      "color": "#B5522E"
     },
     "ios": {
       "supportsTablet": true,
@@ -50,20 +50,18 @@
     "android": {
       "package": "com.washedup.app",
       "googleServicesFile": "./google-services.json",
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyDxXNIh97gwQXA3uKnvvMYFSB-_c93kox8"
-        }
-      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#D97746"
+        "backgroundColor": "#B5522E"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -94,7 +92,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/app-icon.png",
-          "color": "#D97746",
+          "color": "#B5522E",
           "sounds": []
         }
       ]

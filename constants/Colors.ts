@@ -64,6 +64,20 @@ const brand = {
   categorySports: '#5C7CBF',
   categoryWellness: '#5CBF9C',
 
+  // ── Plan pin palette (map pins + category pills) ─────────────────────────
+  pinMusic: '#8B6F5E',
+  pinFood: '#B5522E',
+  pinArt: '#9B7A4A',
+  pinOutdoors: '#5E8B6F',
+  pinComedy: '#C5A55A',
+  pinFilm: '#6B4D7A',
+  pinFitness: '#4A7C59',
+  pinNightlife: '#7A4D6B',
+  pinWellness: '#6B8B8B',
+  pinBooks: '#8B7A5E',
+  pinWashedupEvent: '#2C1810',
+  pinBirthdayParty: '#D4BF82',
+
   // ── Q2 palette ───────────────────────────────────────────────────────────
   darkWarm: '#2C1810',       // Primary text (warm dark)
   secondary: '#78695C',      // Secondary text (dates, locations, metadata)
