@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform, InteractionManager, Image as RNImage } from 'react-native';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { ArrowLeft, MapPin, Calendar, Users, ChevronDown } from 'lucide-react-native';
@@ -57,38 +57,60 @@ interface PlanMarkerProps {
 
 // Android react-native-maps snapshots the marker view to a bitmap and uses
 // that as the marker image. If the snapshot fires before the custom view has
-// fully measured itself, the bitmap is clipped or sized wrong. The fix is
-// per-marker: keep tracksViewChanges=true until *this* marker has reported
-// onLayout, then wait one interaction tick and flip it off.
-// Cache for Android marker bitmaps keyed by plan.id + pinBg
+// fully measured itself, the bitmap is clipped or sized wrong. The fix is to
+// render the pill offscreen inside a ViewShot, wait for onLayout, then
+// capture it as a PNG. Cached by plan.id + pinBg so color changes are
+// picked up.
 const markerImageCache: Record<string, string> = {};
+function cacheKey(planId: string, bg: string) { return `${planId}::${bg}`; }
 
 function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
   const [tracks, setTracks] = useState(!IS_ANDROID);
+  const key = cacheKey(plan.id, pinBg);
   const [imageUri, setImageUri] = useState<string | null>(
-    IS_ANDROID ? (markerImageCache[plan.id] ?? null) : null,
+    IS_ANDROID ? (markerImageCache[key] ?? null) : null,
   );
-  const viewShotRef = useRef<any>(null);
-  const capturedRef = useRef(!!markerImageCache[plan.id]);
+  const viewShotRef = useRef<ViewShot | null>(null);
+  const capturedRef = useRef(!!markerImageCache[key]);
+  const layoutReady = useRef(false);
 
   const label = plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title;
 
-  // Android: render the pill offscreen, capture it as a PNG with ViewShot,
-  // then pass the URI to Marker's `image` prop. This bypasses the broken
-  // bitmap rasterizer entirely. Cached by plan ID so each pill is only
-  // captured once.
-  useEffect(() => {
+  // Android: capture the offscreen pill as a PNG once its native view has
+  // laid out. We wait for onLayout on the inner content, then call capture()
+  // on the next frame so the bitmap is fully rasterized.
+  const doCapture = useCallback(async () => {
     if (!IS_ANDROID || capturedRef.current || !viewShotRef.current) return;
-    const t = setTimeout(async () => {
-      try {
-        const uri = await viewShotRef.current.capture();
-        markerImageCache[plan.id] = uri;
-        capturedRef.current = true;
-        setImageUri(uri);
-      } catch {}
-    }, 200);
+    try {
+      const uri = await (viewShotRef.current as any).capture();
+      console.log('[ViewShot] captured marker for', plan.id, '| pinBg:', pinBg, '| uri:', uri);
+      markerImageCache[key] = uri;
+      capturedRef.current = true;
+      setImageUri(uri);
+    } catch (err) {
+      console.warn('[ViewShot] capture FAILED for', plan.id, '| pinBg:', pinBg, '| error:', err);
+    }
+  }, [plan.id, pinBg, key]);
+
+  const handleOffscreenLayout = useCallback(() => {
+    if (layoutReady.current) return;
+    layoutReady.current = true;
+    // Wait one frame after layout so the native view is fully rasterized
+    requestAnimationFrame(() => doCapture());
+  }, [doCapture]);
+
+  // Fallback: if onLayout doesn't fire within 500ms (e.g. because the
+  // offscreen view is inside MapView), force a capture attempt anyway.
+  useEffect(() => {
+    if (!IS_ANDROID || capturedRef.current) return;
+    const t = setTimeout(() => {
+      if (!capturedRef.current) {
+        console.log('[ViewShot] fallback timer firing for', plan.id);
+        doCapture();
+      }
+    }, 500);
     return () => clearTimeout(t);
-  }, [plan.id]);
+  }, [plan.id, doCapture]);
 
   // iOS: turn off tracking after first paint
   useEffect(() => {
@@ -108,7 +130,11 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
             options={{ format: 'png', result: 'tmpfile' }}
             style={styles.offscreen}
           >
-            <View style={[styles.pin, { backgroundColor: pinBg }]}>
+            <View
+              style={[styles.pin, { backgroundColor: pinBg }]}
+              collapsable={false}
+              onLayout={handleOffscreenLayout}
+            >
               <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
                 {label}
               </Text>

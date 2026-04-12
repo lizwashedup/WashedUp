@@ -92,7 +92,7 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => setTracksMarkerChanges(false), 1500);
+    const t = setTimeout(() => setTracksMarkerChanges(false), 500);
     return () => clearTimeout(t);
   }, []);
 

@@ -540,6 +540,10 @@ export default function ChatScreen() {
   // positioned input bar until onLayout fires and corrects it.
   const [bottomDockHeight, setBottomDockHeight] = useState(70);
 
+  useEffect(() => {
+    console.log('[ChatList] bottomDockHeight:', bottomDockHeight, '| paddingTop applied:', bottomDockHeight + 8);
+  }, [bottomDockHeight]);
+
   // ── "Enable notifications" banner ────────────────────────────────────
   // Shows when the user has no push token and there are messages from
   // others in the chat. This is the moment they feel the pain of missing
@@ -1065,7 +1069,7 @@ export default function ChatScreen() {
       {/* ── Messages ── */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
         {loading ? (
@@ -1080,11 +1084,12 @@ export default function ChatScreen() {
             keyExtractor={item => item.id}
             inverted={true}
             style={{ flex: 1 }}
-            contentContainerStyle={[
-              chatStyles.messageList,
-              { paddingTop: bottomDockHeight + 4 },
-            ]}
+            contentContainerStyle={{
+              paddingBottom: 12,
+              paddingTop: bottomDockHeight + 8,
+            }}
             showsVerticalScrollIndicator={false}
+            removeClippedSubviews={Platform.OS === 'android'}
             automaticallyAdjustContentInsets={false}
             contentInsetAdjustmentBehavior="never"
             keyboardDismissMode="interactive"
@@ -1169,8 +1174,12 @@ export default function ChatScreen() {
               // Name: show above top-most message of group (when older msg is different sender or doesn't exist)
               const showName = !isOwn && !isGroupedWithOlder;
 
+              const gap = isGroupedWithOlder ? chatStyles.msgGap1
+                : msg.reactions?.length ? chatStyles.msgGap18
+                : chatStyles.msgGap10;
+
               return (
-                <View style={{ marginBottom: isGroupedWithOlder ? 1 : (msg.reactions?.length ? 18 : 10) }}>
+                <View style={gap}>
                   <MessageBubble
                     message={msg}
                     isOwn={isOwn}
@@ -1214,7 +1223,11 @@ export default function ChatScreen() {
                 paddingRight: Math.max(insets.right, 20),
               },
             ]}
-            onLayout={(e) => setBottomDockHeight(e.nativeEvent.layout.height)}
+            onLayout={(e) => {
+              const h = e.nativeEvent.layout.height;
+              console.log('[ChatDock] readOnly dock height:', h);
+              setBottomDockHeight(h);
+            }}
           >
             <Text style={chatStyles.readOnlyText}>This chat is read-only. {event?.title ?? 'the plan'} has ended.</Text>
           </View>
@@ -1227,7 +1240,11 @@ export default function ChatScreen() {
               bottom: 0,
               backgroundColor: Colors.white,
             }}
-            onLayout={(e) => setBottomDockHeight(e.nativeEvent.layout.height)}
+            onLayout={(e) => {
+              const h = e.nativeEvent.layout.height;
+              console.log('[ChatDock] input dock height:', h);
+              setBottomDockHeight(h);
+            }}
           >
             {replyingTo && (
               <View style={chatStyles.replyBar}>
@@ -1643,6 +1660,9 @@ const chatStyles = StyleSheet.create({
   },
 
   messageList: { paddingTop: 4, paddingBottom: 12 },
+  msgGap1: { marginBottom: 1 },
+  msgGap10: { marginBottom: 10 },
+  msgGap18: { marginBottom: 18 },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
