@@ -36,14 +36,19 @@ interface Props {
 }
 
 export default function AppStoreReviewAsk({ visible, onClose }: Props) {
-  const dismiss = async () => {
+  const dismiss = () => {
     hapticLight();
-    try {
-      const raw = await AsyncStorage.getItem(REVIEW_ASK_COUNT_KEY);
-      const next = (parseInt(raw ?? '0', 10) || 0) + 1;
-      await AsyncStorage.setItem(REVIEW_ASK_COUNT_KEY, String(next));
-    } catch {}
+    // Close immediately — don't wait for AsyncStorage. Previously the
+    // async operations could hang on Android and onClose never fired,
+    // making "Not now" appear broken.
     onClose();
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(REVIEW_ASK_COUNT_KEY);
+        const next = (parseInt(raw ?? '0', 10) || 0) + 1;
+        await AsyncStorage.setItem(REVIEW_ASK_COUNT_KEY, String(next));
+      } catch {}
+    })();
   };
 
   const handleReview = async () => {
@@ -165,7 +170,8 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
   textButton: {
-    paddingVertical: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
   },
   textButtonText: {
     fontFamily: Fonts.sansMedium,

@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform, InteractionManager } from 'react-native';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform, InteractionManager, Image as RNImage } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { ArrowLeft, MapPin, Calendar, Users, ChevronDown } from 'lucide-react-native';
+import ViewShot from 'react-native-view-shot';
 import { hapticLight, hapticSelection } from '../../lib/haptics';
 import * as Location from 'expo-location';
 import { MapView, Marker } from '../MapView.native';
@@ -59,9 +60,37 @@ interface PlanMarkerProps {
 // fully measured itself, the bitmap is clipped or sized wrong. The fix is
 // per-marker: keep tracksViewChanges=true until *this* marker has reported
 // onLayout, then wait one interaction tick and flip it off.
-function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
-  const [tracks, setTracks] = useState(true);
+// Cache for Android marker bitmaps keyed by plan.id + pinBg
+const markerImageCache: Record<string, string> = {};
 
+function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
+  const [tracks, setTracks] = useState(!IS_ANDROID);
+  const [imageUri, setImageUri] = useState<string | null>(
+    IS_ANDROID ? (markerImageCache[plan.id] ?? null) : null,
+  );
+  const viewShotRef = useRef<any>(null);
+  const capturedRef = useRef(!!markerImageCache[plan.id]);
+
+  const label = plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title;
+
+  // Android: render the pill offscreen, capture it as a PNG with ViewShot,
+  // then pass the URI to Marker's `image` prop. This bypasses the broken
+  // bitmap rasterizer entirely. Cached by plan ID so each pill is only
+  // captured once.
+  useEffect(() => {
+    if (!IS_ANDROID || capturedRef.current || !viewShotRef.current) return;
+    const t = setTimeout(async () => {
+      try {
+        const uri = await viewShotRef.current.capture();
+        markerImageCache[plan.id] = uri;
+        capturedRef.current = true;
+        setImageUri(uri);
+      } catch {}
+    }, 200);
+    return () => clearTimeout(t);
+  }, [plan.id]);
+
+  // iOS: turn off tracking after first paint
   useEffect(() => {
     if (!IS_ANDROID) {
       const t = setTimeout(() => setTracks(false), 300);
@@ -69,18 +98,35 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
     }
   }, []);
 
-  const label = plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title;
-
-  const laidOutRef = useRef(false);
-  const handleLayout = useCallback(() => {
-    if (laidOutRef.current) return;
-    laidOutRef.current = true;
-    if (IS_ANDROID) {
-      setTimeout(() => setTracks(false), 800);
-    } else {
-      setTracks(false);
-    }
-  }, []);
+  if (IS_ANDROID) {
+    return (
+      <>
+        {/* Offscreen pill rendered once to capture as bitmap */}
+        {!capturedRef.current && (
+          <ViewShot
+            ref={viewShotRef}
+            options={{ format: 'png', result: 'tmpfile' }}
+            style={styles.offscreen}
+          >
+            <View style={[styles.pin, { backgroundColor: pinBg }]}>
+              <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
+                {label}
+              </Text>
+            </View>
+            <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
+          </ViewShot>
+        )}
+        <Marker
+          coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
+          onPress={() => onPress(plan)}
+          tracksViewChanges={false}
+          stopPropagation
+          anchor={{ x: 0.5, y: 1 }}
+          {...(imageUri ? { image: { uri: imageUri } } : { pinColor: pinBg })}
+        />
+      </>
+    );
+  }
 
   return (
     <Marker
@@ -90,19 +136,13 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
       stopPropagation
       anchor={{ x: 0.5, y: 1 }}
     >
-      <View
-        style={styles.markerWrap}
-        collapsable={false}
-        renderToHardwareTextureAndroid={true}
-        onLayout={handleLayout}
-        pointerEvents="none"
-      >
-        <View collapsable={false} style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
+      <View style={styles.markerWrap} pointerEvents="none">
+        <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
           <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
             {label}
           </Text>
         </View>
-        <View collapsable={false} style={[styles.pinArrow, { borderTopColor: pinBg }]} />
+        <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
       </View>
     </Marker>
   );
@@ -402,12 +442,15 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.terracotta,
   },
 
+  offscreen: {
+    position: 'absolute',
+    left: -1000,
+    top: -1000,
+    alignItems: 'center',
+    opacity: 1,
+  },
   markerWrap: {
     alignItems: 'center',
-    // Explicit width AND height on Android forces the snapshot bitmap to
-    // size to the pill+arrow cluster instead of collapsing to a clipped
-    // circle on first layout. Without both dimensions the rasterizer
-    // guesses wrong and produces half-circle pins.
     width: 140,
     height: 40,
   },
