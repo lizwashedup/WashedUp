@@ -1112,7 +1112,7 @@ export default function PlanDetailScreen() {
 
   if (planLoading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
@@ -1123,7 +1123,7 @@ export default function PlanDetailScreen() {
 
   if (planError || !plan) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
         <View style={styles.centered}>
           <Text style={styles.errorText}>Couldn't load this plan.</Text>
@@ -1153,7 +1153,7 @@ export default function PlanDetailScreen() {
   const groupSizeLabel = isFeatured ? 'WashedUp Event' : totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
 
       {/* Custom Header */}

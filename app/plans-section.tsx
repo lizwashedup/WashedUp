@@ -91,6 +91,7 @@ export default function PlansSectionScreen() {
         </View>
       ) : (
         <FlatList
+          decelerationRate="normal"
           data={sectionPlans}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (

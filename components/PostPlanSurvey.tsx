@@ -343,7 +343,7 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
   // ── Full-screen modal for steps 1 & no_message ──────────────────────────
   if (isFullScreen) {
     return (
-      <Modal visible={visible} animationType="none" transparent={false}>
+      <Modal visible={visible} animationType="none" transparent={false} onRequestClose={handleDismiss} statusBarTranslucent>
         <View style={styles.container}>
           {renderModalContent()}
         </View>
@@ -353,7 +353,7 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
 
   // ── Centered card modal for steps 2+ ────────────────────────────────────
   return (
-    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent>
+    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={handleDismiss}>
       <View style={styles.backdrop}>
         <View style={[styles.card, { maxHeight: '70%' }]}>
           <TouchableOpacity

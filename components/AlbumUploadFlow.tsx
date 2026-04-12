@@ -265,7 +265,7 @@ const AlbumUploadFlow = forwardRef<AlbumUploadFlowHandle, Props>(function AlbumU
       </Modal>
 
       {/* Upload progress modal */}
-      <Modal visible={step === 'uploading'} transparent animationType="fade">
+      <Modal visible={step === 'uploading'} transparent animationType="fade" onRequestClose={() => {}} statusBarTranslucent>
         <View style={styles.overlay}>
           <View style={styles.progressCard}>
             <ActivityIndicator size="large" color={Colors.terracotta} />

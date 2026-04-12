@@ -363,7 +363,7 @@ export default function AdminEventsScreen() {
       )}
 
       {/* Create / Edit modal */}
-      <Modal visible={showForm} animationType="slide" presentationStyle="pageSheet">
+      <Modal visible={showForm} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowForm(false)} statusBarTranslucent>
         <SafeAreaView style={styles.modalContainer} edges={['top', 'bottom']}>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
             <View style={styles.modalHeader}>
