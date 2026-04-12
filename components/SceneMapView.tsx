@@ -354,6 +354,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    // elevation matches the iOS shadow visual; the pill sits above the map
+    // (no siblings at the same y-coordinate), so it doesn't need to win an
+    // elevation race against the topBar.
     elevation: 3,
     zIndex: 20,
   },
@@ -371,6 +374,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     zIndex: 10,
+    elevation: 10,
     gap: 8,
   },
   backButton: {

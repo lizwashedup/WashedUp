@@ -9,6 +9,7 @@ import Animated, {
   withDelay,
   runOnJS,
 } from 'react-native-reanimated';
+import Colors from '../constants/Colors';
 
 interface Props {
   visible: boolean;
@@ -50,7 +51,7 @@ export function SaveSnackbar({ visible, planId, planTitle, onShare, onDismiss }:
   return (
     <Animated.View style={[styles.container, animStyle]}>
       <View style={styles.left}>
-        <Ionicons name="bookmark" size={14} color="#B5522E" />
+        <Ionicons name="bookmark" size={14} color={Colors.terracotta} />
         <Text style={styles.savedText}>Saved!</Text>
         <Text style={styles.promptText}> · Share with a friend?</Text>
       </View>
@@ -71,14 +72,14 @@ const styles = StyleSheet.create({
     bottom: 90,
     left: 16,
     right: 16,
-    backgroundColor: '#2C1810',
+    backgroundColor: Colors.darkWarm,
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#000',
+    shadowColor: Colors.shadowBlack,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
@@ -94,15 +95,15 @@ const styles = StyleSheet.create({
   savedText: {
     fontWeight: '700',
     fontSize: 14,
-    color: '#FFFFFF',
+    color: Colors.white,
     marginLeft: 6,
   },
   promptText: {
     fontSize: 13,
-    color: '#FFFFFF',
+    color: Colors.white,
   },
   shareBtn: {
-    backgroundColor: '#B5522E',
+    backgroundColor: Colors.terracotta,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -110,6 +111,6 @@ const styles = StyleSheet.create({
   shareBtnText: {
     fontWeight: '700',
     fontSize: 13,
-    color: '#FFFFFF',
+    color: Colors.white,
   },
 });

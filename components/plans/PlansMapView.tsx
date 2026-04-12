@@ -308,6 +308,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     zIndex: 10,
+    elevation: 10,
     gap: 8,
   },
   backButton: {

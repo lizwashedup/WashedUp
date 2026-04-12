@@ -1762,7 +1762,7 @@ export default function PlanDetailScreen() {
 
               {/* Location */}
               <Text style={manageStyles.label}>Location</Text>
-              <View style={{ zIndex: 10 }}>
+              <View style={{ zIndex: 10, elevation: 10 }}>
                 <GooglePlacesAutocomplete
                   ref={managePlacesRef}
                   placeholder="Venue or neighborhood"
@@ -2686,6 +2686,7 @@ const joinStyles = StyleSheet.create({
     top: 16,
     right: 16,
     zIndex: 1,
+    elevation: 1,
   },
   closeX: {
     fontFamily: Fonts.sansMedium,
@@ -3081,6 +3082,7 @@ const manageStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
+    elevation: 24,
   },
   pickerSheet: {
     width: '88%',

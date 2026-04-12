@@ -466,7 +466,7 @@ const styles = StyleSheet.create({
   creatorMarkText: {
     fontFamily: Fonts.sansMedium,
     fontSize: 10,
-    color: '#D97746',
+    color: Colors.terracotta,
     lineHeight: 14,
   },
   headerRight: {
