@@ -46,6 +46,8 @@ import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { registerForPushNotifications } from '../../../hooks/usePushNotifications';
 
 // ─── Event Header Data ────────────────────────────────────────────────────────
 
@@ -534,12 +536,64 @@ export default function ChatScreen() {
   // style terms is the side closest to the input bar visually.
   const [bottomDockHeight, setBottomDockHeight] = useState(0);
 
+  // ── "Enable notifications" banner ────────────────────────────────────
+  // Shows when the user has no push token and there are messages from
+  // others in the chat. This is the moment they feel the pain of missing
+  // notifications. Dismissable for 7 days via AsyncStorage.
+  const [showPushBanner, setShowPushBanner] = useState(false);
+  const PUSH_BANNER_KEY = 'push_banner_dismissed_at';
+  const PUSH_BANNER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+  useEffect(() => {
+    if (!currentUserId || messages.length === 0) return;
+    const hasOtherMessages = messages.some(m => m.user_id !== currentUserId);
+    if (!hasOtherMessages) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status === 'granted') return;
+
+        const dismissed = await AsyncStorage.getItem(PUSH_BANNER_KEY);
+        if (dismissed) {
+          const elapsed = Date.now() - parseInt(dismissed, 10);
+          if (elapsed < PUSH_BANNER_COOLDOWN_MS) return;
+        }
+        if (!cancelled) setShowPushBanner(true);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [currentUserId, messages.length]);
+
+  const handleEnablePush = useCallback(async () => {
+    await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
+    setShowPushBanner(false);
+    Linking.openSettings();
+  }, []);
+
+  const handleDismissPushBanner = useCallback(async () => {
+    await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
+    setShowPushBanner(false);
+  }, []);
+
+  // When returning from Settings, re-check permission. If granted, fetch
+  // and save the token — banner auto-hides since permission is now granted.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state !== 'active' || !showPushBanner) return;
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status === 'granted') {
+        setShowPushBanner(false);
+        registerForPushNotifications({ prompt: false, userId: currentUserId }).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, [showPushBanner, currentUserId]);
+
   useFocusEffect(
     useCallback(() => {
       refetch(true);
-      // Clear the app icon badge — user is actively reading messages now.
-      // _layout no longer auto-clears on every foreground, so this has to
-      // happen here when the chat is actually opened.
       Notifications.setBadgeCountAsync(0).catch(() => {});
     }, [refetch]),
   );
@@ -971,6 +1025,30 @@ export default function ChatScreen() {
 
       </SafeAreaView>
 
+      {showPushBanner && (
+        <View style={chatStyles.pushBanner}>
+          <View style={chatStyles.pushBannerContent}>
+            <Text style={chatStyles.pushBannerText}>
+              Turn on notifications so you never miss a message.
+            </Text>
+            <TouchableOpacity
+              style={chatStyles.pushBannerButton}
+              onPress={handleEnablePush}
+              activeOpacity={0.85}
+            >
+              <Text style={chatStyles.pushBannerButtonText}>Enable</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            onPress={handleDismissPushBanner}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={chatStyles.pushBannerClose}
+          >
+            <Ionicons name="close" size={14} color={Colors.textLight} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ── Messages ── */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -1375,6 +1453,40 @@ export default function ChatScreen() {
 }
 
 const chatStyles = StyleSheet.create({
+  pushBanner: {
+    backgroundColor: Colors.inputBg,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pushBannerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pushBannerText: {
+    flex: 1,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+  },
+  pushBannerButton: {
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  pushBannerButtonText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.white,
+  },
+  pushBannerClose: {
+    marginLeft: 8,
+    padding: 4,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
