@@ -24,7 +24,7 @@ import {
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BrandedAlert } from '../../../components/BrandedAlert';
+import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import ProfileButton from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
@@ -100,7 +100,7 @@ export default function YourPeopleScreen() {
   const [checkingHandle, setCheckingHandle] = useState(false);
   const [showHandlePrompt, setShowHandlePrompt] = useState(false);
   const [friendToRemove, setFriendToRemove] = useState<Friend | null>(null);
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string } | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [userMenuTarget, setUserMenuTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
 
@@ -449,11 +449,15 @@ export default function YourPeopleScreen() {
         },
       );
     } else {
-      Alert.alert('', '', [
-        { text: isPinned ? 'Unpin' : 'Pin to top', onPress: () => isPinned ? unpinFriend(friend.friend_id) : pinFriend(friend.friend_id) },
-        { text: 'Remove from Your People', style: 'destructive', onPress: () => removeFriend(friend) },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+      setAlertInfo({
+        title: friend.first_name_display ?? 'Friend',
+        message: '',
+        buttons: [
+          { text: isPinned ? 'Unpin' : 'Pin to top', onPress: () => isPinned ? unpinFriend(friend.friend_id) : pinFriend(friend.friend_id) },
+          { text: 'Remove from Your People', style: 'destructive', onPress: () => removeFriend(friend) },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      });
     }
   }, [pinnedIds, pinFriend, unpinFriend, removeFriend]);
 
@@ -856,10 +860,14 @@ export default function YourPeopleScreen() {
                           (idx) => { if (idx === 0) unpinFriend(person.id); },
                         );
                       } else {
-                        Alert.alert('', '', [
-                          { text: 'Unpin', onPress: () => unpinFriend(person.id) },
-                          { text: 'Cancel', style: 'cancel' },
-                        ]);
+                        setAlertInfo({
+                          title: person.first_name_display ?? 'Pinned',
+                          message: '',
+                          buttons: [
+                            { text: 'Unpin', onPress: () => unpinFriend(person.id) },
+                            { text: 'Cancel', style: 'cancel' },
+                          ],
+                        });
                       }
                     }}
                     delayLongPress={400}
@@ -1111,7 +1119,7 @@ export default function YourPeopleScreen() {
         visible={!!alertInfo}
         title={alertInfo?.title ?? ''}
         message={alertInfo?.message ?? ''}
-        buttons={[{ text: 'OK' }]}
+        buttons={alertInfo?.buttons ?? [{ text: 'OK' }]}
         onClose={() => setAlertInfo(null)}
       />
 

@@ -741,11 +741,15 @@ export default function ChatScreen() {
             text: member.name,
             onPress: () => {
               setTimeout(() => {
-                Alert.alert(member.name, '', [
-                  { text: 'Report User', onPress: () => { setReportTarget(member); setShowReport(true); } },
-                  { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => router.back()) },
-                  { text: 'Cancel', style: 'cancel' },
-                ]);
+                setAlertInfo({
+                  title: member.name,
+                  message: '',
+                  buttons: [
+                    { text: 'Report User', onPress: () => { setReportTarget(member); setShowReport(true); } },
+                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => router.back()) },
+                    { text: 'Cancel', style: 'cancel' },
+                  ],
+                });
               }, 100);
             },
           })),
@@ -887,12 +891,16 @@ export default function ChatScreen() {
         },
       );
     } else {
-      Alert.alert('Add to chat', '', [
-        { text: 'Take Photo', onPress: () => doPhotoAction('camera') },
-        { text: 'Choose from Library', onPress: () => doPhotoAction('library') },
-        { text: 'Share Location', onPress: doLocation },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+      setAlertInfo({
+        title: 'Add to chat',
+        message: '',
+        buttons: [
+          { text: 'Take Photo', onPress: () => doPhotoAction('camera') },
+          { text: 'Choose from Library', onPress: () => doPhotoAction('library') },
+          { text: 'Share Location', onPress: doLocation },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      });
     }
   }, [currentUserId, doPhotoAction, handleLocationSend]);
 
@@ -1434,10 +1442,14 @@ export default function ChatScreen() {
                     onPress={() => {
                       hapticMedium();
                       setOverlayMessage(null);
-                      Alert.alert('Delete this message?', '', [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Delete', style: 'destructive', onPress: () => deleteMessage(overlayMessage.message.id) },
-                      ]);
+                      setAlertInfo({
+                        title: 'Delete this message?',
+                        message: '',
+                        buttons: [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Delete', style: 'destructive', onPress: () => deleteMessage(overlayMessage.message.id) },
+                        ],
+                      });
                     }}
                     activeOpacity={0.7}
                   >

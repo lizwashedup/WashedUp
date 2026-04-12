@@ -16,7 +16,7 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Linking, LogBox } from 'react-native';
+import { Linking, LogBox } from 'react-native';
 import 'react-native-reanimated';
 
 // Suppress push notification entitlement error on simulators
@@ -39,6 +39,7 @@ import AppStoreReviewAsk, {
 } from '../components/AppStoreReviewAsk';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
 import VideoSplash from '../components/VideoSplash';
+import { BrandedAlert } from '../components/BrandedAlert';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -119,6 +120,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const router = useRouter();
   const [authResolved, setAuthResolved] = useState(false);
   const [authedUserId, setAuthedUserId] = useState<string | null>(null);
+  const [layoutAlert, setLayoutAlert] = useState<{ title: string; message: string } | null>(null);
   const isRecoveryRef = useRef(false);
   const splashHiddenRef = useRef(false);
   const lastNavRef = useRef({ dest: '', ts: 0 });
@@ -302,7 +304,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setAuthResolved(true);
         router.replace('/login');
         setTimeout(() => {
-          Alert.alert('Link expired', 'This password reset link has expired or is invalid. Please request a new one from the login screen.');
+          setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired or is invalid. Please request a new one from the login screen.' });
         }, 500);
         return;
       }
@@ -317,7 +319,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setAuthResolved(true);
         router.replace('/login');
         setTimeout(() => {
-          Alert.alert('Link expired', 'This password reset link has expired. Please request a new one from the login screen.');
+          setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired. Please request a new one from the login screen.' });
         }, 500);
       }
     };
@@ -501,6 +503,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       )}
       {authedUserId && surveyCheckDone && !surveyPlan && !showReviewAsk && (
         <MarkEarnedModal userId={authedUserId} />
+      )}
+      {layoutAlert && (
+        <BrandedAlert
+          visible
+          title={layoutAlert.title}
+          message={layoutAlert.message}
+          onClose={() => setLayoutAlert(null)}
+        />
       )}
     </View>
   );

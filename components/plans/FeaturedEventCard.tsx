@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   StyleSheet,
   ActionSheetIOS,
   Platform,
-  Alert,
   Share,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -16,6 +15,7 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
 import { buildPlanShareContent } from '../../lib/sharePlan';
 
 interface FeaturedEventCardProps {
@@ -68,6 +68,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
   plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, solo = false,
 }) => {
   const router = useRouter();
+  const [cardAlert, setCardAlert] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const handleLongPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -82,11 +83,15 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
         },
       );
     } else {
-      Alert.alert('', '', [
-        { text: 'Report this plan', onPress: () => onReport?.(plan.id) },
-        { text: `Block ${creatorName}`, style: 'destructive', onPress: () => onBlock?.(plan.id) },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+      setCardAlert({
+        title: plan.title,
+        message: '',
+        buttons: [
+          { text: 'Report this plan', onPress: () => onReport?.(plan.id) },
+          { text: `Block ${creatorName}`, style: 'destructive', onPress: () => onBlock?.(plan.id) },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      });
     }
   }, [plan.id, plan.creator?.first_name_display, onReport, onBlock]);
 
@@ -278,6 +283,15 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
           </Text>
         </TouchableOpacity>
       </View>
+    {cardAlert && (
+      <BrandedAlert
+        visible
+        title={cardAlert.title}
+        message={cardAlert.message}
+        buttons={cardAlert.buttons}
+        onClose={() => setCardAlert(null)}
+      />
+    )}
     </TouchableOpacity>
   );
 });

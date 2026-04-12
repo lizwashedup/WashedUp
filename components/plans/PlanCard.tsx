@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   StyleSheet,
   ActionSheetIOS,
   Platform,
-  Alert,
   Share,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -18,6 +17,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight, hapticMedium } from '../../lib/haptics';
 import { buildPlanShareContent } from '../../lib/sharePlan';
 import MarkIcon from '../marks/MarkIcons';
+import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
 import Animated, {
   FadeInUp,
   Easing,
@@ -86,6 +86,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, onCreatorPress, isPast = false }) => {
   const router = useRouter();
+  const [cardAlert, setCardAlert] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   // ── Bookmark scale animation (declared early so handleWishlist can reference it) ──
   const bookmarkScale = useSharedValue(1);
@@ -108,11 +109,15 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         },
       );
     } else {
-      Alert.alert('', '', [
-        { text: 'Report this plan', onPress: () => onReport?.(plan.id) },
-        { text: `Block ${creatorName}`, style: 'destructive', onPress: () => onBlock?.(plan.id) },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+      setCardAlert({
+        title: plan.title,
+        message: '',
+        buttons: [
+          { text: 'Report this plan', onPress: () => onReport?.(plan.id) },
+          { text: `Block ${creatorName}`, style: 'destructive', onPress: () => onBlock?.(plan.id) },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      });
     }
   }, [plan.id, plan.creator?.first_name_display, onReport, onBlock]);
 
@@ -389,6 +394,15 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         )}
       </View>
     </TouchableOpacity>
+    {cardAlert && (
+      <BrandedAlert
+        visible
+        title={cardAlert.title}
+        message={cardAlert.message}
+        buttons={cardAlert.buttons}
+        onClose={() => setCardAlert(null)}
+      />
+    )}
     </Animated.View>
   );
 });
