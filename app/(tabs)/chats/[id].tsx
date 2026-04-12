@@ -1084,10 +1084,11 @@ export default function ChatScreen() {
             keyExtractor={item => item.id}
             inverted={true}
             style={{ flex: 1 }}
-            contentContainerStyle={{
-              paddingBottom: 12,
-              paddingTop: Platform.OS === 'android' ? bottomDockHeight + 8 : 8,
-            }}
+            contentContainerStyle={
+              Platform.OS === 'android'
+                ? { paddingBottom: 12, paddingTop: bottomDockHeight + 8 }
+                : chatStyles.messageList
+            }
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === 'android'}
             automaticallyAdjustContentInsets={false}
@@ -1211,44 +1212,40 @@ export default function ChatScreen() {
             new messages are never obscured by the bar on any screen size. */}
         {isPast ? (
           <View
-            style={[
-              chatStyles.readOnlyBar,
-              Platform.OS === 'android' && {
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-              },
-              {
-                paddingBottom: inputBarBottomPadding,
-                paddingLeft: Math.max(insets.left, 20),
-                paddingRight: Math.max(insets.right, 20),
-              },
-            ]}
-            onLayout={(e) => {
-              const h = e.nativeEvent.layout.height;
-              console.log('[ChatDock] readOnly dock height:', h);
-              setBottomDockHeight(h);
-            }}
+            style={
+              Platform.OS === 'android'
+                ? [
+                    chatStyles.readOnlyBar,
+                    {
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      paddingBottom: inputBarBottomPadding,
+                      paddingLeft: Math.max(insets.left, 20),
+                      paddingRight: Math.max(insets.right, 20),
+                    },
+                  ]
+                : [chatStyles.readOnlyBar, { paddingBottom: inputBarBottomPadding }]
+            }
+            onLayout={Platform.OS === 'android' ? (e) => setBottomDockHeight(e.nativeEvent.layout.height) : undefined}
           >
             <Text style={chatStyles.readOnlyText}>This chat is read-only. {event?.title ?? 'the plan'} has ended.</Text>
           </View>
         ) : (
           <View
-            style={[
-              { backgroundColor: Colors.white },
-              Platform.OS === 'android' && {
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-              },
-            ]}
-            onLayout={(e) => {
-              const h = e.nativeEvent.layout.height;
-              console.log('[ChatDock] input dock height:', h);
-              setBottomDockHeight(h);
-            }}
+            style={
+              Platform.OS === 'android'
+                ? {
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: Colors.white,
+                  }
+                : { backgroundColor: Colors.white }
+            }
+            onLayout={Platform.OS === 'android' ? (e) => setBottomDockHeight(e.nativeEvent.layout.height) : undefined}
           >
             {replyingTo && (
               <View style={chatStyles.replyBar}>
@@ -1274,14 +1271,18 @@ export default function ChatScreen() {
               </View>
             )}
           <View
-            style={[
-              chatStyles.inputBar,
-              {
-                paddingBottom: inputBarBottomPadding,
-                paddingLeft: Math.max(insets.left, 12) + 12,
-                paddingRight: Math.max(insets.right, 12) + 12,
-              },
-            ]}
+            style={
+              Platform.OS === 'android'
+                ? [
+                    chatStyles.inputBar,
+                    {
+                      paddingBottom: inputBarBottomPadding,
+                      paddingLeft: Math.max(insets.left, 12) + 12,
+                      paddingRight: Math.max(insets.right, 12) + 12,
+                    },
+                  ]
+                : [chatStyles.inputBar, { paddingBottom: inputBarBottomPadding }]
+            }
           >
             <TouchableOpacity onPress={handleAttachPress} style={chatStyles.cameraBtn} disabled={uploading}>
               {uploading ? (
