@@ -32,15 +32,32 @@ async function fetchHasPendingInvites(): Promise<boolean> {
 async function fetchUnreadChatCount(): Promise<number> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return 0;
-  const { data } = await supabase
-    .from('app_notifications')
-    .select('event_id')
-    .eq('user_id', user.id)
-    .eq('type', 'new_message')
-    .eq('status', 'unread');
-  // Count distinct chats (event_ids) with unread messages
-  const uniqueChats = new Set((data ?? []).map((r: any) => r.event_id));
-  return uniqueChats.size;
+
+  // Only count unread message notifications for events the user is
+  // currently a joined member of. Stale notifications from events the
+  // user left (or chats that haven't opened yet) were producing a
+  // phantom badge with no chat to show.
+  const [{ data: notifs }, { data: memberships }] = await Promise.all([
+    supabase
+      .from('app_notifications')
+      .select('event_id')
+      .eq('user_id', user.id)
+      .eq('type', 'new_message')
+      .eq('status', 'unread'),
+    supabase
+      .from('event_members')
+      .select('event_id')
+      .eq('user_id', user.id)
+      .eq('status', 'joined'),
+  ]);
+
+  const joinedEvents = new Set((memberships ?? []).map((r: any) => r.event_id));
+  const unreadChats = new Set(
+    (notifs ?? [])
+      .map((r: any) => r.event_id)
+      .filter((eid: string) => joinedEvents.has(eid)),
+  );
+  return unreadChats.size;
 }
 
 export default function TabLayout() {
