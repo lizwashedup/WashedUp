@@ -60,17 +60,10 @@ interface PlanMarkerProps {
 // per-marker: keep tracksViewChanges=true until *this* marker has reported
 // onLayout, then wait one interaction tick and flip it off.
 function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
-  // On Android, react-native-maps snapshots the marker's child View to a
-  // bitmap for the map tile. Every previous attempt to turn off
-  // tracksViewChanges after layout produced clipped half-circle pins
-  // because the snapshot raced the view measurement. The nuclear fix:
-  // keep tracksViewChanges ON permanently on Android. Performance cost
-  // is negligible for < 50 markers. iOS turns it off after first layout.
   const [tracks, setTracks] = useState(true);
 
   useEffect(() => {
     if (!IS_ANDROID) {
-      // iOS: turn off after mount so the map doesn't re-render every frame
       const t = setTimeout(() => setTracks(false), 300);
       return () => clearTimeout(t);
     }
@@ -84,19 +77,49 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
       onPress={() => onPress(plan)}
       tracksViewChanges={IS_ANDROID ? true : (tracks || isSelected)}
       stopPropagation
-      anchor={{ x: 0.5, y: 1 }}
+      anchor={IS_ANDROID ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 }}
     >
-      {/* collapsable={false} prevents Android from collapsing Views in
-          the hierarchy, which breaks the bitmap snapshot. Every View in
-          the marker tree needs its own native node. */}
-      <View style={styles.markerWrap} collapsable={false} pointerEvents="none">
-        <View collapsable={false} style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
-          <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
+      {IS_ANDROID ? (
+        // Android: single flat View, no nesting, no arrow. The bitmap
+        // rasterizer in react-native-maps clips nested Views and triangles
+        // to half-circles. A single View with inline text is the only
+        // structure that snapshots reliably.
+        <View
+          collapsable={false}
+          style={{
+            backgroundColor: pinBg,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 16,
+            minWidth: 40,
+            alignItems: 'center',
+            justifyContent: 'center',
+            ...(isSelected ? { elevation: 6 } : {}),
+          }}
+        >
+          <Text
+            style={{
+              fontFamily: Fonts.sansBold,
+              fontSize: FontSizes.caption,
+              color: Colors.white,
+              textAlign: 'center',
+            }}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
             {label}
           </Text>
         </View>
-        <View collapsable={false} style={[styles.pinArrow, { borderTopColor: pinBg }]} />
-      </View>
+      ) : (
+        <View style={styles.markerWrap} pointerEvents="none">
+          <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
+            <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
+              {label}
+            </Text>
+          </View>
+          <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
+        </View>
+      )}
     </Marker>
   );
 }
