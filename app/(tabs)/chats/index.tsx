@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
+import * as Notifications from 'expo-notifications';
 import {
   View,
   Text,
@@ -122,6 +123,11 @@ export default function ChatsScreen() {
   useFocusEffect(
     React.useCallback(() => {
       refetch();
+      // Opening the Chats tab is the user's "I'm looking at my messages"
+      // signal — clear the app icon badge here. _layout used to do this
+      // on every app foreground, which wiped the badge even when the user
+      // hadn't actually checked their messages.
+      Notifications.setBadgeCountAsync(0).catch(() => {});
     }, [refetch]),
   );
 

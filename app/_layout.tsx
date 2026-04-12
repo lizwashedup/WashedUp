@@ -16,7 +16,7 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking, LogBox } from 'react-native';
+import { Alert, Linking, LogBox } from 'react-native';
 import 'react-native-reanimated';
 
 // Suppress push notification entitlement error on simulators
@@ -31,7 +31,12 @@ import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
-import AppStoreReviewAsk from '../components/AppStoreReviewAsk';
+import AppStoreReviewAsk, {
+  REVIEW_ASK_COUNT_KEY,
+  REVIEW_ASK_COMPLETED_KEY,
+  REVIEW_ASK_LEGACY_KEY,
+  REVIEW_ASK_MAX,
+} from '../components/AppStoreReviewAsk';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
 import VideoSplash from '../components/VideoSplash';
 
@@ -207,8 +212,17 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
     (async () => {
       try {
-        const already = await AsyncStorage.getItem('hasRequestedReview');
-        if (already === 'true') return;
+        // Hard stops: completed flag (clicked Write a Review) or legacy key
+        // (already saw it in the pre-counter version of the app).
+        const completed = await AsyncStorage.getItem(REVIEW_ASK_COMPLETED_KEY);
+        if (completed === 'true') return;
+        const legacy = await AsyncStorage.getItem(REVIEW_ASK_LEGACY_KEY);
+        if (legacy === 'true') return;
+
+        // Soft stop: max ask count reached.
+        const askCountRaw = await AsyncStorage.getItem(REVIEW_ASK_COUNT_KEY);
+        const askCount = parseInt(askCountRaw ?? '0', 10) || 0;
+        if (askCount >= REVIEW_ASK_MAX) return;
 
         // Need 2+ completed plans as a joined member
         const { count } = await supabase
@@ -261,21 +275,12 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     return () => sub.remove();
   }, []);
 
-  // Clear the app icon badge on cold launch and on every foreground
-  // transition. AppState 'change' does NOT fire for the initial 'active'
-  // state on a cold launch, so we also call setBadgeCountAsync once on
-  // mount — otherwise the badge persists from the last push until the
-  // user backgrounds and refocuses the app. Works on iOS (native badge)
-  // and Android (where the launcher supports app badges).
-  useEffect(() => {
-    Notifications.setBadgeCountAsync(0).catch(() => {});
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        Notifications.setBadgeCountAsync(0).catch(() => {});
-      }
-    });
-    return () => sub.remove();
-  }, []);
+  // Badge clearing moved to the specific surfaces where the user is
+  // actually looking at messages: the Chats tab (chats/index.tsx), any
+  // individual chat (chats/[id].tsx), and the Inbox modal. Previously
+  // we cleared on every app foreground, which wiped the badge even
+  // when the user reopened the app for an unrelated reason and hadn't
+  // looked at their messages yet.
 
   // Handle auth callback deep link (password recovery)
   useEffect(() => {

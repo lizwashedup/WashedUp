@@ -16,7 +16,9 @@ import {
   Pressable,
   Linking,
   ScrollView,
+  AppState,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -511,11 +513,77 @@ export default function ChatScreen() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
   const [membersExpanded, setMembersExpanded] = useState(false);
+  // Track keyboard visibility so the Android input bar can drop the home-button
+  // safe-area inset while the keyboard is open. With adjustResize the OS already
+  // moves the bar above the keyboard, so an extra insets.bottom of padding just
+  // floats the text field high above the keyboard.
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+  const inputBarBottomPadding = Platform.OS === 'android' && keyboardVisible ? 8 : insets.bottom + 8;
 
   useFocusEffect(
     useCallback(() => {
       refetch(true);
+      // Clear the app icon badge — user is actively reading messages now.
+      // _layout no longer auto-clears on every foreground, so this has to
+      // happen here when the chat is actually opened.
+      Notifications.setBadgeCountAsync(0).catch(() => {});
     }, [refetch]),
+  );
+
+  // Tell the server this user is actively viewing THIS chat, so the
+  // send-push edge function suppresses pushes for new messages in the
+  // same chat (they arrive live via realtime; a banner + haptic for a
+  // message you can already see on screen is noise). Cleared on blur,
+  // unmount, or app background; re-set when the app foregrounds while
+  // still focused on this chat.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      let markedActive = false;
+
+      const setActive = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || cancelled) return;
+        await supabase
+          .from('profiles')
+          .update({ active_chat_event_id: id })
+          .eq('id', user.id);
+        markedActive = true;
+      };
+
+      const clearActive = async () => {
+        if (!markedActive) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        await supabase
+          .from('profiles')
+          .update({ active_chat_event_id: null })
+          .eq('id', user.id);
+        markedActive = false;
+      };
+
+      if (AppState.currentState === 'active') setActive();
+
+      const appSub = AppState.addEventListener('change', (state) => {
+        if (state === 'active') setActive();
+        else clearActive();
+      });
+
+      return () => {
+        cancelled = true;
+        appSub.remove();
+        clearActive();
+      };
+    }, [id]),
   );
 
   const { blockUser } = useBlock();
@@ -1030,7 +1098,7 @@ export default function ChatScreen() {
 
         {/* Input bar */}
         {isPast ? (
-          <View style={[chatStyles.readOnlyBar, { paddingBottom: insets.bottom + 8 }]}>
+          <View style={[chatStyles.readOnlyBar, { paddingBottom: inputBarBottomPadding }]}>
             <Text style={chatStyles.readOnlyText}>This chat is read-only — {event?.title ?? 'the plan'} has ended</Text>
           </View>
         ) : (
@@ -1058,7 +1126,7 @@ export default function ChatScreen() {
                 </TouchableOpacity>
               </View>
             )}
-          <View style={[chatStyles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
+          <View style={[chatStyles.inputBar, { paddingBottom: inputBarBottomPadding }]}>
             <TouchableOpacity onPress={handleAttachPress} style={chatStyles.cameraBtn} disabled={uploading}>
               {uploading ? (
                 <ActivityIndicator size="small" color={Colors.warmGray} />
@@ -1074,10 +1142,19 @@ export default function ChatScreen() {
               placeholder="Message..."
               placeholderTextColor={Colors.warmGray}
               multiline
+              textAlignVertical="top"
               maxLength={1000}
               returnKeyType="default"
+              keyboardType="default"
               autoCorrect={true}
               spellCheck={true}
+              autoCapitalize="sentences"
+              // Disable autofill so the Android IME's suggestion / spell-check
+              // strip isn't suppressed on multiline inputs (Samsung & Gboard
+              // both hide suggestions when autofill is active on a multiline).
+              autoComplete="off"
+              importantForAutofill="no"
+              textContentType="none"
             />
 
             <TouchableOpacity

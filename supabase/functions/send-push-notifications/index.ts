@@ -43,13 +43,16 @@ Deno.serve(async (req) => {
     tokenUserIds.push(p.id);
   }
 
-  // Step 2: Fetch ALL pending notifications (chunked .in() for scale)
+  // Step 2: Fetch ALL pending notifications (chunked .in() for scale).
+  // Exclude push_suppressed=true so once we decide not to push a row it
+  // never gets retried on a subsequent cron run.
   let allNotifications: any[] = [];
   for (const userChunk of chunk(tokenUserIds, CHUNK_SIZE)) {
     const { data, error } = await supabase
       .from('app_notifications')
       .select('id, user_id, type, title, body, event_id')
       .eq('push_sent', false)
+      .eq('push_suppressed', false)
       .eq('status', 'unread')
       .in('user_id', userChunk);
 
@@ -60,6 +63,60 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ sent: 0, total: 0 }), {
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // Step 2b: Suppress new_message pushes for users who are currently
+  // viewing the exact chat the notification came from. They're already
+  // seeing the message live via Supabase realtime — an extra banner +
+  // haptic for a message they can see on screen is just noise.
+  // We look up profiles.active_chat_event_id for every distinct
+  // (user, event) pair in this batch. If the user's active_chat_event_id
+  // matches the notification's event_id, we mark the row push_suppressed
+  // and drop it from the batch before building the Expo payloads.
+  const messageNotifications = allNotifications.filter(
+    (n: any) => n.type === 'new_message' && n.event_id,
+  );
+  const suppressedIds = new Set<string>();
+  if (messageNotifications.length > 0) {
+    const candidateUserIds = [
+      ...new Set(messageNotifications.map((n: any) => n.user_id)),
+    ];
+    // Active chat map: user_id -> active_chat_event_id
+    const activeChatByUser: Record<string, string | null> = {};
+    for (const userChunk of chunk(candidateUserIds, CHUNK_SIZE)) {
+      const { data: rows } = await supabase
+        .from('profiles')
+        .select('id, active_chat_event_id')
+        .in('id', userChunk);
+      for (const r of rows ?? []) {
+        activeChatByUser[r.id] = r.active_chat_event_id;
+      }
+    }
+    for (const n of messageNotifications) {
+      if (activeChatByUser[n.user_id] === n.event_id) {
+        suppressedIds.add(n.id);
+      }
+    }
+    if (suppressedIds.size > 0) {
+      const idsArr = [...suppressedIds];
+      // Update in chunks to stay well under .in() argument limits.
+      for (const idChunk of chunk(idsArr, CHUNK_SIZE)) {
+        await supabase
+          .from('app_notifications')
+          .update({ push_suppressed: true })
+          .in('id', idChunk);
+      }
+    }
+  }
+
+  // Drop suppressed rows from the working set.
+  allNotifications = allNotifications.filter((n: any) => !suppressedIds.has(n.id));
+
+  if (allNotifications.length === 0) {
+    return new Response(
+      JSON.stringify({ sent: 0, total: 0, suppressed: suppressedIds.size }),
+      { headers: { 'Content-Type': 'application/json' } },
+    );
   }
 
   // Step 3: Count unread notifications per user for badge (efficient grouped count)
@@ -121,7 +178,12 @@ Deno.serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ sent, total: allNotifications.length }), {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return new Response(
+    JSON.stringify({
+      sent,
+      total: allNotifications.length,
+      suppressed: suppressedIds.size,
+    }),
+    { headers: { 'Content-Type': 'application/json' } },
+  );
 });
