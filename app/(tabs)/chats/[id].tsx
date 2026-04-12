@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   TextInput,
   StyleSheet,
-  KeyboardAvoidingView,
   Keyboard,
   Platform,
   ActionSheetIOS,
@@ -515,13 +514,34 @@ export default function ChatScreen() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
   const [membersExpanded, setMembersExpanded] = useState(false);
-  // Track keyboard visibility so the Android input bar can drop the home-button
-  // safe-area inset while the keyboard is open. With adjustResize the OS already
-  // moves the bar above the keyboard, so an extra insets.bottom of padding just
-  // floats the text field high above the keyboard.
+  // Track keyboard on both platforms.
+  //
+  // iOS: KeyboardAvoidingView with behavior="padding" is broken under
+  // the new architecture (Fabric) — the input bar slides behind the
+  // keyboard. Instead we listen to keyboardWillShow, capture the
+  // reported keyboard height, and apply it as paddingBottom on a
+  // wrapper View around the FlatList + input bar. KAV is gone.
+  //
+  // Android: adjustResize in AndroidManifest already resizes the window
+  // so we only need a boolean to drop the safe-area inset from the bar
+  // while the keyboard is open (otherwise the bar floats too high).
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [iosKeyboardHeight, setIosKeyboardHeight] = useState(0);
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS === 'ios') {
+      const showSub = Keyboard.addListener('keyboardWillShow', (e) => {
+        setKeyboardVisible(true);
+        setIosKeyboardHeight(e.endCoordinates.height);
+      });
+      const hideSub = Keyboard.addListener('keyboardWillHide', () => {
+        setKeyboardVisible(false);
+        setIosKeyboardHeight(0);
+      });
+      return () => {
+        showSub.remove();
+        hideSub.remove();
+      };
+    }
     const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
     const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
     return () => {
@@ -529,7 +549,7 @@ export default function ChatScreen() {
       hideSub.remove();
     };
   }, []);
-  const inputBarBottomPadding = Platform.OS === 'android' && keyboardVisible ? 8 : insets.bottom + 8;
+  const inputBarBottomPadding = keyboardVisible ? 8 : insets.bottom + 8;
   // Measure the bottom dock (input bar + any reply/edit banners) so the
   // inverted FlatList can reserve exactly that much space at its visual
   // bottom. Inverted lists flip the content container, so paddingTop in
@@ -1066,12 +1086,11 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {/* ── Messages ── */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
-      >
+      {/* ── Messages ──
+          iOS lifts the chat area by the live keyboard height (manual,
+          because KAV padding is broken on Fabric). Android relies on
+          adjustResize, so paddingBottom stays 0 there. */}
+      <View style={{ flex: 1, paddingBottom: Platform.OS === 'ios' ? iosKeyboardHeight : 0 }}>
         {loading ? (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
             <ActivityIndicator size="large" color={Colors.terracotta} />
@@ -1324,7 +1343,7 @@ export default function ChatScreen() {
           </View>
           </View>
         )}
-      </KeyboardAvoidingView>
+      </View>
 
       {/* Report user modal */}
       {reportTarget && (
