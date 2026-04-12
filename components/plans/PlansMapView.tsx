@@ -60,21 +60,19 @@ interface PlanMarkerProps {
 // per-marker: keep tracksViewChanges=true until *this* marker has reported
 // onLayout, then wait one interaction tick and flip it off.
 function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
+  // On Android, react-native-maps snapshots the marker's child View to a
+  // bitmap for the map tile. Every previous attempt to turn off
+  // tracksViewChanges after layout produced clipped half-circle pins
+  // because the snapshot raced the view measurement. The nuclear fix:
+  // keep tracksViewChanges ON permanently on Android. Performance cost
+  // is negligible for < 50 markers. iOS turns it off after first layout.
   const [tracks, setTracks] = useState(true);
-  const laidOutRef = useRef(false);
 
-  const handleLayout = useCallback(() => {
-    if (laidOutRef.current) return;
-    laidOutRef.current = true;
-    if (IS_ANDROID) {
-      // Android react-native-maps snapshots the marker view to a bitmap.
-      // The snapshot frequently fires before the view has fully measured,
-      // producing clipped half-circle pins. Delay turning off tracking by
-      // 500ms after layout to give the rasterizer time to capture the full
-      // pill shape. InteractionManager alone wasn't enough.
-      setTimeout(() => setTracks(false), 500);
-    } else {
-      setTracks(false);
+  useEffect(() => {
+    if (!IS_ANDROID) {
+      // iOS: turn off after mount so the map doesn't re-render every frame
+      const t = setTimeout(() => setTracks(false), 300);
+      return () => clearTimeout(t);
     }
   }, []);
 
@@ -84,20 +82,20 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
     <Marker
       coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
       onPress={() => onPress(plan)}
-      tracksViewChanges={tracks || isSelected}
+      tracksViewChanges={IS_ANDROID ? true : (tracks || isSelected)}
       stopPropagation
       anchor={{ x: 0.5, y: 1 }}
     >
-      {/* Single wrapping View — Android react-native-maps can only
-          snapshot one direct child of Marker reliably. Fixed width and
-          explicit padding ensure the snapshot bounds match the content. */}
-      <View style={styles.markerWrap} onLayout={handleLayout} pointerEvents="none">
-        <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
+      {/* collapsable={false} prevents Android from collapsing Views in
+          the hierarchy, which breaks the bitmap snapshot. Every View in
+          the marker tree needs its own native node. */}
+      <View style={styles.markerWrap} collapsable={false} pointerEvents="none">
+        <View collapsable={false} style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
           <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
             {label}
           </Text>
         </View>
-        <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
+        <View collapsable={false} style={[styles.pinArrow, { borderTopColor: pinBg }]} />
       </View>
     </Marker>
   );
