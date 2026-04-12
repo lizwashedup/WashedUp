@@ -73,6 +73,50 @@ const MANAGE_CATEGORIES = [
   'Sports', 'Tech', 'Wellness', 'Other',
 ] as const;
 
+const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
+type AgeRange = typeof AGE_RANGES[number];
+
+const AGE_BUCKETS: Record<Exclude<AgeRange, 'All Ages'>, [number, number]> = {
+  '21+': [21, 99],
+  '20s': [20, 29],
+  '30s': [30, 39],
+  '40s': [40, 49],
+  '50s': [50, 59],
+  '60s': [60, 69],
+  '70+': [70, 99],
+};
+
+function ageRangesToMinMax(ranges: AgeRange[]): { min: number | null; max: number | null } {
+  if (ranges.length === 0 || ranges.includes('All Ages')) return { min: null, max: null };
+  let min = 99, max = 0;
+  for (const r of ranges) {
+    const b = AGE_BUCKETS[r as Exclude<AgeRange, 'All Ages'>];
+    if (b) {
+      if (b[0] < min) min = b[0];
+      if (b[1] > max) max = b[1];
+    }
+  }
+  return { min, max };
+}
+
+function minMaxToAgeRanges(min: number | null, max: number | null): AgeRange[] {
+  if (min === null && max === null) return ['All Ages'];
+  const entries = Object.entries(AGE_BUCKETS) as [Exclude<AgeRange, 'All Ages'>, [number, number]][];
+  for (const [range, [bMin, bMax]] of entries) {
+    if (bMin === min && bMax === max) return [range];
+  }
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const [a, [aMin, aMax]] = entries[i];
+      const [b, [bMin, bMax]] = entries[j];
+      if (Math.min(aMin, bMin) === min && Math.max(aMax, bMax) === max) {
+        return [a, b];
+      }
+    }
+  }
+  return ['All Ages'];
+}
+
 // ─── Date/time picker constants ───────────────────────────────────────────────
 // Mirror the wheel-picker pattern used in post/index.tsx so the manage modal's
 // date/time editor matches the create flow visually.
@@ -403,6 +447,7 @@ export default function PlanDetailScreen() {
   const managePlacesRef = React.useRef<GooglePlacesAutocompleteRef>(null);
   const [editCategory, setEditCategory] = useState<string | null>(null);
   const [editGenderRule, setEditGenderRule] = useState('mixed');
+  const [editAgeRanges, setEditAgeRanges] = useState<AgeRange[]>([]);
   const [editGroupSize, setEditGroupSize] = useState(6);
   const [editSaving, setEditSaving] = useState(false);
   const [userGender, setUserGender] = useState<string | null>(null);
@@ -791,6 +836,7 @@ export default function PlanDetailScreen() {
     }, 100);
     setEditCategory(plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null);
     setEditGenderRule(plan.gender_rule ?? 'mixed');
+    setEditAgeRanges(minMaxToAgeRanges(plan.target_age_min, plan.target_age_max));
     setEditGroupSize(plan.max_invites ?? 6);
     // Seed the date / time pickers from the existing plan.start_time
     const start = new Date(plan.start_time);
@@ -842,6 +888,22 @@ export default function PlanDetailScreen() {
     hapticLight();
   };
 
+  const toggleEditAgeRange = (range: AgeRange) => {
+    hapticLight();
+    if (range === 'All Ages') {
+      setEditAgeRanges(['All Ages']);
+      return;
+    }
+    setEditAgeRanges((prev) => {
+      const filtered = prev.filter((r) => r !== 'All Ages');
+      if (filtered.includes(range)) {
+        return filtered.filter((r) => r !== range);
+      }
+      if (filtered.length >= 2) return filtered;
+      return [...filtered, range];
+    });
+  };
+
   const handleSaveEdit = async () => {
     if (!plan || !currentUserId || editSaving) return;
 
@@ -859,6 +921,8 @@ export default function PlanDetailScreen() {
         editTimeHour, editTimeMinute, editTimePeriod,
       );
 
+      const editAgeBounds = ageRangesToMinMax(editAgeRanges);
+
       const updatePayload: Record<string, any> = {
         title: editTitle.trim(),
         description: editDescription.trim() || null,
@@ -869,6 +933,8 @@ export default function PlanDetailScreen() {
         tickets_url: editTicketUrl.trim() || null,
         primary_vibe: editCategory?.toLowerCase() ?? null,
         gender_rule: editGenderRule,
+        target_age_min: editAgeBounds.min,
+        target_age_max: editAgeBounds.max,
         max_invites: editGroupSize,
         start_time: newStartTime.toISOString(),
       };
@@ -1848,6 +1914,25 @@ export default function PlanDetailScreen() {
                   );
                 })}
               </View>
+
+              {/* Age range */}
+              <Text style={manageStyles.label}>Age range</Text>
+              <View style={manageStyles.pillWrap}>
+                {AGE_RANGES.map((range) => {
+                  const isSelected = editAgeRanges.includes(range);
+                  return (
+                    <TouchableOpacity
+                      key={range}
+                      style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
+                      onPress={() => toggleEditAgeRange(range)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[manageStyles.pillText, isSelected && manageStyles.pillTextSelected]}>{range}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={manageStyles.hint}>Select up to 2 ranges, or All Ages</Text>
 
               {/* How many to invite */}
               <Text style={manageStyles.label}>How many to invite</Text>
