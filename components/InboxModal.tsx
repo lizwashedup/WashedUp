@@ -207,7 +207,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
               </Text>
             </View>
           ) : (
-            <ScrollView style={s.list} bounces={false}>
+            <ScrollView decelerationRate="normal" style={s.list} bounces={false}>
               {totalInboxCount === 0 && (
                 <View style={{ alignItems: 'center', paddingVertical: 16 }}>
                   <Text style={[s.meta, { textAlign: 'center' }]}>Nothing new right now</Text>

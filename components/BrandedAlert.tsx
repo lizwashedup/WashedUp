@@ -21,7 +21,7 @@ export function BrandedAlert({ visible, title, message, buttons, onClose }: Bran
   const resolvedButtons = buttons && buttons.length > 0 ? buttons : [{ text: 'OK', onPress: onClose }];
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>{title}</Text>

@@ -1185,7 +1185,7 @@ export default function PlansScreen() {
       )}
 
       {showProfileCompletePrompt && (
-      <Modal visible={showProfileCompletePrompt} transparent animationType="fade" onRequestClose={dismissProfileCompletePrompt}>
+      <Modal visible={showProfileCompletePrompt} transparent animationType="fade" onRequestClose={dismissProfileCompletePrompt} statusBarTranslucent>
         <Pressable style={styles.profilePromptOverlay} onPress={dismissProfileCompletePrompt}>
           <Pressable style={styles.profilePromptCard} onPress={(e) => e.stopPropagation()}>
             <Image source={wLogo} style={styles.profilePromptLogo} contentFit="contain" />

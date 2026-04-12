@@ -427,7 +427,7 @@ export default function ProfileScreen() {
           <View style={{ width: 24 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.deleteContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+        <ScrollView decelerationRate="normal" contentContainerStyle={styles.deleteContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           {deleteStep === 1 && (
             <>
               <View style={styles.deleteWarningIcon}>
@@ -713,6 +713,7 @@ export default function ProfileScreen() {
           transparent
           animationType="slide"
           onRequestClose={() => setShowNeighborhoodPicker(false)}
+          statusBarTranslucent
         >
           <Pressable style={styles.neighborhoodSheetOverlay} onPress={() => setShowNeighborhoodPicker(false)}>
             <Pressable style={styles.neighborhoodSheet} onPress={(e) => e.stopPropagation()}>
@@ -725,7 +726,7 @@ export default function ProfileScreen() {
                   <Ionicons name="close" size={22} color={Colors.asphalt} />
                 </TouchableOpacity>
               </View>
-              <ScrollView style={styles.neighborhoodSheetList} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.neighborhoodSheetList} showsVerticalScrollIndicator={false}>
                 {[...NEIGHBORHOOD_OPTIONS, NEIGHBORHOOD_OTHER].map((opt) => {
                   const selected = editNeighborhood === opt;
                   return (
@@ -772,7 +773,7 @@ export default function ProfileScreen() {
   return (
     <>
       <SafeAreaView style={styles.container} edges={['top']}>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+        <ScrollView decelerationRate="normal" showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
         {/* Header row with back button */}
         <View style={styles.header}>

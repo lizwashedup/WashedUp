@@ -164,6 +164,7 @@ export default function ProfileButton() {
         transparent
         animationType="fade"
         onRequestClose={() => dismissPrompt(false)}
+        statusBarTranslucent
       >
         <Pressable style={styles.promptOverlay} onPress={() => dismissPrompt(false)}>
           <Pressable style={styles.promptCard} onPress={() => {}}>

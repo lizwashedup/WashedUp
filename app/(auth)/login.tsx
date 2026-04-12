@@ -323,6 +323,7 @@ export default function LoginScreen() {
         transparent
         animationType="fade"
         onRequestClose={closeResetModal}
+        statusBarTranslucent
       >
         <Pressable style={modalStyles.overlay} onPress={closeResetModal}>
           <Pressable style={modalStyles.content} onPress={(e) => e.stopPropagation()}>

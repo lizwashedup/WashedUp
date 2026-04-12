@@ -112,6 +112,7 @@ export function ReportModal({
         </View>
 
         <ScrollView
+          decelerationRate="normal"
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"

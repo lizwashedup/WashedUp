@@ -200,7 +200,7 @@ export default function OnboardingBasicsScreen() {
           <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.modalTitle}>Select birthday</Text>
             <View style={styles.pickerRow}>
-              <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
                 {MONTHS.map((m, i) => (
                   <Pressable
                     key={m}
@@ -211,7 +211,7 @@ export default function OnboardingBasicsScreen() {
                   </Pressable>
                 ))}
               </ScrollView>
-              <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
                 {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => (
                   <Pressable
                     key={day}
@@ -222,7 +222,7 @@ export default function OnboardingBasicsScreen() {
                   </Pressable>
                 ))}
               </ScrollView>
-              <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
                 {years.map((y) => (
                   <Pressable
                     key={y}

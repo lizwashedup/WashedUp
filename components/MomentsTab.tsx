@@ -192,7 +192,7 @@ export default function MomentsTab({ userId }: Props) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView decelerationRate="normal" style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {/* Prompt card for unwritten moment */}
       {promptPlan && (
         <View style={styles.promptCard}>

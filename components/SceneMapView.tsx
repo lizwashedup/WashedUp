@@ -164,6 +164,10 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
         customMapStyle={MAP_STYLE}
         showsUserLocation={locationGranted}
         showsMyLocationButton={false}
+        toolbarEnabled={false}
+        moveOnMarkerPress={false}
+        loadingEnabled
+        loadingIndicatorColor={Colors.terracotta}
         onPress={handleMapPress}
       >
         {filteredEvents.map((event) => {

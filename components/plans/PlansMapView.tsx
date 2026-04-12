@@ -230,6 +230,10 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         customMapStyle={MAP_STYLE}
         showsUserLocation={locationGranted}
         showsMyLocationButton={false}
+        toolbarEnabled={false}
+        moveOnMarkerPress={false}
+        loadingEnabled
+        loadingIndicatorColor={Colors.terracotta}
         onPress={handleMapPress}
       >
         {filteredPlans.map((plan) => (

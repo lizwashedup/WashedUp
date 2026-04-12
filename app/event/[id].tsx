@@ -264,7 +264,7 @@ export default function EventDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView decelerationRate="normal" showsVerticalScrollIndicator={false}>
         <View style={styles.heroContainer}>
           <Image
             source={event.image_url ? { uri: event.image_url } : require('../../assets/images/plan-placeholder.png')}

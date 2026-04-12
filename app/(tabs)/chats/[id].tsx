@@ -1086,7 +1086,7 @@ export default function ChatScreen() {
             style={{ flex: 1 }}
             contentContainerStyle={{
               paddingBottom: 12,
-              paddingTop: bottomDockHeight + 8,
+              paddingTop: Platform.OS === 'android' ? bottomDockHeight + 8 : 8,
             }}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === 'android'}
@@ -1213,11 +1213,13 @@ export default function ChatScreen() {
           <View
             style={[
               chatStyles.readOnlyBar,
-              {
+              Platform.OS === 'android' && {
                 position: 'absolute',
                 left: 0,
                 right: 0,
                 bottom: 0,
+              },
+              {
                 paddingBottom: inputBarBottomPadding,
                 paddingLeft: Math.max(insets.left, 20),
                 paddingRight: Math.max(insets.right, 20),
@@ -1233,13 +1235,15 @@ export default function ChatScreen() {
           </View>
         ) : (
           <View
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: Colors.white,
-            }}
+            style={[
+              { backgroundColor: Colors.white },
+              Platform.OS === 'android' && {
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+              },
+            ]}
             onLayout={(e) => {
               const h = e.nativeEvent.layout.height;
               console.log('[ChatDock] input dock height:', h);
@@ -1367,7 +1371,7 @@ export default function ChatScreen() {
       />
 
       {/* Message interaction overlay */}
-      <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)}>
+      <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)} statusBarTranslucent>
         <Pressable style={overlayStyles.backdrop} onPress={() => setOverlayMessage(null)}>
           <Pressable onPress={(e) => e.stopPropagation()} style={overlayStyles.container}>
             {/* Emoji reaction row — only for other people's messages */}

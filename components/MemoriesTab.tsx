@@ -200,7 +200,7 @@ export default function MemoriesTab({ userId }: Props) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView decelerationRate="normal" style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {/* Developing cards */}
       {developingAlbums.map(album => (
         <TouchableOpacity

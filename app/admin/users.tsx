@@ -143,6 +143,7 @@ export default function AdminUsersScreen() {
         </View>
       ) : (
         <ScrollView
+          decelerationRate="normal"
           style={styles.list}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"

@@ -172,6 +172,7 @@ export default function OnboardingReferralScreen() {
           </View>
 
           <ScrollView
+            decelerationRate="normal"
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"

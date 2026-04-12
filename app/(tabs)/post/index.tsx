@@ -687,7 +687,7 @@ export default function PostScreen() {
           {drafts.length > 0 && (
             <View style={styles.draftsSection}>
               <Text style={styles.draftsTitle}>Drafts</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.draftsScroll}>
+              <ScrollView decelerationRate="normal" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.draftsScroll}>
                 {drafts.map((d) => (
                   <View key={d.id} style={styles.draftChip}>
                     <TouchableOpacity
@@ -1131,6 +1131,7 @@ export default function PostScreen() {
         transparent
         animationType="slide"
         onRequestClose={() => setShowNeighborhoodPicker(false)}
+        statusBarTranslucent
       >
         <Pressable style={styles.neighborhoodSheetOverlay} onPress={() => setShowNeighborhoodPicker(false)}>
           <Pressable style={styles.neighborhoodSheet} onPress={(e) => e.stopPropagation()}>
@@ -1143,7 +1144,7 @@ export default function PostScreen() {
                 <Ionicons name="close" size={22} color={Colors.asphalt} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.neighborhoodSheetList} showsVerticalScrollIndicator={false}>
+            <ScrollView decelerationRate="normal" style={styles.neighborhoodSheetList} showsVerticalScrollIndicator={false}>
               {[...NEIGHBORHOOD_OPTIONS, NEIGHBORHOOD_OTHER].map((opt) => {
                 const selected = neighborhood === opt;
                 return (
@@ -1179,7 +1180,7 @@ export default function PostScreen() {
             <Text style={styles.modalTitle}>Select date</Text>
             <View style={styles.pickerRow}>
               {/* Month */}
-              <ScrollView style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
                 {MONTHS.map((m, i) => (
                   <Pressable
                     key={m}
@@ -1193,7 +1194,7 @@ export default function PostScreen() {
                 ))}
               </ScrollView>
               {/* Day */}
-              <ScrollView style={styles.pickerColSm} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerColSm} showsVerticalScrollIndicator={false}>
                 {Array.from({ length: daysInTempMonth }, (_, i) => i + 1).map((d) => (
                   <Pressable
                     key={d}
@@ -1207,7 +1208,7 @@ export default function PostScreen() {
                 ))}
               </ScrollView>
               {/* Year */}
-              <ScrollView style={styles.pickerColSm} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerColSm} showsVerticalScrollIndicator={false}>
                 {years.map((y) => (
                   <Pressable
                     key={y}
@@ -1238,7 +1239,7 @@ export default function PostScreen() {
             <Text style={styles.modalTitle}>Select time</Text>
             <View style={styles.pickerRow}>
               {/* Hour */}
-              <ScrollView style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
                 {HOURS.map((h) => (
                   <Pressable
                     key={h}
@@ -1252,7 +1253,7 @@ export default function PostScreen() {
                 ))}
               </ScrollView>
               {/* Minute */}
-              <ScrollView style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
                 {MINUTE_OPTIONS.map((m) => (
                   <Pressable
                     key={m}
@@ -1266,7 +1267,7 @@ export default function PostScreen() {
                 ))}
               </ScrollView>
               {/* AM/PM */}
-              <ScrollView style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
                 {PERIODS.map((p) => (
                   <Pressable
                     key={p}
@@ -1292,7 +1293,7 @@ export default function PostScreen() {
         <Pressable style={styles.modalOverlay} onPress={() => setShowCategoryPicker(false)}>
           <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.modalTitle}>Select category</Text>
-            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+            <ScrollView decelerationRate="normal" style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
               {CATEGORIES.map((cat) => (
                 <TouchableOpacity
                   key={cat}

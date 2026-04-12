@@ -708,7 +708,7 @@ export default function YourPeopleScreen() {
           )}
         </View>
       ) : (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 32 }} keyboardDismissMode="on-drag">
+        <ScrollView decelerationRate="normal" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 32 }} keyboardDismissMode="on-drag">
           {/* Pending invite cards */}
           {visibleInvites.length > 0 && (
             <View style={styles.inviteCardsSection}>
@@ -1030,7 +1030,7 @@ export default function YourPeopleScreen() {
             <Text style={styles.inviteSheetTitle}>
               Invite {inviteTarget?.first_name_display ?? ''} to a plan
             </Text>
-            <ScrollView style={styles.invitePlanList} bounces={false}>
+            <ScrollView decelerationRate="normal" style={styles.invitePlanList} bounces={false}>
               {myActivePlans.map((plan: any) => {
                 const isFull = plan.member_count >= plan.max_invites;
                 const alreadySent = sentInviteIds.has(plan.id);

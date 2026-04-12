@@ -63,10 +63,11 @@ export default function WelcomeModal({
   }, [onPostPlan]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onDismiss}>
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <ScrollView
+            decelerationRate="normal"
             ref={scrollRef}
             horizontal
             pagingEnabled

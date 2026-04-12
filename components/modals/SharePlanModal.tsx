@@ -59,6 +59,7 @@ export function SharePlanModal({
     >
       <View style={styles.container}>
         <ScrollView
+          decelerationRate="normal"
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >

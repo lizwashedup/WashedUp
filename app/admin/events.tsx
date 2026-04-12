@@ -281,6 +281,7 @@ export default function AdminEventsScreen() {
         </View>
       ) : (
         <ScrollView
+          decelerationRate="normal"
           style={styles.list}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}

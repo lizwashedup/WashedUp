@@ -225,7 +225,7 @@ const AlbumUploadFlow = forwardRef<AlbumUploadFlowHandle, Props>(function AlbumU
               Uncheck anyone who didn't show up. They won't see the album.
             </Text>
 
-            <ScrollView style={styles.attendanceList} bounces={false}>
+            <ScrollView decelerationRate="normal" style={styles.attendanceList} bounces={false}>
               {otherMembers.map(member => {
                 const checked = attendance[member.user_id] ?? true;
                 return (

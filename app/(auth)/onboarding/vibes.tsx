@@ -99,6 +99,7 @@ export default function OnboardingVibesScreen() {
         </View>
 
         <ScrollView
+          decelerationRate="normal"
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}

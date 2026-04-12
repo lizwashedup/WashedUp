@@ -210,6 +210,7 @@ export default function SignupScreen() {
         keyboardVerticalOffset={0}
       >
         <ScrollView
+          decelerationRate="normal"
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
