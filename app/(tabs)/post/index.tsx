@@ -667,6 +667,7 @@ export default function PostScreen() {
         keyboardVerticalOffset={0}
       >
         <ScrollView
+          decelerationRate="normal"
           style={styles.flex}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}

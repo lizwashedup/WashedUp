@@ -259,6 +259,7 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
             <Text style={styles.heading}>Who didn't show up?</Text>
             <Text style={styles.subheading}>Tap to select</Text>
             <FlatList
+              decelerationRate="normal"
               data={otherMembers}
               keyExtractor={(item) => item.id}
               style={styles.memberList}

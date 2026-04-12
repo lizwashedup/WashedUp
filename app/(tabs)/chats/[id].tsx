@@ -973,6 +973,7 @@ export default function ChatScreen() {
             : event.members.slice(0, 4);
           return (
             <ScrollView
+              decelerationRate="normal"
               horizontal
               showsHorizontalScrollIndicator={false}
               style={chatStyles.membersRow}
@@ -1061,6 +1062,7 @@ export default function ChatScreen() {
           </View>
         ) : (
           <FlatList
+            decelerationRate="normal"
             ref={listRef}
             data={enrichedItems}
             keyExtractor={item => item.id}

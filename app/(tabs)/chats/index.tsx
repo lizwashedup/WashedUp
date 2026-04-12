@@ -181,6 +181,7 @@ export default function ChatsScreen() {
         </View>
       ) : (
         <FlatList
+          decelerationRate="normal"
           data={activeChats}
           keyExtractor={item => item.eventId}
           refreshControl={

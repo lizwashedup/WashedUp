@@ -656,6 +656,7 @@ export default function YourPeopleScreen() {
             <Text style={styles.emptySearchText}>{cleanQuery.length < 2 ? 'Type at least 2 characters' : 'No handle found'}</Text>
           ) : (
             <FlatList
+              decelerationRate="normal"
               data={searchResults}
               keyExtractor={(item) => item.id}
               keyboardShouldPersistTaps="handled"

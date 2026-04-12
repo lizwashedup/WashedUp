@@ -883,6 +883,7 @@ export default function PlansScreen() {
           </View>
         ) : (
           <FlatList
+            decelerationRate="normal"
             horizontal
             data={featuredPlans}
             keyExtractor={(item) => item.id}
@@ -1074,6 +1075,7 @@ export default function PlansScreen() {
             </View>
           ) : listEmpty ? (
             <ScrollView
+              decelerationRate="normal"
               contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20 }}
               showsVerticalScrollIndicator={false}
               refreshControl={
@@ -1090,6 +1092,7 @@ export default function PlansScreen() {
             </ScrollView>
           ) : (
             <SectionList
+              decelerationRate="normal"
               sections={sectionListData}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
@@ -1122,6 +1125,7 @@ export default function PlansScreen() {
             </View>
           ) : (
             <SectionList
+              decelerationRate="normal"
               sections={myPlansSections}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}

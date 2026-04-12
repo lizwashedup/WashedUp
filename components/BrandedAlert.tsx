@@ -26,7 +26,10 @@ export function BrandedAlert({ visible, title, message, buttons, onClose }: Bran
         <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>{title}</Text>
           {message && <Text style={styles.message}>{message}</Text>}
-          <View style={styles.buttonRow}>
+          <View style={[
+            styles.buttonRow,
+            resolvedButtons.length > 2 && styles.buttonColumn,
+          ]}>
             {resolvedButtons.map((btn, i) => {
               const isDestructive = btn.style === 'destructive';
               const isCancel = btn.style === 'cancel';
@@ -39,6 +42,7 @@ export function BrandedAlert({ visible, title, message, buttons, onClose }: Bran
                     isCancel && styles.buttonCancel,
                     !isDestructive && !isCancel && styles.buttonDefault,
                     resolvedButtons.length === 1 && { flex: 0, minWidth: 120 },
+                    resolvedButtons.length > 2 && { flex: 0 },
                   ]}
                   onPress={() => {
                     btn.onPress?.();
@@ -103,6 +107,10 @@ const styles = StyleSheet.create({
     gap: 10,
     width: '100%',
     justifyContent: 'center',
+  },
+  buttonColumn: {
+    flexDirection: 'column',
+    gap: 10,
   },
   button: {
     flex: 1,

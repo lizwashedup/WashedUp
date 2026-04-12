@@ -535,6 +535,7 @@ export default function ProfileScreen() {
         </View>
 
         <ScrollView
+          decelerationRate="normal"
           contentContainerStyle={styles.editContent}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"

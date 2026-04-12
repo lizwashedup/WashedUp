@@ -139,6 +139,7 @@ export default function ScenePage() {
       </View>
 
       <ScrollView
+        decelerationRate="normal"
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"

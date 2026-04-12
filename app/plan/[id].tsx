@@ -1199,6 +1199,7 @@ export default function PlanDetailScreen() {
       </View>
 
       <ScrollView
+        decelerationRate="normal"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
@@ -1761,6 +1762,7 @@ export default function PlanDetailScreen() {
             </View>
 
             <ScrollView
+              decelerationRate="normal"
               showsVerticalScrollIndicator={true}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
