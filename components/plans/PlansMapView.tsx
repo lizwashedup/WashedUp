@@ -67,9 +67,12 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
     if (laidOutRef.current) return;
     laidOutRef.current = true;
     if (IS_ANDROID) {
-      InteractionManager.runAfterInteractions(() => {
-        requestAnimationFrame(() => setTracks(false));
-      });
+      // Android react-native-maps snapshots the marker view to a bitmap.
+      // The snapshot frequently fires before the view has fully measured,
+      // producing clipped half-circle pins. Delay turning off tracking by
+      // 500ms after layout to give the rasterizer time to capture the full
+      // pill shape. InteractionManager alone wasn't enough.
+      setTimeout(() => setTracks(false), 500);
     } else {
       setTracks(false);
     }
@@ -396,9 +399,12 @@ const styles = StyleSheet.create({
 
   markerWrap: {
     alignItems: 'center',
-    // Explicit width on Android forces the snapshot bitmap to size to the
-    // pill+arrow cluster instead of measuring to 0 on first layout.
+    // Explicit width AND height on Android forces the snapshot bitmap to
+    // size to the pill+arrow cluster instead of collapsing to a clipped
+    // circle on first layout. Without both dimensions the rasterizer
+    // guesses wrong and produces half-circle pins.
     width: 140,
+    height: 40,
   },
   pin: {
     paddingHorizontal: 10,
