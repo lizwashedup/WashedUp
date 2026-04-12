@@ -1054,7 +1054,7 @@ export default function PostScreen() {
         </ScrollView>
 
         {/* ── Sticky submit button ── */}
-        <View style={styles.stickyFooter}>
+        <View style={[styles.stickyFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           {!canSubmit && (
             <Text style={styles.requiredHint}>
               {title.trim().length === 0

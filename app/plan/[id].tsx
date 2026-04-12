@@ -1489,7 +1489,7 @@ export default function PlanDetailScreen() {
 
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
-      <View style={styles.stickyBar}>
+      <View style={[styles.stickyBar, { paddingBottom: insets.bottom + 12 }]}>
         {isPastPlan && (isMember || isCreator) && currentUserId ? (
           <View style={styles.memberActions}>
             <AlbumUploadFlow ref={albumUploadRef} eventId={plan!.id} currentUserId={currentUserId} members={members} />
