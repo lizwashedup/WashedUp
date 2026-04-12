@@ -605,10 +605,26 @@ export default function ChatScreen() {
   }, [currentUserId, messages.length]);
 
   const handleEnablePush = useCallback(async () => {
-    await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
+    // If iOS has already recorded a hard denial, requestPermissionsAsync
+    // silently no-ops — the only path forward is Settings.
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status === 'denied') {
+      await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
+      setShowPushBanner(false);
+      Linking.openSettings();
+      return;
+    }
+
+    // Undetermined / provisional: surface the native prompt and, on
+    // grant, save the expo push token to the user's profile.
+    const token = await registerForPushNotifications({ prompt: true, userId: currentUserId });
     setShowPushBanner(false);
-    Linking.openSettings();
-  }, []);
+    if (!token) {
+      // User declined the system prompt — honor the 7-day cooldown so we
+      // don't nag on every chat open.
+      await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
+    }
+  }, [currentUserId]);
 
   const handleDismissPushBanner = useCallback(async () => {
     await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
