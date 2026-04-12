@@ -21,7 +21,14 @@ const REVIEW_URL = Platform.OS === 'ios'
   : 'https://play.google.com/store/apps/details?id=com.washedup.app';
 
 const STORE_NAME = Platform.OS === 'ios' ? 'the App Store' : 'Google Play';
-const STORAGE_KEY = 'hasRequestedReview';
+// Show up to MAX_ASKS times if the user keeps tapping "Not now". If they tap
+// "Write a Review", set the completed flag and never ask again regardless of
+// count. The old `hasRequestedReview` key is honored for backwards compat —
+// existing users who already dismissed once won't see it again.
+export const REVIEW_ASK_COUNT_KEY = 'reviewAskCount';
+export const REVIEW_ASK_COMPLETED_KEY = 'reviewAskCompleted';
+export const REVIEW_ASK_LEGACY_KEY = 'hasRequestedReview';
+export const REVIEW_ASK_MAX = 2;
 
 interface Props {
   visible: boolean;
@@ -31,19 +38,23 @@ interface Props {
 export default function AppStoreReviewAsk({ visible, onClose }: Props) {
   const dismiss = async () => {
     hapticLight();
-    await AsyncStorage.setItem(STORAGE_KEY, 'true').catch(() => {});
+    try {
+      const raw = await AsyncStorage.getItem(REVIEW_ASK_COUNT_KEY);
+      const next = (parseInt(raw ?? '0', 10) || 0) + 1;
+      await AsyncStorage.setItem(REVIEW_ASK_COUNT_KEY, String(next));
+    } catch {}
     onClose();
   };
 
   const handleReview = async () => {
     hapticLight();
-    await AsyncStorage.setItem(STORAGE_KEY, 'true').catch(() => {});
+    await AsyncStorage.setItem(REVIEW_ASK_COMPLETED_KEY, 'true').catch(() => {});
     Linking.openURL(REVIEW_URL).catch(() => {});
     onClose();
   };
 
   return (
-    <Modal visible={visible} animationType="fade" transparent>
+    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={dismiss}>
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <TouchableOpacity

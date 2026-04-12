@@ -102,14 +102,15 @@ export async function signInWithGoogle() {
     return null;
   }
 
-  const rawNonce = Crypto.randomUUID();
-  const hashedNonce = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    rawNonce,
-  );
-
+  // Skip nonce on both platforms. Android's Credential Manager doesn't embed
+  // a nonce claim in the id_token at all, and iOS's GIDSignIn embeds a value
+  // that doesn't match SHA256(rawNonce), so Supabase rejects with "Nonces
+  // mismatch" / "Passed nonce and nonce in id_token should either both exist
+  // or not." Supabase's own React Native example omits nonce for Google. The
+  // id_token is still verified by Supabase via Google's signing key + audience
+  // claim, which is the standard security boundary for ID-token sign-in.
   await GoogleSignin.hasPlayServices();
-  const response = await GoogleSignin.signIn({ nonce: hashedNonce });
+  const response = await GoogleSignin.signIn({});
 
   if (response.type === 'cancelled') return null;
 
@@ -121,7 +122,6 @@ export async function signInWithGoogle() {
   const { data, error } = await supabase.auth.signInWithIdToken({
     provider: 'google',
     token: idToken,
-    nonce: rawNonce,
   });
 
   if (error) throw error;

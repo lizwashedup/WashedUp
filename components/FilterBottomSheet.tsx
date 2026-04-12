@@ -93,7 +93,7 @@ export function FilterBottomSheet({
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={dismissSheet}>
+    <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={dismissSheet}>
       <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={dismissSheet} />
       </Animated.View>

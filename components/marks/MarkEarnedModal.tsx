@@ -94,7 +94,7 @@ export default function MarkEarnedModal({ userId }: Props) {
   const isIdentity = current.type === 'identity';
 
   return (
-    <Modal visible transparent animationType="none">
+    <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={dismiss}>
       <Animated.View entering={FadeIn.duration(300)} style={styles.overlay}>
         <View style={styles.card}>
           {/* Header */}

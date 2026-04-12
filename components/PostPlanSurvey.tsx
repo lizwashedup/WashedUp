@@ -263,6 +263,7 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
               keyExtractor={(item) => item.id}
               style={styles.memberList}
               contentContainerStyle={styles.memberListContent}
+              keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => {
                 const selected = selectedNoShows.has(item.id);
                 return (
@@ -351,7 +352,7 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
 
   // ── Centered card modal for steps 2+ ────────────────────────────────────
   return (
-    <Modal visible={visible} animationType="fade" transparent>
+    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent>
       <View style={styles.backdrop}>
         <View style={[styles.card, { maxHeight: '70%' }]}>
           <TouchableOpacity

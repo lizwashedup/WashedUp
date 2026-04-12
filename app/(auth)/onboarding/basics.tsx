@@ -195,7 +195,7 @@ export default function OnboardingBasicsScreen() {
         {saveError ? <Text style={[styles.errorText, { marginTop: 8 }]}>{saveError}</Text> : <View style={styles.errorPlaceholder} />}
       </View>
 
-      <Modal visible={showDatePicker} transparent animationType="slide">
+      <Modal visible={showDatePicker} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setShowDatePicker(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setShowDatePicker(false)}>
           <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.modalTitle}>Select birthday</Text>

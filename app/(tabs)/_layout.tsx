@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
@@ -44,6 +45,11 @@ async function fetchUnreadChatCount(): Promise<number> {
 
 export default function TabLayout() {
   const [userId, setUserId] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
+  const isAndroid = Platform.OS === 'android';
+  const androidBottomInset = Math.max(insets.bottom, 12);
+  const tabBarHeight = isAndroid ? 64 + androidBottomInset : 84;
+  const tabBarPaddingBottom = isAndroid ? androidBottomInset : 28;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -82,8 +88,8 @@ export default function TabLayout() {
           backgroundColor: Colors.parchment,
           borderTopWidth: 0.5,
           borderTopColor: '#E5DDD1',
-          height: 84,
-          paddingBottom: 28,
+          height: tabBarHeight,
+          paddingBottom: tabBarPaddingBottom,
           paddingTop: 8,
         },
         tabBarVariant: 'uikit',

@@ -127,6 +127,16 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
 
   const totalInboxCount = pendingInvites.length + appNotifications.length;
 
+  // Opening the inbox runs expire_stale_notifications on the server, which
+  // can drop notifications that the badge query was still counting. Invalidate
+  // the in-app bell badge once the modal queries have settled so it reflects
+  // the post-expire state instead of waiting up to 30s for the next interval.
+  useEffect(() => {
+    if (!visible) return;
+    if (loadingInvites || loadingNotifs) return;
+    queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+  }, [visible, loadingInvites, loadingNotifs, queryClient]);
+
   const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string) => {
     hapticLight();
     try {
@@ -171,7 +181,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="slide">
+    <Modal visible transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <Pressable style={s.overlay} onPress={onClose}>
         <Pressable style={s.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={s.handle} />

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform, InteractionManager } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { ArrowLeft, MapPin, Calendar, Users, ChevronDown } from 'lucide-react-native';
@@ -45,29 +45,73 @@ interface PlansMapViewProps {
   onWishlist?: (planId: string, current: boolean) => void;
 }
 
+const IS_ANDROID = Platform.OS === 'android';
+
+interface PlanMarkerProps {
+  plan: Plan;
+  isSelected: boolean;
+  pinBg: string;
+  onPress: (plan: Plan) => void;
+}
+
+// Android react-native-maps snapshots the marker view to a bitmap and uses
+// that as the marker image. If the snapshot fires before the custom view has
+// fully measured itself, the bitmap is clipped or sized wrong. The fix is
+// per-marker: keep tracksViewChanges=true until *this* marker has reported
+// onLayout, then wait one interaction tick and flip it off.
+function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
+  const [tracks, setTracks] = useState(true);
+  const laidOutRef = useRef(false);
+
+  const handleLayout = useCallback(() => {
+    if (laidOutRef.current) return;
+    laidOutRef.current = true;
+    if (IS_ANDROID) {
+      InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => setTracks(false));
+      });
+    } else {
+      setTracks(false);
+    }
+  }, []);
+
+  const label = plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title;
+
+  return (
+    <Marker
+      coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
+      onPress={() => onPress(plan)}
+      tracksViewChanges={tracks || isSelected}
+      stopPropagation
+      anchor={{ x: 0.5, y: 1 }}
+    >
+      {/* Single wrapping View — Android react-native-maps can only
+          snapshot one direct child of Marker reliably. Fixed width and
+          explicit padding ensure the snapshot bounds match the content. */}
+      <View style={styles.markerWrap} onLayout={handleLayout} pointerEvents="none">
+        <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
+          <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
+            {label}
+          </Text>
+        </View>
+        <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
+      </View>
+    </Marker>
+  );
+}
+
 export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClose, onWishlist }: PlansMapViewProps) {
   const [selectedFilter, setSelectedFilter] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [heartFilter, setHeartFilter] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
-  // react-native-maps on Android snapshots the marker view on mount when
-  // tracksViewChanges is false. If the snapshot fires before layout settles,
-  // only part of the custom pin renders. Start with tracking enabled, then
-  // flip to false after a short delay so the live pin is captured fully,
-  // after which we stop tracking for performance.
-  const [tracksMarkerChanges, setTracksMarkerChanges] = useState(true);
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       setLocationGranted(status === 'granted');
     });
-  }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => setTracksMarkerChanges(false), 1500);
-    return () => clearTimeout(t);
   }, []);
 
   const filteredPlans = plans.filter((p) => {
@@ -114,31 +158,15 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         showsMyLocationButton={false}
         onPress={handleMapPress}
       >
-        {filteredPlans.map((plan) => {
-          const isSelected = selectedPlan?.id === plan.id;
-          const pinBg = getPlanPinColor(plan);
-          return (
-            <Marker
-              key={plan.id}
-              coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
-              onPress={() => handleMarkerPress(plan)}
-              tracksViewChanges={tracksMarkerChanges || isSelected}
-              stopPropagation
-              anchor={{ x: 0.5, y: 1 }}
-            >
-              {/* Single wrapping View — Android react-native-maps can only
-                  snapshot one direct child of Marker reliably. */}
-              <View style={styles.markerWrap} pointerEvents="none">
-                <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
-                  <Text style={styles.pinText} numberOfLines={1}>
-                    {plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title}
-                  </Text>
-                </View>
-                <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
-              </View>
-            </Marker>
-          );
-        })}
+        {filteredPlans.map((plan) => (
+          <PlanMarker
+            key={plan.id}
+            plan={plan}
+            isSelected={selectedPlan?.id === plan.id}
+            pinBg={getPlanPinColor(plan)}
+            onPress={handleMarkerPress}
+          />
+        ))}
       </MapView>
 
       {/* Top bar */}
@@ -367,12 +395,16 @@ const styles = StyleSheet.create({
 
   markerWrap: {
     alignItems: 'center',
+    // Explicit width on Android forces the snapshot bitmap to size to the
+    // pill+arrow cluster instead of measuring to 0 on first layout.
+    width: 140,
   },
   pin: {
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 16,
     maxWidth: 140,
+    alignSelf: 'center',
   },
   pinSelected: {
     transform: [{ scale: 1.1 }],
