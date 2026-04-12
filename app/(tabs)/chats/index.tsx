@@ -16,7 +16,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { ChevronDown, ChevronRight } from 'lucide-react-native';
 
 const wLogo = require('../../../assets/images/w-logo-waves.png');
+import { useQueryClient } from '@tanstack/react-query';
+import { supabase } from '../../../lib/supabase';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
+import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
 import Colors from '../../../constants/Colors';
@@ -120,15 +123,32 @@ export default function ChatsScreen() {
   const [refreshing, setRefreshing] = React.useState(false);
   const [pastExpanded, setPastExpanded] = React.useState(false);
 
+  const queryClient = useQueryClient();
+
   useFocusEffect(
     React.useCallback(() => {
       refetch();
-      // Opening the Chats tab is the user's "I'm looking at my messages"
-      // signal — clear the app icon badge here. _layout used to do this
-      // on every app foreground, which wiped the badge even when the user
-      // hadn't actually checked their messages.
+      // Opening the Chats tab means the user is looking at their messages.
+      // Clear the app icon badge AND mark all new_message notifications as
+      // read in the DB so the tab badge (driven by the unread count query)
+      // also clears. Previously we only cleared the iOS badge but left the
+      // DB rows unread, so the red "1" on the Chats tab persisted even
+      // though there was nothing new to see.
       Notifications.setBadgeCountAsync(0).catch(() => {});
-    }, [refetch]),
+      (async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+          await supabase
+            .from('app_notifications')
+            .update({ status: 'read' })
+            .eq('user_id', user.id)
+            .eq('type', 'new_message')
+            .eq('status', 'unread');
+          queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
+        } catch {}
+      })();
+    }, [refetch, queryClient]),
   );
 
   const handleRefresh = useCallback(async () => {
