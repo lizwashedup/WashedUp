@@ -199,7 +199,17 @@ function filterIntoSections(
 
 export default function PlansScreen() {
   const [now, setNow] = useState(() => new Date());
-  useFocusEffect(useCallback(() => { setNow(new Date()); }, []));
+  // Only update `now` when the calendar date actually changes (not every
+  // focus). Section headers ("Tonight", "This Weekend") only care about
+  // the date, not the minute. Updating every focus caused an unnecessary
+  // full re-render + layout shift that looked like a flicker on Android.
+  useFocusEffect(useCallback(() => {
+    const fresh = new Date();
+    setNow(prev => {
+      if (prev.toDateString() === fresh.toDateString()) return prev;
+      return fresh;
+    });
+  }, []));
   const sectionDefs = useMemo(() => getSectionDefs(now), [now]);
 
   const [activeTab, setActiveTab] = useState<TabKey>('plans');
