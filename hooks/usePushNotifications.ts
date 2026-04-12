@@ -33,7 +33,7 @@ export function usePushNotifications(userId?: string | null) {
     // so users see it after a meaningful moment instead of cold at launch.
     // Cold-launching the permission dialog before any context produces a much
     // higher denial rate, and once denied iOS won't show the prompt again.
-    registerForPushNotifications({ prompt: false }).then((token) => {
+    registerForPushNotifications({ prompt: false, userId }).then((token) => {
       if (token) setExpoPushToken(token);
     }).catch(() => {});
 
@@ -43,7 +43,7 @@ export function usePushNotifications(userId?: string | null) {
     // token and save it without ever needing to ask again.
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        registerForPushNotifications({ prompt: false }).then((token) => {
+        registerForPushNotifications({ prompt: false, userId }).then((token) => {
           if (token) setExpoPushToken(token);
         }).catch(() => {});
       }
@@ -62,7 +62,7 @@ export function usePushNotifications(userId?: string | null) {
 }
 
 export async function registerForPushNotifications(
-  options: { prompt?: boolean } = {},
+  options: { prompt?: boolean; userId?: string | null } = {},
 ): Promise<string | null> {
   if (!Device.isDevice) return null;
 
@@ -111,12 +111,20 @@ export async function registerForPushNotifications(
     // Save token to this user's profile row so the backend can send targeted
     // notifications. Surface upsert failures loudly — this used to silently
     // fail and we had no way to tell whether tokens were actually landing.
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user && token) {
+    // Prefer the userId passed in by the caller (the authenticated user id
+    // from the hook) over a fresh getUser() call. On Android, getUser() can
+    // race with a just-established session after login and return null,
+    // which caused expo_push_token to silently never get written.
+    let targetUserId = options.userId ?? null;
+    if (!targetUserId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      targetUserId = user?.id ?? null;
+    }
+    if (targetUserId && token) {
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ expo_push_token: token })
-        .eq('id', user.id);
+        .eq('id', targetUserId);
       if (updateError) {
         console.error(
           '[PushNotifications] Failed to save expo_push_token to profiles:',

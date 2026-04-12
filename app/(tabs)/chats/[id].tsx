@@ -528,6 +528,11 @@ export default function ChatScreen() {
     };
   }, []);
   const inputBarBottomPadding = Platform.OS === 'android' && keyboardVisible ? 8 : insets.bottom + 8;
+  // Measure the bottom dock (input bar + any reply/edit banners) so the
+  // inverted FlatList can reserve exactly that much space at its visual
+  // bottom. Inverted lists flip the content container, so paddingTop in
+  // style terms is the side closest to the input bar visually.
+  const [bottomDockHeight, setBottomDockHeight] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -983,7 +988,10 @@ export default function ChatScreen() {
             keyExtractor={item => item.id}
             inverted={true}
             style={{ flex: 1 }}
-            contentContainerStyle={chatStyles.messageList}
+            contentContainerStyle={[
+              chatStyles.messageList,
+              { paddingTop: bottomDockHeight + 4 },
+            ]}
             showsVerticalScrollIndicator={false}
             automaticallyAdjustContentInsets={false}
             contentInsetAdjustmentBehavior="never"
@@ -1096,13 +1104,39 @@ export default function ChatScreen() {
           />
         )}
 
-        {/* Input bar */}
+        {/* Input bar — absolutely positioned so the FlatList can span the
+            full KAV area. The measured height is reserved via paddingTop
+            on the inverted list's contentContainerStyle, which guarantees
+            new messages are never obscured by the bar on any screen size. */}
         {isPast ? (
-          <View style={[chatStyles.readOnlyBar, { paddingBottom: inputBarBottomPadding }]}>
-            <Text style={chatStyles.readOnlyText}>This chat is read-only — {event?.title ?? 'the plan'} has ended</Text>
+          <View
+            style={[
+              chatStyles.readOnlyBar,
+              {
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                paddingBottom: inputBarBottomPadding,
+                paddingLeft: Math.max(insets.left, 20),
+                paddingRight: Math.max(insets.right, 20),
+              },
+            ]}
+            onLayout={(e) => setBottomDockHeight(e.nativeEvent.layout.height)}
+          >
+            <Text style={chatStyles.readOnlyText}>This chat is read-only. {event?.title ?? 'the plan'} has ended.</Text>
           </View>
         ) : (
-          <View style={{ backgroundColor: Colors.white }}>
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: Colors.white,
+            }}
+            onLayout={(e) => setBottomDockHeight(e.nativeEvent.layout.height)}
+          >
             {replyingTo && (
               <View style={chatStyles.replyBar}>
                 <View style={chatStyles.replyBarLeft}>
@@ -1126,7 +1160,16 @@ export default function ChatScreen() {
                 </TouchableOpacity>
               </View>
             )}
-          <View style={[chatStyles.inputBar, { paddingBottom: inputBarBottomPadding }]}>
+          <View
+            style={[
+              chatStyles.inputBar,
+              {
+                paddingBottom: inputBarBottomPadding,
+                paddingLeft: Math.max(insets.left, 12) + 12,
+                paddingRight: Math.max(insets.right, 12) + 12,
+              },
+            ]}
+          >
             <TouchableOpacity onPress={handleAttachPress} style={chatStyles.cameraBtn} disabled={uploading}>
               {uploading ? (
                 <ActivityIndicator size="small" color={Colors.warmGray} />

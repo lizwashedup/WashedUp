@@ -14,7 +14,7 @@ import {
   Keyboard,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -159,6 +159,10 @@ async function saveDrafts(drafts: PlanDraft[]): Promise<void> {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PostScreen() {
+  const insets = useSafeAreaInsets();
+  const sheetBottomPad =
+    Platform.OS === 'ios' ? 40 : Math.max(insets.bottom, 16) + 16;
+
   const now = new Date();
   const currentYear = now.getFullYear();
   const years = [currentYear, currentYear + 1];
@@ -1167,7 +1171,10 @@ export default function PostScreen() {
       {/* ── Date Picker Modal ── */}
       <Modal visible={showDatePicker} transparent animationType="slide">
         <Pressable style={styles.modalOverlay} onPress={() => setShowDatePicker(false)}>
-          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable
+            style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]}
+            onPress={(e) => e.stopPropagation()}
+          >
             <Text style={styles.modalTitle}>Select date</Text>
             <View style={styles.pickerRow}>
               {/* Month */}
@@ -1223,7 +1230,10 @@ export default function PostScreen() {
       {/* ── Time Picker Modal ── */}
       <Modal visible={showTimePicker} transparent animationType="slide">
         <Pressable style={styles.modalOverlay} onPress={() => setShowTimePicker(false)}>
-          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable
+            style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]}
+            onPress={(e) => e.stopPropagation()}
+          >
             <Text style={styles.modalTitle}>Select time</Text>
             <View style={styles.pickerRow}>
               {/* Hour */}
