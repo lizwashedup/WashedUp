@@ -534,7 +534,11 @@ export default function ChatScreen() {
   // inverted FlatList can reserve exactly that much space at its visual
   // bottom. Inverted lists flip the content container, so paddingTop in
   // style terms is the side closest to the input bar visually.
-  const [bottomDockHeight, setBottomDockHeight] = useState(0);
+  // Default to 70 so the first render already reserves space for the input
+  // bar. Without this, bottomDockHeight starts at 0, the inverted list has
+  // no bottom padding, and the newest message renders behind the absolute-
+  // positioned input bar until onLayout fires and corrects it.
+  const [bottomDockHeight, setBottomDockHeight] = useState(70);
 
   // ── "Enable notifications" banner ────────────────────────────────────
   // Shows when the user has no push token and there are messages from
