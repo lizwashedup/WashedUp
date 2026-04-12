@@ -1705,9 +1705,15 @@ export default function PlanDetailScreen() {
         visible={shareAfterJoinVisible}
         onClose={() => {
           setShareAfterJoinVisible(false);
-          router.push(`/(tabs)/chats/${id}` as any);
           if (plan?.tickets_url) {
-            setTimeout(() => setTicketModalVisible(true), 600);
+            // Show the ticket prompt first; navigate to chat only after
+            // the user dismisses it. Previously we navigated immediately
+            // and fired the ticket modal 600ms later, which caused a
+            // visible flash of "get your tickets" over the chat screen
+            // transition on Android.
+            setTicketModalVisible(true);
+          } else {
+            router.push(`/(tabs)/chats/${id}` as any);
           }
         }}
         planTitle={plan?.title || ''}
@@ -1717,8 +1723,8 @@ export default function PlanDetailScreen() {
       />
 
       {/* Ticket Prompt Modal — shown after joining a ticketed event */}
-      <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => setTicketModalVisible(false)}>
-        <Pressable style={joinStyles.overlay} onPress={() => setTicketModalVisible(false)}>
+      <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => { setTicketModalVisible(false); router.push(`/(tabs)/chats/${id}` as any); }}>
+        <Pressable style={joinStyles.overlay} onPress={() => { setTicketModalVisible(false); router.push(`/(tabs)/chats/${id}` as any); }}>
           <Pressable style={ticketStyles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={ticketStyles.iconCircle}>
               <Ticket size={28} color={Colors.terracotta} strokeWidth={2} />
@@ -1733,6 +1739,7 @@ export default function PlanDetailScreen() {
               onPress={() => {
                 setTicketModalVisible(false);
                 if (plan?.tickets_url) openUrl(plan.tickets_url);
+                router.push(`/(tabs)/chats/${id}` as any);
               }}
               activeOpacity={0.85}
             >
@@ -1741,7 +1748,10 @@ export default function PlanDetailScreen() {
 
             <TouchableOpacity
               style={ticketStyles.secondaryBtn}
-              onPress={() => setTicketModalVisible(false)}
+              onPress={() => {
+                setTicketModalVisible(false);
+                router.push(`/(tabs)/chats/${id}` as any);
+              }}
               activeOpacity={0.7}
             >
               <Text style={ticketStyles.secondaryBtnText}>I'll remember</Text>
