@@ -54,7 +54,7 @@ export function SharePlanModal({
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType="slide" onRequestClose={onClose} statusBarTranslucent
       presentationStyle="pageSheet"
     >
       <View style={styles.container}>

@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Share,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { hapticLight } from '../lib/haptics';
 import { useRouter } from 'expo-router';
@@ -22,6 +23,7 @@ interface Props {
 
 export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const deepLink = slug ? `https://washedup.app/plans/${slug}` : `https://washedup.app/e/${planId}`;
 
   const handleSendToFriend = () => {
@@ -50,9 +52,9 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="slide">
+    <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={[styles.sheet, { paddingBottom: Math.max(40, insets.bottom + 16) }]} onPress={(e) => e.stopPropagation()}>
           <View style={styles.handle} />
           <Text style={styles.title}>Share this plan</Text>
 

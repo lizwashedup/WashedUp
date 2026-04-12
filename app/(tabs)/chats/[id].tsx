@@ -1307,7 +1307,7 @@ export default function ChatScreen() {
       )}
 
       {/* Full-screen photo viewer */}
-      <Modal visible={!!photoViewUrl} transparent animationType="fade">
+      <Modal visible={!!photoViewUrl} transparent animationType="fade" onRequestClose={() => setPhotoViewUrl(null)} statusBarTranslucent>
         <Pressable style={chatStyles.photoModal} onPress={() => setPhotoViewUrl(null)}>
           {photoViewUrl && (
             <Image source={{ uri: photoViewUrl }} style={chatStyles.photoFull} contentFit="contain" />

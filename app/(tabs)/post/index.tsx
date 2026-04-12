@@ -1170,7 +1170,7 @@ export default function PostScreen() {
       </Modal>
 
       {/* ── Date Picker Modal ── */}
-      <Modal visible={showDatePicker} transparent animationType="slide">
+      <Modal visible={showDatePicker} transparent animationType="slide" onRequestClose={() => setShowDatePicker(false)} statusBarTranslucent>
         <Pressable style={styles.modalOverlay} onPress={() => setShowDatePicker(false)}>
           <Pressable
             style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]}
@@ -1229,7 +1229,7 @@ export default function PostScreen() {
       </Modal>
 
       {/* ── Time Picker Modal ── */}
-      <Modal visible={showTimePicker} transparent animationType="slide">
+      <Modal visible={showTimePicker} transparent animationType="slide" onRequestClose={() => setShowTimePicker(false)} statusBarTranslucent>
         <Pressable style={styles.modalOverlay} onPress={() => setShowTimePicker(false)}>
           <Pressable
             style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]}
@@ -1288,7 +1288,7 @@ export default function PostScreen() {
       </Modal>
 
       {/* ── Category Picker Modal ── */}
-      <Modal visible={showCategoryPicker} transparent animationType="slide">
+      <Modal visible={showCategoryPicker} transparent animationType="slide" onRequestClose={() => setShowCategoryPicker(false)} statusBarTranslucent>
         <Pressable style={styles.modalOverlay} onPress={() => setShowCategoryPicker(false)}>
           <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.modalTitle}>Select category</Text>

@@ -212,7 +212,7 @@ const AlbumUploadFlow = forwardRef<AlbumUploadFlowHandle, Props>(function AlbumU
       </TouchableOpacity>
 
       {/* Attendance modal */}
-      <Modal visible={step === 'attendance'} transparent animationType="fade">
+      <Modal visible={step === 'attendance'} transparent animationType="fade" onRequestClose={() => setStep('attendance')} statusBarTranslucent>
         <Pressable style={styles.overlay} onPress={() => setStep('idle')}>
           <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
             <View style={styles.sheetHeader}>
@@ -278,7 +278,7 @@ const AlbumUploadFlow = forwardRef<AlbumUploadFlowHandle, Props>(function AlbumU
       </Modal>
 
       {/* Done modal */}
-      <Modal visible={step === 'done'} transparent animationType="fade">
+      <Modal visible={step === 'done'} transparent animationType="fade" onRequestClose={() => setStep('idle')} statusBarTranslucent>
         <Pressable style={styles.overlay} onPress={dismiss}>
           <Pressable style={styles.doneCard} onPress={e => e.stopPropagation()}>
             <Text style={styles.doneEmoji}>📸</Text>

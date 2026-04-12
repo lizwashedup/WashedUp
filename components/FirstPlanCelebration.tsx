@@ -17,7 +17,7 @@ export default function FirstPlanCelebration({ visible, onDismiss }: Props) {
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="none">
+    <Modal visible transparent animationType="none" onRequestClose={onDismiss} statusBarTranslucent>
       <Animated.View entering={FadeIn.duration(300)} style={styles.overlay}>
         <View style={styles.card}>
           <Text style={styles.headline}>Your first plan is live</Text>

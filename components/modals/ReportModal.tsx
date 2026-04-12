@@ -94,6 +94,7 @@ export function ReportModal({
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={handleClose}
+      statusBarTranslucent
     >
       <View style={styles.container}>
         {/* Header */}

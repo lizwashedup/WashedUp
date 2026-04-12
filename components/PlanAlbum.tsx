@@ -217,7 +217,7 @@ export default function PlanAlbum({ eventId, currentUserId, isPast, onAddPhotos 
       )}
 
       {/* Fullscreen viewer */}
-      <Modal visible={!!fullscreenPhoto} transparent animationType="fade">
+      <Modal visible={!!fullscreenPhoto} transparent animationType="fade" onRequestClose={() => setFullscreenPhoto(null)} statusBarTranslucent>
         <Pressable style={styles.fullscreenOverlay} onPress={() => setFullscreenPhoto(null)}>
           <TouchableOpacity
             style={styles.fullscreenClose}

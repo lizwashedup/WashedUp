@@ -1016,7 +1016,7 @@ export default function YourPeopleScreen() {
       )}
 
       {/* Invite Plan Picker */}
-      <Modal visible={!!inviteTarget} transparent animationType="fade">
+      <Modal visible={!!inviteTarget} transparent animationType="fade" onRequestClose={() => setInviteTarget(null)} statusBarTranslucent>
         <Pressable style={styles.qrOverlay} onPress={() => setInviteTarget(null)}>
           <Pressable style={styles.inviteSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.inviteSheetTitle}>
@@ -1064,7 +1064,7 @@ export default function YourPeopleScreen() {
       </Modal>
 
       {/* QR Modal */}
-      <Modal visible={showQr} transparent animationType="fade">
+      <Modal visible={showQr} transparent animationType="fade" onRequestClose={() => setShowQr(false)} statusBarTranslucent>
         <Pressable style={styles.qrOverlay} onPress={() => setShowQr(false)}>
           <Pressable style={styles.qrModal} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.qrModalTitle}>Scan to add me</Text>
@@ -1079,7 +1079,7 @@ export default function YourPeopleScreen() {
       </Modal>
 
       {/* One-time handle prompt */}
-      <Modal visible={showHandlePrompt} transparent animationType="fade">
+      <Modal visible={showHandlePrompt} transparent animationType="fade" onRequestClose={() => setShowHandlePrompt(false)} statusBarTranslucent>
         <Pressable style={styles.handlePromptOverlay} onPress={dismissHandlePrompt}>
           <Pressable style={styles.handlePromptCard} onPress={(e) => e.stopPropagation()}>
             <View style={styles.handlePromptIconWrap}>

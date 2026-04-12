@@ -10,6 +10,7 @@ import {
   PanResponder,
   Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { hapticSelection } from '../lib/haptics';
 import { Check } from 'lucide-react-native';
 import Colors from '../constants/Colors';
@@ -46,6 +47,7 @@ export function FilterBottomSheet({
   onClose,
   onClear,
 }: FilterBottomSheetProps) {
+  const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
 
@@ -98,7 +100,7 @@ export function FilterBottomSheet({
         <Pressable style={StyleSheet.absoluteFill} onPress={dismissSheet} />
       </Animated.View>
       <Animated.View
-        style={[styles.sheet, { transform: [{ translateY }] }]}
+        style={[styles.sheet, { transform: [{ translateY }], paddingBottom: Math.max(44, insets.bottom + 16) }]}
         {...panResponder.panHandlers}
       >
         <Pressable onStartShouldSetResponder={() => true}>

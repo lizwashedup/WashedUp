@@ -114,7 +114,7 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
   const isVisitor = profile?.is_visitor ?? false;
 
   return (
-    <Modal visible transparent animationType="fade">
+    <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
           {loading ? (
