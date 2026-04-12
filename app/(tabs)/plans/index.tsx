@@ -46,7 +46,7 @@ import {
 
 const TC = '#B5522E'; // terracotta primary accent
 
-const wLogo = require('../../../assets/images/w-logo-full.png');
+const wLogo = require('../../../assets/images/w-logo-waves.png');
 
 // Lazy-load map to avoid crash on Expo Go / environments where react-native-maps fails
 const LazyPlansMapView = lazy(() => import('../../../components/plans/PlansMapView'));

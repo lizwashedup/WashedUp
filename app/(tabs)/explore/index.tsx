@@ -160,7 +160,7 @@ export default function ScenePage() {
           <View style={[styles.heroFadeBand, { bottom: 0, opacity: 1 }]} />
           {/* Logo watermark on top */}
           <Image
-            source={require('../../../assets/images/w-logo-full.png')}
+            source={require('../../../assets/images/w-logo-waves.png')}
             style={styles.watermark}
             contentFit="contain"
           />

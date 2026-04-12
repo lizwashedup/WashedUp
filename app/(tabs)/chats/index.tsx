@@ -15,7 +15,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { ChevronDown, ChevronRight } from 'lucide-react-native';
 
-const wLogo = require('../../../assets/images/w-logo-full.png');
+const wLogo = require('../../../assets/images/w-logo-waves.png');
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
