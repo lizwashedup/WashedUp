@@ -22,6 +22,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { useQueryClient } from '@tanstack/react-query';
+import * as Notifications from 'expo-notifications';
+import { registerForPushNotifications } from '../../hooks/usePushNotifications';
 import { supabase } from '../../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
@@ -378,8 +380,55 @@ export default function ProfileScreen() {
     }
   };
 
-  // ── Settings rows (grouped: Legal, Support, Account) ───────────────────────
+  // ── Settings rows (grouped: Notifications, Legal, Support, Account) ───────
 
+  const handleEnablePushFromSettings = async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status === 'granted') {
+      // Already granted — re-run register to refresh the token on the
+      // current profile row in case it drifted.
+      await registerForPushNotifications({ prompt: false, userId: profile?.id ?? null }).catch(() => {});
+      setAlertInfo({
+        title: 'Notifications are on',
+        message: 'You\'re all set to get alerts for messages and plans.',
+      });
+      return;
+    }
+    if (status === 'denied') {
+      // iOS has recorded a hard denial; requestPermissionsAsync is a no-op.
+      setAlertInfo({
+        title: 'Turn on in Settings',
+        message: 'Notifications were turned off earlier. Open iOS Settings and enable them for WashedUp.',
+        buttons: [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ],
+      });
+      return;
+    }
+    // Undetermined / provisional: fire the native prompt and save the
+    // expo push token on grant.
+    const token = await registerForPushNotifications({ prompt: true, userId: profile?.id ?? null });
+    if (token) {
+      setAlertInfo({
+        title: 'Notifications enabled',
+        message: 'You\'ll get alerts for messages and plan updates.',
+      });
+    } else {
+      setAlertInfo({
+        title: 'Notifications not enabled',
+        message: 'You can turn them on later from iOS Settings → WashedUp.',
+        buttons: [
+          { text: 'OK', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ],
+      });
+    }
+  };
+
+  const notificationRows = [
+    { icon: 'notifications-outline', label: 'Enable notifications', onPress: handleEnablePushFromSettings },
+  ];
   const legalRows = [
     { icon: 'shield-outline', label: 'Privacy Policy', onPress: () => Linking.openURL('https://washedup.app/privacy') },
     { icon: 'document-text-outline', label: 'Terms of Service', onPress: () => Linking.openURL('https://washedup.app/terms') },
@@ -823,6 +872,14 @@ export default function ProfileScreen() {
             <Ionicons name="create-outline" size={16} color={Colors.terracotta} />
             <Text style={styles.editProfileBtnText}>Edit Profile</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Notifications */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Notifications</Text>
+        </View>
+        <View style={styles.settingsGroup}>
+          {notificationRows.map((row, i) => renderSettingsRow(row, i === notificationRows.length - 1))}
         </View>
 
         {/* Legal */}
