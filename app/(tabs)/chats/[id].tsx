@@ -528,10 +528,17 @@ export default function ChatScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [iosKeyboardHeight, setIosKeyboardHeight] = useState(0);
   useEffect(() => {
+    // Inverted FlatList: offset 0 is the visual bottom (newest message).
+    // When the keyboard opens we snap to that so the user always sees the
+    // latest messages above the newly-raised input bar.
+    const scrollToLatest = () => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    };
     if (Platform.OS === 'ios') {
       const showSub = Keyboard.addListener('keyboardWillShow', (e) => {
         setKeyboardVisible(true);
         setIosKeyboardHeight(e.endCoordinates.height);
+        scrollToLatest();
       });
       const hideSub = Keyboard.addListener('keyboardWillHide', () => {
         setKeyboardVisible(false);
@@ -542,7 +549,10 @@ export default function ChatScreen() {
         hideSub.remove();
       };
     }
-    const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const showSub = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+      scrollToLatest();
+    });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
     return () => {
       showSub.remove();
