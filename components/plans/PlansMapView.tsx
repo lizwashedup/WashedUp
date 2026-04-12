@@ -71,55 +71,39 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
 
   const label = plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title;
 
+  const laidOutRef = useRef(false);
+  const handleLayout = useCallback(() => {
+    if (laidOutRef.current) return;
+    laidOutRef.current = true;
+    if (IS_ANDROID) {
+      setTimeout(() => setTracks(false), 800);
+    } else {
+      setTracks(false);
+    }
+  }, []);
+
   return (
     <Marker
       coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
       onPress={() => onPress(plan)}
-      tracksViewChanges={IS_ANDROID ? true : (tracks || isSelected)}
+      tracksViewChanges={tracks || isSelected}
       stopPropagation
-      anchor={IS_ANDROID ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 }}
+      anchor={{ x: 0.5, y: 1 }}
     >
-      {IS_ANDROID ? (
-        // Android: single flat View, no nesting, no arrow. The bitmap
-        // rasterizer in react-native-maps clips nested Views and triangles
-        // to half-circles. A single View with inline text is the only
-        // structure that snapshots reliably.
-        <View
-          collapsable={false}
-          style={{
-            backgroundColor: pinBg,
-            paddingHorizontal: 10,
-            paddingVertical: 6,
-            borderRadius: 16,
-            minWidth: 40,
-            alignItems: 'center',
-            justifyContent: 'center',
-            ...(isSelected ? { elevation: 6 } : {}),
-          }}
-        >
-          <Text
-            style={{
-              fontFamily: Fonts.sansBold,
-              fontSize: FontSizes.caption,
-              color: Colors.white,
-              textAlign: 'center',
-            }}
-            numberOfLines={1}
-            allowFontScaling={false}
-          >
+      <View
+        style={styles.markerWrap}
+        collapsable={false}
+        renderToHardwareTextureAndroid={true}
+        onLayout={handleLayout}
+        pointerEvents="none"
+      >
+        <View collapsable={false} style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
+          <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
             {label}
           </Text>
         </View>
-      ) : (
-        <View style={styles.markerWrap} pointerEvents="none">
-          <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
-            <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
-              {label}
-            </Text>
-          </View>
-          <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
-        </View>
-      )}
+        <View collapsable={false} style={[styles.pinArrow, { borderTopColor: pinBg }]} />
+      </View>
     </Marker>
   );
 }
