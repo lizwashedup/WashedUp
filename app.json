@@ -49,11 +49,11 @@
     },
     "android": {
       "package": "com.washedup.app",
-      "versionCode": 6,
       "googleServicesFile": "./google-services.json",
+      "icon": "./assets/images/android-icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#AC4C2A"
+        "backgroundColor": "#B5522E"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
