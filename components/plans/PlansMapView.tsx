@@ -3,7 +3,12 @@ import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform } from '
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { ArrowLeft, MapPin, Calendar, Users, ChevronDown } from 'lucide-react-native';
-import ViewShot from 'react-native-view-shot';
+// HOTFIX 2026-04-13: react-native-view-shot is NOT in the iOS App Store 1.0.3
+// native binary (it was added to package.json after the binary was built).
+// The earlier OTA shipped this import to production iOS, which crashes the
+// map view on every open because the JS engine can't resolve the missing
+// native module. Removed for now — Android falls back to pinColor markers
+// (functional but unstyled). Proper labeled-pill replacement comes in 1.0.4.
 import { hapticLight, hapticSelection } from '../../lib/haptics';
 import * as Location from 'expo-location';
 import { MapView, Marker } from '../MapView.native';
@@ -55,62 +60,10 @@ interface PlanMarkerProps {
   onPress: (plan: Plan) => void;
 }
 
-// Android react-native-maps snapshots the marker view to a bitmap and uses
-// that as the marker image. If the snapshot fires before the custom view has
-// fully measured itself, the bitmap is clipped or sized wrong. The fix is to
-// render the pill offscreen inside a ViewShot, wait for onLayout, then
-// capture it as a PNG. Cached by plan.id + pinBg so color changes are
-// picked up.
-const markerImageCache: Record<string, string> = {};
-function cacheKey(planId: string, bg: string) { return `${planId}::${bg}`; }
-
 function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
   const [tracks, setTracks] = useState(!IS_ANDROID);
-  const key = cacheKey(plan.id, pinBg);
-  const [imageUri, setImageUri] = useState<string | null>(
-    IS_ANDROID ? (markerImageCache[key] ?? null) : null,
-  );
-  const viewShotRef = useRef<ViewShot | null>(null);
-  const capturedRef = useRef(!!markerImageCache[key]);
-  const layoutReady = useRef(false);
 
   const label = plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title;
-
-  // Android: capture the offscreen pill as a PNG once its native view has
-  // laid out. We wait for onLayout on the inner content, then call capture()
-  // on the next frame so the bitmap is fully rasterized.
-  const doCapture = useCallback(async () => {
-    if (!IS_ANDROID || capturedRef.current || !viewShotRef.current) return;
-    try {
-      const uri = await (viewShotRef.current as any).capture();
-      console.log('[ViewShot] captured marker for', plan.id, '| pinBg:', pinBg, '| uri:', uri);
-      markerImageCache[key] = uri;
-      capturedRef.current = true;
-      setImageUri(uri);
-    } catch (err) {
-      console.warn('[ViewShot] capture FAILED for', plan.id, '| pinBg:', pinBg, '| error:', err);
-    }
-  }, [plan.id, pinBg, key]);
-
-  const handleOffscreenLayout = useCallback(() => {
-    if (layoutReady.current) return;
-    layoutReady.current = true;
-    // Wait one frame after layout so the native view is fully rasterized
-    requestAnimationFrame(() => doCapture());
-  }, [doCapture]);
-
-  // Fallback: if onLayout doesn't fire within 500ms (e.g. because the
-  // offscreen view is inside MapView), force a capture attempt anyway.
-  useEffect(() => {
-    if (!IS_ANDROID || capturedRef.current) return;
-    const t = setTimeout(() => {
-      if (!capturedRef.current) {
-        console.log('[ViewShot] fallback timer firing for', plan.id);
-        doCapture();
-      }
-    }, 500);
-    return () => clearTimeout(t);
-  }, [plan.id, doCapture]);
 
   // iOS: turn off tracking after first paint
   useEffect(() => {
@@ -120,37 +73,18 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
     }
   }, []);
 
+  // Android: drop pin with pinColor only (no custom view, no ViewShot).
+  // Temporary fallback for the iOS hotfix; full replacement in 1.0.4.
   if (IS_ANDROID) {
     return (
-      <>
-        {/* Offscreen pill rendered once to capture as bitmap */}
-        {!capturedRef.current && (
-          <ViewShot
-            ref={viewShotRef}
-            options={{ format: 'png', result: 'tmpfile' }}
-            style={styles.offscreen}
-          >
-            <View
-              style={[styles.pin, { backgroundColor: pinBg }]}
-              collapsable={false}
-              onLayout={handleOffscreenLayout}
-            >
-              <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
-                {label}
-              </Text>
-            </View>
-            <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
-          </ViewShot>
-        )}
-        <Marker
-          coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
-          onPress={() => onPress(plan)}
-          tracksViewChanges={false}
-          stopPropagation
-          anchor={{ x: 0.5, y: 1 }}
-          {...(imageUri ? { image: { uri: imageUri } } : { pinColor: pinBg })}
-        />
-      </>
+      <Marker
+        coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
+        onPress={() => onPress(plan)}
+        tracksViewChanges={false}
+        stopPropagation
+        anchor={{ x: 0.5, y: 1 }}
+        pinColor={pinBg}
+      />
     );
   }
 
