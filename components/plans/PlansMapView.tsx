@@ -3,9 +3,15 @@ import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform } from '
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { ArrowLeft, MapPin, Calendar, Users, ChevronDown } from 'lucide-react-native';
+// HOTFIX 2026-04-13: react-native-view-shot is NOT in the iOS App Store 1.0.3
+// native binary (it was added to package.json after the binary was built).
+// The earlier OTA shipped this import to production iOS, which crashes the
+// map view on every open because the JS engine can't resolve the missing
+// native module. Removed for now — Android falls back to pinColor markers
+// (functional but unstyled). Proper labeled-pill replacement comes in 1.0.4.
 import { hapticLight, hapticSelection } from '../../lib/haptics';
 import * as Location from 'expo-location';
-import { MapView, Marker, PROVIDER_GOOGLE } from '../MapView.native';
+import { MapView, Marker } from '../MapView.native';
 import { MAP_STYLE } from '../../constants/MapStyle';
 import { CATEGORY_OPTIONS } from '../../constants/Categories';
 import { FilterBottomSheet } from '../FilterBottomSheet';
@@ -55,31 +61,32 @@ interface PlanMarkerProps {
 }
 
 function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
-  // Custom marker view pattern for react-native-maps on Android:
-  //
-  // The bitmap rasterization races against React Native's Text measurement
-  // pass — if tracksViewChanges flips to false before Text has reported its
-  // measured width, the captured bitmap shows a pill shrunk to padding-only
-  // with the first glyph visible. The race is not solvable with a fixed
-  // timer because measurement latency varies per device, font, and label.
-  //
-  // The fix is event-driven: gate the "freeze the bitmap" transition on
-  // onLayout firing on the pill View. onLayout only fires after native
-  // layout + measurement is complete, so once we see it we know the text
-  // is actually measured. An extra 120ms cushion lets the next render
-  // commit the post-measurement frame into the bitmap before we freeze.
-  // collapsable={false} prevents Android's view collapsing optimization
-  // from dropping the wrapper views before rasterization.
-  const [tracks, setTracks] = useState(true);
-  const [hasLaidOut, setHasLaidOut] = useState(false);
+  const [tracks, setTracks] = useState(!IS_ANDROID);
 
   const label = plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title;
 
+  // iOS: turn off tracking after first paint
   useEffect(() => {
-    if (!hasLaidOut) return;
-    const t = setTimeout(() => setTracks(false), 120);
-    return () => clearTimeout(t);
-  }, [hasLaidOut]);
+    if (!IS_ANDROID) {
+      const t = setTimeout(() => setTracks(false), 300);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  // Android: drop pin with pinColor only (no custom view, no ViewShot).
+  // Temporary fallback for the iOS hotfix; full replacement in 1.0.4.
+  if (IS_ANDROID) {
+    return (
+      <Marker
+        coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
+        onPress={() => onPress(plan)}
+        tracksViewChanges={false}
+        stopPropagation
+        anchor={{ x: 0.5, y: 1 }}
+        pinColor={pinBg}
+      />
+    );
+  }
 
   return (
     <Marker
@@ -89,17 +96,13 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
       stopPropagation
       anchor={{ x: 0.5, y: 1 }}
     >
-      <View style={styles.markerWrap} pointerEvents="none" collapsable={false}>
-        <View
-          style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}
-          collapsable={false}
-          onLayout={() => { if (!hasLaidOut) setHasLaidOut(true); }}
-        >
+      <View style={styles.markerWrap} pointerEvents="none">
+        <View style={[styles.pin, { backgroundColor: pinBg }, isSelected && styles.pinSelected]}>
           <Text style={styles.pinText} numberOfLines={1} allowFontScaling={false}>
             {label}
           </Text>
         </View>
-        <View style={[styles.pinArrow, { borderTopColor: pinBg }]} collapsable={false} />
+        <View style={[styles.pinArrow, { borderTopColor: pinBg }]} />
       </View>
     </Marker>
   );
@@ -156,10 +159,6 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
     <View style={styles.container}>
       <MapView
         ref={mapRef}
-        // iOS uses Apple Maps (the GoogleMaps iOS SDK is not in this
-        // build); only force Google on Android, where it's the default
-        // anyway but being explicit prevents provider drift.
-        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
         style={StyleSheet.absoluteFill}
         initialRegion={LA_REGION}
         customMapStyle={MAP_STYLE}
@@ -407,17 +406,23 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.terracotta,
   },
 
+  offscreen: {
+    position: 'absolute',
+    left: -1000,
+    top: -1000,
+    alignItems: 'center',
+    opacity: 1,
+  },
   markerWrap: {
     alignItems: 'center',
-    width: 180,
-    minHeight: 48,
-    overflow: 'visible',
+    width: 140,
+    height: 40,
   },
   pin: {
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 16,
-    maxWidth: 180,
+    maxWidth: 140,
     alignSelf: 'center',
   },
   pinSelected: {
