@@ -15,6 +15,7 @@ export const MapView = ({ style, children }: { style?: object; children?: React.
 );
 
 export const Marker = () => null;
+export const PROVIDER_GOOGLE = undefined;
 
 const styles = StyleSheet.create({
   placeholder: {
