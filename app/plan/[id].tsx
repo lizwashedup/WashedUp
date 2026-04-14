@@ -1778,7 +1778,13 @@ export default function PlanDetailScreen() {
               showsVerticalScrollIndicator={true}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
-              contentContainerStyle={{ paddingBottom: 24 }}
+              contentContainerStyle={{
+                // Android edge-to-edge: Modal renders full-screen behind
+                // the nav/gesture bar, so the ScrollView needs explicit
+                // insets.bottom padding or the last item (Cancel This Plan)
+                // ends up clipped by the system bar. iOS unchanged.
+                paddingBottom: 24 + (Platform.OS === 'android' ? insets.bottom : 0),
+              }}
               scrollIndicatorInsets={{ right: 2 }}
             >
               {/* Title */}

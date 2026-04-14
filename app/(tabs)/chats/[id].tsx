@@ -16,6 +16,7 @@ import {
   Linking,
   ScrollView,
   AppState,
+  LayoutChangeEvent,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
@@ -29,7 +30,7 @@ import { Ionicons } from '@expo/vector-icons';
 let Clipboard: typeof import('expo-clipboard') | null = null;
 try { Clipboard = require('expo-clipboard'); } catch {}
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
@@ -522,11 +523,35 @@ export default function ChatScreen() {
   // reported keyboard height, and apply it as paddingBottom on a
   // wrapper View around the FlatList + input bar. KAV is gone.
   //
-  // Android: adjustResize in AndroidManifest already resizes the window
-  // so we only need a boolean to drop the safe-area inset from the bar
-  // while the keyboard is open (otherwise the bar floats too high).
+  // Android: edgeToEdgeEnabled=true disables the classic adjustResize
+  // window shrink on Android 15+, and Keyboard.addListener('keyboardDidShow')
+  // reports a stale/zero height under new arch. We use Reanimated's
+  // useAnimatedKeyboard instead — it hooks into Android's WindowInsets
+  // API via the native module and is the only reliable height source in
+  // edge-to-edge mode. The shared value drives an animated style applied
+  // to the Android input bar wrapper (Animated.View). iOS continues to
+  // use the keyboardWillShow listener + iosKeyboardHeight state untouched.
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [iosKeyboardHeight, setIosKeyboardHeight] = useState(0);
+  // Android keyboard height mirrored from Reanimated's shared value into
+  // JS state so the FlatList's contentContainerStyle can re-render with
+  // the correct paddingTop reservation when the keyboard opens/closes.
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+  const animatedKeyboard = useAnimatedKeyboard();
+  const androidInputBarAnimatedStyle = useAnimatedStyle(() => ({
+    bottom: animatedKeyboard.height.value,
+  }));
+  useAnimatedReaction(
+    () => animatedKeyboard.height.value,
+    (h) => { runOnJS(setAndroidKeyboardHeight)(h); },
+    [],
+  );
+  // Android gets Animated.View driven by useAnimatedKeyboard; iOS gets
+  // plain View with static bottom from iosKeyboardHeight (unchanged).
+  const InputBarWrapper: React.ComponentType<any> =
+    Platform.OS === 'android' ? Animated.View : View;
+  const inputBarBottomStyle =
+    Platform.OS === 'android' ? androidInputBarAnimatedStyle : { bottom: iosKeyboardHeight };
   useEffect(() => {
     // Inverted FlatList: offset 0 is the visual bottom (newest message).
     // When the keyboard opens we snap to that so the user always sees the
@@ -570,9 +595,18 @@ export default function ChatScreen() {
   // positioned input bar until onLayout fires and corrects it.
   const [bottomDockHeight, setBottomDockHeight] = useState(70);
 
+  // Reserved space at the visual bottom of the inverted FlatList so the
+  // newest message always sits directly above the input bar. Without the
+  // keyboard height term, when the keyboard opens the input bar moves up
+  // but the reservation doesn't, so the newest message ends up hidden
+  // behind the keyboard and scrollToLatest lands "halfway up" visually.
+  const currentKeyboardHeight =
+    Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight;
+  const listBottomReservation = bottomDockHeight + 8 + currentKeyboardHeight;
+
   useEffect(() => {
-    console.log('[ChatList] bottomDockHeight:', bottomDockHeight, '| paddingTop applied:', bottomDockHeight + 8);
-  }, [bottomDockHeight]);
+    console.log('[ChatList] bottomDockHeight:', bottomDockHeight, '| listBottomReservation:', listBottomReservation);
+  }, [bottomDockHeight, listBottomReservation]);
 
   // ── "Enable notifications" banner ────────────────────────────────────
   // Shows when the user has no push token and there are messages from
@@ -1134,7 +1168,7 @@ export default function ChatScreen() {
             keyExtractor={item => item.id}
             inverted={true}
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: 12, paddingTop: bottomDockHeight + 8 }}
+            contentContainerStyle={{ paddingBottom: 12, paddingTop: listBottomReservation }}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === 'android'}
             automaticallyAdjustContentInsets={false}
@@ -1257,33 +1291,35 @@ export default function ChatScreen() {
             on the inverted list's contentContainerStyle, which guarantees
             new messages are never obscured by the bar on any screen size. */}
         {isPast ? (
-          <View
+          <InputBarWrapper
             style={[
               chatStyles.readOnlyBar,
               {
                 position: 'absolute',
                 left: 0,
                 right: 0,
-                bottom: Platform.OS === 'ios' ? iosKeyboardHeight : 0,
                 paddingBottom: inputBarBottomPadding,
                 paddingLeft: Math.max(insets.left, 20),
                 paddingRight: Math.max(insets.right, 20),
               },
+              inputBarBottomStyle,
             ]}
-            onLayout={(e) => setBottomDockHeight(e.nativeEvent.layout.height)}
+            onLayout={(e: LayoutChangeEvent) => setBottomDockHeight(e.nativeEvent.layout.height)}
           >
             <Text style={chatStyles.readOnlyText}>This chat is read-only. {event?.title ?? 'the plan'} has ended.</Text>
-          </View>
+          </InputBarWrapper>
         ) : (
-          <View
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              bottom: Platform.OS === 'ios' ? iosKeyboardHeight : 0,
-              backgroundColor: Colors.white,
-            }}
-            onLayout={(e) => setBottomDockHeight(e.nativeEvent.layout.height)}
+          <InputBarWrapper
+            style={[
+              {
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                backgroundColor: Colors.white,
+              },
+              inputBarBottomStyle,
+            ]}
+            onLayout={(e: LayoutChangeEvent) => setBottomDockHeight(e.nativeEvent.layout.height)}
           >
             {replyingTo && (
               <View style={chatStyles.replyBar}>
@@ -1358,7 +1394,7 @@ export default function ChatScreen() {
               <Ionicons name="arrow-up" size={18} color={Colors.white} />
             </TouchableOpacity>
           </View>
-          </View>
+          </InputBarWrapper>
         )}
       </View>
 

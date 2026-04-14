@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { supabase } from '../lib/supabase';
@@ -30,6 +32,7 @@ interface InboxModalProps {
 export default function InboxModal({ visible, onClose, userId }: InboxModalProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   // Clear the home-screen badge whenever the inbox is opened. The act of
@@ -183,7 +186,16 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   return (
     <Modal visible transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <Pressable style={s.overlay} onPress={onClose}>
-        <Pressable style={s.sheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable
+          style={[
+            s.sheet,
+            // Android edge-to-edge: Modal renders behind the nav/gesture bar;
+            // add the bottom inset on top of the base 40px so action buttons
+            // stay clear of the system bar. iOS unchanged.
+            Platform.OS === 'android' && { paddingBottom: 40 + insets.bottom },
+          ]}
+          onPress={(e) => e.stopPropagation()}
+        >
           <View style={s.handle} />
           <View style={s.headerRow}>
             <Text style={s.title}>Notifications</Text>

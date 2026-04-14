@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   useSharedValue,
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export function SaveSnackbar({ visible, planId, planTitle, onShare, onDismiss }: Props) {
+  const insets = useSafeAreaInsets();
   const translateY = useSharedValue(100);
   const opacity = useSharedValue(0);
 
@@ -49,7 +51,16 @@ export function SaveSnackbar({ visible, planId, planTitle, onShare, onDismiss }:
   if (!visible) return null;
 
   return (
-    <Animated.View style={[styles.container, animStyle]}>
+    <Animated.View
+      style={[
+        styles.container,
+        // Android edge-to-edge: lift the snackbar above the nav/gesture bar
+        // on top of the base 90px tab-bar clearance. iOS already accounts
+        // for the home indicator through its own tab bar safe area.
+        Platform.OS === 'android' && { bottom: 90 + insets.bottom },
+        animStyle,
+      ]}
+    >
       <View style={styles.left}>
         <Ionicons name="bookmark" size={14} color={Colors.terracotta} />
         <Text style={styles.savedText}>Saved!</Text>

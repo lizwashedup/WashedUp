@@ -9,6 +9,7 @@ import {
   ScrollView,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { BrandedAlert } from '../BrandedAlert';
@@ -39,6 +40,7 @@ export function ReportModal({
   reportedUserName,
   eventId,
 }: ReportModalProps) {
+  const insets = useSafeAreaInsets();
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string } | null>(null);
@@ -155,7 +157,17 @@ export function ReportModal({
         </ScrollView>
 
         {/* Sticky submit button */}
-        <View style={[styles.footer, { paddingBottom: Platform.OS === 'ios' ? 32 : 20 }]}>
+        <View
+          style={[
+            styles.footer,
+            {
+              // Android edge-to-edge: add nav/gesture bar inset so submit
+              // button stays tappable. iOS keeps its existing 32px.
+              paddingBottom:
+                Platform.OS === 'ios' ? 32 : 20 + insets.bottom,
+            },
+          ]}
+        >
           <TouchableOpacity
             style={[styles.submitBtn, !selectedReason && styles.submitBtnDisabled]}
             onPress={handleSubmit}
