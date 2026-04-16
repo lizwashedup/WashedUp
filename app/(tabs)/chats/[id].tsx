@@ -596,13 +596,22 @@ export default function ChatScreen() {
   const [bottomDockHeight, setBottomDockHeight] = useState(70);
 
   // Reserved space at the visual bottom of the inverted FlatList so the
-  // newest message always sits directly above the input bar. Without the
-  // keyboard height term, when the keyboard opens the input bar moves up
-  // but the reservation doesn't, so the newest message ends up hidden
-  // behind the keyboard and scrollToLatest lands "halfway up" visually.
-  const currentKeyboardHeight =
-    Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight;
-  const listBottomReservation = bottomDockHeight + 8 + currentKeyboardHeight;
+  // newest message always sits directly above the input bar.
+  //
+  // iOS: the list shrinks by iosKeyboardHeight via marginBottom on the
+  // FlatList style below, so the contentContainer only needs to reserve
+  // the input bar height. Growing paddingTop by the keyboard height here
+  // would trigger maintainVisibleContentPosition to shift the scroll on
+  // keyboard open, leaving the user stuck mid-conversation unable to
+  // reach the newest message above the bar.
+  //
+  // Android: edgeToEdge disables the classic adjustResize window shrink,
+  // so the list itself doesn't get smaller when the keyboard opens — the
+  // paddingTop has to reserve both the bar and the keyboard height.
+  const listBottomReservation =
+    Platform.OS === 'ios'
+      ? bottomDockHeight + 8
+      : bottomDockHeight + 8 + androidKeyboardHeight;
 
   useEffect(() => {
     console.log('[ChatList] bottomDockHeight:', bottomDockHeight, '| listBottomReservation:', listBottomReservation);
@@ -1167,7 +1176,10 @@ export default function ChatScreen() {
             data={enrichedItems}
             keyExtractor={item => item.id}
             inverted={true}
-            style={{ flex: 1 }}
+            style={[
+              { flex: 1 },
+              Platform.OS === 'ios' && { marginBottom: iosKeyboardHeight },
+            ]}
             contentContainerStyle={{ paddingBottom: 12, paddingTop: listBottomReservation }}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === 'android'}
