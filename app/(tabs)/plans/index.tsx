@@ -136,7 +136,12 @@ function getSectionDefs(now: Date): SectionDef[] {
   const sections: SectionDef[] = [];
 
   const todayEnd = new Date(y, mo, d, 23, 59, 59, 999);
-  sections.push({ key: 'tonight', title: 'Tonight', from: now, to: todayEnd });
+  // Widen "Tonight" back 3h so happening-now plans (start_time in the last
+  // 3h) land in this bucket instead of falling through the section filter
+  // at line ~192. The RPC caps past plans at 3h so this won't pull in
+  // anything older than that.
+  const tonightFrom = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+  sections.push({ key: 'tonight', title: 'Tonight', from: tonightFrom, to: todayEnd });
 
   if (day >= 1 && day <= 4) {
     const tomorrowStart = new Date(y, mo, d + 1, 0, 0, 0);
