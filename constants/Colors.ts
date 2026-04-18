@@ -77,6 +77,7 @@ const brand = {
   pinBooks: '#8B7A5E',
   pinWashedupEvent: '#2C1810',
   pinBirthdayParty: '#D4BF82',
+  pinHappeningNow: '#C5A55A',  // Live/happening-now map marker bg (semantic alias; same hex as pinComedy but different meaning)
 
   // ── Q2 palette ───────────────────────────────────────────────────────────
   darkWarm: '#2C1810',       // Primary text (warm dark)

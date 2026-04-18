@@ -55,6 +55,7 @@ interface EventInfo {
   id: string;
   title: string;
   start_time: string;
+  status: string;
   tickets_url: string | null;
   member_count: number;
   members: Array<{ id: string; first_name: string | null; avatar_url: string | null }>;
@@ -65,7 +66,7 @@ async function fetchEventInfo(eventId: string): Promise<EventInfo> {
   const [eventResult, memberResult] = await Promise.all([
     supabase
       .from('events')
-      .select('id, title, start_time, tickets_url, member_count')
+      .select('id, title, start_time, status, tickets_url, member_count')
       .eq('id', eventId)
       .maybeSingle(),
     supabase
@@ -101,6 +102,7 @@ async function fetchEventInfo(eventId: string): Promise<EventInfo> {
     id: event.id,
     title: event.title,
     start_time: event.start_time,
+    status: (event as any).status ?? 'forming',
     tickets_url: (event as any).tickets_url ?? null,
     member_count: (event as any).member_count ?? 0,
     members,
@@ -781,8 +783,13 @@ export default function ChatScreen() {
   }
 
   const isPast = event
-    ? new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000)
+    ? event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000)
     : false;
+
+  const hoursLeft = event
+    ? Math.round(48 - ((Date.now() - new Date(event.start_time).getTime()) / (1000 * 60 * 60)))
+    : 0;
+  const showCountdown = !isPast && !!event && new Date(event.start_time) < new Date() && hoursLeft > 0;
 
   const handleReportMenu = useCallback(async () => {
     // Fetch ALL members (no limit) for the report menu
@@ -1333,6 +1340,11 @@ export default function ChatScreen() {
             ]}
             onLayout={(e: LayoutChangeEvent) => setBottomDockHeight(e.nativeEvent.layout.height)}
           >
+            {showCountdown && (
+              <Text style={chatStyles.countdownText}>
+                {`chat stays active for ${hoursLeft} more hours`}
+              </Text>
+            )}
             {replyingTo && (
               <View style={chatStyles.replyBar}>
                 <View style={chatStyles.replyBarLeft}>
@@ -1459,8 +1471,8 @@ export default function ChatScreen() {
       <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)} statusBarTranslucent>
         <Pressable style={overlayStyles.backdrop} onPress={() => setOverlayMessage(null)}>
           <Pressable onPress={(e) => e.stopPropagation()} style={overlayStyles.container}>
-            {/* Emoji reaction row — only for other people's messages */}
-            {!overlayMessage?.isOwn && (
+            {/* Emoji reaction row — only for other people's messages, disabled when read-only */}
+            {!overlayMessage?.isOwn && !isPast && (
             <View style={overlayStyles.emojiRow}>
               {['\uD83D\uDC4D', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDE2E', '\uD83D\uDE22', '\uD83D\uDE4F'].map((emoji) => (
                 <EmojiReactionButton
@@ -1478,7 +1490,7 @@ export default function ChatScreen() {
 
             {/* Action menu */}
             <View style={overlayStyles.actionMenu}>
-              {overlayMessage?.message.message_type === 'user' && (
+              {overlayMessage?.message.message_type === 'user' && !isPast && (
                 <>
                   <TouchableOpacity
                     style={overlayStyles.actionRow}
@@ -1819,6 +1831,16 @@ const chatStyles = StyleSheet.create({
     borderTopColor: Colors.inputBg,
   },
   readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, fontStyle: 'italic' },
+  countdownText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: '#78695C',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: Colors.inputBg,
+  },
   replyBar: {
     flexDirection: 'row',
     alignItems: 'center',
