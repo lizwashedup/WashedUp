@@ -84,6 +84,7 @@ function PlanMarker({ plan, isSelected, pinBg, happeningNow, onPress }: PlanMark
         tracksViewChanges={false}
         stopPropagation
         anchor={{ x: 0.5, y: 1 }}
+        zIndex={happeningNow ? 1 : 0}
         {...(happeningNow
           ? { image: require('../../assets/markers/happening-now.png') }
           : { pinColor: pinBg }
@@ -92,10 +93,9 @@ function PlanMarker({ plan, isSelected, pinBg, happeningNow, onPress }: PlanMark
     );
   }
 
-  // iOS: custom View pill markers.
-  // Happening-now: gold pill, 1.3x larger, terracotta dot + "live · X there".
+  // iOS: custom View teardrop marker.
+  // Happening-now: gold circular teardrop with "live" text, rendered above normal pins.
   if (happeningNow) {
-    const going = Math.max(1, capDisplayCount(plan.member_count));
     return (
       <Marker
         coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
@@ -103,15 +103,16 @@ function PlanMarker({ plan, isSelected, pinBg, happeningNow, onPress }: PlanMark
         tracksViewChanges={tracks || isSelected}
         stopPropagation
         anchor={{ x: 0.5, y: 1 }}
+        zIndex={1}
       >
-        <View style={[styles.markerWrap, { transform: [{ scale: 1.3 }] }]} pointerEvents="none">
-          <View style={[styles.happeningNowPin, isSelected && styles.pinSelected]}>
-            <View style={styles.happeningNowDot} />
-            <Text style={styles.happeningNowPinText} numberOfLines={1} allowFontScaling={false}>
-              {`live \u00B7 ${going} there`}
+        <View style={styles.markerWrap} pointerEvents="none">
+          <View style={[styles.happeningNowTeardrop, isSelected && styles.pinSelected]}>
+            <View style={styles.happeningNowTeardropDot} />
+            <Text style={styles.happeningNowTeardropText} allowFontScaling={false}>
+              live
             </Text>
           </View>
-          <View style={[styles.pinArrow, { borderTopColor: Colors.pinHappeningNow }]} />
+          <View style={styles.happeningNowTeardropTail} />
         </View>
       </Marker>
     );
@@ -475,28 +476,37 @@ const styles = StyleSheet.create({
     color: Colors.white,
     textAlign: 'center',
   },
-  happeningNowPin: {
+  happeningNowTeardrop: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.pinHappeningNow,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    maxWidth: 160,
-    alignSelf: 'center',
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 14,
     gap: 5,
   },
-  happeningNowDot: {
+  happeningNowTeardropDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: Colors.terracotta,
   },
-  happeningNowPinText: {
+  happeningNowTeardropText: {
     fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    color: Colors.darkWarm,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
     textAlign: 'center',
+  },
+  happeningNowTeardropTail: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 7,
+    borderRightWidth: 7,
+    borderTopWidth: 10,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: Colors.pinHappeningNow,
+    marginTop: -1,
   },
   pinArrow: {
     width: 0,
