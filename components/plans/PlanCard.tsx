@@ -88,6 +88,10 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   const router = useRouter();
   const [cardAlert, setCardAlert] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
+  const isHappeningNow =
+    new Date(plan.start_time) <= new Date() &&
+    new Date(plan.start_time) > new Date(Date.now() - 3 * 60 * 60 * 1000);
+
   // ── Bookmark scale animation (declared early so handleWishlist can reference it) ──
   const bookmarkScale = useSharedValue(1);
   const bookmarkAnimatedStyle = useAnimatedStyle(() => ({
@@ -289,39 +293,48 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         {plan.title}
       </Text>
 
-      {/* B2. Featured pill (gold "washedup event" or pink "birthday party") for
-          featured plans, else regular category pill. */}
-      {isFeatured ? (
+      {/* B2. Pills row — happening-now status (when live), then featured pill
+          (gold "washedup event" or pink "birthday party") OR regular category
+          + women-only pills. Happening-now leads visually so users scanning
+          the feed spot live plans first. */}
+      {(isHappeningNow || isFeatured || plan.category || plan.gender_rule === 'women_only') ? (
         <View style={styles.categoryRow}>
-          <View
-            style={[
-              styles.featuredPill,
-              isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
-            ]}
-          >
-            <Text
-              style={[
-                styles.featuredPillText,
-                isBirthdayParty && { color: Colors.birthdayPink },
-              ]}
-            >
-              {isBirthdayParty ? 'birthday party' : 'washedup event'}
-            </Text>
-          </View>
-        </View>
-      ) : (plan.category || plan.gender_rule === 'women_only') ? (
-        <View style={styles.categoryRow}>
-          {plan.category && (
-            <View style={styles.categoryPill}>
-              <Text style={[styles.categoryPillText, { color: getPlanPinColor(plan) }]}>
-                {plan.category}
-              </Text>
+          {isHappeningNow && (
+            <View style={styles.happeningNowPill}>
+              <Text style={styles.happeningNowPillText}>happening now</Text>
             </View>
           )}
-          {plan.gender_rule === 'women_only' && (
-            <View style={styles.womenOnlyPill}>
-              <Text style={styles.womenOnlyPillText}>Women Only</Text>
+          {isFeatured ? (
+            <View
+              style={[
+                styles.featuredPill,
+                isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.featuredPillText,
+                  isBirthdayParty && { color: Colors.birthdayPink },
+                ]}
+              >
+                {isBirthdayParty ? 'birthday party' : 'washedup event'}
+              </Text>
             </View>
+          ) : (
+            <>
+              {plan.category && (
+                <View style={styles.categoryPill}>
+                  <Text style={[styles.categoryPillText, { color: getPlanPinColor(plan) }]}>
+                    {plan.category}
+                  </Text>
+                </View>
+              )}
+              {plan.gender_rule === 'women_only' && (
+                <View style={styles.womenOnlyPill}>
+                  <Text style={styles.womenOnlyPillText}>Women Only</Text>
+                </View>
+              )}
+            </>
           )}
         </View>
       ) : null}
@@ -541,6 +554,18 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansBold,
     fontSize: 10,
     color: Colors.goldenAmber,
+    letterSpacing: 0.2,
+  },
+  happeningNowPill: {
+    backgroundColor: '#C5A55A',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  happeningNowPillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: '#2C1810',
     letterSpacing: 0.2,
   },
   womenOnlyPill: {

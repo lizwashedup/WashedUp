@@ -158,7 +158,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
         const { data: plans } = await supabase
           .from('event_members')
-          .select('event_id, events!inner(id, title, image_url, status, start_time)')
+          .select('event_id, events!inner(id, title, image_url, status, start_time, is_featured)')
           .eq('user_id', authedUserId)
           .eq('status', 'joined')
           .eq('events.status', 'completed')
@@ -184,6 +184,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           id: event.id,
           title: event.title,
           image_url: event.image_url ?? null,
+          is_featured: event.is_featured ?? false,
         });
 
         const { data: memberData } = await supabase

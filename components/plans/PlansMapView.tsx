@@ -18,7 +18,7 @@ import { FilterBottomSheet } from '../FilterBottomSheet';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
-import { getPlanPinColor } from '../../lib/planColors';
+import { getPlanPinColor, isHappeningNow } from '../../lib/planColors';
 import type { Plan } from '../../lib/fetchPlans';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -57,10 +57,11 @@ interface PlanMarkerProps {
   plan: Plan;
   isSelected: boolean;
   pinBg: string;
+  happeningNow: boolean;
   onPress: (plan: Plan) => void;
 }
 
-function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
+function PlanMarker({ plan, isSelected, pinBg, happeningNow, onPress }: PlanMarkerProps) {
   const [tracks, setTracks] = useState(!IS_ANDROID);
 
   const label = plan.title.length > 12 ? plan.title.slice(0, 12) + '...' : plan.title;
@@ -73,8 +74,8 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
     }
   }, []);
 
-  // Android: drop pin with pinColor only (no custom view, no ViewShot).
-  // Temporary fallback for the iOS hotfix; full replacement in 1.0.4.
+  // Android: always image-only (no custom View children — breaks on Android).
+  // Happening-now gets the gold LIVE teardrop; regular plans get pinColor.
   if (IS_ANDROID) {
     return (
       <Marker
@@ -83,11 +84,41 @@ function PlanMarker({ plan, isSelected, pinBg, onPress }: PlanMarkerProps) {
         tracksViewChanges={false}
         stopPropagation
         anchor={{ x: 0.5, y: 1 }}
-        pinColor={pinBg}
+        zIndex={happeningNow ? 1 : 0}
+        {...(happeningNow
+          ? { image: require('../../assets/markers/happening-now.png') }
+          : { pinColor: pinBg }
+        )}
       />
     );
   }
 
+  // iOS: custom View teardrop marker.
+  // Happening-now: gold circular teardrop with "live" text, rendered above normal pins.
+  if (happeningNow) {
+    return (
+      <Marker
+        coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
+        onPress={() => onPress(plan)}
+        tracksViewChanges={tracks || isSelected}
+        stopPropagation
+        anchor={{ x: 0.5, y: 1 }}
+        zIndex={1}
+      >
+        <View style={styles.markerWrap} pointerEvents="none">
+          <View style={[styles.happeningNowTeardrop, isSelected && styles.pinSelected]}>
+            <View style={styles.happeningNowTeardropDot} />
+            <Text style={styles.happeningNowTeardropText} allowFontScaling={false}>
+              live
+            </Text>
+          </View>
+          <View style={styles.happeningNowTeardropTail} />
+        </View>
+      </Marker>
+    );
+  }
+
+  // Regular iOS pill (plan title, category color).
   return (
     <Marker
       coordinate={{ latitude: plan.location_lat!, longitude: plan.location_lng! }}
@@ -176,6 +207,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
             plan={plan}
             isSelected={selectedPlan?.id === plan.id}
             pinBg={getPlanPinColor(plan)}
+            happeningNow={isHappeningNow(plan)}
             onPress={handleMarkerPress}
           />
         ))}
@@ -241,6 +273,11 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
             />
           )}
           <View style={styles.cardContent}>
+            {isHappeningNow(selectedPlan) && (
+              <View style={styles.cardHappeningNowPill}>
+                <Text style={styles.cardHappeningNowText}>happening now</Text>
+              </View>
+            )}
             {selectedPlan.category && (
               <View style={[styles.cardCatBadge, { backgroundColor: getPlanPinColor(selectedPlan) }]}>
                 <Text style={styles.cardCatText}>{selectedPlan.category}</Text>
@@ -439,6 +476,38 @@ const styles = StyleSheet.create({
     color: Colors.white,
     textAlign: 'center',
   },
+  happeningNowTeardrop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.pinHappeningNow,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 14,
+    gap: 5,
+  },
+  happeningNowTeardropDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.terracotta,
+  },
+  happeningNowTeardropText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+    textAlign: 'center',
+  },
+  happeningNowTeardropTail: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 7,
+    borderRightWidth: 7,
+    borderTopWidth: 10,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: Colors.pinHappeningNow,
+    marginTop: -1,
+  },
   pinArrow: {
     width: 0,
     height: 0,
@@ -472,6 +541,20 @@ const styles = StyleSheet.create({
   cardContent: {
     padding: 14,
     gap: 6,
+  },
+  cardHappeningNowPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.pinHappeningNow,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+    marginBottom: 4,
+  },
+  cardHappeningNowText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: Colors.darkWarm,
+    letterSpacing: 0.2,
   },
   cardCatBadge: {
     alignSelf: 'flex-start',

@@ -8,11 +8,9 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
     ArrowLeft,
     Calendar,
-    Camera,
     MapPin,
     MessageCircle,
     MoreHorizontal,
-    Pen,
     Ticket,
     Users
 } from 'lucide-react-native';
@@ -54,8 +52,6 @@ import { showAddToCalendar } from '../../lib/addToCalendar';
 let showLocation: typeof import('react-native-map-link').showLocation | null = null;
 try { showLocation = require('react-native-map-link').showLocation; } catch {}
 import { MapView, Marker } from '../../components/MapView';
-import AlbumUploadFlow from '../../components/AlbumUploadFlow';
-import PlanAlbum from '../../components/PlanAlbum';
 
 // Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
 // Falls back to the hard-coded key so autocomplete works in preview/CI builds
@@ -414,7 +410,6 @@ export default function PlanDetailScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
-  const albumUploadRef = React.useRef<import('../../components/AlbumUploadFlow').AlbumUploadFlowHandle>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [mapCoords, setMapCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [joinModalVisible, setJoinModalVisible] = useState(false);
@@ -621,40 +616,10 @@ export default function PlanDetailScreen() {
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
   const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
-
-  // Post-plan prompt: check if user has uploaded photos and written a moment
-  const { data: hasUploadedPhotos = false } = useQuery({
-    queryKey: ['has-uploaded-photos', id, currentUserId],
-    queryFn: async () => {
-      if (!currentUserId) return false;
-      const { count } = await supabase
-        .from('plan_photos')
-        .select('id', { count: 'exact', head: true })
-        .eq('event_id', id)
-        .eq('uploaded_by', currentUserId);
-      return (count ?? 0) > 0;
-    },
-    enabled: isPastPlan && (isMember || isCreator) && !!currentUserId,
-  });
-
-  const { data: hasWrittenMoment = false } = useQuery({
-    queryKey: ['has-written-moment', id, currentUserId],
-    queryFn: async () => {
-      if (!currentUserId) return false;
-      const { count } = await supabase
-        .from('plan_moments')
-        .select('id', { count: 'exact', head: true })
-        .eq('event_id', id)
-        .eq('user_id', currentUserId);
-      return (count ?? 0) > 0;
-    },
-    enabled: isPastPlan && (isMember || isCreator) && !!currentUserId,
-  });
-
-  const showPostPlanPrompt = isPastPlan && (isMember || isCreator) && (!hasUploadedPhotos || !hasWrittenMoment);
-
-  const [momentText, setMomentText] = useState('');
-  const [momentSubmitting, setMomentSubmitting] = useState(false);
+  const isHappeningNow =
+    !!plan &&
+    new Date(plan.start_time) <= new Date() &&
+    new Date(plan.start_time) > new Date(Date.now() - 3 * 60 * 60 * 1000);
 
   const manageGenderOptions = useMemo(() => {
     const opts: { label: string; value: string }[] = [
@@ -1215,74 +1180,6 @@ export default function PlanDetailScreen() {
           />
         ) : null}
 
-        {/* Post-plan prompt */}
-        {showPostPlanPrompt && currentUserId && (
-          <View style={styles.postPlanPrompt}>
-            <Text style={styles.postPlanTitle}>How'd it go?</Text>
-            {!hasUploadedPhotos && (
-              <TouchableOpacity
-                style={styles.postPlanRow}
-                onPress={() => albumUploadRef.current?.startFlow()}
-                activeOpacity={0.8}
-              >
-                <View style={styles.postPlanIcon}>
-                  <Camera size={18} color={Colors.terracotta} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.postPlanRowTitle}>Add your photos</Text>
-                  <Text style={styles.postPlanRowSub}>They'll develop overnight and be ready tomorrow</Text>
-                </View>
-              </TouchableOpacity>
-            )}
-            {!hasWrittenMoment && (
-              <View style={styles.postPlanMomentWrap}>
-                <View style={styles.postPlanRow}>
-                  <View style={styles.postPlanIcon}>
-                    <Pen size={16} color={Colors.terracotta} />
-                  </View>
-                  <Text style={styles.postPlanRowTitle}>Write a note</Text>
-                </View>
-                <TextInput
-                  style={styles.postPlanInput}
-                  placeholder="write a note to help remember this plan"
-                  placeholderTextColor={Colors.textLight}
-                  value={momentText}
-                  onChangeText={setMomentText}
-                  multiline
-                  maxLength={500}
-                  textAlignVertical="top"
-                />
-                {momentText.trim().length > 0 && (
-                  <TouchableOpacity
-                    style={[styles.postPlanSubmit, momentSubmitting && { opacity: 0.5 }]}
-                    onPress={async () => {
-                      if (momentSubmitting || !momentText.trim()) return;
-                      setMomentSubmitting(true);
-                      try {
-                        await supabase.from('plan_moments').insert({
-                          event_id: id,
-                          user_id: currentUserId,
-                          content: momentText.trim(),
-                          is_public: true,
-                        });
-                        hapticSuccess();
-                        setMomentText('');
-                        queryClient.invalidateQueries({ queryKey: ['has-written-moment', id, currentUserId] });
-                        queryClient.invalidateQueries({ queryKey: ['user-moments', currentUserId] });
-                      } catch {}
-                      setMomentSubmitting(false);
-                    }}
-                    disabled={momentSubmitting}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.postPlanSubmitText}>Share moment</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-          </View>
-        )}
-
         {/* A. Creator Info */}
         <View style={styles.creatorBlock}>
           <TouchableOpacity
@@ -1368,6 +1265,19 @@ export default function PlanDetailScreen() {
 
         {/* E. Logistics Section */}
         <View style={styles.logisticsCard}>
+          {isHappeningNow && (
+            <View style={styles.happeningNowBanner}>
+              <Text style={styles.happeningNowBannerText}>
+                happening right now
+              </Text>
+              <Text style={styles.happeningNowBannerInvite}>
+                still room for you
+              </Text>
+              <Text style={styles.happeningNowBannerSub}>
+                started at {formatTime(plan.start_time).toLowerCase()}
+              </Text>
+            </View>
+          )}
           <View style={styles.logisticsRow}>
             <Calendar size={18} color={Colors.terracotta} strokeWidth={2} />
             <View style={styles.logisticsContent}>
@@ -1466,16 +1376,6 @@ export default function PlanDetailScreen() {
           ))}
         </View>
 
-        {/* G. Album for past plans */}
-        {isPastPlan && currentUserId && (
-          <PlanAlbum
-            eventId={plan!.id}
-            currentUserId={currentUserId}
-            isPast={isPastPlan}
-            onAddPhotos={() => albumUploadRef.current?.startFlow()}
-          />
-        )}
-
         {/* H. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && isEligible && !isFull && (
           <View style={styles.ctaBlock}>
@@ -1494,7 +1394,6 @@ export default function PlanDetailScreen() {
       <View style={[styles.stickyBar, { paddingBottom: insets.bottom + 12 }]}>
         {isPastPlan && (isMember || isCreator) && currentUserId ? (
           <View style={styles.memberActions}>
-            <AlbumUploadFlow ref={albumUploadRef} eventId={plan!.id} currentUserId={currentUserId} members={members} />
             <TouchableOpacity
               style={styles.openChatButton}
               onPress={() => router.push(`/(tabs)/chats/${plan!.id}` as any)}
@@ -2316,74 +2215,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 140,
   },
-  // Post-plan prompt
-  postPlanPrompt: {
-    backgroundColor: Colors.white,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  postPlanTitle: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    marginBottom: 12,
-  },
-  postPlanRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 8,
-  },
-  postPlanIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: `${Colors.terracotta}10`,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  postPlanRowTitle: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  postPlanRowSub: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.textLight,
-    marginTop: 2,
-  },
-  postPlanMomentWrap: {
-    marginTop: 4,
-  },
-  postPlanInput: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-    backgroundColor: Colors.inputBg,
-    borderRadius: 12,
-    padding: 12,
-    minHeight: 64,
-    marginTop: 8,
-    lineHeight: 20,
-  },
-  postPlanSubmit: {
-    alignSelf: 'flex-end',
-    backgroundColor: Colors.terracotta,
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 18,
-    marginTop: 10,
-  },
-  postPlanSubmitText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodySM,
-    color: Colors.white,
-  },
-
   creatorBlock: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2530,6 +2361,30 @@ const styles = StyleSheet.create({
   },
   logisticsContent: {
     flex: 1,
+  },
+  happeningNowBanner: {
+    backgroundColor: '#C5A55A',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  happeningNowBannerText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: '#2C1810',
+  },
+  happeningNowBannerInvite: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: '#2C1810',
+    marginTop: 2,
+  },
+  happeningNowBannerSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: '#78695C',
+    marginTop: 2,
   },
   logisticsMain: {
     fontFamily: Fonts.sansMedium,

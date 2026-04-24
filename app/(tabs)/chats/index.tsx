@@ -106,6 +106,15 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
         <View style={styles.datePill}>
           <Text style={styles.datePillText}>{formatEventDate(chat.start_time)}</Text>
         </View>
+        {!chat.is_past && new Date(chat.start_time) < new Date() && (() => {
+          const hl = Math.round(48 - ((Date.now() - new Date(chat.start_time).getTime()) / (1000 * 60 * 60)));
+          if (hl <= 0) return null;
+          return (
+            <Text style={styles.countdownText}>
+              {`chat stays active for ${hl} more hours`}
+            </Text>
+          );
+        })()}
       </View>
 
       {hasUnread && (
@@ -365,6 +374,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   datePillText: { fontSize: 10, fontWeight: '500', color: '#78695C' },
+  countdownText: {
+    fontSize: 12,
+    color: '#78695C',
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
   separator: { height: 1, backgroundColor: '#F5EDE0', marginLeft: 84 },
 
   emptyState: {
