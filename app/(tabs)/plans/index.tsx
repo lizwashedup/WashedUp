@@ -453,7 +453,7 @@ export default function PlansScreen() {
         .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured, featured_type')
         .eq('is_featured', true)
         .in('status', ['forming', 'active', 'full'])
-        .gt('start_time', new Date().toISOString())
+        .gt('start_time', new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString())
         .order('start_time', { ascending: true });
 
       if (error || !events || events.length === 0) return [];
@@ -694,14 +694,14 @@ export default function PlansScreen() {
 
   const myPlansUpcoming = useMemo(
     () => myPlans
-      .filter((p) => ['forming', 'active', 'full'].includes(p.status) && new Date(p.start_time) >= now)
+      .filter((p) => ['forming', 'active', 'full'].includes(p.status) && new Date(p.start_time) >= new Date(Date.now() - 3 * 60 * 60 * 1000))
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
     [myPlans, now],
   );
 
   const myPlansPast = useMemo(
     () => myPlans
-      .filter((p) => p.status === 'completed' || new Date(p.start_time) < now)
+      .filter((p) => p.status === 'completed' || new Date(p.start_time) < new Date(Date.now() - 3 * 60 * 60 * 1000))
       .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
       .slice(0, 20),
     [myPlans, now],

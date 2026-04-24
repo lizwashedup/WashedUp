@@ -621,6 +621,10 @@ export default function PlanDetailScreen() {
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
   const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
+  const isHappeningNow =
+    !!plan &&
+    new Date(plan.start_time) <= new Date() &&
+    new Date(plan.start_time) > new Date(Date.now() - 3 * 60 * 60 * 1000);
 
   // Post-plan prompt: check if user has uploaded photos and written a moment
   const { data: hasUploadedPhotos = false } = useQuery({
@@ -1368,6 +1372,19 @@ export default function PlanDetailScreen() {
 
         {/* E. Logistics Section */}
         <View style={styles.logisticsCard}>
+          {isHappeningNow && (
+            <View style={styles.happeningNowBanner}>
+              <Text style={styles.happeningNowBannerText}>
+                happening right now
+              </Text>
+              <Text style={styles.happeningNowBannerInvite}>
+                still room for you
+              </Text>
+              <Text style={styles.happeningNowBannerSub}>
+                started at {formatTime(plan.start_time).toLowerCase()}
+              </Text>
+            </View>
+          )}
           <View style={styles.logisticsRow}>
             <Calendar size={18} color={Colors.terracotta} strokeWidth={2} />
             <View style={styles.logisticsContent}>
@@ -2530,6 +2547,30 @@ const styles = StyleSheet.create({
   },
   logisticsContent: {
     flex: 1,
+  },
+  happeningNowBanner: {
+    backgroundColor: '#C5A55A',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  happeningNowBannerText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: '#2C1810',
+  },
+  happeningNowBannerInvite: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: '#2C1810',
+    marginTop: 2,
+  },
+  happeningNowBannerSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: '#78695C',
+    marginTop: 2,
   },
   logisticsMain: {
     fontFamily: Fonts.sansMedium,
