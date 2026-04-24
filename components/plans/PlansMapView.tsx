@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import { MapView, Marker } from '../MapView.native';
 import { MAP_STYLE } from '../../constants/MapStyle';
 import { CATEGORY_OPTIONS } from '../../constants/Categories';
+import { WHEN_OPTIONS } from '../../constants/WhenFilter';
 import { FilterBottomSheet } from '../FilterBottomSheet';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -52,6 +53,47 @@ interface PlansMapViewProps {
 }
 
 const IS_ANDROID = Platform.OS === 'android';
+
+// Mirror of the When-bucket date math in app/(tabs)/plans/index.tsx:getSectionDefs.
+// Kept inline to avoid a shared util; buckets rarely change.
+function matchesWhen(startTime: string, whenKeys: string[], now: Date): boolean {
+  if (whenKeys.length === 0) return true;
+  const t = new Date(startTime).getTime();
+  const y = now.getFullYear(), mo = now.getMonth(), d = now.getDate(), day = now.getDay();
+
+  for (const key of whenKeys) {
+    if (key === 'tonight') {
+      const from = now.getTime() - 3 * 60 * 60 * 1000;
+      const to = new Date(y, mo, d, 23, 59, 59, 999).getTime();
+      if (t >= from && t <= to) return true;
+    } else if (key === 'this-weekend') {
+      let from: number | null = null;
+      let to: number | null = null;
+      if (day >= 1 && day <= 4) {
+        const daysToFri = 5 - day;
+        from = new Date(y, mo, d + daysToFri, 16, 0, 0, 0).getTime();
+        to = new Date(y, mo, d + daysToFri + 2, 23, 59, 59, 999).getTime();
+      } else if (day === 5) {
+        from = new Date(y, mo, d + 1, 0, 0, 0).getTime();
+        to = new Date(y, mo, d + 2, 23, 59, 59, 999).getTime();
+      } else if (day === 6) {
+        from = new Date(y, mo, d + 1, 0, 0, 0).getTime();
+        to = new Date(y, mo, d + 1, 23, 59, 59, 999).getTime();
+      }
+      if (from !== null && to !== null && t >= from && t <= to) return true;
+    } else if (key === 'next-week') {
+      const daysToNextMon = day === 0 ? 1 : (8 - day);
+      const from = new Date(y, mo, d + daysToNextMon, 0, 0, 0).getTime();
+      const to = new Date(y, mo, d + daysToNextMon + 4, 23, 59, 59, 999).getTime();
+      if (t >= from && t <= to) return true;
+    } else if (key === 'coming-up') {
+      const daysToNextMon = day === 0 ? 1 : (8 - day);
+      const nextFriEnd = new Date(y, mo, d + daysToNextMon + 4, 23, 59, 59, 999).getTime();
+      if (t > nextFriEnd) return true;
+    }
+  }
+  return false;
+}
 
 interface PlanMarkerProps {
   plan: Plan;
@@ -144,8 +186,18 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [heartFilter, setHeartFilter] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
+  const [whenFilter, setWhenFilter] = useState<string[]>([]);
+  const [whenSheetOpen, setWhenSheetOpen] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
   const mapRef = useRef<any>(null);
+
+  const now = useMemo(() => new Date(), []);
+  const whenActive = whenFilter.length > 0;
+  const whenLabel = whenFilter.length === 0
+    ? 'When'
+    : whenFilter.length === 1
+      ? WHEN_OPTIONS.find((o) => o.key === whenFilter[0])?.label ?? 'When'
+      : `When · ${whenFilter.length}`;
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
@@ -157,6 +209,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
     if (!p.location_lat || !p.location_lng) return false;
     if (selectedFilter && (p.category?.toLowerCase() !== selectedFilter.toLowerCase())) return false;
     if (heartFilter && !wishlistedSet[p.id]) return false;
+    if (!matchesWhen(p.start_time, whenFilter, now)) return false;
     return true;
   });
 
@@ -219,13 +272,21 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
           <ArrowLeft size={20} color={Colors.asphalt} strokeWidth={2.5} />
         </TouchableOpacity>
 
-        <View style={styles.countPill}>
-          <Text style={styles.countText}>
-            {filteredPlans.length} {filteredPlans.length === 1 ? 'plan' : 'plans'}
-          </Text>
-        </View>
-
         <View style={styles.topBarRight}>
+          <TouchableOpacity
+            style={[styles.categoryPill, whenActive && styles.categoryPillActive]}
+            onPress={() => {
+              hapticSelection();
+              setWhenSheetOpen(true);
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.categoryPillText, whenActive && styles.categoryPillTextActive]}>
+              {whenLabel}
+            </Text>
+            <ChevronDown size={14} color={whenActive ? Colors.white : Colors.asphalt} strokeWidth={2} />
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.categoryPill, selectedFilter !== null && styles.categoryPillActive]}
             onPress={() => {
@@ -328,6 +389,22 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
       )}
 
       <FilterBottomSheet
+        visible={whenSheetOpen}
+        title="When"
+        options={[...WHEN_OPTIONS]}
+        selected={whenFilter}
+        onToggle={(key) => {
+          setWhenFilter(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+          setSelectedPlan(null);
+        }}
+        onClose={() => setWhenSheetOpen(false)}
+        onClear={() => {
+          setWhenFilter([]);
+          setSelectedPlan(null);
+        }}
+      />
+
+      <FilterBottomSheet
         visible={categorySheetOpen}
         title="Category"
         options={CATEGORY_OPTIONS.map((c) => ({ key: c, label: c }))}
@@ -372,23 +449,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 6,
     elevation: 4,
-  },
-
-  countPill: {
-    backgroundColor: Colors.white,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowColor: Colors.shadowBlack,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  countText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
   },
 
   topBarRight: {
