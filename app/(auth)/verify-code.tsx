@@ -77,10 +77,14 @@ export default function VerifyCodeScreen() {
       setVerifying(true);
       setMicroError(null);
       try {
+        // 'sms' verifies a fresh signInWithOtp; 'phone_change' verifies an
+        // updateUser({ phone }) call from the migration gate (existing user
+        // adding a phone to their already-authenticated account).
+        const verifyType = mode === 'migration' ? 'phone_change' : 'sms';
         const { error } = await supabase.auth.verifyOtp({
           phone: formatToE164(phone),
           token,
-          type: 'sms',
+          type: verifyType,
         });
         if (error) throw error;
         hapticSuccess();
