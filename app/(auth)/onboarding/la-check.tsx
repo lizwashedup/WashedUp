@@ -9,32 +9,37 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { router, useRouter } from 'expo-router';
-import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
-import { ChevronLeft } from 'lucide-react-native';
+import { router } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import { Fonts } from '../../../constants/Typography';
 
 export default function OnboardingLACheckScreen() {
-  const routerBack = useRouter();
   const [choseNo, setChoseNo] = useState(false);
   const [city, setCity] = useState('');
   const [loading, setLoading] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{
+    title: string;
+    message: string;
+    buttons?: BrandedAlertButton[];
+  } | null>(null);
 
   const handleLA = async (isVisitor: boolean) => {
+    if (loading) return;
     hapticLight();
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
+        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
         await supabase.auth.signOut();
         return;
       }
@@ -46,7 +51,10 @@ export default function OnboardingLACheckScreen() {
           onboarding_status: 'referral',
         })
         .eq('id', user.id);
-      if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
+      if (error) {
+        setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
+        return;
+      }
       router.push('/onboarding/referral');
     } finally {
       setLoading(false);
@@ -59,23 +67,33 @@ export default function OnboardingLACheckScreen() {
   };
 
   const handleContinueFromNo = async () => {
+    if (loading) return;
     hapticLight();
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
+        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
         await supabase.auth.signOut();
         return;
       }
       const trimmedCity = city.trim() || 'Other';
       const cityFilter = checkContent(trimmedCity);
       if (!cityFilter.ok) {
-        setAlertInfo({ title: 'Content not allowed', message: cityFilter.reason ?? 'Please try a different city name.' });
+        setAlertInfo({
+          title: 'content not allowed',
+          message: cityFilter.reason ?? 'please try a different city name.',
+        });
         return;
       }
-      const { error } = await supabase.from('profiles').update({ city: trimmedCity, onboarding_status: 'waitlisted' }).eq('id', user.id);
-      if (error) { setAlertInfo({ title: 'Something went wrong', message: 'Could not save. Please try again.' }); return; }
+      const { error } = await supabase
+        .from('profiles')
+        .update({ city: trimmedCity, onboarding_status: 'waitlisted' })
+        .eq('id', user.id);
+      if (error) {
+        setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
+        return;
+      }
       router.push('/onboarding/waitlisted');
     } finally {
       setLoading(false);
@@ -86,89 +104,95 @@ export default function OnboardingLACheckScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <KeyboardAvoidingView
-        style={styles.keyboardView}
+        style={styles.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.container}>
-            <View style={styles.progressWrap}>
-              <View style={[styles.progressBar, { width: '50%' }]} />
-            </View>
-            <View style={styles.headerRow}>
-              <TouchableOpacity
-                onPress={() => { hapticLight(); routerBack.back(); }}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                style={styles.backButton}
-              >
-                <ChevronLeft size={28} color={Colors.asphalt} />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.backHit}
+              onPress={() => {
+                hapticLight();
+                router.back();
+              }}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Ionicons name="chevron-back" size={24} color={Colors.text1} />
+            </TouchableOpacity>
 
-            <Text style={styles.heading}>Are you in the greater Los Angeles area?</Text>
-            <View style={styles.gap32} />
+            <View style={styles.body}>
+              <Text style={styles.heading}>
+                are you in the greater los angeles area?
+              </Text>
 
-            {!choseNo ? (
-              <>
-                <TouchableOpacity
-                  style={styles.primaryButton}
-                  onPress={() => handleLA(false)}
-                  onPressIn={() => hapticLight()}
-                  activeOpacity={0.9}
-                  disabled={loading}
-                >
-                  <Text style={styles.primaryButtonText}>Yes, I live here</Text>
-                </TouchableOpacity>
-                <View style={styles.gap16} />
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={() => handleLA(true)}
-                  onPressIn={() => hapticLight()}
-                  activeOpacity={0.9}
-                  disabled={loading}
-                >
-                  <Text style={styles.secondaryButtonText}>I&apos;m visiting LA</Text>
-                </TouchableOpacity>
-                <View style={styles.gap16} />
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={handleNo}
-                  onPressIn={() => hapticLight()}
-                  activeOpacity={0.9}
-                  disabled={loading}
-                >
-                  <Text style={styles.secondaryButtonText}>No, bring washedup to my city</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.waitlistHeading}>washedup is only in LA right now.</Text>
-                <View style={styles.gap16} />
-                <Text style={styles.notLaText}>
-                  We&apos;re expanding as fast as we can. If you&apos;d like washedup in your city, add it below to be added to the waitlist!
-                </Text>
-                <View style={styles.gap24} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Your city"
-                  placeholderTextColor={Colors.textLight}
-                  value={city}
-                  onChangeText={setCity}
-                  autoCapitalize="words"
-                  editable={!loading}
-                />
-                <View style={styles.gap24} />
-                <TouchableOpacity
-                  style={styles.primaryButton}
-                  onPress={handleContinueFromNo}
-                  onPressIn={() => hapticLight()}
-                  activeOpacity={0.9}
-                  disabled={loading}
-                >
-                  <Text style={styles.primaryButtonText}>Join Waitlist</Text>
-                </TouchableOpacity>
-              </>
-            )}
+              {!choseNo ? (
+                <View style={styles.choices}>
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={() => handleLA(false)}
+                    activeOpacity={0.9}
+                    disabled={loading}
+                  >
+                    <Text style={styles.primaryButtonText}>yes, i live here</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={() => handleLA(true)}
+                    activeOpacity={0.85}
+                    disabled={loading}
+                  >
+                    <Text style={styles.secondaryButtonText}>i’m visiting LA</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={handleNo}
+                    activeOpacity={0.85}
+                    disabled={loading}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      no, bring washedup to my city
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.noBlock}>
+                  <Text style={styles.notHereHeading}>
+                    washedup is only in la right now.
+                  </Text>
+                  <Text style={styles.notHereBody}>
+                    we’re expanding as fast as we can. add your city below and
+                    we’ll let you know when we land.
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="your city"
+                    placeholderTextColor={Colors.text3}
+                    value={city}
+                    onChangeText={setCity}
+                    autoCapitalize="words"
+                    editable={!loading}
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                  />
+
+                  <TouchableOpacity
+                    style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+                    onPress={handleContinueFromNo}
+                    activeOpacity={0.9}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color={Colors.surface} />
+                    ) : (
+                      <Text style={styles.primaryButtonText}>join waitlist</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
@@ -184,62 +208,97 @@ export default function OnboardingLACheckScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.parchment },
-  keyboardView: { flex: 1 },
-  container: { flex: 1, paddingHorizontal: 24 },
-  progressWrap: {
-    height: 4,
-    backgroundColor: Colors.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 8,
+  safe: { flex: 1, backgroundColor: Colors.cream },
+  kav: { flex: 1 },
+  container: { flex: 1, paddingHorizontal: 28, paddingTop: 4, paddingBottom: 16 },
+
+  backHit: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
   },
-  progressBar: { height: '100%', backgroundColor: Colors.terracotta, borderRadius: 2 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
-  backButton: { padding: 4 },
-  heading: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
-  gap32: { height: 32 },
-  gap24: { height: 24 },
-  gap20: { height: 20 },
-  gap16: { height: 16 },
-  gap8: { height: 8 },
+
+  body: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+
+  heading: {
+    fontFamily: Fonts.headline,
+    fontSize: 28,
+    lineHeight: 34,
+    color: Colors.text1,
+    marginBottom: 28,
+  },
+
+  choices: {
+    gap: 14,
+  },
+
   primaryButton: {
     height: 52,
-    borderRadius: 14,
-    backgroundColor: Colors.terracotta,
-    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: Colors.brand,
     alignItems: 'center',
-    shadowColor: Colors.terracotta,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    justifyContent: 'center',
+    shadowColor: Colors.brandDeep,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 28,
+    elevation: 6,
   },
-  primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.white },
+  primaryButtonDisabled: {
+    backgroundColor: Colors.borderWarm,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  primaryButtonText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 16,
+    color: Colors.surface,
+    letterSpacing: 0.2,
+  },
+
   secondaryButton: {
     height: 52,
-    borderRadius: 14,
-    backgroundColor: Colors.cardBg,
+    borderRadius: 8,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
-    borderColor: Colors.border,
-    justifyContent: 'center',
+    borderColor: Colors.borderWarm,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  secondaryButtonText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.displaySM, color: Colors.asphalt },
-  waitlistHeading: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
-  notLaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textMedium, lineHeight: 24 },
-  input: {
-    height: 52,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    paddingLeft: 16,
-    paddingRight: 16,
-    paddingVertical: 0,
+  secondaryButtonText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 15,
+    color: Colors.text1,
+  },
+
+  noBlock: {
+    gap: 16,
+  },
+  notHereHeading: {
+    fontFamily: Fonts.headline,
+    fontSize: 24,
+    lineHeight: 30,
+    color: Colors.text1,
+  },
+  notHereBody: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    textAlign: 'left',
+    fontSize: 15,
+    lineHeight: 22,
+    color: Colors.text2,
+  },
+  input: {
+    height: 56,
+    backgroundColor: Colors.inputBg,
+    borderWidth: 1,
+    borderColor: Colors.borderWarm,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 16,
+    color: Colors.text1,
   },
 });
