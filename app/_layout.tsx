@@ -303,6 +303,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // Link was tapped but tokens are missing (expired link or fragment stripped)
         isRecoveryRef.current = false;
         setAuthResolved(true);
+        console.log('[auth_redirect] reason=recovery_link_invalid');
         router.replace('/login');
         setTimeout(() => {
           setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired or is invalid. Please request a new one from the login screen.' });
@@ -318,6 +319,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       } else {
         isRecoveryRef.current = false;
         setAuthResolved(true);
+        console.log('[auth_redirect] reason=recovery_setSession_failed');
         router.replace('/login');
         setTimeout(() => {
           setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired. Please request a new one from the login screen.' });
@@ -342,6 +344,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           supabase.auth.getSession(),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
         ]);
+        const sessionTimedOut = sessionResult === null;
 
         if (cancelled || isRecoveryRef.current) return;
 
@@ -350,6 +353,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           : null;
 
         if (!session?.user) {
+          console.log(`[auth_redirect] reason=${sessionTimedOut ? 'getSession_timeout' : 'no_session'}`);
           lastNavRef.current = { dest: '/login', ts: Date.now() };
           router.replace('/login');
           setTimeout(() => setAuthResolved(true), 80);
@@ -364,6 +368,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           await supabase.auth.signOut();
           if (cancelled || isRecoveryRef.current) return;
           setAuthedUserId(null);
+          console.log('[auth_redirect] reason=banned_apple');
           lastNavRef.current = { dest: '/login', ts: Date.now() };
           router.replace('/login');
           setTimeout(() => setAuthResolved(true), 80);
@@ -385,6 +390,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         if (cancelled || isRecoveryRef.current) return;
 
         if (!profileData) {
+          console.log('[auth_redirect] reason=profile_fetch_failed');
           lastNavRef.current = { dest: '/login', ts: Date.now() };
           router.replace('/login');
           setTimeout(() => setAuthResolved(true), 80);
