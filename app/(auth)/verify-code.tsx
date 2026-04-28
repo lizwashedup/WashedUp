@@ -19,7 +19,7 @@ import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
-import { formatDisplay, formatToE164 } from '../../lib/phoneFormat';
+import { formatDisplay, formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
 import { onboardingDest } from '../../lib/authRouting';
 import OtpInput, { type OtpInputHandle } from '../../components/auth/OtpInput';
 
@@ -44,6 +44,28 @@ export default function VerifyCodeScreen() {
 
   const otpRef = useRef<OtpInputHandle>(null);
   const successAnim = useRef(new Animated.Value(0)).current;
+  // Track the post-verify hold timer so we can cancel on unmount and avoid
+  // setState-on-unmounted warnings if the user backs out mid-animation.
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Bail out if we landed here with no phone (e.g. someone deep-linked
+  // /verify-code directly). Without a phone, verifyOtp would always fail
+  // and the user would see the wrong "wrong code" error.
+  useEffect(() => {
+    if (!isValidUSPhone(phone)) {
+      router.replace('/phone-entry');
+    }
+  }, [phone]);
+
+  // Clear any pending hold timer when the screen unmounts.
+  useEffect(() => {
+    return () => {
+      if (holdTimerRef.current) {
+        clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Cooldown ticker
   useEffect(() => {
@@ -78,21 +100,43 @@ export default function VerifyCodeScreen() {
           easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: false,
         }).start();
+
+        // Mirror the verified phone onto profiles.phone_number. Supabase
+        // sets auth.users.phone automatically, but the profiles table is
+        // a separate row and isn't auto-synced. Without this write, a
+        // phone-auth user would have profiles.phone_number=null forever,
+        // which (a) bounces them back to /migration-gate on the next
+        // cold start, and (b) inflates their bot-detection score. Best-
+        // effort — swallow the error and keep navigating.
+        const e164 = formatToE164(phone);
+        const { data: { user: verifiedUser } } = await supabase.auth.getUser();
+        if (verifiedUser) {
+          supabase
+            .from('profiles')
+            .update({ phone_number: e164 })
+            .eq('id', verifiedUser.id)
+            .then(({ error: syncError }) => {
+              if (syncError) {
+                console.warn('[phone-auth] profiles.phone_number sync failed:', syncError.message);
+              }
+            });
+        }
+
         // Decide destination after a brief celebratory hold.
-        setTimeout(async () => {
+        holdTimerRef.current = setTimeout(async () => {
+          holdTimerRef.current = null;
           if (mode === 'migration') {
             router.replace('/(tabs)/plans');
             return;
           }
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) {
+          if (!verifiedUser) {
             router.replace('/onboarding/basics');
             return;
           }
           const { data: profile } = await supabase
             .from('profiles')
             .select('onboarding_status, referral_source')
-            .eq('id', user.id)
+            .eq('id', verifiedUser.id)
             .maybeSingle();
           const next = onboardingDest(
             profile?.onboarding_status,
@@ -109,7 +153,8 @@ export default function VerifyCodeScreen() {
         } else {
           setMicroError('wrong code. try again.');
         }
-        setTimeout(() => {
+        holdTimerRef.current = setTimeout(() => {
+          holdTimerRef.current = null;
           setCode('');
           setOtpState('idle');
           setMicroError(null);

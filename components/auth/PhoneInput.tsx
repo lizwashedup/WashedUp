@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
+import { View, Text, TextInput, StyleSheet } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
 import { formatDisplay, stripDigits } from '../../lib/phoneFormat';
@@ -83,10 +83,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: 'transparent',
-    ...Platform.select({
-      ios: { backdropFilter: 'blur(8px)' as never },
-      default: {},
-    }),
   },
   fieldRowError: {
     borderWidth: 1.5,
