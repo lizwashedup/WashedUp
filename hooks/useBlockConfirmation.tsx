@@ -7,14 +7,19 @@ import { supabase } from '../lib/supabase';
 /**
  * BrandedAlert-driven confirmation flow for blocking a user.
  *
- * Stage 1: this hook owns the confirm + error modals AND inlines the
- * supabase mutation. The live `useBlock` shows its own raw `Alert.alert`,
- * which would double-prompt over our BrandedAlert, so we can't call it
- * here yet. Stage 3 refactors `useBlock` into a pure mutation and this
- * hook switches to calling it; the inlined supabase block below goes
- * away then.
+ * Returns:
+ * - `requestBlock(id, name, options)` — opens the upfront confirm modal.
+ *   On success, fires `options.onSuccess` and (if provided) shows a soft
+ *   "want to tell us what happened?" prompt that calls
+ *   `options.onRequestReport` if the user opts in.
+ * - `blockNow(id, name, onSuccess?)` — runs the mutation directly without
+ *   the confirm modal; for follow-up flows (e.g. the "also block?"
+ *   prompt that fires after a standalone report) where consent has
+ *   already been collected.
+ * - `modals` — render this fragment somewhere in the consumer's tree.
  *
- * No call sites use this hook yet.
+ * Apple 1.2: every block writes a silent compliance row to `reports`
+ * regardless of whether the user opts into the post-block prompt.
  */
 type RequestBlockOptions = {
   onSuccess?: () => void;
@@ -174,8 +179,7 @@ export function useBlockConfirmation() {
         ]}
         footerLink={{
           text: 'see your blocked users',
-          // TODO: remove `as any` in stage 2 when /profile/blocked-users is created
-          onPress: () => router.push('/profile/blocked-users' as any),
+          onPress: () => router.push('/profile/blocked-users'),
         }}
         onClose={() => {
           if (!working) setConfirmTarget(null);

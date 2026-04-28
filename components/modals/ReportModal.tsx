@@ -79,7 +79,10 @@ export function ReportModal({
         reporter_user_id: user.id,
         reported_user_id: reportedUserId,
         reason: selectedReason,
-        reported_event_id: eventId ?? null,
+        // `||` (not `??`) so empty-string eventIds (passed by MiniProfile
+        // contexts that aren't tied to a specific plan) coerce to null
+        // instead of failing the uuid type check.
+        reported_event_id: eventId || null,
         details,
       });
 
@@ -100,10 +103,9 @@ export function ReportModal({
           });
         }
       }, 350);
-    } catch (err) {
+    } catch {
       // Close the modal first so the error alert can render on top of it
       // (iOS pageSheet Modal blocks any other Modal sibling).
-      console.log('[ReportModal] submit failed:', err);
       onClose();
       setTimeout(() => {
         setAlertInfo({
