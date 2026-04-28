@@ -70,10 +70,12 @@ NEVER use #D97746, #A84B2A, #E8955A, or any other orange. Only #B5522E.
 - #C43D2E — error states only
 
 ### Fonts
-- DO NOT install or use Plus Jakarta Sans, DM Sans, or any custom fonts
-- Use the system font for everything (the default iOS/Android font)
-- Cochin is ONLY used for the logo wordmark. Never use Cochin anywhere else in the app. Creator messages use system font italic.
-- The header wordmark "washedup" is a PNG image, not a font
+- Three approved fonts, all loaded via @expo-google-fonts and referenced through constants/Typography.ts:
+  - **Cormorant Garamond** — editorial display, hero headlines, plan titles (Fonts.display, Fonts.displayBold, Fonts.displayItalic)
+  - **Plus Jakarta Sans** — onboarding section headlines, phone-auth flow (Fonts.headline, Fonts.headlineMedium)
+  - **DM Sans** — all UI text, body, buttons, labels (Fonts.sans, Fonts.sansMedium, Fonts.sansSemibold, Fonts.sansBold)
+- Never hardcode fontFamily strings — always use Fonts.* from constants/Typography.ts.
+- The header wordmark "washedup" is a PNG image, not a font.
 
 ### Plan card pattern
 - Creator avatar (real photo, 36px circle) with name + "posted" below
@@ -104,8 +106,8 @@ NEVER use #D97746, #A84B2A, #E8955A, or any other orange. Only #B5522E.
 - Include a CTA button
 
 ### Things to NEVER do
-- Never use gold (#D4BF82 or #C5A55A) for text — decorative only
-- Never use custom fonts — system font only
+- Never use gold (#D4BF82 or #C5A55A) for text — decorative only (exception: phone-auth OTP success state uses #C5A55A intentionally)
+- Never hardcode fontFamily strings — always reference Fonts from constants/Typography.ts
 - Never hardcode colors — always reference the Colors file (constants/Colors.ts)
 - Never say "host", "hosting", "Posted by", or "is going to" — always just "posted"
 - Never remove the + button from the tab bar

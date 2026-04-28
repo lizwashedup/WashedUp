@@ -1,8 +1,9 @@
 /**
  * WashedUp — Typography System
  *
- * Two-font system:
- *   Cormorant Garamond — editorial display, headings, plan titles
+ * Three-font system:
+ *   Cormorant Garamond — editorial display, hero headlines, plan titles
+ *   Plus Jakarta Sans  — onboarding section headlines (phone auth flow)
  *   DM Sans            — all UI text, body, buttons, labels
  */
 
@@ -10,8 +11,11 @@ export const Fonts = {
   display: 'CormorantGaramond_400Regular',
   displayBold: 'CormorantGaramond_700Bold',
   displayItalic: 'CormorantGaramond_400Regular_Italic',
+  headline: 'PlusJakartaSans_700Bold',
+  headlineMedium: 'PlusJakartaSans_500Medium',
   sans: 'DMSans_400Regular',
   sansMedium: 'DMSans_500Medium',
+  sansSemibold: 'DMSans_600SemiBold',
   sansBold: 'DMSans_700Bold',
 } as const;
 

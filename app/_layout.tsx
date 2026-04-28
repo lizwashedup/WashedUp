@@ -10,8 +10,13 @@ import {
 import {
   DMSans_400Regular,
   DMSans_500Medium,
+  DMSans_600SemiBold,
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans';
+import {
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_700Bold,
+} from '@expo-google-fonts/plus-jakarta-sans';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
@@ -68,7 +73,10 @@ function RootLayout() {
     CormorantGaramond_400Regular_Italic,
     DMSans_400Regular,
     DMSans_500Medium,
+    DMSans_600SemiBold,
     DMSans_700Bold,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_700Bold,
     ...FontAwesome.font,
     ...Ionicons.font,
   });
