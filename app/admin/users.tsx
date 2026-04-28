@@ -71,7 +71,7 @@ export default function AdminUsersScreen() {
     const name = user.first_name_display ?? 'this user';
     Alert.alert(
       `Delete & Ban ${name}?`,
-      `This will permanently delete their account, all their plans and messages, and ban their email so they cannot re-register. This cannot be undone.`,
+      `This permanently deletes their account, plans, and messages. Their email and Apple ID are added to the ban list so they cannot re-register. This cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -81,18 +81,15 @@ export default function AdminUsersScreen() {
             setRemoving(user.id);
             hapticWarning();
             try {
-              const { data: { session } } = await supabase.auth.getSession();
-              if (!session) throw new Error('Not authenticated');
-
-              const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-manage-user', {
-                body: { action: 'delete_and_ban', targetUserId: user.id },
+              const { error } = await supabase.rpc('admin_ban_user', {
+                target_id: user.id,
+                ban_reason: `Manual ban from admin UI on ${new Date().toISOString().slice(0, 10)}`,
               });
-              if (fnError) throw fnError;
-              if (fnData?.error) throw new Error(fnData.error);
+              if (error) throw error;
 
               hapticSuccess();
               queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-              Alert.alert('Done', `${name} has been deleted and banned.`);
+              Alert.alert('Done', `${name} has been deleted and added to the ban list.`);
             } catch (e: any) {
               Alert.alert('Error', e.message ?? 'Could not remove user. Try again.');
             } finally {
