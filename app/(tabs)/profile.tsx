@@ -429,6 +429,9 @@ export default function ProfileScreen() {
   const notificationRows = [
     { icon: 'notifications-outline', label: 'Enable notifications', onPress: handleEnablePushFromSettings },
   ];
+  const privacyRows = [
+    { icon: 'ban-outline', label: 'blocked users', onPress: () => router.push('/profile/blocked-users') },
+  ];
   const legalRows = [
     { icon: 'shield-outline', label: 'Privacy Policy', onPress: () => Linking.openURL('https://washedup.app/privacy') },
     { icon: 'document-text-outline', label: 'Terms of Service', onPress: () => Linking.openURL('https://washedup.app/terms') },
@@ -880,6 +883,14 @@ export default function ProfileScreen() {
         </View>
         <View style={styles.settingsGroup}>
           {notificationRows.map((row, i) => renderSettingsRow(row, i === notificationRows.length - 1))}
+        </View>
+
+        {/* Privacy */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Privacy</Text>
+        </View>
+        <View style={styles.settingsGroup}>
+          {privacyRows.map((row, i) => renderSettingsRow(row, i === privacyRows.length - 1))}
         </View>
 
         {/* Legal */}

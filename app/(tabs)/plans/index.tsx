@@ -25,6 +25,7 @@ import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
 import { SkeletonFeed } from '../../../components/SkeletonCard';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
+import { BrandedAlert } from '../../../components/BrandedAlert';
 import { FeaturedEventCard } from '../../../components/plans/FeaturedEventCard';
 import { PlanCard } from '../../../components/plans/PlanCard';
 import { SaveSnackbar } from '../../../components/SaveSnackbar';
@@ -37,7 +38,7 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { supabase } from '../../../lib/supabase';
-import { useBlock } from '../../../hooks/useBlock';
+import { useBlockConfirmation } from '../../../hooks/useBlockConfirmation';
 import {
   markWelcomeShown,
   wasHandlePromptShownThisSession,
@@ -807,11 +808,15 @@ export default function PlansScreen() {
     [pastExpanded, myPlansPast.length, waitlistExpanded, waitlistedPlans.length],
   );
 
-  const { blockUser } = useBlock();
+  const { requestBlock, blockNow, modals: blockModals } = useBlockConfirmation();
+  const [pendingBlockAfterReport, setPendingBlockAfterReport] = useState<{ id: string; name: string } | null>(null);
+  const [reportFromBlock, setReportFromBlock] = useState(false);
+  const [reportSuccessAlert, setReportSuccessAlert] = useState(false);
 
   const handleReport = useCallback((planId: string) => {
     const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find((p) => p.id === planId);
     if (plan?.creator?.id) {
+      setReportFromBlock(false);
       setReportTarget({
         userId: plan.creator.id,
         userName: plan.creator.first_name_display ?? 'User',
@@ -823,9 +828,16 @@ export default function PlansScreen() {
   const handleBlock = useCallback((planId: string) => {
     const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find((p) => p.id === planId);
     if (plan?.creator?.id) {
-      blockUser(plan.creator.id, plan.creator.first_name_display ?? 'User');
+      const creatorId = plan.creator.id;
+      const creatorName = plan.creator.first_name_display ?? 'User';
+      requestBlock(creatorId, creatorName, {
+        onRequestReport: (uid, uname) => {
+          setReportFromBlock(true);
+          setReportTarget({ userId: uid, userName: uname, eventId: planId });
+        },
+      });
     }
-  }, [allPlans, myPlans, waitlistedPlans, blockUser]);
+  }, [allPlans, myPlans, waitlistedPlans, requestBlock]);
 
   const renderItem = useCallback(
     ({ item }: { item: Plan }) => (
@@ -1216,8 +1228,48 @@ export default function PlansScreen() {
           reportedUserId={reportTarget.userId}
           reportedUserName={reportTarget.userName}
           eventId={reportTarget.eventId}
+          onReportComplete={(uid, uname) => {
+            setReportTarget(null);
+            if (reportFromBlock) {
+              setReportSuccessAlert(true);
+            } else {
+              setPendingBlockAfterReport({ id: uid, name: uname });
+            }
+            setReportFromBlock(false);
+          }}
         />
       )}
+
+      <BrandedAlert
+        visible={!!pendingBlockAfterReport}
+        title="report submitted"
+        message={
+          pendingBlockAfterReport
+            ? `also block ${pendingBlockAfterReport.name}? they won't be able to see or join your plans.`
+            : undefined
+        }
+        buttons={[
+          { text: 'no thanks', style: 'cancel' },
+          {
+            text: 'block',
+            style: 'destructive',
+            onPress: () => {
+              if (pendingBlockAfterReport) {
+                void blockNow(pendingBlockAfterReport.id, pendingBlockAfterReport.name);
+              }
+            },
+          },
+        ]}
+        onClose={() => setPendingBlockAfterReport(null)}
+      />
+
+      <BrandedAlert
+        visible={reportSuccessAlert}
+        title="thanks for the report"
+        message="we review all reports within 24 hours."
+        buttons={[{ text: 'ok' }]}
+        onClose={() => setReportSuccessAlert(false)}
+      />
 
       <MiniProfileCard
         visible={!!miniProfileUserId}
@@ -1225,13 +1277,21 @@ export default function PlansScreen() {
         onClose={() => setMiniProfileUserId(null)}
         onReport={(uid, uname) => {
           setMiniProfileUserId(null);
+          setReportFromBlock(false);
           setReportTarget({ userId: uid, userName: uname, eventId: '' });
         }}
         onBlock={(uid, uname) => {
           setMiniProfileUserId(null);
-          blockUser(uid, uname);
+          requestBlock(uid, uname, {
+            onRequestReport: (rUid, rUname) => {
+              setReportFromBlock(true);
+              setReportTarget({ userId: rUid, userName: rUname, eventId: '' });
+            },
+          });
         }}
       />
+
+      {blockModals}
 
       <SaveSnackbar
         visible={!!snackbar}

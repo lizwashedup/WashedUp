@@ -65,17 +65,41 @@ Deno.serve(async (req) => {
       ? `https://washedup.app/e/${report.reported_event_id}`
       : 'N/A';
 
+    // Split details into the auto-prefix (e.g. "Reported from plan") and the
+    // user-typed note (anything after the blank line). Either may be missing.
+    const escapeHtml = (s: string) =>
+      s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const rawDetails = report.details ?? '';
+    const sepIdx = rawDetails.indexOf('\n\n');
+    const contextLine = sepIdx >= 0 ? rawDetails.slice(0, sepIdx) : rawDetails;
+    const userNote = sepIdx >= 0 ? rawDetails.slice(sepIdx + 2).trim() : '';
+    const userNoteHtml = userNote
+      ? escapeHtml(userNote).replace(/\n/g, '<br>')
+      : '';
+
     const html = `
       <div style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #D97746; margin-bottom: 4px;">${isBlock ? 'User Blocked' : 'New Report'}</h2>
         <p style="color: #999; font-size: 13px; margin-top: 0;">${new Date(report.created_at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} PT</p>
 
+        ${userNoteHtml ? `
+        <div style="margin-top: 16px; padding: 14px 16px; background: #FFF8F2; border-left: 4px solid #D97746; border-radius: 6px;">
+          <div style="color: #999; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px;">What the reporter said</div>
+          <div style="color: #1E1E1E; font-size: 15px; line-height: 22px; white-space: pre-wrap;">${userNoteHtml}</div>
+        </div>
+        ` : ''}
+
         <table style="width: 100%; border-collapse: collapse; margin-top: 16px;">
-          <tr><td style="padding: 8px 0; color: #666; width: 140px;">Reason</td><td style="padding: 8px 0; font-weight: 600;">${report.reason}</td></tr>
-          ${report.details ? `<tr><td style="padding: 8px 0; color: #666;">Details</td><td style="padding: 8px 0;">${report.details}</td></tr>` : ''}
-          <tr><td style="padding: 8px 0; color: #666;">Reported user</td><td style="padding: 8px 0;">${reportedName} (${reportedEmail})</td></tr>
+          <tr><td style="padding: 8px 0; color: #666; width: 140px;">Reason</td><td style="padding: 8px 0; font-weight: 600;">${escapeHtml(report.reason)}</td></tr>
+          ${contextLine ? `<tr><td style="padding: 8px 0; color: #666;">Context</td><td style="padding: 8px 0;">${escapeHtml(contextLine)}</td></tr>` : ''}
+          <tr><td style="padding: 8px 0; color: #666;">Reported user</td><td style="padding: 8px 0;">${escapeHtml(reportedName)} (${escapeHtml(reportedEmail)})</td></tr>
           <tr><td style="padding: 8px 0; color: #666;">Reported user ID</td><td style="padding: 8px 0; font-family: monospace; font-size: 12px;">${report.reported_user_id}</td></tr>
-          <tr><td style="padding: 8px 0; color: #666;">Reporter</td><td style="padding: 8px 0;">${reporterName}</td></tr>
+          <tr><td style="padding: 8px 0; color: #666;">Reporter</td><td style="padding: 8px 0;">${escapeHtml(reporterName)}</td></tr>
           <tr><td style="padding: 8px 0; color: #666;">Reporter ID</td><td style="padding: 8px 0; font-family: monospace; font-size: 12px;">${report.reporter_user_id}</td></tr>
           ${report.reported_event_id ? `<tr><td style="padding: 8px 0; color: #666;">Plan</td><td style="padding: 8px 0;"><a href="${planLink}" style="color: #D97746;">${report.reported_event_id}</a></td></tr>` : ''}
         </table>

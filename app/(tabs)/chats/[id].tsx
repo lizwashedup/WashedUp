@@ -44,7 +44,7 @@ import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import { ReportModal } from '../../../components/modals/ReportModal';
-import { useBlock } from '../../../hooks/useBlock';
+import { useBlockConfirmation } from '../../../hooks/useBlockConfirmation';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { registerForPushNotifications } from '../../../hooks/usePushNotifications';
@@ -744,7 +744,10 @@ export default function ChatScreen() {
     }, [id]),
   );
 
-  const { blockUser } = useBlock();
+  const { requestBlock, blockNow, modals: blockModals } = useBlockConfirmation();
+  const [pendingBlockAfterReport, setPendingBlockAfterReport] = useState<{ id: string; name: string } | null>(null);
+  const [reportFromBlock, setReportFromBlock] = useState(false);
+  const [reportSuccessAlert, setReportSuccessAlert] = useState(false);
 
   const { data: event, isError: eventError } = useQuery({
     queryKey: ['event-info', id],
@@ -829,8 +832,15 @@ export default function ChatScreen() {
             ActionSheetIOS.showActionSheetWithOptions(
               { options: ['Report User', 'Block User', 'Cancel'], destructiveButtonIndex: 1, cancelButtonIndex: 2, title: member.name },
               (actionIdx) => {
-                if (actionIdx === 0) { setReportTarget(member); setShowReport(true); }
-                if (actionIdx === 1) blockUser(member.id, member.name, () => router.back());
+                if (actionIdx === 0) { setReportFromBlock(false); setReportTarget(member); setShowReport(true); }
+                if (actionIdx === 1) requestBlock(member.id, member.name, {
+                  onSuccess: () => router.back(),
+                  onRequestReport: (rUid, rUname) => {
+                    setReportFromBlock(true);
+                    setReportTarget({ id: rUid, name: rUname });
+                    setShowReport(true);
+                  },
+                });
               },
             );
           }, 300);
@@ -849,8 +859,15 @@ export default function ChatScreen() {
                   title: member.name,
                   message: '',
                   buttons: [
-                    { text: 'Report User', onPress: () => { setReportTarget(member); setShowReport(true); } },
-                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => router.back()) },
+                    { text: 'Report User', onPress: () => { setReportFromBlock(false); setReportTarget(member); setShowReport(true); } },
+                    { text: 'Block User', style: 'destructive', onPress: () => requestBlock(member.id, member.name, {
+                      onSuccess: () => router.back(),
+                      onRequestReport: (rUid, rUname) => {
+                        setReportFromBlock(true);
+                        setReportTarget({ id: rUid, name: rUname });
+                        setShowReport(true);
+                      },
+                    }) },
                     { text: 'Cancel', style: 'cancel' },
                   ],
                 });
@@ -861,7 +878,7 @@ export default function ChatScreen() {
         ],
       });
     }
-  }, [id, currentUserId, blockUser]);
+  }, [id, currentUserId, requestBlock]);
 
   // Scroll the inverted FlatList to its visual bottom (offset 0 in inverted
   // coordinates is where the newest message lives). Needed because the list
@@ -1433,8 +1450,49 @@ export default function ChatScreen() {
           reportedUserId={reportTarget.id}
           reportedUserName={reportTarget.name}
           eventId={id}
+          onReportComplete={(uid, uname) => {
+            setShowReport(false);
+            setReportTarget(null);
+            if (reportFromBlock) {
+              setReportSuccessAlert(true);
+            } else {
+              setPendingBlockAfterReport({ id: uid, name: uname });
+            }
+            setReportFromBlock(false);
+          }}
         />
       )}
+
+      <BrandedAlert
+        visible={!!pendingBlockAfterReport}
+        title="report submitted"
+        message={
+          pendingBlockAfterReport
+            ? `also block ${pendingBlockAfterReport.name}? they won't be able to see or join your plans.`
+            : undefined
+        }
+        buttons={[
+          { text: 'no thanks', style: 'cancel' },
+          {
+            text: 'block',
+            style: 'destructive',
+            onPress: () => {
+              if (pendingBlockAfterReport) {
+                void blockNow(pendingBlockAfterReport.id, pendingBlockAfterReport.name);
+              }
+            },
+          },
+        ]}
+        onClose={() => setPendingBlockAfterReport(null)}
+      />
+
+      <BrandedAlert
+        visible={reportSuccessAlert}
+        title="thanks for the report"
+        message="we review all reports within 24 hours."
+        buttons={[{ text: 'ok' }]}
+        onClose={() => setReportSuccessAlert(false)}
+      />
 
       {/* Full-screen photo viewer */}
       <Modal visible={!!photoViewUrl} transparent animationType="fade" onRequestClose={() => setPhotoViewUrl(null)} statusBarTranslucent>
@@ -1453,11 +1511,21 @@ export default function ChatScreen() {
         visible={!!miniProfileUserId}
         onClose={() => setMiniProfileUserId(null)}
         onReport={(uid, uname) => {
+          setReportFromBlock(false);
           setReportTarget({ id: uid, name: uname });
           setShowReport(true);
         }}
-        onBlock={(uid, uname) => blockUser(uid, uname, () => router.back())}
+        onBlock={(uid, uname) => requestBlock(uid, uname, {
+          onSuccess: () => router.back(),
+          onRequestReport: (rUid, rUname) => {
+            setReportFromBlock(true);
+            setReportTarget({ id: rUid, name: rUname });
+            setShowReport(true);
+          },
+        })}
       />
+
+      {blockModals}
 
       <BrandedAlert
         visible={!!alertInfo}

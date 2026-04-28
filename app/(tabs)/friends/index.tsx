@@ -31,7 +31,7 @@ import { ReportModal } from '../../../components/modals/ReportModal';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useBlock } from '../../../hooks/useBlock';
+import { useBlockConfirmation } from '../../../hooks/useBlockConfirmation';
 import { checkContent } from '../../../lib/contentFilter';
 import { supabase } from '../../../lib/supabase';
 import { markHandlePromptShown } from '../../../lib/promptState';
@@ -594,9 +594,12 @@ export default function YourPeopleScreen() {
     }
   }, [inviteTarget, userId]);
 
-  const { blockUser } = useBlock();
+  const { requestBlock, blockNow, modals: blockModals } = useBlockConfirmation();
+  const [pendingBlockAfterReport, setPendingBlockAfterReport] = useState<{ id: string; name: string } | null>(null);
+  const [reportFromBlock, setReportFromBlock] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+  const [reportSuccessAlert, setReportSuccessAlert] = useState(false);
 
   const handleUserMenu = useCallback((targetId: string, targetName: string) => {
     hapticLight();
@@ -1020,8 +1023,49 @@ export default function YourPeopleScreen() {
           onClose={() => { setShowReport(false); setReportTarget(null); }}
           reportedUserId={reportTarget.id}
           reportedUserName={reportTarget.name}
+          onReportComplete={(uid, uname) => {
+            setShowReport(false);
+            setReportTarget(null);
+            if (reportFromBlock) {
+              setReportSuccessAlert(true);
+            } else {
+              setPendingBlockAfterReport({ id: uid, name: uname });
+            }
+            setReportFromBlock(false);
+          }}
         />
       )}
+
+      <BrandedAlert
+        visible={!!pendingBlockAfterReport}
+        title="report submitted"
+        message={
+          pendingBlockAfterReport
+            ? `also block ${pendingBlockAfterReport.name}? they won't be able to see or join your plans.`
+            : undefined
+        }
+        buttons={[
+          { text: 'no thanks', style: 'cancel' },
+          {
+            text: 'block',
+            style: 'destructive',
+            onPress: () => {
+              if (pendingBlockAfterReport) {
+                void blockNow(pendingBlockAfterReport.id, pendingBlockAfterReport.name);
+              }
+            },
+          },
+        ]}
+        onClose={() => setPendingBlockAfterReport(null)}
+      />
+
+      <BrandedAlert
+        visible={reportSuccessAlert}
+        title="thanks for the report"
+        message="we review all reports within 24 hours."
+        buttons={[{ text: 'ok' }]}
+        onClose={() => setReportSuccessAlert(false)}
+      />
 
       {/* Invite Plan Picker */}
       <Modal visible={!!inviteTarget} transparent animationType="fade" onRequestClose={() => setInviteTarget(null)} statusBarTranslucent>
@@ -1128,13 +1172,21 @@ export default function YourPeopleScreen() {
         userId={miniProfileUserId}
         onClose={() => setMiniProfileUserId(null)}
         onReport={(uid, uname) => {
+          setReportFromBlock(false);
           setReportTarget({ id: uid, name: uname });
           setShowReport(true);
         }}
         onBlock={(uid, uname) => {
-          blockUser(uid, uname, () => {
-            queryClient.invalidateQueries({ queryKey: ['profile-search'] });
-            queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+          requestBlock(uid, uname, {
+            onSuccess: () => {
+              queryClient.invalidateQueries({ queryKey: ['profile-search'] });
+              queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+            },
+            onRequestReport: (rUid, rUname) => {
+              setReportFromBlock(true);
+              setReportTarget({ id: rUid, name: rUname });
+              setShowReport(true);
+            },
           });
         }}
       />
@@ -1147,6 +1199,7 @@ export default function YourPeopleScreen() {
             text: `Report ${userMenuTarget?.name ?? ''}`,
             onPress: () => {
               if (userMenuTarget) {
+                setReportFromBlock(false);
                 setReportTarget({ id: userMenuTarget.id, name: userMenuTarget.name });
                 setShowReport(true);
               }
@@ -1157,9 +1210,16 @@ export default function YourPeopleScreen() {
             style: 'destructive',
             onPress: () => {
               if (userMenuTarget) {
-                blockUser(userMenuTarget.id, userMenuTarget.name, () => {
-                  queryClient.invalidateQueries({ queryKey: ['profile-search'] });
-                  queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+                requestBlock(userMenuTarget.id, userMenuTarget.name, {
+                  onSuccess: () => {
+                    queryClient.invalidateQueries({ queryKey: ['profile-search'] });
+                    queryClient.invalidateQueries({ queryKey: ['friends', userId] });
+                  },
+                  onRequestReport: (rUid, rUname) => {
+                    setReportFromBlock(true);
+                    setReportTarget({ id: rUid, name: rUname });
+                    setShowReport(true);
+                  },
                 });
               }
             },
@@ -1168,6 +1228,8 @@ export default function YourPeopleScreen() {
         ]}
         onClose={() => setUserMenuTarget(null)}
       />
+
+      {blockModals}
     </SafeAreaView>
   );
 }
