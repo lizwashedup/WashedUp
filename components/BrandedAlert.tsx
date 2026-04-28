@@ -14,10 +14,11 @@ interface BrandedAlertProps {
   title: string;
   message?: string;
   buttons?: BrandedAlertButton[];
+  footerLink?: { text: string; onPress: () => void };
   onClose: () => void;
 }
 
-export function BrandedAlert({ visible, title, message, buttons, onClose }: BrandedAlertProps) {
+export function BrandedAlert({ visible, title, message, buttons, footerLink, onClose }: BrandedAlertProps) {
   const resolvedButtons = buttons && buttons.length > 0 ? buttons : [{ text: 'OK', onPress: onClose }];
 
   return (
@@ -63,6 +64,19 @@ export function BrandedAlert({ visible, title, message, buttons, onClose }: Bran
               );
             })}
           </View>
+          {footerLink && (
+            <TouchableOpacity
+              style={styles.footerLinkWrap}
+              onPress={() => {
+                footerLink.onPress();
+                onClose();
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.6}
+            >
+              <Text style={styles.footerLinkText}>{footerLink.text}</Text>
+            </TouchableOpacity>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
@@ -140,5 +154,17 @@ const styles = StyleSheet.create({
   },
   buttonTextDestructive: {
     color: Colors.white,
+  },
+  footerLinkWrap: {
+    marginTop: 14,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerLinkText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+    textDecorationLine: 'underline',
   },
 });
