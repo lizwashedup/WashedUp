@@ -17,7 +17,7 @@ import {
   PlusJakartaSans_500Medium,
   PlusJakartaSans_700Bold,
 } from '@expo-google-fonts/plus-jakarta-sans';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
@@ -31,6 +31,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
+import { authedDest, unauthedRoute } from '../lib/authRouting';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useSessionLogger } from '../hooks/useSessionLogger';
@@ -112,30 +113,11 @@ function RootLayout() {
 
 export default Sentry.wrap(RootLayout);
 
-function onboardingDest(
-  status: string | null | undefined,
-  referralSource: string | null | undefined,
-): string {
-  // Backstop: users mid-onboarding on an older client may have reached photo
-  // or vibes without going through the referral step (added April 8). Bounce
-  // them back to referral before letting them continue. 'complete' is
-  // intentionally excluded — don't interrupt active users for a data backfill.
-  if (!referralSource && (status === 'photo' || status === 'vibes')) {
-    return '/onboarding/referral';
-  }
-  switch (status) {
-    case 'complete': return '/(tabs)/plans';
-    case 'vibes': return '/onboarding/vibes';
-    case 'photo': return '/onboarding/photo';
-    case 'referral': return '/onboarding/referral';
-    case 'la_check': return '/onboarding/la-check';
-    case 'waitlisted': return '/onboarding/waitlisted';
-    default: return '/onboarding/basics';
-  }
-}
-
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
   const [authResolved, setAuthResolved] = useState(false);
   const [authedUserId, setAuthedUserId] = useState<string | null>(null);
   const [layoutAlert, setLayoutAlert] = useState<{ title: string; message: string } | null>(null);
@@ -372,8 +354,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
         if (!session?.user) {
           console.log(`[auth_redirect] reason=${sessionTimedOut ? 'getSession_timeout' : 'no_session'}`);
-          lastNavRef.current = { dest: '/login', ts: Date.now() };
-          router.replace('/login');
+          const unauth = unauthedRoute();
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
           return;
         }
@@ -387,18 +370,23 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           if (cancelled || isRecoveryRef.current) return;
           setAuthedUserId(null);
           console.log('[auth_redirect] reason=banned_apple');
-          lastNavRef.current = { dest: '/login', ts: Date.now() };
-          router.replace('/login');
+          const unauth = unauthedRoute();
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
           return;
         }
 
         // Retry profile fetch once on failure — avoids signing out on a network blip
-        let profileData: { onboarding_status: string | null; referral_source: string | null } | null = null;
+        let profileData: {
+          onboarding_status: string | null;
+          referral_source: string | null;
+          phone_number: string | null;
+        } | null = null;
         for (let attempt = 0; attempt < 2; attempt++) {
           const { data, error: e } = await supabase
             .from('profiles')
-            .select('onboarding_status, referral_source')
+            .select('onboarding_status, referral_source, phone_number')
             .eq('id', session.user.id)
             .single();
           if (!e && data) { profileData = data as any; break; }
@@ -409,14 +397,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
         if (!profileData) {
           console.log('[auth_redirect] reason=profile_fetch_failed');
-          lastNavRef.current = { dest: '/login', ts: Date.now() };
-          router.replace('/login');
+          const unauth = unauthedRoute();
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
           return;
         }
 
         setAuthedUserId(session.user.id);
-        const dest = onboardingDest(profileData.onboarding_status, profileData.referral_source);
+        const dest = authedDest({
+          onboarding_status: profileData.onboarding_status,
+          referral_source: profileData.referral_source,
+          phone_number: profileData.phone_number,
+        });
         lastNavRef.current = { dest, ts: Date.now() };
         // Navigate first, then lift the overlay — prevents a 1-frame flash
         // where the splash is gone but the destination hasn't rendered yet.
@@ -424,8 +417,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setTimeout(() => setAuthResolved(true), 80);
       } catch {
         if (!cancelled) {
-          lastNavRef.current = { dest: '/login', ts: Date.now() };
-          router.replace('/login');
+          const unauth = unauthedRoute();
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
         }
       }
@@ -446,8 +440,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
       if (!session?.user) {
         setAuthedUserId(null);
-        lastNavRef.current = { dest: '/login', ts: Date.now() };
-        router.replace('/login');
+        const unauth = unauthedRoute();
+        lastNavRef.current = { dest: unauth, ts: Date.now() };
+        router.replace(unauth as any);
         return;
       }
 
@@ -458,19 +453,34 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (await isBannedAppleUser(session.user)) {
         await supabase.auth.signOut();
         setAuthedUserId(null);
-        lastNavRef.current = { dest: '/login', ts: Date.now() };
-        router.replace('/login');
+        const unauth = unauthedRoute();
+        lastNavRef.current = { dest: unauth, ts: Date.now() };
+        router.replace(unauth as any);
+        return;
+      }
+
+      // Verify-code is self-routing: it shows a 600ms success animation
+      // before navigating itself via the same authedDest helper. Skip the
+      // root-level redirect so we don't preempt that animation by yanking
+      // the user away the moment SIGNED_IN fires.
+      if (pathnameRef.current === '/verify-code') {
+        setAuthedUserId(session.user.id);
+        setAuthResolved(true);
         return;
       }
 
       try {
         const { data } = await supabase
           .from('profiles')
-          .select('onboarding_status, referral_source')
+          .select('onboarding_status, referral_source, phone_number')
           .eq('id', session.user.id)
           .single();
 
-        const dest = onboardingDest(data?.onboarding_status, data?.referral_source);
+        const dest = authedDest({
+          onboarding_status: data?.onboarding_status,
+          referral_source: data?.referral_source,
+          phone_number: data?.phone_number,
+        });
         const now = Date.now();
         if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {
           setAuthedUserId(session.user.id);

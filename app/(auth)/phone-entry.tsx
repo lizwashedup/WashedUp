@@ -47,9 +47,8 @@ export default function PhoneEntryScreen() {
       });
       if (otpError) throw otpError;
       hapticLight();
-      // Cast removed in phase 4 once /verify-code is added to typed routes.
       router.push({
-        pathname: '/verify-code' as never,
+        pathname: '/verify-code',
         params: { phone },
       });
     } catch (e: unknown) {

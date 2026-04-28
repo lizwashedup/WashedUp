@@ -49,7 +49,7 @@ export default function MigrationGateScreen() {
       if (updateError) throw updateError;
       hapticLight();
       router.push({
-        pathname: '/verify-code' as never,
+        pathname: '/verify-code',
         params: { phone, mode: 'migration' },
       });
     } catch (e: unknown) {
