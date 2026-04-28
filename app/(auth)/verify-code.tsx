@@ -20,6 +20,7 @@ import { Fonts } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { formatDisplay, formatToE164 } from '../../lib/phoneFormat';
+import { onboardingDest } from '../../lib/authRouting';
 import OtpInput, { type OtpInputHandle } from '../../components/auth/OtpInput';
 
 const RESEND_COOLDOWN_S = 30;
@@ -29,24 +30,6 @@ const CODE_LEN = 6;
 
 type Mode = 'signup' | 'migration';
 type OtpState = 'idle' | 'success' | 'error';
-
-function destForProfile(
-  status: string | null | undefined,
-  referralSource: string | null | undefined,
-): string {
-  if (!referralSource && (status === 'photo' || status === 'vibes')) {
-    return '/onboarding/referral';
-  }
-  switch (status) {
-    case 'complete': return '/(tabs)/plans';
-    case 'vibes': return '/onboarding/vibes';
-    case 'photo': return '/onboarding/photo';
-    case 'referral': return '/onboarding/referral';
-    case 'la_check': return '/onboarding/la-check';
-    case 'waitlisted': return '/onboarding/waitlisted';
-    default: return '/onboarding/basics';
-  }
-}
 
 export default function VerifyCodeScreen() {
   const params = useLocalSearchParams<{ phone?: string; mode?: string }>();
@@ -111,7 +94,7 @@ export default function VerifyCodeScreen() {
             .select('onboarding_status, referral_source')
             .eq('id', user.id)
             .maybeSingle();
-          const next = destForProfile(
+          const next = onboardingDest(
             profile?.onboarding_status,
             profile?.referral_source,
           );
@@ -156,7 +139,7 @@ export default function VerifyCodeScreen() {
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
-    else router.replace('/phone-entry' as never);
+    else router.replace('/phone-entry');
   };
 
   const cooldownLabel = `0:${String(cooldown).padStart(2, '0')}`;
