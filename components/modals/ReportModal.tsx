@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   Modal,
   ActivityIndicator,
   ScrollView,
+  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,6 +33,13 @@ export interface ReportModalProps {
   reportedUserId: string;
   reportedUserName: string;
   eventId?: string;
+  /**
+   * Fired after a successful report submit. When provided, replaces the
+   * built-in "Report submitted" success alert so the consumer can show
+   * its own follow-up (e.g. "also block X?" prompt). Old call sites that
+   * omit this prop keep the original success-alert behavior.
+   */
+  onReportComplete?: (reportedUserId: string, reportedUserName: string) => void;
 }
 
 export function ReportModal({
@@ -39,15 +48,18 @@ export function ReportModal({
   reportedUserId,
   reportedUserName,
   eventId,
+  onReportComplete,
 }: ReportModalProps) {
   const insets = useSafeAreaInsets();
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string } | null>(null);
 
   const handleClose = () => {
     if (submitting) return;
     setSelectedReason(null);
+    setDescription('');
     onClose();
   };
 
@@ -59,31 +71,46 @@ export function ReportModal({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      const context = eventId ? 'Reported from plan' : 'Reported from user search';
+      const trimmed = description.trim();
+      const details = trimmed ? `${context}\n\n${trimmed}` : context;
+
       const { error } = await supabase.from('reports').insert({
         reporter_user_id: user.id,
         reported_user_id: reportedUserId,
         reason: selectedReason,
         reported_event_id: eventId ?? null,
-        details: eventId ? 'Reported from plan' : 'Reported from user search',
+        details,
       });
 
       if (error) throw error;
 
       setSelectedReason(null);
+      setDescription('');
       onClose();
 
-      // Slight delay so the modal has time to close before the alert appears
+      // Slight delay so the modal has time to close before the next UI lands
+      setTimeout(() => {
+        if (onReportComplete) {
+          onReportComplete(reportedUserId, reportedUserName);
+        } else {
+          setAlertInfo({
+            title: 'Report submitted',
+            message: 'Thank you. We review all reports within 24 hours.',
+          });
+        }
+      }, 350);
+    } catch (err) {
+      // Close the modal first so the error alert can render on top of it
+      // (iOS pageSheet Modal blocks any other Modal sibling).
+      console.log('[ReportModal] submit failed:', err);
+      onClose();
       setTimeout(() => {
         setAlertInfo({
-          title: 'Report submitted',
-          message: 'Thank you. We review all reports within 24 hours.',
+          title: 'Could not submit report',
+          message: 'Please email hello@washedup.app and we\'ll look into it.',
         });
       }, 350);
-    } catch {
-      setAlertInfo({
-        title: 'Could not submit report',
-        message: 'Please email hello@washedup.app and we\'ll look into it.',
-      });
     } finally {
       setSubmitting(false);
     }
@@ -98,7 +125,10 @@ export function ReportModal({
       onRequestClose={handleClose}
       statusBarTranslucent
     >
-      <View style={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -151,6 +181,22 @@ export function ReportModal({
             })}
           </View>
 
+          {/* Optional description */}
+          <View style={styles.detailsBlock}>
+            <Text style={styles.detailsLabel}>add details (optional)</Text>
+            <TextInput
+              style={styles.detailsInput}
+              value={description}
+              onChangeText={setDescription}
+              placeholder="what happened?"
+              placeholderTextColor={Colors.warmGray}
+              multiline
+              maxLength={1000}
+              editable={!submitting}
+              textAlignVertical="top"
+            />
+          </View>
+
           <Text style={styles.disclaimer}>
             Your report is anonymous. We review all reports within 24 hours.
           </Text>
@@ -181,7 +227,7 @@ export function ReportModal({
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
 
     </Modal>
 
@@ -285,6 +331,36 @@ const styles = StyleSheet.create({
   checkSelected: {
     backgroundColor: Colors.terracotta,
     borderColor: Colors.terracotta,
+  },
+
+  // Optional description
+  detailsBlock: {
+    gap: 8,
+    marginTop: 4,
+  },
+  detailsLabel: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
+    letterSpacing: 0.3,
+  },
+  detailsInput: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.inputBg,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 12,
+    minHeight: 96,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+    shadowColor: Colors.asphalt,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
 
   disclaimer: {

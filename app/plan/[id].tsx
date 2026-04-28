@@ -41,7 +41,7 @@ import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_MAX_CAPACITY, FEATURED_DEFAULT_CAPACITY } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { useBlock } from '../../hooks/useBlock';
+import { useBlockConfirmation } from '../../hooks/useBlockConfirmation';
 import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
@@ -470,7 +470,11 @@ export default function PlanDetailScreen() {
   // reserves empty space at the top of the page.
   const [heroLoadFailed, setHeroLoadFailed] = useState(false);
 
-  const { blockUser } = useBlock();
+  const { requestBlock, blockNow, modals: blockModals } = useBlockConfirmation();
+  const [pendingBlockAfterReport, setPendingBlockAfterReport] = useState<{ id: string; name: string } | null>(null);
+  // True when the report flow was opened from the post-block prompt; used to
+  // suppress the "also block?" follow-up since the user has already blocked.
+  const [reportFromBlock, setReportFromBlock] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1059,6 +1063,7 @@ export default function PlanDetailScreen() {
         {
           text: `Report ${creatorName}`,
           onPress: () => {
+            setReportFromBlock(false);
             setReportTarget({ id: plan.creator?.id ?? '', name: creatorName });
             setShowReport(true);
           },
@@ -1066,12 +1071,19 @@ export default function PlanDetailScreen() {
         {
           text: `Block ${creatorName}`,
           style: 'destructive',
-          onPress: () => blockUser(plan.creator?.id ?? '', creatorName, () => router.back()),
+          onPress: () => requestBlock(plan.creator?.id ?? '', creatorName, {
+            onSuccess: () => router.back(),
+            onRequestReport: (uid, uname) => {
+              setReportFromBlock(true);
+              setReportTarget({ id: uid, name: uname });
+              setShowReport(true);
+            },
+          }),
         },
         { text: 'Cancel', style: 'cancel' },
       ],
     });
-  }, [isCreator, plan, blockUser]);
+  }, [isCreator, plan, requestBlock]);
 
   // ─── Loading / Error ─────────────────────────────────────────────────────────
 
@@ -2139,8 +2151,45 @@ export default function PlanDetailScreen() {
           reportedUserId={reportTarget.id}
           reportedUserName={reportTarget.name}
           eventId={plan.id}
+          onReportComplete={(uid, uname) => {
+            setShowReport(false);
+            setReportTarget(null);
+            if (reportFromBlock) {
+              setBrandedAlert({
+                visible: true,
+                title: 'thanks for the report',
+                message: 'we review all reports within 24 hours.',
+              });
+            } else {
+              setPendingBlockAfterReport({ id: uid, name: uname });
+            }
+            setReportFromBlock(false);
+          }}
         />
       )}
+
+      <BrandedAlert
+        visible={!!pendingBlockAfterReport}
+        title="report submitted"
+        message={
+          pendingBlockAfterReport
+            ? `also block ${pendingBlockAfterReport.name}? they won't be able to see or join your plans.`
+            : undefined
+        }
+        buttons={[
+          { text: 'no thanks', style: 'cancel' },
+          {
+            text: 'block',
+            style: 'destructive',
+            onPress: () => {
+              if (pendingBlockAfterReport) {
+                void blockNow(pendingBlockAfterReport.id, pendingBlockAfterReport.name);
+              }
+            },
+          },
+        ]}
+        onClose={() => setPendingBlockAfterReport(null)}
+      />
 
       <BrandedAlert
         visible={brandedAlert.visible}
@@ -2155,11 +2204,21 @@ export default function PlanDetailScreen() {
         visible={!!miniProfileUserId}
         onClose={() => setMiniProfileUserId(null)}
         onReport={(uid, uname) => {
+          setReportFromBlock(false);
           setReportTarget({ id: uid, name: uname });
           setShowReport(true);
         }}
-        onBlock={(uid, uname) => blockUser(uid, uname, () => router.back())}
+        onBlock={(uid, uname) => requestBlock(uid, uname, {
+          onSuccess: () => router.back(),
+          onRequestReport: (rUid, rUname) => {
+            setReportFromBlock(true);
+            setReportTarget({ id: rUid, name: rUname });
+            setShowReport(true);
+          },
+        })}
       />
+
+      {blockModals}
     </SafeAreaView>
   );
 }

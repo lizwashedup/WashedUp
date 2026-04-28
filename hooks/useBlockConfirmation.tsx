@@ -30,6 +30,11 @@ export function useBlockConfirmation() {
     blockedName: string;
     options: RequestBlockOptions;
   } | null>(null);
+  const [postBlockPrompt, setPostBlockPrompt] = useState<{
+    blockedId: string;
+    blockedName: string;
+    onRequestReport: NonNullable<RequestBlockOptions['onRequestReport']>;
+  } | null>(null);
   const [errorOpen, setErrorOpen] = useState(false);
   const [working, setWorking] = useState(false);
 
@@ -44,63 +49,77 @@ export function useBlockConfirmation() {
     [],
   );
 
+  const runBlockMutation = useCallback(
+    async (blockedId: string, blockedName: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('blocked_users')
+        .eq('id', user.id)
+        .single();
+
+      const current: string[] = profile?.blocked_users ?? [];
+      if (!current.includes(blockedId)) {
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ blocked_users: [...current, blockedId] })
+          .eq('id', user.id);
+        if (updateError) throw updateError;
+
+        // Apple 1.2: silent compliance report fires on EVERY block.
+        try {
+          await supabase.from('reports').insert({
+            reporter_user_id: user.id,
+            reported_user_id: blockedId,
+            reason: 'Blocked by user',
+            reported_event_id: null,
+            details: `User blocked ${blockedName}. They will no longer appear in their feed or be able to contact them.`,
+          });
+        } catch {
+          // best-effort; block still succeeds
+        }
+      }
+
+      // Mirror useBlock's invalidations — instant feed removal.
+      queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+      queryClient.invalidateQueries({ queryKey: ['events', 'detail'] });
+      queryClient.invalidateQueries({ queryKey: ['events', 'members'] });
+      queryClient.invalidateQueries({ queryKey: ['event-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['my-profile'] });
+      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['profile-blocked'] });
+      queryClient.invalidateQueries({ queryKey: ['friends'] });
+      queryClient.invalidateQueries({ queryKey: ['profile-search'] });
+      queryClient.invalidateQueries({ queryKey: ['scene-events'] });
+      queryClient.invalidateQueries({ queryKey: ['explore-wishlists'] });
+      queryClient.invalidateQueries({ queryKey: ['wishlists'] });
+    },
+    [queryClient],
+  );
+
   const handleBlock = useCallback(
-    async (alsoReport: boolean) => {
+    async () => {
       if (!confirmTarget || working) return;
       const { blockedId, blockedName, options } = confirmTarget;
       setWorking(true);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error('Not authenticated');
-
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('blocked_users')
-          .eq('id', user.id)
-          .single();
-
-        const current: string[] = profile?.blocked_users ?? [];
-        if (!current.includes(blockedId)) {
-          const { error: updateError } = await supabase
-            .from('profiles')
-            .update({ blocked_users: [...current, blockedId] })
-            .eq('id', user.id);
-          if (updateError) throw updateError;
-
-          // Apple 1.2: silent compliance report fires on EVERY block,
-          // regardless of which destructive button the user picked.
-          try {
-            await supabase.from('reports').insert({
-              reporter_user_id: user.id,
-              reported_user_id: blockedId,
-              reason: 'Blocked by user',
-              reported_event_id: null,
-              details: `User blocked ${blockedName}. They will no longer appear in their feed or be able to contact them.`,
-            });
-          } catch {
-            // best-effort; block still succeeds
-          }
-        }
-
-        // Mirror useBlock's invalidations — instant feed removal.
-        queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
-        queryClient.invalidateQueries({ queryKey: ['events', 'detail'] });
-        queryClient.invalidateQueries({ queryKey: ['events', 'members'] });
-        queryClient.invalidateQueries({ queryKey: ['event-plans'] });
-        queryClient.invalidateQueries({ queryKey: ['my-profile'] });
-        queryClient.invalidateQueries({ queryKey: ['my-plans'] });
-        queryClient.invalidateQueries({ queryKey: ['profile-blocked'] });
-        queryClient.invalidateQueries({ queryKey: ['friends'] });
-        queryClient.invalidateQueries({ queryKey: ['profile-search'] });
-        queryClient.invalidateQueries({ queryKey: ['scene-events'] });
-        queryClient.invalidateQueries({ queryKey: ['explore-wishlists'] });
-        queryClient.invalidateQueries({ queryKey: ['wishlists'] });
-
+        await runBlockMutation(blockedId, blockedName);
         options.onSuccess?.();
-        if (alsoReport && options.onRequestReport) {
-          options.onRequestReport(blockedId, blockedName);
-        }
         setConfirmTarget(null);
+        // Soft post-block prompt: ask if they want to tell us why.
+        // Higher signal than the upfront commitment because the user
+        // is more honest after the action than before it.
+        if (options.onRequestReport) {
+          setTimeout(() => {
+            setPostBlockPrompt({
+              blockedId,
+              blockedName,
+              onRequestReport: options.onRequestReport!,
+            });
+          }, 250);
+        }
       } catch {
         setConfirmTarget(null);
         setTimeout(() => setErrorOpen(true), 250);
@@ -108,7 +127,33 @@ export function useBlockConfirmation() {
         setWorking(false);
       }
     },
-    [confirmTarget, working, queryClient],
+    [confirmTarget, working, runBlockMutation],
+  );
+
+  /**
+   * Run the block mutation directly without showing the confirm modal.
+   * Use this when the user has already consented in another flow (e.g.
+   * the post-report "also block?" prompt). Errors surface in the same
+   * error modal as `requestBlock`.
+   */
+  const blockNow = useCallback(
+    async (
+      blockedId: string,
+      blockedName: string,
+      onSuccess?: () => void,
+    ) => {
+      if (working) return;
+      setWorking(true);
+      try {
+        await runBlockMutation(blockedId, blockedName);
+        onSuccess?.();
+      } catch {
+        setTimeout(() => setErrorOpen(true), 250);
+      } finally {
+        setWorking(false);
+      }
+    },
+    [working, runBlockMutation],
   );
 
   const blockingMessage = `blocking means:
@@ -124,8 +169,7 @@ export function useBlockConfirmation() {
         title={confirmTarget ? `block ${confirmTarget.blockedName}?` : ''}
         message={confirmTarget ? blockingMessage : undefined}
         buttons={[
-          { text: 'block', style: 'destructive', onPress: () => { void handleBlock(false); } },
-          { text: 'block & report', style: 'destructive', onPress: () => { void handleBlock(true); } },
+          { text: 'block', style: 'destructive', onPress: () => { void handleBlock(); } },
           { text: 'cancel', style: 'cancel' },
         ]}
         footerLink={{
@@ -139,6 +183,31 @@ export function useBlockConfirmation() {
       />
 
       <BrandedAlert
+        visible={!!postBlockPrompt}
+        title={
+          postBlockPrompt
+            ? `${postBlockPrompt.blockedName} is blocked`
+            : ''
+        }
+        message="want to tell us what happened? it helps us catch patterns."
+        buttons={[
+          { text: 'no thanks', style: 'cancel' },
+          {
+            text: 'report',
+            onPress: () => {
+              if (postBlockPrompt) {
+                postBlockPrompt.onRequestReport(
+                  postBlockPrompt.blockedId,
+                  postBlockPrompt.blockedName,
+                );
+              }
+            },
+          },
+        ]}
+        onClose={() => setPostBlockPrompt(null)}
+      />
+
+      <BrandedAlert
         visible={errorOpen}
         title="something went wrong"
         message="could not block user. please try again."
@@ -148,5 +217,5 @@ export function useBlockConfirmation() {
     </>
   );
 
-  return { requestBlock, modals };
+  return { requestBlock, blockNow, modals };
 }

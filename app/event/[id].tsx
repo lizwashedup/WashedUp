@@ -19,7 +19,7 @@ import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
-import { useBlock } from '../../hooks/useBlock';
+import { useBlockConfirmation } from '../../hooks/useBlockConfirmation';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -92,7 +92,11 @@ export default function EventDetailScreen() {
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
-  const { blockUser } = useBlock();
+  const { requestBlock, blockNow, modals: blockModals } = useBlockConfirmation();
+  const [pendingBlockAfterReport, setPendingBlockAfterReport] = useState<{ id: string; name: string } | null>(null);
+  // True when the report flow was opened from the post-block prompt; used to
+  // suppress the "also block?" follow-up since the user has already blocked.
+  const [reportFromBlock, setReportFromBlock] = useState(false);
 
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
@@ -107,6 +111,7 @@ export default function EventDetailScreen() {
         {
           text: `Report ${creatorName}`,
           onPress: () => {
+            setReportFromBlock(false);
             setReportTarget({ id: creatorId, name: creatorName });
             setShowReport(true);
           },
@@ -114,14 +119,21 @@ export default function EventDetailScreen() {
         {
           text: `Block ${creatorName}`,
           style: 'destructive',
-          onPress: () => blockUser(creatorId, creatorName, () => {
-            queryClient.invalidateQueries({ queryKey: ['event-plans', id] });
+          onPress: () => requestBlock(creatorId, creatorName, {
+            onSuccess: () => {
+              queryClient.invalidateQueries({ queryKey: ['event-plans', id] });
+            },
+            onRequestReport: (uid, uname) => {
+              setReportFromBlock(true);
+              setReportTarget({ id: uid, name: uname });
+              setShowReport(true);
+            },
           }),
         },
         { text: 'Cancel', style: 'cancel' },
       ],
     });
-  }, [userId, blockUser, queryClient, id]);
+  }, [userId, requestBlock, queryClient, id]);
 
   const { data: event, isLoading } = useQuery({
     queryKey: ['explore-event', id],
@@ -454,8 +466,47 @@ export default function EventDetailScreen() {
           onClose={() => { setShowReport(false); setReportTarget(null); }}
           reportedUserId={reportTarget.id}
           reportedUserName={reportTarget.name}
+          onReportComplete={(uid, uname) => {
+            setShowReport(false);
+            setReportTarget(null);
+            if (reportFromBlock) {
+              // Already blocked — skip the "also block?" follow-up and show
+              // a brief thanks instead so the report doesn't submit silently.
+              setAlertInfo({
+                title: 'thanks for the report',
+                message: 'we review all reports within 24 hours.',
+              });
+            } else {
+              setPendingBlockAfterReport({ id: uid, name: uname });
+            }
+            setReportFromBlock(false);
+          }}
         />
       )}
+
+      <BrandedAlert
+        visible={!!pendingBlockAfterReport}
+        title="report submitted"
+        message={
+          pendingBlockAfterReport
+            ? `also block ${pendingBlockAfterReport.name}? they won't be able to see or join your plans.`
+            : undefined
+        }
+        buttons={[
+          { text: 'no thanks', style: 'cancel' },
+          {
+            text: 'block',
+            style: 'destructive',
+            onPress: () => {
+              if (pendingBlockAfterReport) {
+                void blockNow(pendingBlockAfterReport.id, pendingBlockAfterReport.name);
+              }
+            },
+          },
+        ]}
+        onClose={() => setPendingBlockAfterReport(null)}
+      />
+
 
       <BrandedAlert
         visible={!!alertInfo}
@@ -464,6 +515,8 @@ export default function EventDetailScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+
+      {blockModals}
     </View>
   );
 }

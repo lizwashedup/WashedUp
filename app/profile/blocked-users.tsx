@@ -25,7 +25,7 @@ type BlockedProfile = {
 };
 
 const PRIVACY_EXPLAINER =
-  "blocked people can't see your plans, and you can't see theirs.";
+  "blocked people can't see or join your plans or plans you're in. and you can't see or join their plans or plans they join first.";
 
 export default function BlockedUsersScreen() {
   const router = useRouter();
