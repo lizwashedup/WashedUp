@@ -1,12 +1,3 @@
-import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as ImagePicker from 'expo-image-picker';
-import { router, useRouter } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
-import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
-import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
-import { StatusBar } from 'expo-status-bar';
-import { Camera, ChevronLeft, RefreshCw } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   ActionSheetIOS,
@@ -20,33 +11,47 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import { StatusBar } from 'expo-status-bar';
+import { router } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { hapticLight } from '../../../lib/haptics';
+import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
+import ProgressHead from '../../../components/onboarding/ProgressHead';
+import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { supabase } from '../../../lib/supabase';
 import { friendlyError } from '../../../lib/friendlyError';
+import Colors from '../../../constants/Colors';
+import { Fonts } from '../../../constants/Typography';
 
-const AVATAR_SIZE = 180;
+const AVATAR_SIZE = 260;
 
 export default function OnboardingPhotoScreen() {
-  const routerBack = useRouter();
   const queryClient = useQueryClient();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [skipping, setSkipping] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{
+    title: string;
+    message: string;
+    buttons?: BrandedAlertButton[];
+  } | null>(null);
 
-  const pickImageFromLibrary = async () => {
+  const pickFromLibrary = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         setAlertInfo({
-          title: 'Permission needed',
+          title: 'permission needed',
           message: 'washedup needs access to your photos to set a profile picture.',
           buttons: [
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            { text: 'Cancel', style: 'cancel' },
+            { text: 'open settings', onPress: () => Linking.openSettings() },
+            { text: 'cancel', style: 'cancel' },
           ],
         });
         return;
@@ -58,22 +63,25 @@ export default function OnboardingPhotoScreen() {
         quality: 1,
       });
       if (result.canceled || !result.assets?.[0]) return;
-      await processPickedImage(result.assets[0].uri);
+      await processPicked(result.assets[0].uri);
     } catch {
-      setAlertInfo({ title: 'Something went wrong', message: 'Could not open photo library. Please try again.' });
+      setAlertInfo({
+        title: 'something went wrong',
+        message: 'could not open photo library. try again.',
+      });
     }
   };
 
-  const takePhotoFromCamera = async () => {
+  const takePhoto = async () => {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
         setAlertInfo({
-          title: 'Permission needed',
-          message: 'washedup needs access to your camera to take a profile photo.',
+          title: 'permission needed',
+          message: 'washedup needs camera access to take a profile photo.',
           buttons: [
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            { text: 'Cancel', style: 'cancel' },
+            { text: 'open settings', onPress: () => Linking.openSettings() },
+            { text: 'cancel', style: 'cancel' },
           ],
         });
         return;
@@ -84,89 +92,119 @@ export default function OnboardingPhotoScreen() {
         quality: 1,
       });
       if (result.canceled || !result.assets?.[0]) return;
-      await processPickedImage(result.assets[0].uri);
+      await processPicked(result.assets[0].uri);
     } catch {
-      setAlertInfo({ title: 'Something went wrong', message: 'Could not open camera. Please try again.' });
+      setAlertInfo({
+        title: 'something went wrong',
+        message: 'could not open camera. try again.',
+      });
     }
   };
 
-  const processPickedImage = async (uri: string) => {
+  const processPicked = async (uri: string) => {
     try {
       const manipulated = await ImageManipulator.manipulateAsync(
         uri,
         [{ resize: { width: 800, height: 800 } }],
-        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        {
+          compress: 0.85,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        },
       );
       setImageUri(manipulated.uri);
       setImageBase64(manipulated.base64 ?? null);
     } catch {
-      setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
+      setAlertInfo({ title: 'invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
     }
   };
 
-  const pickImage = () => {
+  const openPicker = () => {
     hapticLight();
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ['Take Photo', 'Choose from Library', 'Cancel'],
+          options: ['take photo', 'choose from library', 'cancel'],
           cancelButtonIndex: 2,
-          title: 'Add a profile photo',
+          title: 'add a profile photo',
         },
         (idx) => {
-          if (idx === 0) takePhotoFromCamera();
-          if (idx === 1) pickImageFromLibrary();
+          if (idx === 0) takePhoto();
+          if (idx === 1) pickFromLibrary();
         },
       );
     } else {
       setAlertInfo({
-        title: 'Add a profile photo',
-        message: 'Choose how to add your photo',
+        title: 'add a profile photo',
+        message: 'choose how to add your photo',
         buttons: [
-          { text: 'Take Photo', onPress: takePhotoFromCamera },
-          { text: 'Choose from Library', onPress: pickImageFromLibrary },
-          { text: 'Cancel', style: 'cancel' },
+          { text: 'take photo', onPress: takePhoto },
+          { text: 'choose from library', onPress: pickFromLibrary },
+          { text: 'cancel', style: 'cancel' },
         ],
       });
     }
   };
 
   const handleContinue = async () => {
-    if (!imageBase64) return; // should never happen — button is disabled without it
+    if (!imageBase64 || loading) return;
     hapticLight();
     setLoading(true);
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
+        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
         supabase.auth.signOut();
         return;
       }
-
       const path = `${user.id}/${Date.now()}.jpg`;
-      const avatarUrl = await uploadBase64ToStorage('profile-photos', path, imageBase64, { upsert: true });
-
+      const avatarUrl = await uploadBase64ToStorage(
+        'profile-photos',
+        path,
+        imageBase64,
+        { upsert: true },
+      );
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ profile_photo_url: avatarUrl, onboarding_status: 'vibes' })
         .eq('id', user.id);
-
       if (updateError) throw updateError;
-
-      // Invalidate so ProfileButton refetches when it mounts. Don't await — the
-      // next screen doesn't need the photo, and awaiting just delays navigation.
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
-
       router.push('/onboarding/vibes');
-    } catch (e: any) {
+    } catch (e: unknown) {
       setAlertInfo({
-        title: 'Upload failed',
-        message: friendlyError(e, 'Could not upload photo. Please try again.'),
+        title: 'upload failed',
+        message: friendlyError(e, 'could not upload photo. try again.'),
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    if (skipping) return;
+    hapticLight();
+    setSkipping(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
+        supabase.auth.signOut();
+        return;
+      }
+      const { error } = await supabase
+        .from('profiles')
+        .update({ onboarding_status: 'vibes' })
+        .eq('id', user.id);
+      if (error) throw error;
+      router.push('/onboarding/vibes');
+    } catch {
+      setAlertInfo({
+        title: 'something went wrong',
+        message: 'could not advance. try again.',
+      });
+    } finally {
+      setSkipping(false);
     }
   };
 
@@ -174,93 +212,70 @@ export default function OnboardingPhotoScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <View style={styles.container}>
-        {/* Progress bar */}
-        <View style={styles.progressWrap}>
-          <View style={[styles.progressBar, { width: '75%' }]} />
-        </View>
+        <ProgressHead step={3} totalSteps={4} onBack={() => router.back()} />
 
-        {/* Back button */}
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => {
-              hapticLight();
-              routerBack.back();
-            }}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            style={styles.backButton}
-          >
-            <ChevronLeft size={28} color={Colors.asphalt} />
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.heading}>Add a profile photo</Text>
-        <Text style={styles.subtext}>
-          please upload a profile picture so people can get excited about meeting you
+        <View style={styles.gap20} />
+        <Text style={styles.heading}>
+          <Text style={styles.headingSans}>add a photo </Text>
+          <Text style={styles.headingItalic}>of you.</Text>
         </Text>
-        <View style={styles.gap32} />
+        <Text style={styles.subline}>
+          show your face! it helps people feel comfortable meeting up.
+        </Text>
 
-        {/* Photo circle — tap to pick, shows crop hint when empty */}
-        <View style={styles.avatarWrap}>
+        <View style={styles.avatarStage}>
           <TouchableOpacity
-            style={styles.avatarCircle}
-            onPress={pickImage}
+            style={[styles.avatarCircle, imageUri && styles.avatarCircleFilled]}
+            onPress={openPicker}
             activeOpacity={0.85}
           >
             {imageUri ? (
               <Image source={{ uri: imageUri }} style={styles.avatarImage} contentFit="cover" />
             ) : (
               <View style={styles.avatarEmpty}>
-                <Camera size={44} color={Colors.textLight} />
-                <Text style={styles.avatarHint}>Tap to add photo</Text>
+                <Ionicons name="add" size={48} color={Colors.brand} />
               </View>
             )}
           </TouchableOpacity>
-
-          {/* Orange ring around circle */}
           {imageUri && (
-            <View style={styles.avatarRing} pointerEvents="none" />
+            <TouchableOpacity
+              style={styles.changePill}
+              onPress={openPicker}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <Text style={styles.changePillText}>change</Text>
+            </TouchableOpacity>
           )}
         </View>
 
-        {/* Crop hint text — only shown before picking */}
-        {!imageUri && (
-          <Text style={styles.cropHint}>
-            After choosing, you can pinch, zoom, and drag{'\n'}to get your face perfectly centred
-          </Text>
-        )}
-
-        {/* Retake option after photo is set */}
-        {imageUri && (
-          <TouchableOpacity
-            style={styles.retakeButton}
-            onPress={pickImage}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <RefreshCw size={14} color={Colors.terracotta} />
-            <Text style={styles.retakeText}>Choose a different photo</Text>
-          </TouchableOpacity>
-        )}
-
         <View style={styles.spacer} />
 
-        {/* Continue */}
-        <TouchableOpacity
-          style={[
-            styles.primaryButton,
-            (!imageUri || !imageBase64 || loading) && styles.primaryButtonDisabled,
-          ]}
-          onPress={handleContinue}
-          onPressIn={() => hapticLight()}
-          activeOpacity={0.9}
-          disabled={!imageUri || !imageBase64 || loading}
-        >
-          {loading ? (
-            <ActivityIndicator color={Colors.white} />
-          ) : (
-            <Text style={styles.primaryButtonText}>Continue →</Text>
-          )}
-        </TouchableOpacity>
-
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={styles.skipHit}
+            onPress={handleSkip}
+            disabled={skipping || loading}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.skipText}>
+              {skipping ? 'skipping…' : 'skip for now'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.cta, (!imageBase64 || loading || skipping) && styles.ctaDisabled]}
+            onPress={handleContinue}
+            activeOpacity={0.9}
+            disabled={!imageBase64 || loading || skipping}
+          >
+            {loading ? (
+              <ActivityIndicator color={Colors.surface} />
+            ) : (
+              <Text style={[styles.ctaText, !imageBase64 && styles.ctaTextDisabled]}>
+                continue
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
       <BrandedAlert
         visible={!!alertInfo}
@@ -274,93 +289,109 @@ export default function OnboardingPhotoScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.parchment },
-  container: { flex: 1, paddingHorizontal: 24 },
+  safe: { flex: 1, backgroundColor: Colors.cream },
+  container: { flex: 1, paddingHorizontal: 28 },
 
-  progressWrap: {
-    height: 4,
-    backgroundColor: Colors.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 8,
+  gap20: { height: 20 },
+
+  heading: {
+    fontSize: 32,
+    lineHeight: 36,
+    color: Colors.text1,
+    marginTop: 16,
   },
-  progressBar: { height: '100%', backgroundColor: Colors.terracotta, borderRadius: 2 },
+  headingSans: { fontFamily: Fonts.headline },
+  headingItalic: { fontFamily: Fonts.displayItalic, fontStyle: 'italic' },
 
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
-  backButton: { padding: 4 },
+  subline: {
+    fontFamily: Fonts.sans,
+    fontSize: 15,
+    lineHeight: 22,
+    color: Colors.text2,
+    marginTop: 6,
+  },
 
-  heading: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
-  subtext: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: 6, lineHeight: 20 },
-
-  gap32: { height: 32 },
-  gap12: { height: 12 },
-
-  avatarWrap: {
+  avatarStage: {
     alignSelf: 'center',
+    marginTop: 36,
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
     position: 'relative',
   },
   avatarCircle: {
     width: AVATAR_SIZE,
     height: AVATAR_SIZE,
     borderRadius: AVATAR_SIZE / 2,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    justifyContent: 'center',
+    backgroundColor: Colors.brandSoft,
+    borderWidth: 2.5,
+    borderColor: Colors.brand,
+    borderStyle: 'dashed',
     alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
   },
-  avatarRing: {
-    position: 'absolute',
-    top: -3,
-    left: -3,
-    width: AVATAR_SIZE + 6,
-    height: AVATAR_SIZE + 6,
-    borderRadius: (AVATAR_SIZE + 6) / 2,
-    borderWidth: 3,
-    borderColor: Colors.terracotta,
+  avatarCircleFilled: {
+    borderStyle: 'solid',
   },
   avatarImage: { width: '100%', height: '100%' },
-  avatarEmpty: { alignItems: 'center', gap: 8 },
-  avatarHint: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textLight },
+  avatarEmpty: { alignItems: 'center', justifyContent: 'center' },
 
-  cropHint: {
-    textAlign: 'center',
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textLight,
-    marginTop: 14,
-    lineHeight: 19,
+  changePill: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: Colors.brand,
+    borderRadius: 999,
+    shadowColor: Colors.brandDeep,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 4,
   },
-
-  retakeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 14,
-  },
-  retakeText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.terracotta,
+  changePillText: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: 12,
+    color: Colors.surface,
+    letterSpacing: 0.2,
   },
 
   spacer: { flex: 1 },
-
-  primaryButton: {
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: Colors.terracotta,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: Colors.terracotta,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-    marginBottom: 8,
+  footer: {
+    paddingTop: 12,
+    paddingBottom: 8,
+    gap: 14,
   },
-  primaryButtonDisabled: { opacity: 0.45 },
-  primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.white },
+  cta: {
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: Colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.brandDeep,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 28,
+    elevation: 6,
+  },
+  ctaDisabled: {
+    backgroundColor: Colors.borderWarm,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  ctaText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 16,
+    color: Colors.surface,
+    letterSpacing: 0.2,
+  },
+  ctaTextDisabled: { color: Colors.text3 },
+
+  skipHit: { alignSelf: 'center', paddingVertical: 6 },
+  skipText: {
+    fontFamily: Fonts.sans,
+    fontSize: 13,
+    color: Colors.text3,
+  },
 });

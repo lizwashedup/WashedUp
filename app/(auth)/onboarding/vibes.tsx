@@ -1,32 +1,53 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { router, useRouter } from 'expo-router';
+import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
-import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
-import { ChevronLeft } from 'lucide-react-native';
+import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
 import { registerForPushNotifications } from '../../../hooks/usePushNotifications';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { INTEREST_COLORS } from '../../../constants/Colors';
+import { Fonts } from '../../../constants/Typography';
+import ProgressHead from '../../../components/onboarding/ProgressHead';
 
-const VIBE_TAGS = [
+// DB column profiles.vibe_tags stores capitalized strings ("Music", "Art")
+// — kept that way so existing rows match the new writes. UI labels are
+// lowercased on render. Colors looked up by lowercase key.
+const INTEREST_OPTIONS = [
   'Music', 'Art', 'Tech', 'Food', 'Fitness', 'Nightlife',
   'Outdoors', 'LGBTQ+', 'Gaming', 'Wellness', 'Books', 'Sports',
   'Comedy', 'Film',
-];
+] as const;
 
-export default function OnboardingVibesScreen() {
-  const routerBack = useRouter();
+const MIN_SELECT = 3;
+
+function colorFor(tag: string): string | null {
+  const key = tag.toLowerCase() as keyof typeof INTEREST_COLORS;
+  return (INTEREST_COLORS as Record<string, string>)[key] ?? null;
+}
+
+export default function OnboardingInterestsScreen() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{
+    title: string;
+    message: string;
+    buttons?: BrandedAlertButton[];
+  } | null>(null);
 
-  const selectedCount = Object.keys(selected).filter(k => selected[k]).length;
+  const selectedCount = Object.keys(selected).filter((k) => selected[k]).length;
+  const canContinue = selectedCount >= MIN_SELECT;
 
   const toggle = (tag: string) => {
     hapticLight();
@@ -38,8 +59,6 @@ export default function OnboardingVibesScreen() {
     });
   };
 
-  const canContinue = selectedCount >= 3;
-
   const handleLetsGo = async () => {
     if (!canContinue || loading) return;
     hapticLight();
@@ -47,11 +66,11 @@ export default function OnboardingVibesScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setAlertInfo({ title: 'Session expired', message: 'Please sign in again.' });
+        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
         supabase.auth.signOut();
         return;
       }
-      const tags = Object.keys(selected).filter(k => selected[k]);
+      const tags = Object.keys(selected).filter((k) => selected[k]);
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
@@ -60,19 +79,19 @@ export default function OnboardingVibesScreen() {
         })
         .eq('id', user.id);
       if (updateError) {
-        setAlertInfo({ title: 'Something went wrong', message: 'Could not save your vibes. Please try again.' });
+        setAlertInfo({
+          title: 'something went wrong',
+          message: 'could not save. try again.',
+        });
         return;
       }
 
-      // Invalidate and refetch profile-photo so it shows when user lands on Plans
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
       await queryClient.refetchQueries({ queryKey: PROFILE_PHOTO_KEY });
 
-      // Ask for push permission with onboarding context. This is the FIRST
-      // place the prompt is shown — the auth-time hook intentionally does
-      // not prompt, so users see this dialog after they've engaged with the
-      // app rather than coldly at launch. registerForPushNotifications saves
-      // the token to profiles.expo_push_token if the user grants permission.
+      // Push permission prompt — kept here intentionally so users see it
+      // after engagement, not at cold-start. registerForPushNotifications
+      // saves the token to profiles.expo_push_token if granted.
       await registerForPushNotifications({ prompt: true }).catch(() => {});
 
       router.replace('/(tabs)/plans');
@@ -85,64 +104,66 @@ export default function OnboardingVibesScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <View style={styles.container}>
-        <View style={styles.progressWrap}>
-          <View style={[styles.progressBar, { width: '100%' }]} />
-        </View>
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => { hapticLight(); routerBack.back(); }}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            style={styles.backButton}
-          >
-            <ChevronLeft size={28} color={Colors.asphalt} />
-          </TouchableOpacity>
-        </View>
+        <ProgressHead step={4} totalSteps={4} onBack={() => router.back()} />
 
         <ScrollView
-          decelerationRate="normal"
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.heading}>What are you into?</Text>
-          <Text style={styles.subtext}>Pick at least 3</Text>
           <View style={styles.gap20} />
+          <Text style={styles.heading}>what are you into?</Text>
+          <Text style={styles.subline}>pick at least {MIN_SELECT}</Text>
+
+          <View style={styles.gap28} />
 
           <View style={styles.grid}>
-            {VIBE_TAGS.map((tag) => {
+            {INTEREST_OPTIONS.map((tag) => {
               const isSelected = !!selected[tag];
+              const accent = colorFor(tag);
+              const selectedStyle = accent
+                ? { backgroundColor: accent, borderColor: accent }
+                : { backgroundColor: Colors.brandSoft, borderColor: Colors.brand };
               return (
                 <TouchableOpacity
                   key={tag}
-                  style={[styles.pill, isSelected && styles.pillSelected]}
+                  style={[styles.pill, isSelected && selectedStyle]}
                   onPress={() => toggle(tag)}
-                  activeOpacity={0.8}
+                  activeOpacity={0.85}
                 >
-                  <Text style={[styles.pillText, isSelected && styles.pillTextSelected]}>{tag}</Text>
+                  <Text
+                    style={[
+                      styles.pillText,
+                      isSelected && styles.pillTextSelected,
+                      isSelected && !accent && { color: Colors.brandDeep },
+                    ]}
+                  >
+                    {tag.toLowerCase()}
+                  </Text>
                 </TouchableOpacity>
               );
             })}
           </View>
 
-          <Text style={styles.countText}>{selectedCount} selected</Text>
+          <Text style={styles.countText}>
+            {selectedCount} of {INTEREST_OPTIONS.length} selected
+          </Text>
           <View style={styles.gap20} />
         </ScrollView>
 
         <TouchableOpacity
-          style={[
-            styles.primaryButton,
-            (!canContinue || loading) && styles.primaryButtonDisabled,
-          ]}
+          style={[styles.cta, (!canContinue || loading) && styles.ctaDisabled]}
           onPress={handleLetsGo}
-          onPressIn={() => hapticLight()}
           activeOpacity={0.9}
           disabled={!canContinue || loading}
         >
           {loading ? (
-            <ActivityIndicator color={Colors.white} />
+            <ActivityIndicator color={Colors.surface} />
           ) : (
-            <Text style={styles.primaryButtonText}>Let&apos;s Go</Text>
+            <Text style={[styles.ctaText, !canContinue && styles.ctaTextDisabled]}>
+              let’s go
+            </Text>
           )}
         </TouchableOpacity>
       </View>
@@ -158,53 +179,84 @@ export default function OnboardingVibesScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.parchment },
-  container: { flex: 1, paddingHorizontal: 24 },
-  progressWrap: {
-    height: 4,
-    backgroundColor: Colors.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressBar: { height: '100%', backgroundColor: Colors.terracotta, borderRadius: 2 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
-  backButton: { padding: 4 },
-  heading: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
-  subtext: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: 4 },
+  safe: { flex: 1, backgroundColor: Colors.cream },
+  container: { flex: 1, paddingHorizontal: 28, paddingBottom: 12 },
+
   gap20: { height: 20 },
+  gap28: { height: 28 },
+
   scroll: { flex: 1 },
-  scrollContent: { flexGrow: 1 },
+  scrollContent: { flexGrow: 1, paddingBottom: 24 },
+
+  heading: {
+    fontFamily: Fonts.headline,
+    fontSize: 32,
+    lineHeight: 36,
+    color: Colors.text1,
+    marginTop: 16,
+  },
+  subline: {
+    fontFamily: Fonts.sans,
+    fontSize: 15,
+    lineHeight: 22,
+    color: Colors.text2,
+    marginTop: 6,
+  },
+
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
   },
   pill: {
-    width: '31%',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    backgroundColor: Colors.cardBg,
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 14,
-  },
-  pillSelected: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
-  pillText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
-  pillTextSelected: { color: Colors.white, fontFamily: Fonts.sansBold },
-  countText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textLight, marginTop: 16 },
-  primaryButton: {
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: Colors.terracotta,
-    justifyContent: 'center',
+    borderColor: Colors.borderWarm,
     alignItems: 'center',
-    shadowColor: Colors.terracotta,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    justifyContent: 'center',
   },
-  primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.white },
+  pillText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 14,
+    color: Colors.text1,
+  },
+  pillTextSelected: {
+    fontFamily: Fonts.sansSemibold,
+    color: Colors.surface,
+  },
+
+  countText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 13,
+    color: Colors.text2,
+    marginTop: 16,
+  },
+
+  cta: {
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: Colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.brandDeep,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 28,
+    elevation: 6,
+  },
+  ctaDisabled: {
+    backgroundColor: Colors.borderWarm,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  ctaText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 16,
+    color: Colors.surface,
+    letterSpacing: 0.2,
+  },
+  ctaTextDisabled: { color: Colors.text3 },
 });
