@@ -25,6 +25,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
+import { friendlyAppleError, friendlyGoogleError } from '../../lib/socialAuthErrors';
 import { supabase } from '../../lib/supabase';
 
 const SOCIAL_PROOF = '1000+ people in LA already joined';
@@ -58,7 +59,7 @@ export default function LoginScreen() {
       await signInWithApple();
     } catch (e: any) {
       if (e?.code !== 'ERR_REQUEST_CANCELED') {
-        setError(e?.message ?? 'Apple sign-in failed. Please try again.');
+        setError(friendlyAppleError(e));
       }
     } finally {
       setSocialLoading(null);
@@ -72,7 +73,7 @@ export default function LoginScreen() {
       await signInWithGoogle();
     } catch (e: any) {
       if (e?.code !== 'SIGN_IN_CANCELLED') {
-        setError(e?.message ?? 'Google sign-in failed. Please try again.');
+        setError(friendlyGoogleError(e));
       }
     } finally {
       setSocialLoading(null);
