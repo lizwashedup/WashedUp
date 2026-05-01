@@ -22,8 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { useQueryClient } from '@tanstack/react-query';
-import * as Notifications from 'expo-notifications';
-import { registerForPushNotifications } from '../../hooks/usePushNotifications';
+import { registerForPushNotifications, getPushPermissionStatus } from '../../hooks/usePushNotifications';
 import { supabase } from '../../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
@@ -391,7 +390,7 @@ export default function ProfileScreen() {
   // ── Settings rows (grouped: Notifications, Legal, Support, Account) ───────
 
   const handleEnablePushFromSettings = async () => {
-    const { status } = await Notifications.getPermissionsAsync();
+    const status = await getPushPermissionStatus();
     if (status === 'granted') {
       // Already granted — re-run register to refresh the token on the
       // current profile row in case it drifted.

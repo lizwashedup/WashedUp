@@ -91,11 +91,10 @@
       "expo-updates",
       "expo-video",
       [
-        "expo-notifications",
+        "onesignal-expo-plugin",
         {
-          "icon": "./assets/images/app-icon.png",
-          "color": "#B5522E",
-          "sounds": []
+          "mode": "production",
+          "iconAccentColor": "#B5522E"
         }
       ]
     ],

@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+const ONESIGNAL_API_URL = 'https://api.onesignal.com/notifications';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -12,26 +12,26 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
+  const ONESIGNAL_APP_ID = Deno.env.get('ONESIGNAL_APP_ID')!;
+  const ONESIGNAL_REST_API_KEY = Deno.env.get('ONESIGNAL_REST_API_KEY')!;
+
   await supabase.rpc('expire_stale_notifications');
 
-  // Step 1: Get all users who have push tokens
-  const { data: tokenProfiles, error: tokenError } = await supabase
-    .from('profiles')
-    .select('id, expo_push_token')
-    .not('expo_push_token', 'is', null);
+  // Step 1: Get distinct users who have at least one OneSignal subscription.
+  // user_id is used as the OneSignal external_id alias (set via OneSignal.login
+  // on the client). We don't need the player_ids server-side — OneSignal fans
+  // out to every device registered for an external_id automatically.
+  const { data: tokenRows, error: tokenError } = await supabase
+    .from('device_tokens')
+    .select('user_id');
 
-  if (tokenError || !tokenProfiles?.length) {
+  if (tokenError || !tokenRows?.length) {
     return new Response(JSON.stringify({ sent: 0, total: 0 }), {
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  const tokenMap: Record<string, string> = {};
-  const tokenUserIds: string[] = [];
-  for (const p of tokenProfiles) {
-    tokenMap[p.id] = p.expo_push_token;
-    tokenUserIds.push(p.id);
-  }
+  const tokenUserIds = [...new Set(tokenRows.map((r) => r.user_id))];
 
   // Step 2: ATOMICALLY claim pending notifications via the postgres helper.
   //
@@ -39,12 +39,14 @@ Deno.serve(async (req) => {
   // this function once per app_notifications insert, so when N rows are
   // inserted close together (e.g. one chat message generating N recipient
   // rows), N parallel function invocations would each SELECT the full
-  // unread queue and each call Expo with the same rows. Result was 5–8x
+  // unread queue and each call OneSignal with the same rows. Result was 5–8x
   // duplicate push notifications hitting users.
   //
   // claim_pending_push_notifications uses FOR UPDATE SKIP LOCKED so each
   // parallel caller grabs a disjoint set of rows in a single atomic
-  // statement, then returns the rows it just marked push_sent=true.
+  // statement, then returns the rows it just marked push_sent=true. Also
+  // performs active-chat suppression for new_message notifications where
+  // the recipient is currently viewing that chat.
   const { data: claimedRows, error: claimError } = await supabase.rpc(
     'claim_pending_push_notifications',
     { p_token_user_ids: tokenUserIds, p_batch_size: 100 },
@@ -82,37 +84,58 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Build Expo messages
-  const messages = notifications
-    .filter((n: any) => tokenMap[n.user_id])
-    .map((n: any) => ({
-      to: tokenMap[n.user_id],
-      title: n.title,
-      body: n.body,
-      data: { type: n.type, eventId: n.event_id },
-      sound: 'default',
-      badge: badgeCounts[n.user_id] ?? 1,
-    }));
-
-  if (messages.length === 0) {
-    return new Response(JSON.stringify({ sent: 0, total: notifications.length }), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Send in batches of 100
+  // Send each notification individually to OneSignal. OneSignal's /notifications
+  // endpoint takes one (title, body, data, badge) per call, so we can't batch
+  // across distinct users like the old Expo flow did. Per-row volume is small
+  // enough that this is fine; revisit if rate limits bite.
+  //
+  // Reliability fix vs. the old Expo flow: if OneSignal returns non-2xx, we
+  // revert the claim by setting push_sent=false on those ids. The next
+  // app_notifications insert will re-trigger this function and the claim RPC
+  // will re-pick up the unsent rows. This converts "permanently lost on Expo
+  // 4xx/5xx" into "delayed until the next push." Closes the silent-loss gap.
   let sent = 0;
-  for (let i = 0; i < messages.length; i += 100) {
-    const batch = messages.slice(i, i + 100);
-    const res = await fetch(EXPO_PUSH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(batch),
-    });
-    if (res.ok) sent += batch.length;
+  const failedIds: string[] = [];
+
+  for (const n of notifications) {
+    try {
+      const res = await fetch(ONESIGNAL_API_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Key ${ONESIGNAL_REST_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          app_id: ONESIGNAL_APP_ID,
+          target_channel: 'push',
+          include_aliases: { external_id: [n.user_id] },
+          headings: { en: n.title },
+          contents: { en: n.body },
+          data: { type: n.type, eventId: n.event_id },
+          ios_badgeType: 'SetTo',
+          ios_badgeCount: badgeCounts[n.user_id] ?? 1,
+        }),
+      });
+
+      if (res.ok) {
+        sent += 1;
+      } else {
+        failedIds.push(n.id);
+      }
+    } catch {
+      failedIds.push(n.id);
+    }
   }
 
-  return new Response(JSON.stringify({ sent, total: notifications.length }), {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  if (failedIds.length > 0) {
+    await supabase
+      .from('app_notifications')
+      .update({ push_sent: false })
+      .in('id', failedIds);
+  }
+
+  return new Response(
+    JSON.stringify({ sent, total: notifications.length, failed: failedIds.length }),
+    { headers: { 'Content-Type': 'application/json' } },
+  );
 });

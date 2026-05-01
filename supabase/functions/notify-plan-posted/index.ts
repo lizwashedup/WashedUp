@@ -82,38 +82,32 @@ Deno.serve(async (req) => {
       }),
     });
 
-    // ── 2. Push notification to admin devices ──────────────────────────────────
+    // ── 2. Push notification to admin devices via OneSignal ────────────────────
+    // Admins are targeted by external_id alias (= user_id, set by OneSignal.login
+    // on the client). One API call fans out to every device every admin has
+    // registered. OneSignal silently handles admins with no subscriptions.
     const { data: adminRows } = await supabase
       .from('admin_users')
       .select('user_id');
 
     if (adminRows && adminRows.length > 0) {
       const adminIds = adminRows.map((r: { user_id: string }) => r.user_id);
-      const { data: adminProfiles } = await supabase
-        .from('profiles')
-        .select('expo_push_token')
-        .in('id', adminIds)
-        .not('expo_push_token', 'is', null);
 
-      const tokens = (adminProfiles ?? [])
-        .map((p: { expo_push_token: string | null }) => p.expo_push_token)
-        .filter(Boolean) as string[];
-
-      if (tokens.length > 0) {
-        const messages = tokens.map((token) => ({
-          to: token,
-          title: '📋 New plan posted',
-          body: `"${plan.title}" by ${creatorName}`,
+      await fetch('https://api.onesignal.com/notifications', {
+        method: 'POST',
+        headers: {
+          Authorization: `Key ${Deno.env.get('ONESIGNAL_REST_API_KEY')!}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          app_id: Deno.env.get('ONESIGNAL_APP_ID')!,
+          target_channel: 'push',
+          include_aliases: { external_id: adminIds },
+          headings: { en: '📋 New plan posted' },
+          contents: { en: `"${plan.title}" by ${creatorName}` },
           data: { planId: plan.id, type: 'admin_plan_alert' },
-          sound: 'default',
-        }));
-
-        await fetch('https://exp.host/--/api/v2/push/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(messages),
-        });
-      }
+        }),
+      });
     }
 
     const emailBody = await emailRes.json();

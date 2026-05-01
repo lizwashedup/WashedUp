@@ -19,13 +19,10 @@ import {
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { Stack, useRouter, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import * as Notifications from 'expo-notifications';
+import { OneSignal } from 'react-native-onesignal';
 import { useEffect, useRef, useState } from 'react';
-import { Linking, LogBox } from 'react-native';
+import { Linking } from 'react-native';
 import 'react-native-reanimated';
-
-// Suppress push notification entitlement error on simulators
-LogBox.ignoreLogs(['getRegistrationInfoAsync']);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
@@ -256,8 +253,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   }, [authResolved, onReady]);
 
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as Record<string, any>;
+    // OneSignal click handler. Buffers cold-start taps until a listener
+    // attaches, so this catches both warm-foreground taps and taps that
+    // launched the app from terminated state.
+    const onClick = (event: any) => {
+      const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
       const type = data?.type as string | undefined;
 
       if ((type === 'plan_invite' || type === 'waitlist_spot') && data?.eventId) {
@@ -267,8 +267,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       } else if (data?.eventId) {
         router.push(`/(tabs)/chats/${data.eventId}` as any);
       }
-    });
-    return () => sub.remove();
+    };
+
+    try {
+      OneSignal.Notifications.addEventListener('click', onClick);
+    } catch (err) {
+      if (__DEV__) console.warn('[PushNotifications] click listener attach failed:', err);
+    }
+
+    return () => {
+      try {
+        OneSignal.Notifications.removeEventListener('click', onClick);
+      } catch {}
+    };
   }, []);
 
   // Badge clearing moved to the specific surfaces where the user is
