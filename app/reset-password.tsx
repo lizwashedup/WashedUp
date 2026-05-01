@@ -19,6 +19,7 @@ import { Image } from 'expo-image';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { BrandedAlert, type BrandedAlertButton } from '../components/BrandedAlert';
 import { supabase } from '../lib/supabase';
+import { friendlyError } from '../lib/friendlyError';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 
@@ -52,7 +53,7 @@ export default function ResetPasswordScreen() {
     try {
       const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
       if (updateError) {
-        setError(updateError.message);
+        setError(friendlyError(updateError, 'Could not update password. Please try again.'));
         return;
       }
       setAlertInfo({

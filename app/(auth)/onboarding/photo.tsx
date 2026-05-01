@@ -25,6 +25,7 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { supabase } from '../../../lib/supabase';
+import { friendlyError } from '../../../lib/friendlyError';
 
 const AVATAR_SIZE = 180;
 
@@ -162,7 +163,7 @@ export default function OnboardingPhotoScreen() {
     } catch (e: any) {
       setAlertInfo({
         title: 'Upload failed',
-        message: e?.message ?? 'Could not upload photo. Please try again.',
+        message: friendlyError(e, 'Could not upload photo. Please try again.'),
       });
     } finally {
       setLoading(false);

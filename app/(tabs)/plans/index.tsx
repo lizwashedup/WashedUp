@@ -37,6 +37,7 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { supabase } from '../../../lib/supabase';
+import { friendlyError } from '../../../lib/friendlyError';
 import { useBlock } from '../../../hooks/useBlock';
 import {
   markWelcomeShown,
@@ -1083,7 +1084,7 @@ export default function PlansScreen() {
           ) : isError ? (
             <View style={styles.centered}>
               <Text style={styles.errorTitle}>Couldn't load plans</Text>
-              <Text style={styles.errorMessage}>{(error as Error)?.message ?? 'Unknown error'}</Text>
+              <Text style={styles.errorMessage}>{friendlyError(error, 'Could not load plans. Pull to refresh or try again.')}</Text>
               <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
                 <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>

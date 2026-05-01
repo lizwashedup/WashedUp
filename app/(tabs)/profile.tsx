@@ -27,6 +27,7 @@ import { registerForPushNotifications } from '../../hooks/usePushNotifications';
 import { supabase } from '../../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
+import { friendlyError } from '../../lib/friendlyError';
 import { PROFILE_PHOTO_KEY } from '../../constants/QueryKeys';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
@@ -328,7 +329,7 @@ export default function ProfileScreen() {
       );
       setShowEditFlow(false);
     } catch (err: any) {
-      setAlertInfo({ title: 'Could not save', message: err?.message ?? 'Please try again.' });
+      setAlertInfo({ title: 'Could not save', message: friendlyError(err, 'Please try again.') });
     } finally {
       setSaving(false);
     }
@@ -372,10 +373,10 @@ export default function ProfileScreen() {
       router.replace('/login');
     } catch (err: any) {
       setDeleting(false);
-      const msg = err?.message ?? String(err);
+      console.error('[delete_own_account] failed:', err);
       setAlertInfo({
         title: 'Something went wrong',
-        message: `We could not delete your account automatically. ${msg}\n\nPlease email hello@washedup.app and we will delete it within 24 hours.`,
+        message: 'We could not delete your account automatically.\n\nPlease email hello@washedup.app and we will delete it within 24 hours.',
       });
     }
   };

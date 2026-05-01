@@ -26,6 +26,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
 import { friendlyAppleError, friendlyGoogleError } from '../../lib/socialAuthErrors';
+import { friendlyError } from '../../lib/friendlyError';
 import { supabase } from '../../lib/supabase';
 import { checkContent } from '../../lib/contentFilter';
 
@@ -141,7 +142,7 @@ export default function SignupScreen() {
       }
       // Auth listener in root layout handles navigation when session exists
     } catch (e: any) {
-      setError(e?.message ?? 'Something went wrong. Please try again.');
+      setError(friendlyError(e, 'Something went wrong. Please try again.'));
     } finally {
       setLoading(false);
     }

@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { ArrowLeft, Plus, X, Pencil, Trash2, ImagePlus, Users } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
+import { friendlyError } from '../../lib/friendlyError';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
@@ -82,7 +83,7 @@ export default function AdminEventsScreen() {
       setBroadcastTitle('');
       setBroadcastBody('');
     } catch (e: any) {
-      setAlertInfo({ title: 'Failed', message: e.message ?? 'Could not send broadcast.' });
+      setAlertInfo({ title: 'Failed', message: friendlyError(e, 'Could not send broadcast.') });
     } finally {
       setSendingBroadcast(false);
     }
@@ -112,7 +113,7 @@ export default function AdminEventsScreen() {
       const { data: urlData } = supabase.storage.from('event-images').getPublicUrl(fileName);
       setForm(f => ({ ...f, image_url: urlData.publicUrl }));
     } catch (e: any) {
-      setAlertInfo({ title: 'Upload failed', message: e.message ?? 'Could not upload image.' });
+      setAlertInfo({ title: 'Upload failed', message: friendlyError(e, 'Could not upload image.') });
     } finally {
       setUploadingImage(false);
     }
@@ -221,7 +222,7 @@ export default function AdminEventsScreen() {
       setShowForm(false);
       setEditingEvent(null);
     } catch (e: any) {
-      setAlertInfo({ title: 'Error', message: e.message ?? 'Could not save. Make sure the admin migration has been run.' });
+      setAlertInfo({ title: 'Error', message: friendlyError(e, 'Could not save. Make sure the admin migration has been run.') });
     } finally {
       setSaving(false);
     }

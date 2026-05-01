@@ -17,6 +17,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticWarning, hapticSuccess } from '../../lib/haptics';
 import { ArrowLeft, Search, UserX } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
+import { friendlyError } from '../../lib/friendlyError';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
@@ -94,7 +95,7 @@ export default function AdminUsersScreen() {
               queryClient.invalidateQueries({ queryKey: ['admin-users'] });
               Alert.alert('Done', `${name} has been deleted and banned.`);
             } catch (e: any) {
-              Alert.alert('Error', e.message ?? 'Could not remove user. Try again.');
+              Alert.alert('Error', friendlyError(e, 'Could not remove user. Try again.'));
             } finally {
               setRemoving(null);
             }

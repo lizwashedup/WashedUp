@@ -45,6 +45,7 @@ import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import { friendlyError } from '../../lib/friendlyError';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 // Lazy-load react-native-map-link so older production binaries (built before
 // this dep was added) don't crash when this screen's module is imported.
@@ -734,7 +735,7 @@ export default function PlanDetailScreen() {
       setShareAfterJoinVisible(true);
     },
     onError: (error: any) => {
-      setBrandedAlert({ visible: true, title: 'Oops', message: error.message ?? 'Something went wrong.' });
+      setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
     },
   });
 
@@ -765,7 +766,7 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
     },
     onError: (error: any) => {
-      setBrandedAlert({ visible: true, title: 'Oops', message: error.message ?? 'Something went wrong.' });
+      setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
     },
   });
 
@@ -935,7 +936,7 @@ export default function PlanDetailScreen() {
       const rawMsg = e?.message ?? '';
       const msg = rawMsg.includes('events_host_message_length')
         ? 'Message must be at least 10 characters.'
-        : rawMsg || 'Could not save changes.';
+        : friendlyError(e, 'Could not save changes.');
       setBrandedAlert({ visible: true, title: 'Error', message: msg });
     } finally {
       setEditSaving(false);
@@ -974,7 +975,7 @@ export default function PlanDetailScreen() {
               queryClient.invalidateQueries({ queryKey: ['my-plans'] });
               router.back();
             } catch (e: any) {
-              setBrandedAlert({ visible: true, title: 'Error', message: e.message ?? 'Could not cancel plan.' });
+              setBrandedAlert({ visible: true, title: 'Error', message: friendlyError(e, 'Could not cancel plan.') });
             }
           },
         },

@@ -34,6 +34,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useBlock } from '../../../hooks/useBlock';
 import { checkContent } from '../../../lib/contentFilter';
 import { supabase } from '../../../lib/supabase';
+import { friendlyError } from '../../../lib/friendlyError';
 import { markHandlePromptShown } from '../../../lib/promptState';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -375,7 +376,7 @@ export default function YourPeopleScreen() {
       if (err?.code === '23505') {
         setAlertInfo({ title: 'Already connected', message: 'You are already connected with this person.' });
       } else {
-        setAlertInfo({ title: 'Could not add', message: err?.message ?? 'Please try again.' });
+        setAlertInfo({ title: 'Could not add', message: friendlyError(err, 'Please try again.') });
       }
     },
   });
@@ -485,7 +486,7 @@ export default function YourPeopleScreen() {
       refetchProfile();
     } catch (err: any) {
       if (err?.code === '23505') setHandleError('That handle is already taken');
-      else setHandleError(err?.message ?? 'Could not save');
+      else setHandleError(friendlyError(err, 'Could not save'));
     } finally {
       setSavingHandle(false);
     }
@@ -590,7 +591,7 @@ export default function YourPeopleScreen() {
       hapticSuccess();
       setAlertInfo({ title: 'Invite sent!', message: `You invited ${name} to "${plan.title}"` });
     } catch (e: any) {
-      setAlertInfo({ title: 'Could not send invite', message: e?.message ?? 'Something went wrong. Try again.' });
+      setAlertInfo({ title: 'Could not send invite', message: friendlyError(e, 'Something went wrong. Try again.') });
     }
   }, [inviteTarget, userId]);
 
