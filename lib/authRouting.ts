@@ -19,9 +19,11 @@ export function unauthedRoute(): string {
 /**
  * Resume an authed user at the right point in onboarding.
  *
- * Backstop: a user mid-onboarding on an older client may have reached
- * 'photo' or 'vibes' without going through the referral step (added
- * 2026-04-08). Bounce them back to referral before continuing.
+ * Backstops:
+ *   - older clients reached 'photo'/'vibes' without going through referral
+ *     (added 2026-04-08); bounce back to referral first.
+ *   - 'vibes' is no longer a screen; route those users to 'photo' so they
+ *     can finish in the new shorter flow. Safe to delete next release.
  * 'complete' is intentionally excluded — don't interrupt active users
  * for a data backfill.
  */
@@ -34,7 +36,7 @@ export function onboardingDest(
   }
   switch (status) {
     case 'complete': return '/(tabs)/plans';
-    case 'vibes': return '/onboarding/vibes';
+    case 'vibes': return '/onboarding/photo'; // legacy: vibes removed from onboarding
     case 'photo': return '/onboarding/photo';
     case 'referral': return '/onboarding/referral';
     case 'la_check': return '/onboarding/la-check';

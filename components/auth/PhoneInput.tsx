@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: 56,
     borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    backgroundColor: Colors.surfaceTranslucent,
     paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: 'transparent',

@@ -18,6 +18,7 @@ import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
+import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 import ProgressHead from '../../../components/onboarding/ProgressHead';
@@ -52,7 +53,6 @@ function is18Plus(birthday: Date): boolean {
 }
 
 export default function OnboardingBasicsScreen() {
-  const [needsName, setNeedsName] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [birthday, setBirthday] = useState<Date | null>(null);
@@ -86,15 +86,25 @@ export default function OnboardingBasicsScreen() {
         }
         const { data: profile } = await supabase
           .from('profiles')
-          .select('first_name_display, last_name')
+          .select('first_name_display, last_name, birthday, gender')
           .eq('id', user.id)
           .maybeSingle();
         if (cancelled) return;
-        const hasFirst = !!profile?.first_name_display?.trim();
-        const hasLast = !!profile?.last_name?.trim();
-        setNeedsName(!(hasFirst && hasLast));
         if (profile?.first_name_display) setFirstName(profile.first_name_display);
         if (profile?.last_name) setLastName(profile.last_name);
+        if (profile?.birthday) {
+          const [y, m, d] = profile.birthday.split('-').map(Number);
+          if (y && m && d) setBirthday(new Date(y, m - 1, d));
+        }
+        if (profile?.gender) {
+          const reverseGender: Record<string, Gender> = {
+            woman: 'woman',
+            man: 'man',
+            non_binary: 'non-binary',
+          };
+          const mapped = reverseGender[profile.gender];
+          if (mapped) setGender(mapped);
+        }
       } finally {
         if (!cancelled) setBootstrapping(false);
       }
@@ -102,7 +112,7 @@ export default function OnboardingBasicsScreen() {
     return () => { cancelled = true; };
   }, []);
 
-  const namesValid = !needsName || (firstName.trim().length > 0 && lastName.trim().length > 0);
+  const namesValid = firstName.trim().length > 0 && lastName.trim().length > 0;
   const canContinue = !!birthday && !!gender && !dateError && namesValid;
 
   const openDatePicker = () => {
@@ -132,8 +142,11 @@ export default function OnboardingBasicsScreen() {
     return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
   };
 
+  const submit = useSubmitGuard();
+
   const handleContinue = async () => {
     if (!canContinue || !birthday || !gender || loading) return;
+    if (!submit.tryAcquire()) return;
     setSaveError(null);
     setLoading(true);
     try {
@@ -159,24 +172,23 @@ export default function OnboardingBasicsScreen() {
         birthday: isoBirthday,
         gender: GENDER_TO_ENUM[gender],
         onboarding_status: 'la_check',
+        first_name_display: firstName.trim(),
+        last_name: lastName.trim(),
       };
-      if (needsName) {
-        updates.first_name_display = firstName.trim();
-        updates.last_name = lastName.trim();
-      }
       const { error } = await supabase
         .from('profiles')
         .update(updates)
         .eq('id', user.id);
       if (error) throw error;
       hapticLight();
-      router.push('/onboarding/la-check');
+      router.replace('/onboarding/la-check');
     } catch (e: unknown) {
       const message = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
         : 'something went wrong. please try again.';
       setSaveError(message);
     } finally {
+      submit.release();
       setLoading(false);
     }
   };
@@ -204,7 +216,7 @@ export default function OnboardingBasicsScreen() {
         style={styles.kav}
       >
         <View style={styles.container}>
-          <ProgressHead step={1} totalSteps={4} onBack={() => router.back()} />
+          <ProgressHead step={1} totalSteps={4} />
 
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -220,35 +232,31 @@ export default function OnboardingBasicsScreen() {
 
             <View style={styles.gap28} />
 
-            {needsName && (
-              <>
-                <Text style={styles.label}>first name</Text>
-                <TextInput
-                  style={styles.input}
-                  value={firstName}
-                  onChangeText={setFirstName}
-                  placeholder="first name"
-                  placeholderTextColor={Colors.text3}
-                  autoCapitalize="words"
-                  textContentType="givenName"
-                  returnKeyType="next"
-                />
-                <View style={styles.gap16} />
+            <Text style={styles.label}>first name</Text>
+            <TextInput
+              style={styles.input}
+              value={firstName}
+              onChangeText={setFirstName}
+              placeholder="first name"
+              placeholderTextColor={Colors.text3}
+              autoCapitalize="words"
+              textContentType="givenName"
+              returnKeyType="next"
+            />
+            <View style={styles.gap16} />
 
-                <Text style={styles.label}>last name</Text>
-                <TextInput
-                  style={styles.input}
-                  value={lastName}
-                  onChangeText={setLastName}
-                  placeholder="last name"
-                  placeholderTextColor={Colors.text3}
-                  autoCapitalize="words"
-                  textContentType="familyName"
-                  returnKeyType="done"
-                />
-                <View style={styles.gap16} />
-              </>
-            )}
+            <Text style={styles.label}>last name</Text>
+            <TextInput
+              style={styles.input}
+              value={lastName}
+              onChangeText={setLastName}
+              placeholder="last name"
+              placeholderTextColor={Colors.text3}
+              autoCapitalize="words"
+              textContentType="familyName"
+              returnKeyType="done"
+            />
+            <View style={styles.gap16} />
 
             <Text style={styles.label}>birthday</Text>
             <TouchableOpacity
@@ -389,12 +397,12 @@ const styles = StyleSheet.create({
 
   heading: {
     fontSize: 32,
-    lineHeight: 36,
+    lineHeight: 44,
     color: Colors.text1,
     marginTop: 16,
   },
   headingSans: { fontFamily: Fonts.headline },
-  headingItalic: { fontFamily: Fonts.displayItalic, fontStyle: 'italic' },
+  headingItalic: { fontFamily: Fonts.displayItalic, fontStyle: 'italic', fontSize: 40 },
 
   subline: {
     fontFamily: Fonts.sans,

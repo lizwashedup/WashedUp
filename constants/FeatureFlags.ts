@@ -19,7 +19,7 @@
  * DO NOT flip to true in a committed file until phone auth is fully
  * tested + Twilio/Supabase phone provider verified live.
  */
-export const PHONE_AUTH_ENABLED = false;
+export const PHONE_AUTH_ENABLED = true;
 
 /**
  * Hard cutoff for the migration gate's "i'll do this later" option.

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Linking,
-  Platform,
+  Modal,
+  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -23,6 +23,9 @@ import ProgressHead from '../../../components/onboarding/ProgressHead';
 import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
+import { registerForPushNotifications } from '../../../hooks/usePushNotifications';
+import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
+import { invalidateAuthProfile } from '../../../hooks/useProfile';
 import { supabase } from '../../../lib/supabase';
 import { friendlyError } from '../../../lib/friendlyError';
 import Colors from '../../../constants/Colors';
@@ -35,7 +38,7 @@ export default function OnboardingPhotoScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [skipping, setSkipping] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{
     title: string;
     message: string;
@@ -121,33 +124,26 @@ export default function OnboardingPhotoScreen() {
 
   const openPicker = () => {
     hapticLight();
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['take photo', 'choose from library', 'cancel'],
-          cancelButtonIndex: 2,
-          title: 'add a profile photo',
-        },
-        (idx) => {
-          if (idx === 0) takePhoto();
-          if (idx === 1) pickFromLibrary();
-        },
-      );
-    } else {
-      setAlertInfo({
-        title: 'add a profile photo',
-        message: 'choose how to add your photo',
-        buttons: [
-          { text: 'take photo', onPress: takePhoto },
-          { text: 'choose from library', onPress: pickFromLibrary },
-          { text: 'cancel', style: 'cancel' },
-        ],
-      });
-    }
+    setPickerOpen(true);
   };
+
+  const closePicker = () => setPickerOpen(false);
+
+  const handleTakePhoto = () => {
+    setPickerOpen(false);
+    takePhoto();
+  };
+
+  const handleChooseLibrary = () => {
+    setPickerOpen(false);
+    pickFromLibrary();
+  };
+
+  const submit = useSubmitGuard();
 
   const handleContinue = async () => {
     if (!imageBase64 || loading) return;
+    if (!submit.tryAcquire()) return;
     hapticLight();
     setLoading(true);
     try {
@@ -166,45 +162,27 @@ export default function OnboardingPhotoScreen() {
       );
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ profile_photo_url: avatarUrl, onboarding_status: 'vibes' })
+        .update({ profile_photo_url: avatarUrl, onboarding_status: 'complete' })
         .eq('id', user.id);
       if (updateError) throw updateError;
       queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
-      router.push('/onboarding/vibes');
+      // Force the tabs onboarding guard to read fresh status on next mount,
+      // otherwise the cache seeded at login still says 'photo'/'la_check'
+      // and the guard bounces the user out of /(tabs)/plans.
+      invalidateAuthProfile(queryClient, user.id);
+      // Push permission prompt — kept here intentionally so users see it
+      // after engagement, not at cold-start. Best-effort; swallowed errors
+      // shouldn't block the navigation to plans.
+      await registerForPushNotifications({ prompt: true }).catch(() => {});
+      router.replace('/(tabs)/plans');
     } catch (e: unknown) {
       setAlertInfo({
         title: 'upload failed',
         message: friendlyError(e, 'could not upload photo. try again.'),
       });
     } finally {
+      submit.release();
       setLoading(false);
-    }
-  };
-
-  const handleSkip = async () => {
-    if (skipping) return;
-    hapticLight();
-    setSkipping(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
-        supabase.auth.signOut();
-        return;
-      }
-      const { error } = await supabase
-        .from('profiles')
-        .update({ onboarding_status: 'vibes' })
-        .eq('id', user.id);
-      if (error) throw error;
-      router.push('/onboarding/vibes');
-    } catch {
-      setAlertInfo({
-        title: 'something went wrong',
-        message: 'could not advance. try again.',
-      });
-    } finally {
-      setSkipping(false);
     }
   };
 
@@ -212,12 +190,13 @@ export default function OnboardingPhotoScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <View style={styles.container}>
-        <ProgressHead step={3} totalSteps={4} onBack={() => router.back()} />
+        <ProgressHead step={4} totalSteps={4} onBack={() => router.replace('/onboarding/referral')} />
 
         <View style={styles.gap20} />
         <Text style={styles.heading}>
-          <Text style={styles.headingSans}>add a photo </Text>
-          <Text style={styles.headingItalic}>of you.</Text>
+          <Text style={styles.headingSans}>add a photo of </Text>
+          <Text style={styles.headingItalic}>you</Text>
+          <Text style={styles.headingSans}>.</Text>
         </Text>
         <Text style={styles.subline}>
           show your face! it helps people feel comfortable meeting up.
@@ -252,20 +231,10 @@ export default function OnboardingPhotoScreen() {
 
         <View style={styles.footer}>
           <TouchableOpacity
-            style={styles.skipHit}
-            onPress={handleSkip}
-            disabled={skipping || loading}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Text style={styles.skipText}>
-              {skipping ? 'skipping…' : 'skip for now'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.cta, (!imageBase64 || loading || skipping) && styles.ctaDisabled]}
+            style={[styles.cta, (!imageBase64 || loading) && styles.ctaDisabled]}
             onPress={handleContinue}
             activeOpacity={0.9}
-            disabled={!imageBase64 || loading || skipping}
+            disabled={!imageBase64 || loading}
           >
             {loading ? (
               <ActivityIndicator color={Colors.surface} />
@@ -284,6 +253,33 @@ export default function OnboardingPhotoScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+      <Modal
+        visible={pickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closePicker}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.pickerOverlay} onPress={closePicker}>
+          <Pressable style={styles.pickerCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.pickerTitle}>add a profile photo</Text>
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={handleTakePhoto}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.pickerButtonText}>take photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={handleChooseLibrary}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.pickerButtonText}>choose from library</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -388,10 +384,46 @@ const styles = StyleSheet.create({
   },
   ctaTextDisabled: { color: Colors.text3 },
 
-  skipHit: { alignSelf: 'center', paddingVertical: 6 },
-  skipText: {
-    fontFamily: Fonts.sans,
-    fontSize: 13,
-    color: Colors.text3,
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlayMedium,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  pickerCard: {
+    backgroundColor: Colors.cream,
+    borderRadius: 20,
+    paddingTop: 22,
+    paddingBottom: 18,
+    paddingHorizontal: 22,
+    width: '100%',
+    maxWidth: 320,
+    gap: 12,
+  },
+  pickerTitle: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 16,
+    color: Colors.text1,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  pickerButton: {
+    height: 48,
+    borderRadius: 999,
+    backgroundColor: Colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.brandDeep,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  pickerButtonText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 16,
+    color: Colors.surface,
+    letterSpacing: 0.2,
   },
 });

@@ -2,11 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useNavigation } from 'expo-router';
 import { ChevronDown, ChevronRight, LayoutList, Map } from 'lucide-react-native';
-import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Animated,
+    Easing,
     FlatList,
     Modal,
     Pressable,
@@ -30,7 +33,6 @@ import { PlanCard } from '../../../components/plans/PlanCard';
 import { SaveSnackbar } from '../../../components/SaveSnackbar';
 import { ShareSheet } from '../../../components/ShareSheet';
 import ProfileButton from '../../../components/ProfileButton';
-import WelcomeModal from '../../../components/WelcomeModal';
 import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -38,6 +40,7 @@ import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { supabase } from '../../../lib/supabase';
 import { friendlyError } from '../../../lib/friendlyError';
+import { postAuthTransitionRef } from '../../../lib/navState';
 import { useBlock } from '../../../hooks/useBlock';
 import {
   markWelcomeShown,
@@ -48,6 +51,159 @@ import {
 const TC = '#B5522E'; // terracotta primary accent
 
 const wLogo = require('../../../assets/images/w-logo-waves.png');
+
+/**
+ * First-visit loading cover. Acts as a true overlay above the plans feed:
+ * once data is ready (and a minimum display time has elapsed so it never
+ * blinks) the whole layer cross-fades out, revealing the feed already
+ * mounted underneath. The W lifts slightly as it leaves — like the screen
+ * is delivering the content, not just stepping aside.
+ *
+ * Props:
+ *   - done: parent flips this true when plans data is ready.
+ *   - onExit: called once the exit fade finishes so the parent can unmount.
+ *
+ * Composition:
+ *   - whole-screen fades in over 280ms (no hard cut from the photo screen)
+ *   - W logo (132px, terracotta) gently breathes — slow scale + opacity
+ *     loop, easing both ways so it reads alive instead of mechanical
+ *   - label fades in shortly after
+ *   - three brand-colored dots pulse in stagger
+ *   - exit: brief scale-up on the W (1.0 → 1.10) while the screen fades
+ *     to 0 over 420ms; the cumulative effect is the W "lifting away"
+ */
+const MIN_WELCOME_DISPLAY_MS = 1500;
+const EXIT_DURATION_MS = 420;
+
+function WelcomeLoading({
+  done,
+  onExit,
+}: {
+  done: boolean;
+  onExit: () => void;
+}) {
+  const screenOpacity = React.useRef(new Animated.Value(0)).current;
+  const exitScale = React.useRef(new Animated.Value(0)).current;
+  const breath = React.useRef(new Animated.Value(0)).current;
+  const textOpacity = React.useRef(new Animated.Value(0)).current;
+  const dot1 = React.useRef(new Animated.Value(0.3)).current;
+  const dot2 = React.useRef(new Animated.Value(0.3)).current;
+  const dot3 = React.useRef(new Animated.Value(0.3)).current;
+  const mountedAt = React.useRef(Date.now()).current;
+  const exitingRef = React.useRef(false);
+
+  // Mount-time animations: fade-in screen, fade-in label, start loops.
+  React.useEffect(() => {
+    Animated.timing(screenOpacity, {
+      toValue: 1,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    Animated.timing(textOpacity, {
+      toValue: 1,
+      duration: 460,
+      delay: 140,
+      useNativeDriver: true,
+    }).start();
+
+    const breathLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breath, {
+          toValue: 1,
+          duration: 1300,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breath, {
+          toValue: 0,
+          duration: 1300,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    breathLoop.start();
+
+    const pulseDot = (v: Animated.Value) =>
+      Animated.sequence([
+        Animated.timing(v, { toValue: 1, duration: 420, useNativeDriver: true }),
+        Animated.timing(v, { toValue: 0.3, duration: 420, useNativeDriver: true }),
+      ]);
+    const dotsLoop = Animated.loop(
+      Animated.stagger(200, [pulseDot(dot1), pulseDot(dot2), pulseDot(dot3)]),
+    );
+    dotsLoop.start();
+
+    return () => {
+      breathLoop.stop();
+      dotsLoop.stop();
+    };
+  }, [screenOpacity, breath, textOpacity, dot1, dot2, dot3]);
+
+  // Exit animation, gated on `done` AND a minimum display time so the
+  // overlay never blinks for a sub-second cached load.
+  React.useEffect(() => {
+    if (!done || exitingRef.current) return;
+    const elapsed = Date.now() - mountedAt;
+    const wait = Math.max(0, MIN_WELCOME_DISPLAY_MS - elapsed);
+    const t = setTimeout(() => {
+      exitingRef.current = true;
+      Animated.parallel([
+        Animated.timing(exitScale, {
+          toValue: 1,
+          duration: EXIT_DURATION_MS,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(screenOpacity, {
+          toValue: 0,
+          duration: EXIT_DURATION_MS,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) onExit();
+      });
+    }, wait);
+    return () => clearTimeout(t);
+  }, [done, onExit, mountedAt, screenOpacity, exitScale]);
+
+  const breathScale = breath.interpolate({ inputRange: [0, 1], outputRange: [1, 1.04] });
+  const wOpacity = breath.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1] });
+  const exitScaleOut = exitScale.interpolate({ inputRange: [0, 1], outputRange: [1, 1.1] });
+
+  return (
+    <Animated.View
+      style={[styles.welcomeLoading, { opacity: screenOpacity }]}
+      pointerEvents={exitingRef.current ? 'none' : 'auto'}
+    >
+      <Animated.View
+        style={{
+          opacity: wOpacity,
+          transform: [{ scale: breathScale }, { scale: exitScaleOut }],
+        }}
+      >
+        <Image
+          source={wLogo}
+          style={styles.welcomeLoadingLogo}
+          contentFit="contain"
+          tintColor={Colors.brand}
+        />
+      </Animated.View>
+      <Animated.Text
+        style={[styles.welcomeLoadingText, { opacity: textOpacity }]}
+      >
+        finding plans for you
+      </Animated.Text>
+      <View style={styles.welcomeLoadingDots}>
+        <Animated.View style={[styles.welcomeLoadingDot, { opacity: dot1 }]} />
+        <Animated.View style={[styles.welcomeLoadingDot, { opacity: dot2 }]} />
+        <Animated.View style={[styles.welcomeLoadingDot, { opacity: dot3 }]} />
+      </View>
+    </Animated.View>
+  );
+}
 
 // Lazy-load map to avoid crash on Expo Go / environments where react-native-maps fails
 const LazyPlansMapView = lazy(() => import('../../../components/plans/PlansMapView'));
@@ -244,7 +400,20 @@ export default function PlansScreen() {
   const [userId, setUserId] = React.useState<string | null>(null);
   const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
-  const [welcomeName, setWelcomeName] = useState('');
+  const welcomeBannerOpacity = useRef(new Animated.Value(1)).current;
+  const [welcomeOverlayDone, setWelcomeOverlayDone] = useState(false);
+  // One-shot consume of the post-auth transition flag. Any sign-in path
+  // (login.tsx, verify-code.tsx) sets `postAuthTransitionRef.active`; we
+  // read once on mount so the WelcomeLoading overlay covers the
+  // skeleton-blink even for existing users who've already dismissed the
+  // first-visit welcome banner.
+  const [postAuthTransition] = useState(() => {
+    if (postAuthTransitionRef.active) {
+      postAuthTransitionRef.active = false;
+      return true;
+    }
+    return false;
+  });
   const [showProfileCompletePrompt, setShowProfileCompletePrompt] = useState(false);
 
   React.useEffect(() => {
@@ -289,7 +458,6 @@ export default function PlansScreen() {
               if (seenAt) {
                 try { await AsyncStorage.setItem(key, '1'); } catch {}
               } else if (firstName) {
-                setWelcomeName(firstName);
                 setShowWelcome(true);
                 markWelcomeShown();
                 try { await AsyncStorage.setItem(key, '1'); } catch {}
@@ -864,16 +1032,16 @@ export default function PlansScreen() {
       .then(() => {});
   }, [userId]);
 
-  const handleWelcomeDismiss = useCallback(async () => {
-    setShowWelcome(false);
-    await persistWelcomeSeen();
-  }, [persistWelcomeSeen]);
-
-  const handleWelcomePost = useCallback(async () => {
-    setShowWelcome(false);
-    await persistWelcomeSeen();
-    router.push('/(tabs)/post');
-  }, [persistWelcomeSeen]);
+  const handleWelcomeDismiss = useCallback(() => {
+    Animated.timing(welcomeBannerOpacity, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowWelcome(false);
+      persistWelcomeSeen();
+    });
+  }, [welcomeBannerOpacity, persistWelcomeSeen]);
 
   // ── Featured events section ──────────────────────────────────────────────────
   const featuredSection = useMemo(() => {
@@ -922,7 +1090,53 @@ export default function PlansScreen() {
     );
   }, [featuredPlans, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock]);
 
+  // First-visit welcome banner. Renders inline at the top of the feed.
+  // Uses the same persistence (welcome_seen_at + AsyncStorage) as before;
+  // dismiss fades out then unmounts.
+  const welcomeBanner = showWelcome ? (
+    <Animated.View
+      style={[styles.welcomeBannerOuter, { opacity: welcomeBannerOpacity }]}
+    >
+      <LinearGradient
+        colors={[Colors.creamWarm, Colors.brandSoft]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.welcomeBannerInner}
+      >
+        <Image
+          source={wLogo}
+          style={styles.welcomeBannerLogo}
+          contentFit="contain"
+          tintColor={Colors.brand}
+        />
+        <Text style={styles.welcomeBannerText}>
+          people are making plans this week. jump in on one.
+        </Text>
+        <TouchableOpacity
+          onPress={handleWelcomeDismiss}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.welcomeBannerCloseHit}
+        >
+          <Ionicons name="close" size={15} color={Colors.text3} />
+        </TouchableOpacity>
+      </LinearGradient>
+    </Animated.View>
+  ) : null;
+
+  const listHeader = (
+    <>
+      {welcomeBanner}
+      {featuredSection}
+    </>
+  );
+
   const listEmpty = sections.length === 0;
+
+  // First-visit overlay readiness: feed is mounted underneath as soon as
+  // userId + all loading queries resolve. The overlay watches this flag
+  // (plus its own min-display timer) to decide when to fade away.
+  const dataReady = !!userId && !isLoading && !wishlistsLoading && !myPlansLoading;
+  const showWelcomeOverlay = (showWelcome || postAuthTransition) && !welcomeOverlayDone;
   const emptyMessage = heartFilter
     ? 'When you save a plan it shows up here'
     : allPlans.length > 0
@@ -1098,7 +1312,7 @@ export default function PlansScreen() {
                 <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />
               }
             >
-              {featuredSection}
+              {listHeader}
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>{emptyMessage}</Text>
                 <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
@@ -1113,7 +1327,7 @@ export default function PlansScreen() {
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
               renderSectionHeader={renderSectionHeader}
-              ListHeaderComponent={featuredSection}
+              ListHeaderComponent={listHeader}
               stickySectionHeadersEnabled={false}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
@@ -1181,15 +1395,6 @@ export default function PlansScreen() {
         onClear={() => setCategoryFilter([])}
       />
 
-      {showWelcome && (
-        <WelcomeModal
-          visible={showWelcome}
-          firstName={welcomeName}
-          onDismiss={handleWelcomeDismiss}
-          onPostPlan={handleWelcomePost}
-        />
-      )}
-
       {showProfileCompletePrompt && (
       <Modal visible={showProfileCompletePrompt} transparent animationType="fade" onRequestClose={dismissProfileCompletePrompt} statusBarTranslucent>
         <Pressable style={styles.profilePromptOverlay} onPress={dismissProfileCompletePrompt}>
@@ -1253,6 +1458,18 @@ export default function PlansScreen() {
         slug={shareSheet?.slug}
         onClose={() => setShareSheet(null)}
       />
+
+      {showWelcomeOverlay && (
+        <View
+          style={styles.welcomeOverlay}
+          pointerEvents="auto"
+        >
+          <WelcomeLoading
+            done={dataReady}
+            onExit={() => setWelcomeOverlayDone(true)}
+          />
+        </View>
+      )}
 
     </SafeAreaView>
   );
@@ -1370,6 +1587,74 @@ const styles = StyleSheet.create({
   },
   featuredSection: {
     marginBottom: 20,
+  },
+  welcomeBannerOuter: {
+    marginHorizontal: 20,
+    marginTop: 4,
+    marginBottom: 14,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  welcomeBannerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingLeft: 14,
+    paddingRight: 8,
+  },
+  welcomeBannerLogo: {
+    width: 18,
+    height: 18,
+    opacity: 0.9,
+  },
+  welcomeBannerText: {
+    flex: 1,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.text1,
+  },
+  welcomeBannerCloseHit: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.7,
+  },
+  welcomeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 999,
+    elevation: 999,
+  },
+  welcomeLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 28,
+    paddingBottom: 40,
+    backgroundColor: Colors.parchment,
+  },
+  welcomeLoadingLogo: {
+    width: 132,
+    height: 132,
+  },
+  welcomeLoadingText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 16,
+    color: Colors.text2,
+    letterSpacing: 0.3,
+  },
+  welcomeLoadingDots: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: -8,
+  },
+  welcomeLoadingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.brand,
   },
   featuredHeaderRow: {
     flexDirection: 'row',

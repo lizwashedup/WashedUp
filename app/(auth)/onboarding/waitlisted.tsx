@@ -44,11 +44,6 @@ export default function OnboardingWaitlistedScreen() {
             style={styles.wMark}
             resizeMode="contain"
           />
-          <Image
-            source={require('../../../assets/images/logo-wordmark.png')}
-            style={styles.wordmark}
-            resizeMode="contain"
-          />
         </View>
 
         <View style={styles.content}>

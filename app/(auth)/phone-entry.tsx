@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -19,12 +19,15 @@ import { Fonts } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
 import { hapticLight, hapticError } from '../../lib/haptics';
 import { formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
+import { wasOtpRecentlySent, markOtpSent } from '../../lib/navState';
+import { useSubmitGuard } from '../../hooks/useSubmitGuard';
 import PhoneInput from '../../components/auth/PhoneInput';
 
 const HERO_PHOTO_URI =
   'https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?w=900&q=80';
 
 const TERMS_URL = 'https://washedup.app/terms';
+const PRIVACY_URL = 'https://washedup.app/privacy';
 const GUIDELINES_URL = 'https://washedup.app/community-guidelines';
 
 export default function PhoneEntryScreen() {
@@ -35,23 +38,37 @@ export default function PhoneEntryScreen() {
   const tenDigits = phone.length === 10;
   const valid = isValidUSPhone(phone);
   const canSubmit = tenDigits && valid && !submitting;
+  const submit = useSubmitGuard();
+
+  const handlePhoneChange = useCallback((d: string) => {
+    setError(null);
+    setPhone(d);
+  }, []);
 
   const handleContinue = async () => {
     if (!canSubmit) return;
+    if (!submit.tryAcquire()) return;
     setError(null);
     setSubmitting(true);
     try {
       const e164 = formatToE164(phone);
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        phone: e164,
-      });
-      if (otpError) throw otpError;
+      // If we've sent an OTP to this number recently (e.g., user backed out
+      // of /verify-code and re-tapped continue), skip the API and let them
+      // verify the code that's already in their messages.
+      if (!wasOtpRecentlySent(e164)) {
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          phone: e164,
+        });
+        if (otpError) throw otpError;
+        markOtpSent(e164);
+      }
       hapticLight();
       router.push({
         pathname: '/verify-code',
         params: { phone },
       });
     } catch (e: unknown) {
+      console.log('[phone-entry] signInWithOtp error:', e);
       hapticError();
       const status = (e as { status?: number } | null)?.status;
       const message = (e as { message?: string } | null)?.message ?? '';
@@ -63,6 +80,7 @@ export default function PhoneEntryScreen() {
         setError('something went wrong. try again.');
       }
     } finally {
+      submit.release();
       setSubmitting(false);
     }
   };
@@ -76,16 +94,16 @@ export default function PhoneEntryScreen() {
       <StatusBar style="light" />
       <LinearGradient
         colors={[
-          'rgba(181,82,46,0.18)',
-          'rgba(181,82,46,0.10)',
-          'rgba(110,45,23,0.40)',
+          Colors.overlayWarm,
+          Colors.overlayWarmSoft,
+          Colors.overlayBrandDeep,
         ]}
         locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
       <LinearGradient
-        colors={['transparent', 'rgba(44,24,16,0.55)']}
+        colors={['transparent', Colors.overlayDark55]}
         locations={[0.55, 1]}
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
@@ -98,7 +116,7 @@ export default function PhoneEntryScreen() {
         >
           <View style={styles.topRow}>
             <Image
-              source={require('../../assets/images/logo-wordmark.png')}
+              source={require('../../assets/images/washedup-logo.png')}
               style={styles.wordmark}
               resizeMode="contain"
             />
@@ -112,10 +130,7 @@ export default function PhoneEntryScreen() {
             <Text style={styles.label}>phone number</Text>
             <PhoneInput
               value={phone}
-              onChangeText={(d) => {
-                setError(null);
-                setPhone(d);
-              }}
+              onChangeText={handlePhoneChange}
               onSubmitEditing={handleContinue}
               error={error ?? undefined}
               autoFocus
@@ -133,6 +148,20 @@ export default function PhoneEntryScreen() {
               </Text>
             </TouchableOpacity>
 
+            {/* Escape hatch for existing email/Apple/Google users — without
+                this they'd accidentally create a duplicate account by
+                entering their phone above. */}
+            <TouchableOpacity
+              onPress={() => router.push('/login')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.existingHit}
+            >
+              <Text style={styles.existingText}>
+                already on washedup?{' '}
+                <Text style={styles.existingLink}>sign in here</Text>
+              </Text>
+            </TouchableOpacity>
+
             <Text style={styles.legal}>
               by continuing you agree to our{' '}
               <Text
@@ -141,7 +170,14 @@ export default function PhoneEntryScreen() {
               >
                 terms
               </Text>
-              {' '}&{' '}
+              {', '}
+              <Text
+                style={styles.legalLink}
+                onPress={() => Linking.openURL(PRIVACY_URL)}
+              >
+                privacy policy
+              </Text>
+              {' & '}
               <Text
                 style={styles.legalLink}
                 onPress={() => Linking.openURL(GUIDELINES_URL)}
@@ -168,7 +204,6 @@ const styles = StyleSheet.create({
   wordmark: {
     width: 132,
     height: 28,
-    tintColor: Colors.cream,
     opacity: 0.96,
   },
   heroWrap: {
@@ -181,9 +216,9 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.displayBold,
     fontSize: 44,
     lineHeight: 48,
-    color: Colors.cream,
+    color: Colors.terracotta,
     maxWidth: 280,
-    textShadowColor: 'rgba(44,24,16,0.35)',
+    textShadowColor: Colors.shadowWarmDark,
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 16,
   },
@@ -194,7 +229,7 @@ const styles = StyleSheet.create({
   label: {
     fontFamily: Fonts.sansSemibold,
     fontSize: 13,
-    color: 'rgba(250,245,236,0.92)',
+    color: Colors.creamMedium,
     letterSpacing: 0.2,
     marginBottom: 2,
   },
@@ -229,7 +264,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: 11,
     lineHeight: 16,
-    color: 'rgba(250,245,236,0.78)',
+    color: Colors.creamMuted,
     textAlign: 'center',
     paddingHorizontal: 16,
     marginTop: 8,
@@ -238,7 +273,23 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansSemibold,
     fontSize: 11,
     lineHeight: 16,
-    color: 'rgba(250,245,236,0.96)',
+    color: Colors.creamHigh,
+    textDecorationLine: 'underline',
+  },
+  existingHit: {
+    alignSelf: 'center',
+    marginTop: 14,
+  },
+  existingText: {
+    fontFamily: Fonts.sans,
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.creamMuted,
+    textAlign: 'center',
+  },
+  existingLink: {
+    fontFamily: Fonts.sansSemibold,
+    color: Colors.creamHigh,
     textDecorationLine: 'underline',
   },
 });

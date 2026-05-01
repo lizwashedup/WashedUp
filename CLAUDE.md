@@ -33,6 +33,7 @@ Key typography values:
 - Fonts.sansMedium — DM Sans Medium (UI text, chips)
 - Fonts.sans — DM Sans Regular (body, meta)
 - Fonts.displayBold — Cormorant Garamond Bold (plan titles, editorial)
+- Fonts.headline — Plus Jakarta Sans Bold (onboarding headlines, phone-auth flow)
 - FontSizes.bodyLG = 16, bodyMD = 14, bodySM = 13, caption = 11
 
 ## Navigation
@@ -70,12 +71,13 @@ NEVER use #D97746, #A84B2A, #E8955A, or any other orange. Only #B5522E.
 - #C43D2E — error states only
 
 ### Fonts
-- Three approved fonts, all loaded via @expo-google-fonts and referenced through constants/Typography.ts:
-  - **Cormorant Garamond** — editorial display, hero headlines, plan titles (Fonts.display, Fonts.displayBold, Fonts.displayItalic)
-  - **Plus Jakarta Sans** — onboarding section headlines, phone-auth flow (Fonts.headline, Fonts.headlineMedium)
-  - **DM Sans** — all UI text, body, buttons, labels (Fonts.sans, Fonts.sansMedium, Fonts.sansSemibold, Fonts.sansBold)
-- Never hardcode fontFamily strings — always use Fonts.* from constants/Typography.ts.
-- The header wordmark "washedup" is a PNG image, not a font.
+This project uses three custom font families, all loaded in `app/_layout.tsx` via `@expo-google-fonts`:
+
+- **DM Sans** — all UI text, body, buttons, labels (Fonts.sans, Fonts.sansMedium, Fonts.sansSemibold, Fonts.sansBold)
+- **Cormorant Garamond** — editorial display, hero headlines, plan titles (Fonts.display, Fonts.displayBold, Fonts.displayItalic)
+- **Plus Jakarta Sans** — onboarding section headlines, phone-auth flow (Fonts.headline, Fonts.headlineMedium)
+
+Always reference Fonts.* from `constants/Typography.ts`. Do not add new font families without discussion. Never hardcode fontFamily strings. The header wordmark "washedup" is a PNG image, not a font.
 
 ### Plan card pattern
 - Creator avatar (real photo, 36px circle) with name + "posted" below
