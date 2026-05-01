@@ -20,3 +20,7 @@ export function snoozeMigrationGate(): void {
 export function isMigrationGateSnoozed(): boolean {
   return snoozedThisSession;
 }
+
+export function resetMigrationGateSnooze(): void {
+  snoozedThisSession = false;
+}

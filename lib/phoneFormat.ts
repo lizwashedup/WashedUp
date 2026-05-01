@@ -40,12 +40,28 @@ export function formatDisplay(digits: string): string {
 }
 
 /**
+ * NANP service codes that are never valid as the area code of a real
+ * phone number. Twilio rejects these with an opaque error; catching them
+ * client-side keeps the error message friendly. This is not a full
+ * allowlist of assigned codes (NANPA maintains one of ~600 entries) — just
+ * the "obviously wrong" patterns most likely to be typo'd.
+ */
+const INVALID_AREA_CODES = new Set([
+  // N11 special service codes
+  '211', '311', '411', '511', '611', '711', '811', '911',
+  // Common typo / test inputs
+  '000', '111', '555',
+]);
+
+/**
  * Returns true when `digits10` is exactly 10 digits and the area code is
- * not 0 or 1 (NANP rule: area codes start 2–9).
+ * structurally valid per NANP (starts 2–9, not a known service code).
  */
 export function isValidUSPhone(digits10: string): boolean {
   const d = stripDigits(digits10);
   if (d.length !== 10) return false;
   const areaFirst = d.charCodeAt(0);
-  return areaFirst >= 50 /* '2' */ && areaFirst <= 57 /* '9' */;
+  if (areaFirst < 50 /* '2' */ || areaFirst > 57 /* '9' */) return false;
+  if (INVALID_AREA_CODES.has(d.slice(0, 3))) return false;
+  return true;
 }

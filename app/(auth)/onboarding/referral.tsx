@@ -19,6 +19,7 @@ import { router } from 'expo-router';
 import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
+import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
@@ -76,8 +77,11 @@ export default function OnboardingReferralScreen() {
     }
   }, [isOther]);
 
+  const submit = useSubmitGuard();
+
   const handleContinue = async () => {
     if (!canContinue || loading) return;
+    if (!submit.tryAcquire()) return;
     hapticLight();
     setLoading(true);
     try {
@@ -108,7 +112,7 @@ export default function OnboardingReferralScreen() {
         referralValue = selected as string;
       }
       // Smart-advance preserves status if a mid-flow user was bounced
-      // back here from photo/vibes (older clients skipped referral).
+      // back here from photo (older clients skipped referral).
       const { data: existing } = await supabase
         .from('profiles')
         .select('onboarding_status')
@@ -116,7 +120,7 @@ export default function OnboardingReferralScreen() {
         .single();
       const currentStatus = existing?.onboarding_status ?? 'referral';
       const nextStatus =
-        currentStatus === 'photo' || currentStatus === 'vibes'
+        currentStatus === 'photo'
           ? currentStatus
           : 'photo';
       const { error } = await supabase
@@ -133,10 +137,9 @@ export default function OnboardingReferralScreen() {
         });
         return;
       }
-      const destPath =
-        nextStatus === 'vibes' ? '/onboarding/vibes' : '/onboarding/photo';
-      router.push(destPath);
+      router.replace('/onboarding/photo');
     } finally {
+      submit.release();
       setLoading(false);
     }
   };
@@ -150,7 +153,7 @@ export default function OnboardingReferralScreen() {
         keyboardVerticalOffset={0}
       >
         <View style={styles.container}>
-          <ProgressHead step={2} totalSteps={4} onBack={() => router.back()} />
+          <ProgressHead step={3} totalSteps={4} onBack={() => router.replace('/onboarding/la-check')} />
 
           <ScrollView
             decelerationRate="normal"

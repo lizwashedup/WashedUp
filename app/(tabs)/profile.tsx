@@ -32,6 +32,8 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { checkContent } from '../../lib/contentFilter';
+import { unauthedRoute } from '../../lib/authRouting';
+import { lastUnauthRedirectAt } from '../../lib/navState';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 import {
@@ -364,12 +366,18 @@ export default function ProfileScreen() {
         }
       }
 
+      // Navigate first so the now-empty profile screen can't re-render with
+      // stale/missing data while signOut + the auth listener race to redirect.
+      // Stamp the shared dedup timestamp synchronously BEFORE the replace so
+      // the listener's SIGNED_OUT handler skips its own router.replace and
+      // we don't see a double-navigation bounce.
+      lastUnauthRedirectAt.ts = Date.now();
+      router.replace(unauthedRoute() as never);
       try {
         await supabase.auth.signOut();
       } catch {
         // Session invalid after deletion; ignore
       }
-      router.replace('/login');
     } catch (err: any) {
       setDeleting(false);
       const msg = err?.message ?? String(err);

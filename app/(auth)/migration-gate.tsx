@@ -61,7 +61,7 @@ export default function MigrationGateScreen() {
       } else if (/already.*registered|already.*in use|taken/i.test(message)) {
         setError('that number is linked to another account.');
       } else if (/invalid.*phone/i.test(message)) {
-        setError('that phone number doesn’t look right.');
+        setError('that phone number doesn’t look right. double-check and try again.');
       } else {
         setError('something went wrong. try again.');
       }
@@ -92,11 +92,6 @@ export default function MigrationGateScreen() {
             <Image
               source={require('../../assets/images/w-logo-waves.png')}
               style={styles.wMark}
-              resizeMode="contain"
-            />
-            <Image
-              source={require('../../assets/images/logo-wordmark.png')}
-              style={styles.wordmark}
               resizeMode="contain"
             />
           </View>
@@ -199,8 +194,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  wMark: { width: 28, height: 28, tintColor: Colors.brand },
-  wordmark: { width: 92, height: 22, tintColor: Colors.text1, opacity: 0.92 },
+  wMark: { width: 28, height: 28, tintColor: Colors.brandPressed },
 
   callout: {
     backgroundColor: Colors.brandSoft,
@@ -235,6 +229,9 @@ const styles = StyleSheet.create({
   headlineItalic: {
     fontFamily: Fonts.displayItalic,
     fontStyle: 'italic',
+    color: Colors.brand,
+    textDecorationLine: 'underline',
+    textDecorationColor: Colors.brand,
   },
   subline: {
     fontFamily: Fonts.sans,
@@ -279,9 +276,9 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: Colors.cream,
+    backgroundColor: Colors.brandSoft,
     borderWidth: 2,
-    borderColor: Colors.brandSoft,
+    borderColor: Colors.brandBorderSoft,
     marginTop: 1,
   },
   timelineLine: {
@@ -323,7 +320,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   ctaDisabled: {
-    backgroundColor: Colors.borderWarm,
+    opacity: 0.45,
     shadowOpacity: 0,
     elevation: 0,
   },
@@ -333,7 +330,7 @@ const styles = StyleSheet.create({
     color: Colors.surface,
     letterSpacing: 0.2,
   },
-  ctaTextDisabled: { color: Colors.text3 },
+  ctaTextDisabled: { color: Colors.surface },
 
   skipButton: {
     alignItems: 'center',

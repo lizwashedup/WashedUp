@@ -27,10 +27,23 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
 import { supabase } from '../../lib/supabase';
 import { checkContent } from '../../lib/contentFilter';
+import { PHONE_AUTH_ENABLED } from '../../constants/FeatureFlags';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// When phone auth is the primary entry, /signup is dead. Anyone who
+// reaches it directly (deep link, history, etc.) gets bounced to
+// phone-entry. Rendered inside a separate component so the early-return
+// in SignupScreen happens BEFORE any hooks — keeps hook order consistent
+// for the email-signup body below.
+function SignupRedirect() {
+  useEffect(() => { router.replace('/phone-entry'); }, []);
+  return <View style={{ flex: 1, backgroundColor: Colors.parchment }} />;
+}
+
 export default function SignupScreen() {
+  if (PHONE_AUTH_ENABLED) return <SignupRedirect />;
+
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -64,37 +77,37 @@ export default function SignupScreen() {
     const trimmedLast = lastName.trim();
     const trimmedEmail = email.trim();
     if (!trimmedFirst) {
-      setError('Please enter your first name.');
+      setError('enter your first name.');
       return;
     }
     if (!trimmedLast) {
-      setError('Please enter your last name.');
+      setError('enter your last name.');
       return;
     }
     if (!trimmedEmail) {
-      setError('Please enter your email address.');
+      setError('enter your email address.');
       return;
     }
     if (!EMAIL_REGEX.test(trimmedEmail)) {
-      setError('Please enter a valid email address.');
+      setError('enter a valid email address.');
       return;
     }
     if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+      setError('password must be at least 6 characters.');
       return;
     }
     if (!agreedToTerms) {
-      setError('Please agree to the Terms of Service, Privacy Policy, and Community Guidelines.');
+      setError('agree to the terms of service, privacy policy, and community guidelines.');
       return;
     }
     const firstFilter = checkContent(trimmedFirst);
     if (!firstFilter.ok) {
-      setError(firstFilter.reason ?? 'That name is not allowed. Please try a different one.');
+      setError(firstFilter.reason ?? 'that name is not allowed. try a different one.');
       return;
     }
     const lastFilter = checkContent(trimmedLast);
     if (!lastFilter.ok) {
-      setError(lastFilter.reason ?? 'That name is not allowed. Please try a different one.');
+      setError(lastFilter.reason ?? 'that name is not allowed. try a different one.');
       return;
     }
 
@@ -107,15 +120,15 @@ export default function SignupScreen() {
       if (signUpError) {
         const msg = signUpError.message?.toLowerCase() ?? '';
         if (msg.includes('already registered') || msg.includes('already exists')) {
-          setError('An account with this email already exists.');
+          setError('an account with this email already exists.');
         } else if (msg.includes('password') && (msg.includes('weak') || msg.includes('short') || msg.includes('least'))) {
-          setError('Password is too weak. Please use at least 6 characters.');
+          setError('password must be at least 6 characters.');
         } else if (msg.includes('rate') || msg.includes('too many')) {
-          setError('Too many attempts. Please wait a moment and try again.');
+          setError('too many attempts. try again in a few minutes.');
         } else if (msg.includes('valid') && msg.includes('email')) {
-          setError('Please enter a valid email address.');
+          setError('enter a valid email address.');
         } else {
-          setError('Something went wrong. Please try again.');
+          setError('something went wrong. try again.');
         }
         return;
       }
@@ -134,13 +147,13 @@ export default function SignupScreen() {
 
       if (!authData?.session) {
         setAlertInfo({
-          title: 'Check your email',
-          message: 'We sent you a confirmation link. Please verify your email to continue.',
+          title: 'check your email',
+          message: 'we sent you a confirmation link. verify your email to continue.',
         });
       }
       // Auth listener in root layout handles navigation when session exists
     } catch (e: any) {
-      setError(e?.message ?? 'Something went wrong. Please try again.');
+      setError(e?.message ?? 'something went wrong. try again.');
     } finally {
       setLoading(false);
     }
@@ -167,7 +180,7 @@ export default function SignupScreen() {
 
   const handleAppleSignIn = async () => {
     if (!agreedToTerms) {
-      setError('Please agree to the Terms of Service, Privacy Policy, and Community Guidelines first.');
+      setError('agree to the terms of service, privacy policy, and community guidelines first.');
       return;
     }
     setError(null);
@@ -176,7 +189,7 @@ export default function SignupScreen() {
       await signInWithApple();
     } catch (e: any) {
       if (e?.code !== 'ERR_REQUEST_CANCELED') {
-        setError(e?.message ?? 'Apple sign-in failed. Please try again.');
+        setError(e?.message ?? 'apple sign-in failed. try again.');
       }
     } finally {
       setSocialLoading(null);
@@ -185,7 +198,7 @@ export default function SignupScreen() {
 
   const handleGoogleSignIn = async () => {
     if (!agreedToTerms) {
-      setError('Please agree to the Terms of Service, Privacy Policy, and Community Guidelines first.');
+      setError('agree to the terms of service, privacy policy, and community guidelines first.');
       return;
     }
     setError(null);
@@ -194,7 +207,7 @@ export default function SignupScreen() {
       await signInWithGoogle();
     } catch (e: any) {
       if (e?.code !== 'SIGN_IN_CANCELLED') {
-        setError(e?.message ?? 'Google sign-in failed. Please try again.');
+        setError(e?.message ?? 'google sign-in failed. try again.');
       }
     } finally {
       setSocialLoading(null);
@@ -225,7 +238,7 @@ export default function SignupScreen() {
               style={styles.topSection}
             >
               <Image source={require('../../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
-              <Text style={styles.tagline}>Find People to Go With.</Text>
+              <Text style={styles.tagline}>find people to go with.</Text>
             </Animated.View>
 
             {/* Form */}
@@ -233,8 +246,8 @@ export default function SignupScreen() {
               entering={FadeIn.duration(400).delay(100)}
               style={styles.formSection}
             >
-              <Text style={styles.formTitle}>Join washedup</Text>
-              <Text style={styles.formSubtitle}>Takes 30 seconds. No, really.</Text>
+              <Text style={styles.formTitle}>join washedup</Text>
+              <Text style={styles.formSubtitle}>takes 30 seconds. no, really.</Text>
               <View style={styles.gap20} />
 
               <View style={styles.nameRow}>
@@ -244,7 +257,7 @@ export default function SignupScreen() {
                     styles.nameInput,
                     inputBorder(firstNameInvalid, firstNameFocused),
                   ]}
-                  placeholder="First name"
+                  placeholder="first name"
                   placeholderTextColor={Colors.textMedium}
                   value={firstName}
                   onChangeText={(t) => { setFirstName(t); setError(null); setValidationTouched(false); }}
@@ -262,7 +275,7 @@ export default function SignupScreen() {
                     styles.nameInput,
                     inputBorder(lastNameInvalid, lastNameFocused),
                   ]}
-                  placeholder="Last name"
+                  placeholder="last name"
                   placeholderTextColor={Colors.textMedium}
                   value={lastName}
                   onChangeText={(t) => { setLastName(t); setError(null); setValidationTouched(false); }}
@@ -282,7 +295,7 @@ export default function SignupScreen() {
                   styles.input,
                   inputBorder(emailInvalid, emailFocused),
                 ]}
-                placeholder="Email address"
+                placeholder="email address"
                 placeholderTextColor={Colors.textMedium}
                 value={email}
                 onChangeText={(t) => { setEmail(t); setError(null); setValidationTouched(false); }}
@@ -305,7 +318,7 @@ export default function SignupScreen() {
                     styles.input,
                     inputBorder(passwordInvalid, passwordFocused),
                   ]}
-                  placeholder="Create a password"
+                  placeholder="create a password"
                   placeholderTextColor={Colors.textMedium}
                   value={password}
                   onChangeText={(t) => { setPassword(t); setError(null); setValidationTouched(false); }}
@@ -329,7 +342,7 @@ export default function SignupScreen() {
                 </TouchableOpacity>
               </View>
               <View style={styles.gap4} />
-              <Text style={styles.helperText}>At least 6 characters</Text>
+              <Text style={styles.helperText}>at least 6 characters</Text>
               <View style={styles.gap20} />
 
               <View style={styles.agreementRow}>
@@ -344,17 +357,17 @@ export default function SignupScreen() {
                   </View>
                 </TouchableOpacity>
                 <View style={styles.agreementTextWrap}>
-                  <Text style={styles.agreementText}>By creating an account, you agree to our </Text>
+                  <Text style={styles.agreementText}>by creating an account, you agree to our </Text>
                   <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/terms'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
-                    <Text style={styles.agreementLink}>Terms of Service</Text>
+                    <Text style={styles.agreementLink}>terms of service</Text>
                   </TouchableOpacity>
                   <Text style={styles.agreementText}>, </Text>
                   <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/privacy'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
-                    <Text style={styles.agreementLink}>Privacy Policy</Text>
+                    <Text style={styles.agreementLink}>privacy policy</Text>
                   </TouchableOpacity>
                   <Text style={styles.agreementText}>, and </Text>
                   <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/guidelines'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
-                    <Text style={styles.agreementLink}>Community Guidelines</Text>
+                    <Text style={styles.agreementLink}>community guidelines</Text>
                   </TouchableOpacity>
                   <Text style={styles.agreementText}>.</Text>
                 </View>
@@ -375,7 +388,7 @@ export default function SignupScreen() {
                 {loading ? (
                   <ActivityIndicator color={Colors.white} />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Sign Up</Text>
+                  <Text style={styles.primaryButtonText}>sign up</Text>
                 )}
               </TouchableOpacity>
             </Animated.View>
@@ -419,7 +432,7 @@ export default function SignupScreen() {
                     {socialLoading === 'google' ? (
                       <ActivityIndicator color={Colors.asphalt} />
                     ) : (
-                      <Text style={styles.googleButtonText}>Continue with Google</Text>
+                      <Text style={styles.googleButtonText}>continue with google</Text>
                     )}
                   </TouchableOpacity>
                 </>
@@ -427,9 +440,9 @@ export default function SignupScreen() {
 
               <View style={styles.gap16} />
               <View style={styles.signupRow}>
-                <Text style={styles.signupPrompt}>Already have an account? </Text>
+                <Text style={styles.signupPrompt}>already have an account? </Text>
                 <TouchableOpacity onPress={handleLogInPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text style={styles.signupLink}>Log in</Text>
+                  <Text style={styles.signupLink}>log in</Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.gap8} />

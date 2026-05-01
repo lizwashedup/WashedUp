@@ -32,6 +32,9 @@ import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
+import { seedAuthProfile } from '../hooks/useProfile';
+import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt } from '../lib/navState';
+import { resetMigrationGateSnooze } from '../lib/migrationGateSnooze';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useSessionLogger } from '../hooks/useSessionLogger';
@@ -351,11 +354,30 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           return;
         }
 
-        // Apple ban check on session restore — if the restored session
-        // belongs to a banned Apple sub, sign out silently and kick to login.
-        // This stops a banned user from persisting via an already-issued
-        // refresh token even after we've revoked them on the server side.
-        if (await isBannedAppleUser(session.user)) {
+        // Apple ban check + profile fetch run in parallel — both are
+        // independent of each other and the ban check is a single RPC,
+        // so we save one network RTT vs sequential awaits. If the user
+        // is banned we still sign them out before honoring the profile.
+        const fetchProfileWithRetry = async () => {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const { data, error: e } = await supabase
+              .from('profiles')
+              .select('onboarding_status, referral_source, phone_number')
+              .eq('id', session.user.id)
+              .single();
+            if (!e && data) return data as any;
+            if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+          }
+          return null;
+        };
+        const [isBanned, profileData] = await Promise.all([
+          isBannedAppleUser(session.user),
+          fetchProfileWithRetry(),
+        ]);
+
+        if (cancelled || isRecoveryRef.current) return;
+
+        if (isBanned) {
           await supabase.auth.signOut();
           if (cancelled || isRecoveryRef.current) return;
           setAuthedUserId(null);
@@ -367,24 +389,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           return;
         }
 
-        // Retry profile fetch once on failure — avoids signing out on a network blip
-        let profileData: {
-          onboarding_status: string | null;
-          referral_source: string | null;
-          phone_number: string | null;
-        } | null = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const { data, error: e } = await supabase
-            .from('profiles')
-            .select('onboarding_status, referral_source, phone_number')
-            .eq('id', session.user.id)
-            .single();
-          if (!e && data) { profileData = data as any; break; }
-          if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
-        }
-
-        if (cancelled || isRecoveryRef.current) return;
-
         if (!profileData) {
           console.log('[auth_redirect] reason=profile_fetch_failed');
           const unauth = unauthedRoute();
@@ -394,6 +398,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           return;
         }
 
+        // Seed the React Query cache so the (tabs) onboarding guard can
+        // read the same profile without firing a duplicate Supabase select.
+        seedAuthProfile(queryClient, session.user.id, profileData);
         setAuthedUserId(session.user.id);
         const dest = authedDest({
           onboarding_status: profileData.onboarding_status,
@@ -429,8 +436,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
       if (!session?.user) {
+        resetMigrationGateSnooze();
         setAuthedUserId(null);
         const unauth = unauthedRoute();
+        // Skip the redirect if either (a) the pathname already matches
+        // the unauthed route, or (b) a caller (e.g. delete-account flow)
+        // synchronously stamped lastUnauthRedirectAt.ts before this
+        // listener could fire. (a) catches the steady state; (b) catches
+        // the race where pathnameRef hasn't been updated yet by its own
+        // useEffect — without (b) the listener fires a second
+        // router.replace and the user sees a brief bounce.
+        const externallyRedirected = Date.now() - lastUnauthRedirectAt.ts < 1500;
+        if (externallyRedirected || pathnameRef.current === unauth) {
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          return;
+        }
         lastNavRef.current = { dest: unauth, ts: Date.now() };
         router.replace(unauth as any);
         return;
@@ -452,8 +472,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       // Verify-code is self-routing: it shows a 600ms success animation
       // before navigating itself via the same authedDest helper. Skip the
       // root-level redirect so we don't preempt that animation by yanking
-      // the user away the moment SIGNED_IN fires.
-      if (pathnameRef.current === '/verify-code') {
+      // the user away the moment SIGNED_IN fires. Pathname-agnostic via
+      // a shared ref — survives deep-link entry to /verify-code.
+      if (verifyCodeSelfRoutingRef.current || pathnameRef.current === '/verify-code') {
         setAuthedUserId(session.user.id);
         setAuthResolved(true);
         return;
@@ -466,6 +487,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           .eq('id', session.user.id)
           .single();
 
+        if (data) {
+          seedAuthProfile(queryClient, session.user.id, data as any);
+        }
         const dest = authedDest({
           onboarding_status: data?.onboarding_status,
           referral_source: data?.referral_source,

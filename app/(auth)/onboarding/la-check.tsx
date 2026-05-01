@@ -14,13 +14,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
+import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
+import ProgressHead from '../../../components/onboarding/ProgressHead';
 
 export default function OnboardingLACheckScreen() {
   const [choseNo, setChoseNo] = useState(false);
@@ -32,8 +33,11 @@ export default function OnboardingLACheckScreen() {
     buttons?: BrandedAlertButton[];
   } | null>(null);
 
+  const submit = useSubmitGuard();
+
   const handleLA = async (isVisitor: boolean) => {
     if (loading) return;
+    if (!submit.tryAcquire()) return;
     hapticLight();
     setLoading(true);
     try {
@@ -55,8 +59,9 @@ export default function OnboardingLACheckScreen() {
         setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
         return;
       }
-      router.push('/onboarding/referral');
+      router.replace('/onboarding/referral');
     } finally {
+      submit.release();
       setLoading(false);
     }
   };
@@ -68,6 +73,7 @@ export default function OnboardingLACheckScreen() {
 
   const handleContinueFromNo = async () => {
     if (loading) return;
+    if (!submit.tryAcquire()) return;
     hapticLight();
     setLoading(true);
     try {
@@ -94,8 +100,9 @@ export default function OnboardingLACheckScreen() {
         setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
         return;
       }
-      router.push('/onboarding/waitlisted');
+      router.replace('/onboarding/waitlisted');
     } finally {
+      submit.release();
       setLoading(false);
     }
   };
@@ -109,16 +116,14 @@ export default function OnboardingLACheckScreen() {
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.container}>
-            <TouchableOpacity
-              style={styles.backHit}
-              onPress={() => {
+            <ProgressHead
+              step={2}
+              totalSteps={4}
+              onBack={() => {
                 hapticLight();
-                router.back();
+                router.replace('/onboarding/basics');
               }}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            >
-              <Ionicons name="chevron-back" size={24} color={Colors.text1} />
-            </TouchableOpacity>
+            />
 
             <View style={styles.body}>
               <Text style={styles.heading}>
@@ -211,13 +216,6 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.cream },
   kav: { flex: 1 },
   container: { flex: 1, paddingHorizontal: 28, paddingTop: 4, paddingBottom: 16 },
-
-  backHit: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-  },
 
   body: {
     flex: 1,
