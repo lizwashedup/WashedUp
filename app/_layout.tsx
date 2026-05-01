@@ -40,6 +40,14 @@ import AppStoreReviewAsk, {
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
 import VideoSplash from '../components/VideoSplash';
 import { BrandedAlert } from '../components/BrandedAlert';
+import * as Sentry from '@sentry/react-native';
+
+Sentry.init({
+  dsn: 'https://fb9ffdb4b5f0fb3ea5191274a258f266@o4511311419604992.ingest.us.sentry.io/4511311773827072',
+  tracesSampleRate: 0,
+  enableAutoSessionTracking: true,
+  ignoreErrors: [/getRegistrationInfoAsync/],
+});
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -52,7 +60,7 @@ export const unstable_settings = {
   initialRouteName: '(tabs)',
 };
 
-export default function RootLayout() {
+function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     CormorantGaramond_400Regular,
@@ -93,6 +101,8 @@ export default function RootLayout() {
     </QueryClientProvider>
   );
 }
+
+export default Sentry.wrap(RootLayout);
 
 function onboardingDest(
   status: string | null | undefined,
