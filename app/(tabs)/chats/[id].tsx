@@ -18,7 +18,7 @@ import {
   AppState,
   LayoutChangeEvent,
 } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import * as Notifications from 'expo-notifications'; // setBadgeCountAsync only — local-only API, no server call. OneSignal SDK doesn't expose direct badge clear; revisit during cleanup.
 import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -47,7 +47,7 @@ import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerForPushNotifications } from '../../../hooks/usePushNotifications';
+import { registerForPushNotifications, getPushPermissionStatus } from '../../../hooks/usePushNotifications';
 
 // ─── Event Header Data ────────────────────────────────────────────────────────
 
@@ -635,7 +635,7 @@ export default function ChatScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const { status } = await Notifications.getPermissionsAsync();
+        const status = await getPushPermissionStatus();
         if (status === 'granted') return;
 
         const dismissed = await AsyncStorage.getItem(PUSH_BANNER_KEY);
@@ -650,9 +650,9 @@ export default function ChatScreen() {
   }, [currentUserId, messages.length]);
 
   const handleEnablePush = useCallback(async () => {
-    // If iOS has already recorded a hard denial, requestPermissionsAsync
-    // silently no-ops — the only path forward is Settings.
-    const { status } = await Notifications.getPermissionsAsync();
+    // If iOS has already recorded a hard denial, the system prompt silently
+    // no-ops — the only path forward is Settings.
+    const status = await getPushPermissionStatus();
     if (status === 'denied') {
       await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
       setShowPushBanner(false);
@@ -681,7 +681,7 @@ export default function ChatScreen() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (state) => {
       if (state !== 'active' || !showPushBanner) return;
-      const { status } = await Notifications.getPermissionsAsync();
+      const status = await getPushPermissionStatus();
       if (status === 'granted') {
         setShowPushBanner(false);
         registerForPushNotifications({ prompt: false, userId: currentUserId }).catch(() => {});

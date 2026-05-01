@@ -1,145 +1,167 @@
-import { useState, useEffect, useRef } from 'react';
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
+import { useEffect } from 'react';
+import { OneSignal, OSNotificationPermission } from 'react-native-onesignal';
+import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { Platform, AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
-import Colors from '../constants/Colors';
 
-// Global handler: controls how notifications are displayed when the app is in the foreground.
-// Set once at module level so it's always active regardless of which component mounts first.
-// Wrapped in try/catch because simulators lack push notification entitlements.
-try {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
-} catch {}
+// Initialize OneSignal once at module load. Safe to call multiple times — the
+// SDK guards against double-init internally — but doing it at module level
+// means the click handler buffer is active before any component mounts, so
+// cold-start notification taps are captured.
+const ONESIGNAL_APP_ID =
+  Constants.expoConfig?.extra?.oneSignalAppId ??
+  process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID ??
+  '';
+
+let initialized = false;
+function ensureInitialized() {
+  if (initialized || !ONESIGNAL_APP_ID) return;
+  try {
+    OneSignal.initialize(ONESIGNAL_APP_ID);
+    initialized = true;
+  } catch (err) {
+    if (__DEV__) console.warn('[PushNotifications] OneSignal.initialize failed:', err);
+  }
+}
+
+ensureInitialized();
+
+function devicePlatform(): 'ios' | 'android' | 'web' | null {
+  if (Platform.OS === 'ios') return 'ios';
+  if (Platform.OS === 'android') return 'android';
+  if (Platform.OS === 'web') return 'web';
+  return null;
+}
+
+async function upsertDeviceToken(userId: string, playerId: string) {
+  const platform = devicePlatform();
+  if (!platform) return;
+
+  const { error } = await supabase.from('device_tokens').upsert(
+    {
+      user_id: userId,
+      platform,
+      onesignal_player_id: playerId,
+      last_seen_at: new Date().toISOString(),
+    },
+    { onConflict: 'onesignal_player_id' },
+  );
+
+  if (error) {
+    console.error(
+      '[PushNotifications] Failed to upsert device_tokens:',
+      error.message,
+      error.code ?? '',
+      error.details ?? '',
+    );
+  }
+}
 
 export function usePushNotifications(userId?: string | null) {
-  const [expoPushToken, setExpoPushToken] = useState<string>('');
-  const notificationListener = useRef<Notifications.EventSubscription | null>(null);
-
   useEffect(() => {
     if (!userId) return;
+    ensureInitialized();
 
-    // On mount: only register if permission is ALREADY granted. Don't prompt
-    // here — the prompt is shown contextually during onboarding (vibes screen)
-    // so users see it after a meaningful moment instead of cold at launch.
-    // Cold-launching the permission dialog before any context produces a much
-    // higher denial rate, and once denied iOS won't show the prompt again.
-    registerForPushNotifications({ prompt: false, userId }).then((token) => {
-      if (token) setExpoPushToken(token);
-    }).catch(() => {});
+    // Alias this device to the authenticated user. external_id is what the
+    // server passes to OneSignal in include_aliases.external_id when sending.
+    // OneSignal handles fanout to every device the user has registered.
+    try {
+      OneSignal.login(userId);
+    } catch (err) {
+      if (__DEV__) console.warn('[PushNotifications] OneSignal.login failed:', err);
+    }
 
-    // Re-check on every foreground transition. This catches the case where
-    // the user denied the prompt but later enabled notifications via iOS
-    // Settings — when they bring the app back to foreground we'll fetch the
-    // token and save it without ever needing to ask again.
-    const appStateSub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        registerForPushNotifications({ prompt: false, userId }).then((token) => {
-          if (token) setExpoPushToken(token);
-        }).catch(() => {});
-      }
-    });
+    // If a subscription already exists at mount (returning user, permission
+    // granted previously), capture it. Subsequent changes are caught by the
+    // observer below.
+    OneSignal.User.pushSubscription
+      .getIdAsync()
+      .then((id) => {
+        if (id) upsertDeviceToken(userId, id);
+      })
+      .catch(() => {});
 
-    notificationListener.current?.remove();
-    notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
+    // Observe subscription changes — fires when user grants permission, when
+    // the subscription id changes, or when opt-in state flips.
+    const onSubscriptionChange = (event: any) => {
+      const id = event?.current?.id;
+      const optedIn = event?.current?.optedIn;
+      if (id && optedIn) upsertDeviceToken(userId, id);
+    };
+
+    try {
+      OneSignal.User.pushSubscription.addEventListener('change', onSubscriptionChange);
+    } catch (err) {
+      if (__DEV__) console.warn('[PushNotifications] addEventListener failed:', err);
+    }
 
     return () => {
-      notificationListener.current?.remove();
-      appStateSub.remove();
+      try {
+        OneSignal.User.pushSubscription.removeEventListener('change', onSubscriptionChange);
+      } catch {}
     };
   }, [userId]);
 
-  return { expoPushToken };
+  return {};
 }
 
+// Status helper for entry points that branch on 'granted'/'denied'/'undetermined'
+// (e.g. profile settings showing "open Settings" only on hard denial). Maps
+// OneSignal's permissionNative values to the legacy three-state shape.
+export type PushPermissionStatus = 'granted' | 'denied' | 'undetermined';
+
+export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
+  ensureInitialized();
+  try {
+    const native = await OneSignal.Notifications.permissionNative();
+    if (
+      native === OSNotificationPermission.Authorized ||
+      native === OSNotificationPermission.Provisional ||
+      native === OSNotificationPermission.Ephemeral
+    ) {
+      return 'granted';
+    }
+    if (native === OSNotificationPermission.Denied) return 'denied';
+    return 'undetermined';
+  } catch {
+    return 'undetermined';
+  }
+}
+
+// Request permission (or just probe). Preserves the legacy signature so the
+// onboarding/profile/chat-banner entry points don't need to change. Returns
+// the OneSignal subscription id on success or null on denial / error.
 export async function registerForPushNotifications(
   options: { prompt?: boolean; userId?: string | null } = {},
 ): Promise<string | null> {
-  if (!Device.isDevice) return null;
+  ensureInitialized();
 
-  // Android requires a notification channel before any notification can be shown
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: Colors.terracotta,
-    });
-  }
-
-  let finalStatus: string;
   try {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    finalStatus = existingStatus;
-
-    // Only show the system permission prompt when the caller explicitly asks
-    // for it (e.g. the vibes screen at the end of onboarding). Other call
-    // sites — cold launch from the hook, foreground re-check — pass
-    // prompt:false because they just want to know whether permission is
-    // already granted, not surface a fresh dialog.
-    if (existingStatus !== 'granted' && options.prompt) {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
+    const hasPermission = OneSignal.Notifications.hasPermission();
+    if (!hasPermission && options.prompt) {
+      // Returns true if granted, false if denied or already denied.
+      const granted = await OneSignal.Notifications.requestPermission(true);
+      if (!granted) return null;
+    } else if (!hasPermission) {
+      return null;
     }
-  } catch {
-    // Simulator doesn't support push notification entitlements
+  } catch (err) {
+    if (__DEV__) console.warn('[PushNotifications] permission check failed:', err);
     return null;
   }
 
-  if (finalStatus !== 'granted') return null;
-
-  // Resolve projectId from app.json extra.eas — run `eas init` if this is missing
-  const projectId =
-    Constants.expoConfig?.extra?.eas?.projectId ??
-    (Constants as any).easConfig?.projectId;
-
-  if (!projectId || projectId === 'YOUR_PROJECT_ID_RUN_EAS_INIT') return null;
-
   try {
-    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-    const token = tokenData.data;
+    const playerId = await OneSignal.User.pushSubscription.getIdAsync();
+    if (!playerId) return null;
 
-    // Save token to this user's profile row so the backend can send targeted
-    // notifications. Surface upsert failures loudly — this used to silently
-    // fail and we had no way to tell whether tokens were actually landing.
-    // Prefer the userId passed in by the caller (the authenticated user id
-    // from the hook) over a fresh getUser() call. On Android, getUser() can
-    // race with a just-established session after login and return null,
-    // which caused expo_push_token to silently never get written.
-    let targetUserId = options.userId ?? null;
-    if (!targetUserId) {
-      const { data: { user } } = await supabase.auth.getUser();
-      targetUserId = user?.id ?? null;
-    }
-    if (targetUserId && token) {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ expo_push_token: token })
-        .eq('id', targetUserId);
-      if (updateError) {
-        console.error(
-          '[PushNotifications] Failed to save expo_push_token to profiles:',
-          updateError.message,
-          updateError.code ?? '',
-          updateError.details ?? '',
-        );
-      }
+    const targetUserId = options.userId ?? null;
+    if (targetUserId) {
+      await upsertDeviceToken(targetUserId, playerId);
     }
 
-    return token;
+    return playerId;
   } catch (err) {
-    if (__DEV__) {
-      console.warn('[PushNotifications] getExpoPushTokenAsync failed:', err);
-    }
+    if (__DEV__) console.warn('[PushNotifications] failed to read subscription id:', err);
     return null;
   }
 }
