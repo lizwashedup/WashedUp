@@ -1357,11 +1357,11 @@ export default function PlanDetailScreen() {
               <Users size={18} color={Colors.terracotta} strokeWidth={2} />
               <View style={styles.logisticsContent}>
                 <Text style={styles.logisticsMain}>
-                  {isFeatured
-                    ? (isCreator && isOfficialCreator
-                      ? `${displayMemberCount} of ${totalCapacity} spots filled`
-                      : `${displayMemberCount} going`)
-                    : `${displayMemberCount} of ${totalCapacity} spots filled`}
+                  {isFeatured && !(isCreator && isOfficialCreator)
+                    ? `${displayMemberCount} going`
+                    : spotsLeft === 0
+                      ? 'Full'
+                      : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
                 </Text>
                 <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
               </View>
