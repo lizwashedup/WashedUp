@@ -94,7 +94,7 @@
         "onesignal-expo-plugin",
         {
           "mode": "production",
-          "iconAccentColor": "#B5522E"
+          "smallIconAccentColor": "#B5522E"
         }
       ],
       [

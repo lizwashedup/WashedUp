@@ -21,9 +21,15 @@ import { Stack, useRouter, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { OneSignal } from 'react-native-onesignal';
 import { useEffect, useRef, useState } from 'react';
-import { Linking } from 'react-native';
+import { Linking, LogBox } from 'react-native';
 import 'react-native-reanimated';
+
+// Silence the simulator-only redbox from expo-notifications trying to read
+// APNs registration from the keychain. Sims don't have push entitlements;
+// the package is still installed for setBadgeCountAsync. Harmless on devices.
+LogBox.ignoreLogs(['getRegistrationInfoAsync']);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { PostHogProvider } from 'posthog-react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -99,15 +105,28 @@ function RootLayout() {
     return null;
   }
 
+  // PostHogProvider throws if apiKey is empty. When the env var is missing
+  // (fresh checkout, misconfigured env), disable the SDK client instead of
+  // crashing the app.
+  const posthogApiKey = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <RootLayoutNav onReady={() => {}} />
-        {showVideoSplash && (
-          <VideoSplash onFinish={() => setShowVideoSplash(false)} />
-        )}
-      </SafeAreaProvider>
-    </QueryClientProvider>
+    <PostHogProvider
+      apiKey={posthogApiKey || 'placeholder'}
+      options={{
+        host: 'https://us.i.posthog.com',
+        disabled: !posthogApiKey,
+      }}
+    >
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <RootLayoutNav onReady={() => {}} />
+          {showVideoSplash && (
+            <VideoSplash onFinish={() => setShowVideoSplash(false)} />
+          )}
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    </PostHogProvider>
   );
 }
 
