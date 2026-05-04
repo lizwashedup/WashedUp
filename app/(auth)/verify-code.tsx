@@ -95,6 +95,25 @@ export default function VerifyCodeScreen() {
     return () => clearInterval(t);
   }, [cooldown]);
 
+  // Mode-aware OTP send. Migration mode's original OTP was sent via
+  // auth.updateUser (a phone_change flow on an already-authenticated user).
+  // Resending with signInWithOtp would create a separate signup OTP that
+  // conflicts with the pending phone_change verification. Mirror the original
+  // send call instead.
+  const sendOtpForCurrentMode = useCallback(
+    async (e164: string): Promise<{ ok: boolean; rateLimited: boolean }> => {
+      const { error } = mode === 'migration'
+        ? await supabase.auth.updateUser({ phone: e164 })
+        : await supabase.auth.signInWithOtp({ phone: e164 });
+      if (!error) return { ok: true, rateLimited: false };
+      const status = (error as { status?: number }).status;
+      const message = error.message ?? '';
+      const rateLimited = status === 429 || /rate.?limit|too many/i.test(message);
+      return { ok: false, rateLimited };
+    },
+    [mode],
+  );
+
   const handleVerify = useCallback(
     async (token: string) => {
       if (verifyingRef.current || token.length !== CODE_LEN) return;
@@ -193,18 +212,32 @@ export default function VerifyCodeScreen() {
       } catch (e: unknown) {
         hapticError();
         setOtpState('error');
+        const status = (e as { status?: number } | null)?.status;
         const message = (e as { message?: string } | null)?.message ?? '';
-        if (/expire/i.test(message)) {
-          setMicroError('that code expired. tap resend.');
+        const isRateLimit = status === 429 || /rate.?limit|too many/i.test(message);
+
+        if (isRateLimit) {
+          setMicroError('too many attempts. try again in a few minutes.');
         } else {
+          // Supabase returns the same "Token has expired or is invalid"
+          // message for both wrong codes and truly expired ones — we can't
+          // tell them apart from the message. Default to "try again" which
+          // is right for the common case (typo). If the code is truly dead,
+          // the next attempt will fail the same way and the user can tap
+          // the Resend button below to get a fresh SMS.
           setMicroError('wrong code. try again.');
         }
+
+        // Hold the error state briefly, then clear the input + refocus.
+        // Focus must be deferred to the next frame so React commits the
+        // setOtpState('idle') first — otherwise the input is still
+        // editable=false when focus() fires and iOS rejects it (no keyboard).
         holdTimerRef.current = setTimeout(() => {
           holdTimerRef.current = null;
           setCode('');
           setOtpState('idle');
           setMicroError(null);
-          otpRef.current?.focus();
+          requestAnimationFrame(() => otpRef.current?.focus());
         }, ERROR_HOLD_MS);
       } finally {
         verifyingRef.current = false;
@@ -217,6 +250,9 @@ export default function VerifyCodeScreen() {
   // Hoisted so OtpInput's prop identity is stable across parent re-renders.
   const handleCodeChange = useCallback((c: string) => {
     if (otpStateRef.current !== 'idle') return;
+    // Defensive: if the input lost focus during a re-render, grab focus
+    // back so subsequent keystrokes land in the input.
+    otpRef.current?.focus();
     setCode(c);
     setMicroError(null);
   }, []);
@@ -234,30 +270,20 @@ export default function VerifyCodeScreen() {
       setCooldown(RESEND_COOLDOWN_S);
       return;
     }
-    try {
-      // Migration mode's original OTP was sent via auth.updateUser (a
-      // phone_change flow on an already-authenticated user). Resending
-      // with signInWithOtp would create a separate signup OTP that
-      // conflicts with the pending phone_change verification. Mirror
-      // the original send call instead.
-      const { error } = mode === 'migration'
-        ? await supabase.auth.updateUser({ phone: e164 })
-        : await supabase.auth.signInWithOtp({ phone: e164 });
-      if (error) throw error;
+    const result = await sendOtpForCurrentMode(e164);
+    if (result.ok) {
       markOtpSent(e164);
       hapticLight();
       setCooldown(RESEND_COOLDOWN_S);
-    } catch (e: unknown) {
-      hapticError();
-      const status = (e as { status?: number } | null)?.status;
-      const message = (e as { message?: string } | null)?.message ?? '';
-      if (status === 429 || /rate.?limit|too many/i.test(message)) {
-        setMicroError('too many attempts. try again in a few minutes.');
-      } else {
-        setMicroError('couldn’t resend. try again in a sec.');
-      }
+      return;
     }
-  }, [phone, mode]);
+    hapticError();
+    if (result.rateLimited) {
+      setMicroError('too many attempts. try again in a few minutes.');
+    } else {
+      setMicroError('couldn’t send a new code. try again in a sec.');
+    }
+  }, [phone, sendOtpForCurrentMode]);
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
