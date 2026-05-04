@@ -52,6 +52,19 @@ export default function PhoneEntryScreen() {
     setSubmitting(true);
     try {
       const e164 = formatToE164(phone);
+      // Sign out any active session BEFORE initiating a new OTP. Otherwise
+      // signInWithOtp creates a fresh auth.users row for the new phone but
+      // leaves the client's session pointing at the old user — onboarding
+      // writes then silently land on the old account and the new one becomes
+      // an orphan with no profile data. (Discovered while testing 2026-05-03.)
+      const { data: { session: existingSession } } = await supabase.auth.getSession();
+      if (existingSession) {
+        await supabase.auth.signOut().catch(() => {
+          // Don't block the user if signOut fails — the next signInWithOtp
+          // will replace the session anyway. Worst case is a stale ghost
+          // session that gets overwritten on verifyOtp success.
+        });
+      }
       // If we've sent an OTP to this number recently (e.g., user backed out
       // of /verify-code and re-tapped continue), skip the API and let them
       // verify the code that's already in their messages.
