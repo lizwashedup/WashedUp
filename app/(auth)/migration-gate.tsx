@@ -20,6 +20,7 @@ import { hapticLight, hapticError } from '../../lib/haptics';
 import { formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
 import { snoozeMigrationGate } from '../../lib/migrationGateSnooze';
 import PhoneInput from '../../components/auth/PhoneInput';
+import { useSubmitGuard } from '../../hooks/useSubmitGuard';
 
 function isMandatoryToday(): boolean {
   const today = new Date().toISOString().slice(0, 10);
@@ -33,9 +34,11 @@ export default function MigrationGateScreen() {
 
   const mandatory = isMandatoryToday();
   const canSubmit = isValidUSPhone(phone) && !submitting;
+  const submit = useSubmitGuard();
 
   const handleVerify = async () => {
     if (!canSubmit) return;
+    if (!submit.tryAcquire()) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -66,6 +69,7 @@ export default function MigrationGateScreen() {
         setError('something went wrong. try again.');
       }
     } finally {
+      submit.release();
       setSubmitting(false);
     }
   };

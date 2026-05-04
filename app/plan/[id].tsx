@@ -416,6 +416,7 @@ export default function PlanDetailScreen() {
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
+  const [showDuplicateSheet, setShowDuplicateSheet] = useState(false);
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
   const [manageModalVisible, setManageModalVisible] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -1463,7 +1464,14 @@ export default function PlanDetailScreen() {
               styles.waitlistButton,
               isOnWaitlist && styles.waitlistButtonActive,
             ]}
-            onPress={handleJoinWaitlist}
+            onPress={() => {
+              if (isOnWaitlist) {
+                handleJoinWaitlist();
+              } else {
+                hapticLight();
+                setShowDuplicateSheet(true);
+              }
+            }}
             disabled={waitlistLoading}
             activeOpacity={0.9}
           >
@@ -1598,6 +1606,73 @@ export default function PlanDetailScreen() {
               ) : (
                 <Text style={joinStyles.joinBtnText}>Join</Text>
               )}
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* "Don't want to wait?" bottom sheet — shown when user taps Join Waitlist
+          on a full plan (only when they're not already on waitlist / not waitlistNotified). */}
+      <Modal
+        visible={showDuplicateSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDuplicateSheet(false)}
+        statusBarTranslucent
+      >
+        <Pressable
+          style={duplicateSheetStyles.overlay}
+          onPress={() => setShowDuplicateSheet(false)}
+          accessibilityRole="button"
+          accessibilityLabel="close"
+        >
+          <Pressable style={duplicateSheetStyles.sheet} onPress={() => {}}>
+            <View style={duplicateSheetStyles.handle} />
+            <Text style={duplicateSheetStyles.title}>don't want to wait?</Text>
+            <Text style={duplicateSheetStyles.body}>
+              you can skip the wait by making your own version of this plan. anyone else on the waitlist can join you instead.
+            </Text>
+            <TouchableOpacity
+              style={duplicateSheetStyles.primaryBtn}
+              onPress={() => {
+                hapticLight();
+                setShowDuplicateSheet(false);
+                // Let the modal start its slide-out before pushing the next
+                // screen — otherwise on Android with statusBarTranslucent
+                // there's a brief flash where the modal is mid-animation
+                // while the new screen pushes in.
+                setTimeout(() => {
+                  router.push({
+                    pathname: '/(tabs)/post',
+                    params: {
+                      prefillTitle: plan?.title ?? '',
+                      prefillDescription: plan?.description ?? '',
+                      prefillLocation: plan?.location_text ?? '',
+                      prefillCategory: plan?.primary_vibe ?? '',
+                      prefillImageUrl: plan?.image_url ?? '',
+                      duplicatedFromEventId: id ?? '',
+                    },
+                  });
+                }, 150);
+              }}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="post a duplicate hangout"
+            >
+              <Text style={duplicateSheetStyles.primaryBtnText}>post a duplicate hangout</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={duplicateSheetStyles.secondaryBtn}
+              onPress={() => {
+                hapticLight();
+                setShowDuplicateSheet(false);
+                handleJoinWaitlist();
+              }}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="just join the waitlist"
+            >
+              <Text style={duplicateSheetStyles.secondaryBtnText}>just join the waitlist</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -3109,5 +3184,72 @@ const manageStyles = StyleSheet.create({
     fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
     marginBottom: 8,
+  },
+});
+
+const duplicateSheetStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: Colors.overlayDark,
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: Colors.parchment,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 12,
+    paddingBottom: 32,
+    paddingHorizontal: 24,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.border,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  title: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    marginBottom: 8,
+  },
+  body: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  primaryBtn: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+    shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  primaryBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.white,
+  },
+  secondaryBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  secondaryBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.terracotta,
   },
 });

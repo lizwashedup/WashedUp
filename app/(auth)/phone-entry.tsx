@@ -64,6 +64,14 @@ export default function PhoneEntryScreen() {
           // will replace the session anyway. Worst case is a stale ghost
           // session that gets overwritten on verifyOtp success.
         });
+        // Let the root onAuthStateChange listener's queued navigation drain
+        // before signInWithOtp triggers another auth event. Without this,
+        // the SIGNED_OUT-driven router.replace can land AFTER we navigate
+        // to /verify-code and bounce the user back to /phone-entry.
+        // Supabase dispatches via an internal timer chain so a single
+        // microtask yield isn't enough — 100ms is enough on any device
+        // we've seen and is unnoticeable in the UX.
+        await new Promise<void>((r) => setTimeout(r, 100));
       }
       // If we've sent an OTP to this number recently (e.g., user backed out
       // of /verify-code and re-tapped continue), skip the API and let them

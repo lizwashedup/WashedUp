@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { Heart } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Colors from '../../constants/Colors';
@@ -173,11 +172,10 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel={isWishlisted ? 'Remove from saved' : 'Save plan'}
           >
-            <Heart
+            <Ionicons
+              name={isWishlisted ? 'bookmark' : 'bookmark-outline'}
               size={18}
-              color={isWishlisted ? Colors.errorRed : Colors.asphalt}
-              fill={isWishlisted ? Colors.errorRed : 'transparent'}
-              strokeWidth={2}
+              color={isWishlisted ? Colors.terracotta : Colors.asphalt}
             />
           </TouchableOpacity>
         </View>

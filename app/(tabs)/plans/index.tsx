@@ -9,6 +9,7 @@ import React, { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'r
 import {
     ActivityIndicator,
     Animated,
+    Dimensions,
     Easing,
     FlatList,
     Modal,
@@ -335,26 +336,87 @@ function getSectionDefs(now: Date): SectionDef[] {
   return sections;
 }
 
+// ─── Feed item grouping (clusters of duplicated plans) ───────────────────────
+
+type FeedItem =
+  | { kind: 'standalone'; plan: Plan }
+  | { kind: 'cluster'; rootId: string; plans: Plan[] };
+
+function feedItemSpotsRemaining(p: Plan): number {
+  return (p.max_invites ?? 0) + 1 - (p.member_count ?? 0);
+}
+
+function feedItemSortTime(item: FeedItem): string {
+  if (item.kind === 'standalone') return item.plan.start_time;
+  // Cluster slots in by its EARLIEST member so it appears at the same point
+  // a single member would have in the chronological feed.
+  return item.plans.reduce(
+    (min, p) => (new Date(p.start_time) < new Date(min) ? p.start_time : min),
+    item.plans[0].start_time,
+  );
+}
+
+function feedItemMatchesCategory(item: FeedItem, filter: CategoryOption[]): boolean {
+  if (filter.length === 0) return true;
+  const lower = filter.map((c) => c.toLowerCase());
+  if (item.kind === 'standalone') {
+    return !!item.plan.category && lower.includes(item.plan.category.toLowerCase());
+  }
+  return item.plans.some((p) => p.category && lower.includes(p.category.toLowerCase()));
+}
+
+// Bucket plans into FeedItems by cluster_root_id. The RPC guarantees a
+// non-null cluster_root_id only when ≥2 visible rows share the lineage,
+// but client-side filters (heartFilter, !is_featured, etc.) run AFTER the
+// RPC and can reduce a cluster back to 1 visible member. We re-collapse
+// any 1-member cluster into a standalone here so the "popular plan"
+// header never sits over a single card.
+function groupIntoFeedItems(plans: Plan[]): FeedItem[] {
+  // Plain record instead of Map<...> because the file imports `Map` from
+  // lucide-react-native (an icon component) which shadows the global type.
+  const clusters: Record<string, Plan[]> = {};
+  const items: FeedItem[] = [];
+  for (const p of plans) {
+    if (p.cluster_root_id) {
+      if (!clusters[p.cluster_root_id]) clusters[p.cluster_root_id] = [];
+      clusters[p.cluster_root_id].push(p);
+    } else {
+      items.push({ kind: 'standalone', plan: p });
+    }
+  }
+  for (const rootId of Object.keys(clusters)) {
+    const members = clusters[rootId];
+    if (members.length < 2) {
+      // Cluster collapsed to 1 by client-side filters — render as a normal
+      // standalone card with no "popular plan" header.
+      items.push({ kind: 'standalone', plan: members[0] });
+      continue;
+    }
+    // Most spots first (leftmost), full plans last.
+    members.sort((a, b) => feedItemSpotsRemaining(b) - feedItemSpotsRemaining(a));
+    items.push({ kind: 'cluster', rootId, plans: members });
+  }
+  return items;
+}
+
 function filterIntoSections(
-  plans: Plan[],
+  items: FeedItem[],
   sectionDefs: SectionDef[],
   categoryFilter: CategoryOption[],
   whenKeys: string[],
-): { def: SectionDef; plans: Plan[] }[] {
-  const catFiltered = categoryFilter.length === 0
-    ? plans
-    : plans.filter((p) => categoryFilter.some((c) => c.toLowerCase() === p.category?.toLowerCase()));
+): { def: SectionDef; items: FeedItem[] }[] {
+  const catFiltered = items.filter((i) => feedItemMatchesCategory(i, categoryFilter));
 
   return sectionDefs
     .filter((def) => whenKeys.length === 0 || whenKeys.includes(def.key))
     .map((def) => ({
       def,
-      plans: catFiltered.filter((p) => {
-        const t = new Date(p.start_time);
+      items: catFiltered.filter((i) => {
+        const t = new Date(feedItemSortTime(i));
         return t >= def.from && t <= def.to;
       }),
     }))
-    .filter((s) => s.plans.length > 0);
+    .filter((s) => s.items.length > 0);
 }
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -615,14 +677,26 @@ export default function PlansScreen() {
 
   // ── Featured events query ────────────────────────────────────────────────────
   const { data: featuredPlans = [] } = useQuery<FeaturedPlan[]>({
-    queryKey: ['events', 'featured'],
+    queryKey: ['events', 'featured', userId],
     queryFn: async () => {
+      if (!userId) return [];
+
+      // Visibility filtering (gender / age / mutual_blocks) happens in the
+      // RPC. Without this, the featured carousel would leak plans to users
+      // who shouldn't see them (e.g. a man seeing a women_only plan).
+      const { data: eligibleIdsRaw, error: eligErr } = await supabase
+        .rpc('get_featured_eligible_ids', { p_user_id: userId });
+      if (eligErr) {
+        console.warn('[featured] get_featured_eligible_ids failed:', eligErr.message);
+        return [];
+      }
+      const eligibleIds = (eligibleIdsRaw ?? []) as string[];
+      if (eligibleIds.length === 0) return [];
+
       const { data: events, error } = await supabase
         .from('events')
         .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured, featured_type')
-        .eq('is_featured', true)
-        .in('status', ['forming', 'active', 'full'])
-        .gt('start_time', new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString())
+        .in('id', eligibleIds)
         .order('start_time', { ascending: true });
 
       if (error || !events || events.length === 0) return [];
@@ -901,15 +975,17 @@ export default function PlansScreen() {
     return nonFeatured.filter((p) => wishlistedSet[p.id]);
   }, [allPlans, heartFilter, wishlistedSet]);
 
+  const feedItems = useMemo(() => groupIntoFeedItems(displayPlans), [displayPlans]);
+
   const sections = useMemo(
-    () => filterIntoSections(displayPlans, sectionDefs, categoryFilter, whenFilter),
-    [displayPlans, sectionDefs, categoryFilter, whenFilter],
+    () => filterIntoSections(feedItems, sectionDefs, categoryFilter, whenFilter),
+    [feedItems, sectionDefs, categoryFilter, whenFilter],
   );
 
   const sectionListData = useMemo(() => {
     return sections.map((s) => ({
       title: s.def.title,
-      data: s.plans,
+      data: s.items,
     })).filter((s) => s.data.length > 0);
   }, [sections]);
 
@@ -1020,6 +1096,52 @@ export default function PlansScreen() {
       </View>
     ),
     [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, allPlans, myPlans],
+  );
+
+  // Renders a cluster of duplicate plans as a horizontal scroll. Each member
+  // is the same PlanCard used at full width, just constrained to a 300px
+  // wrapper to match the featured carousel's visual density.
+  const renderFeedItem = useCallback(
+    ({ item }: { item: FeedItem }) => {
+      if (item.kind === 'standalone') {
+        return renderItem({ item: item.plan });
+      }
+      return (
+        <View style={styles.clusterSection}>
+          <Text style={styles.clusterHeaderText}>popular plans</Text>
+          <FlatList
+            decelerationRate="normal"
+            horizontal
+            data={item.plans}
+            keyExtractor={(p) => p.id}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.clusterScrollContent}
+            renderItem={({ item: p }) => (
+              <View style={styles.clusterCardWrap}>
+                <PlanCard
+                  plan={toPlanCardPlan(p)}
+                  isMember={!!memberIdSet[p.id]}
+                  isWishlisted={!!wishlistedSet[p.id]}
+                  onWishlist={(id, current) => {
+                    wishlistMutation.mutate({ eventId: id, current });
+                    if (!current) {
+                      setSnackbar({ planId: id, planTitle: p.title });
+                    } else {
+                      setSnackbar(null);
+                    }
+                  }}
+                  onReport={handleReport}
+                  onBlock={handleBlock}
+                  onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
+                  isPast={p.status === 'completed'}
+                />
+              </View>
+            )}
+          />
+        </View>
+      );
+    },
+    [renderItem, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock],
   );
 
   const persistWelcomeSeen = useCallback(async () => {
@@ -1324,8 +1446,10 @@ export default function PlansScreen() {
             <SectionList
               decelerationRate="normal"
               sections={sectionListData}
-              keyExtractor={(item) => item.id}
-              renderItem={renderItem}
+              keyExtractor={(item) =>
+                item.kind === 'standalone' ? item.plan.id : `cluster:${item.rootId}`
+              }
+              renderItem={renderFeedItem}
               renderSectionHeader={renderSectionHeader}
               ListHeaderComponent={listHeader}
               stickySectionHeadersEnabled={false}
@@ -1675,6 +1799,29 @@ const styles = StyleSheet.create({
   featuredScrollContent: {
     paddingHorizontal: 20,
     gap: 12,
+  },
+  clusterSection: {
+    marginBottom: 20,
+  },
+  clusterHeaderText: {
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 11,
+    color: TC,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginLeft: 20,
+    marginBottom: 8,
+  },
+  clusterScrollContent: {
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  clusterCardWrap: {
+    // 300px on iPhone-13-class+ devices to match the featured carousel,
+    // but on narrower devices (iPhone SE @ 320pt) clamp so we keep a
+    // visible peek of the next card (~60pt) — otherwise the horizontal
+    // scroll affordance disappears.
+    width: Math.min(300, Dimensions.get('window').width - 60),
   },
   sectionHeader: {
     fontFamily: 'DMSans_700Bold',

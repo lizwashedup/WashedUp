@@ -230,6 +230,7 @@ export default function PostScreen() {
     prefillImageUrl?: string;
     prefillLocation?: string;
     prefillCategory?: string;
+    duplicatedFromEventId?: string;
   }>();
   const [exploreEventId, setExploreEventId] = useState<string | null>(null);
 
@@ -411,8 +412,13 @@ export default function PostScreen() {
   const [drafts, setDrafts] = useState<PlanDraft[]>([]);
 
   useEffect(() => {
+    // Skip the drafts list while a duplicate-plan prefill is active so the
+    // user can't accidentally clobber their prefilled state by tapping
+    // "load draft", and so saving from a duplicate doesn't silently overwrite
+    // a prior draft via stale state.
+    if (params.duplicatedFromEventId) return;
     loadDrafts().then(setDrafts);
-  }, []);
+  }, [params.duplicatedFromEventId]);
 
   const handleSaveDraft = useCallback(async () => {
     if (!title.trim()) {
@@ -566,6 +572,7 @@ export default function PostScreen() {
           neighborhood: (neighborhood === NEIGHBORHOOD_OTHER
             ? neighborhoodOther.trim()
             : neighborhood.trim()) || null,
+          duplicated_from_event_id: params.duplicatedFromEventId || null,
         })
         .select('id')
         .single();
@@ -597,6 +604,19 @@ export default function PostScreen() {
             });
             return;
           }
+        }
+
+        // If this plan was created as a duplicate of another, notify the
+        // original plan's waitlist users. Fire-and-forget — a notification
+        // failure shouldn't block plan creation.
+        if (params.duplicatedFromEventId) {
+          supabase.rpc('notify_waitlist_duplicate_plan', {
+            p_original_event_id: params.duplicatedFromEventId,
+            p_new_event_id: insertedEvent.id,
+            p_creator_user_id: user.id,
+          }).then(({ error: notifyErr }) => {
+            if (notifyErr) console.warn('[post] notify_waitlist_duplicate_plan failed:', notifyErr.message);
+          });
         }
       }
 

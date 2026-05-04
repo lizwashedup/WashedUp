@@ -41,7 +41,7 @@ import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
-import { seedAuthProfile } from '../hooks/useProfile';
+import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
 import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt } from '../lib/navState';
 import { resetMigrationGateSnooze } from '../lib/migrationGateSnooze';
 import Colors from '../constants/Colors';
@@ -295,7 +295,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
       const type = data?.type as string | undefined;
 
-      if ((type === 'plan_invite' || type === 'waitlist_spot') && data?.eventId) {
+      if ((type === 'plan_invite' || type === 'waitlist_spot' || type === 'duplicate_plan') && data?.eventId) {
         router.push(`/plan/${data.eventId}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
@@ -527,15 +527,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
 
       try {
-        const { data } = await supabase
-          .from('profiles')
-          .select('onboarding_status, referral_source, phone_number')
-          .eq('id', session.user.id)
-          .single();
-
-        if (data) {
-          seedAuthProfile(queryClient, session.user.id, data as any);
-        }
+        // Reuse the shared auth-profile cache (seeded by cold-start checkAuth)
+        // so SIGNED_IN doesn't fire a duplicate select within the 60s stale
+        // window. Falls back to a network fetch if the cache is empty/stale.
+        const data = await getAuthProfile(queryClient, session.user.id);
         const dest = authedDest({
           onboarding_status: data?.onboarding_status,
           referral_source: data?.referral_source,

@@ -58,6 +58,7 @@ export default function VerifyCodeScreen() {
   const verifyingRef = useRef(false);
   const cooldownRef = useRef(RESEND_COOLDOWN_S);
   const otpStateRef = useRef<OtpState>('idle');
+  const isMountedRef = useRef(true);
 
   // Bail out if we landed here with no phone (e.g. someone deep-linked
   // /verify-code directly). Without a phone, verifyOtp would always fail
@@ -73,6 +74,7 @@ export default function VerifyCodeScreen() {
   // root auth listener permanently muted.
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
       if (holdTimerRef.current) {
         clearTimeout(holdTimerRef.current);
         holdTimerRef.current = null;
@@ -177,11 +179,12 @@ export default function VerifyCodeScreen() {
               .then(({ error: syncError }) => {
                 if (!syncError) return;
                 console.warn('[phone-auth] profiles.phone_number sync failed:', syncError.message);
+                invalidateAuthProfile(queryClient, verifiedUser.id);
+                if (!isMountedRef.current) return;
                 if (holdTimerRef.current) {
                   clearTimeout(holdTimerRef.current);
                   holdTimerRef.current = null;
                 }
-                invalidateAuthProfile(queryClient, verifiedUser.id);
                 setSyncFailedAlert(true);
               });
           }
