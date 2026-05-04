@@ -24,10 +24,16 @@ import { useEffect, useRef, useState } from 'react';
 import { Linking, LogBox } from 'react-native';
 import 'react-native-reanimated';
 
-// Silence the simulator-only redbox from expo-notifications trying to read
-// APNs registration from the keychain. Sims don't have push entitlements;
-// the package is still installed for setBadgeCountAsync. Harmless on devices.
-LogBox.ignoreLogs(['getRegistrationInfoAsync']);
+// Silence dev-only redboxes that aren't real bugs:
+// 1. expo-notifications trying to read APNs registration from the keychain
+//    on simulators (no push entitlement). Harmless on real devices.
+// 2. device_tokens upsert failing because the table only exists in the
+//    OneSignal migration file, not yet applied to prod. Will be removed
+//    once the migration ships in §8 Step 8 of the OneSignal plan.
+LogBox.ignoreLogs([
+  'getRegistrationInfoAsync',
+  'Failed to upsert device_tokens',
+]);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PostHogProvider } from 'posthog-react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
