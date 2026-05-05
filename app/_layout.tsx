@@ -46,6 +46,7 @@ import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt } from '../lib/navState'
 import { resetMigrationGateSnooze } from '../lib/migrationGateSnooze';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/uploadAlbumMedia';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
@@ -151,6 +152,13 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const lastNavRef = useRef({ dest: '', ts: 0 });
   usePushNotifications(authedUserId);
   useSessionLogger(authedUserId);
+
+  // Resume any in-flight album upload batches once on mount, and re-nudge on
+  // app foreground. Worker is idempotent — safe to call repeatedly.
+  useEffect(() => {
+    void resumeAllPendingAlbumBatches();
+    return registerAlbumUploadResume();
+  }, []);
 
   // ── Post-plan survey ────────────────────────────────────────────────────
   const [surveyPlan, setSurveyPlan] = useState<SurveyPlan | null>(null);
@@ -295,7 +303,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
       const type = data?.type as string | undefined;
 
-      if ((type === 'plan_invite' || type === 'waitlist_spot' || type === 'duplicate_plan') && data?.eventId) {
+      // Album notifications: prompt/reminder/no-uploads-nudge open the upload
+      // flow; ready/someone-uploaded/more-photos-added/hearts-batched open the
+      // album detail view.
+      if (type === 'album_upload_prompt' || type === 'album_upload_reminder' || type === 'album_creator_no_uploads_nudge') {
+        if (data?.eventId) router.push(`/album/upload/${data.eventId}` as any);
+      } else if (type === 'album_ready' || type === 'album_someone_uploaded' || type === 'album_more_photos_added' || type === 'album_hearts_batched') {
+        if (data?.eventId) router.push(`/album/${data.eventId}` as any);
+      } else if ((type === 'plan_invite' || type === 'waitlist_spot' || type === 'duplicate_plan') && data?.eventId) {
         router.push(`/plan/${data.eventId}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);

@@ -25,6 +25,7 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
+import { AlbumsGrid } from '../../../components/albums/AlbumsGrid';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import ProfileButton from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
@@ -104,6 +105,7 @@ export default function YourPeopleScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [userMenuTarget, setUserMenuTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'people' | 'albums'>('people');
 
   // Debounce search
   React.useEffect(() => {
@@ -630,6 +632,30 @@ export default function YourPeopleScreen() {
         <ProfileButton />
       </View>
 
+      {/* Tabs */}
+      <View style={styles.albumsTabRow}>
+        <Pressable
+          onPress={() => setActiveTab('people')}
+          style={[styles.albumsTab, activeTab === 'people' && styles.albumsTabActive]}
+        >
+          <Text style={[styles.albumsTabText, activeTab === 'people' && styles.albumsTabTextActive]}>
+            Your People
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setActiveTab('albums')}
+          style={[styles.albumsTab, activeTab === 'albums' && styles.albumsTabActive]}
+        >
+          <Text style={[styles.albumsTabText, activeTab === 'albums' && styles.albumsTabTextActive]}>
+            Albums
+          </Text>
+        </Pressable>
+      </View>
+
+      {activeTab === 'albums' ? (
+        <AlbumsGrid userId={userId ?? ''} />
+      ) : (
+      <>
       {/* Search bar */}
       <View style={styles.searchWrap}>
         <Search size={18} color={Colors.textLight} style={styles.searchIcon} />
@@ -1169,6 +1195,8 @@ export default function YourPeopleScreen() {
         ]}
         onClose={() => setUserMenuTarget(null)}
       />
+      </>
+      )}
     </SafeAreaView>
   );
 }
@@ -1178,6 +1206,30 @@ export default function YourPeopleScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   centered: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const },
+  albumsTabRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  albumsTab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'transparent',
+  },
+  albumsTabActive: { borderBottomColor: Colors.terracotta },
+  albumsTabText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.warmGray,
+  },
+  albumsTabTextActive: {
+    color: Colors.asphalt,
+    fontFamily: Fonts.sansBold,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
