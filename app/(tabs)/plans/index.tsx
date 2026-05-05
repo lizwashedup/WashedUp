@@ -294,12 +294,17 @@ function getSectionDefs(now: Date): SectionDef[] {
   const sections: SectionDef[] = [];
 
   const todayEnd = new Date(y, mo, d, 23, 59, 59, 999);
-  // Widen "Tonight" back 3h so happening-now plans (start_time in the last
-  // 3h) land in this bucket instead of falling through the section filter
+  // Widen the today bucket back 3h so happening-now plans (start_time in
+  // the last 3h) land in it instead of falling through the section filter
   // at line ~192. The RPC caps past plans at 3h so this won't pull in
   // anything older than that.
+  //
+  // Title flips on local-time hour: morning + early afternoon say "Today"
+  // (a 9 AM plan under "Tonight" at 11 AM was confusing real users). 4 PM
+  // onward keeps the original "Tonight" framing for evening plans.
   const tonightFrom = new Date(now.getTime() - 3 * 60 * 60 * 1000);
-  sections.push({ key: 'tonight', title: 'Tonight', from: tonightFrom, to: todayEnd });
+  const todayTitle = now.getHours() < 16 ? 'Today' : 'Tonight';
+  sections.push({ key: 'tonight', title: todayTitle, from: tonightFrom, to: todayEnd });
 
   if (day >= 1 && day <= 4) {
     const tomorrowStart = new Date(y, mo, d + 1, 0, 0, 0);
