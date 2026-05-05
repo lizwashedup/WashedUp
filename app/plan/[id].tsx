@@ -822,12 +822,6 @@ export default function PlanDetailScreen() {
     onSuccess: () => {
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['events', 'my-interest', id, currentUserId] });
-      const creatorName = plan?.creator?.first_name_display ?? 'them';
-      setBrandedAlert({
-        visible: true,
-        title: 'Done!',
-        message: `We'll let ${creatorName} know.`,
-      });
     },
     onError: (error: any) => {
       setBrandedAlert({

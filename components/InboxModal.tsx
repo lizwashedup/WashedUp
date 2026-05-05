@@ -95,9 +95,15 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         if (!data || data.length === 0) return [];
 
         // Try to extract sender name from title (e.g. "Hello joined your plan!" → "Hello")
-        // and look up their profile photo
+        // and look up their profile photo. interest_signal/interest_invite both
+        // start with the relevant person's first name in their title.
         const nameMatches = data
-          .filter((n: any) => n.type === 'member_joined' || n.type === 'invite_accepted')
+          .filter((n: any) =>
+            n.type === 'member_joined' ||
+            n.type === 'invite_accepted' ||
+            n.type === 'interest_signal' ||
+            n.type === 'interest_invite'
+          )
           .map((n: any) => {
             const match = n.title?.match(/^(\S+)\s/);
             return match?.[1] ?? null;

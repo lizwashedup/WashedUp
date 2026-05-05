@@ -390,7 +390,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               ) : (
                 <>
                   <Text style={styles.spotsNumber}>{spotsLeft}</Text>
-                  {` ${spotsLeft === 1 ? 'spot' : 'spots'}`}
+                  {` ${spotsLeft === 1 ? 'spot left' : 'spots left'}`}
                 </>
               )}
             </Text>
