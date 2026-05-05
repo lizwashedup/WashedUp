@@ -8,6 +8,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
 import { PolaroidCard, PolaroidStatus } from './PolaroidCard';
+import { PolaroidEmptyIcon } from './PolaroidEmptyIcon';
 
 // Same AsyncStorage key the upload-prompt modal uses to remember which prompt
 // notifications the user has dismissed locally.
@@ -206,6 +207,9 @@ export function AlbumsGrid({ userId }: Props) {
   if (!albums || albums.length === 0) {
     return (
       <View style={styles.empty}>
+        <View style={styles.emptyIcon}>
+          <PolaroidEmptyIcon size={96} />
+        </View>
         <Text style={styles.emptyTitle}>Your albums will live here.</Text>
         <Text style={styles.emptySubtitle}>Go do something, then relive it here.</Text>
         <TouchableOpacity
@@ -265,6 +269,7 @@ const styles = StyleSheet.create({
     flex: 1, alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: 32, paddingVertical: 64, gap: 12,
   },
+  emptyIcon: { marginBottom: 12 },
   emptyTitle: {
     fontFamily: Fonts.displayBold, fontSize: FontSizes.displaySM,
     color: Colors.asphalt, textAlign: 'center',
