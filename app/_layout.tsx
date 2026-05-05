@@ -47,6 +47,7 @@ import { resetMigrationGateSnooze } from '../lib/migrationGateSnooze';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/uploadAlbumMedia';
+import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptModal';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
@@ -599,6 +600,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           visible={showReviewAsk && !surveyPlan}
           onClose={() => setShowReviewAsk(false)}
         />
+      )}
+      {authedUserId && !surveyPlan && !showReviewAsk && (
+        <AlbumUploadPromptModal userId={authedUserId} />
       )}
       {authedUserId && surveyCheckDone && !surveyPlan && !showReviewAsk && (
         <MarkEarnedModal userId={authedUserId} />
