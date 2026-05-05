@@ -2,11 +2,14 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS, ActivityIndicator, Alert, Dimensions, FlatList, Modal,
-  Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput,
+  TouchableOpacity, View,
 } from 'react-native';
+import { captureRef } from 'react-native-view-shot';
+import { BrandedShareCanvas } from '../../components/albums/BrandedShareCanvas';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
@@ -55,6 +58,12 @@ type AlbumPayload = {
   myUserId: string;
   // Set of upload_ids the caller has already hearted.
   myHeartedIds: Set<string>;
+  // Caller's per-album personalisation (custom name, memory note, mute).
+  myMetadata: {
+    custom_name: string | null;
+    memory_note: string | null;
+    notifications_muted: boolean;
+  } | null;
 };
 
 async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
@@ -124,6 +133,18 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
     myHeartedIds = new Set((hearts ?? []).map((h) => h.upload_id));
   }
 
+  // 6. Caller's per-album metadata (custom name, memory note, mute flag).
+  let myMetadata: AlbumPayload['myMetadata'] = null;
+  if (albumRow) {
+    const { data: meta } = await supabase
+      .from('album_user_metadata')
+      .select('custom_name, memory_note, notifications_muted')
+      .eq('plan_album_id', albumRow.id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    myMetadata = meta ?? null;
+  }
+
   return {
     album: albumRow ? {
       id: albumRow.id,
@@ -138,6 +159,7 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
     attendees,
     myUserId: user.id,
     myHeartedIds,
+    myMetadata,
   };
 }
 
@@ -162,6 +184,15 @@ export default function AlbumDetailScreen() {
   // animate on tap before the round-trip + refetch completes.
   const [optimisticHearted, setOptimisticHearted] = useState<Record<string, boolean>>({});
   const [optimisticHiddenIds, setOptimisticHiddenIds] = useState<Set<string>>(new Set());
+  const [sharing, setSharing] = useState(false);
+  const shareCanvasRef = useRef<View>(null);
+
+  // Personal-name + memory-note state, debounced-saved to album_user_metadata.
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<string | null>(null);
+  const [savedName, setSavedName] = useState<string | null>(null);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [muted, setMuted] = useState(false);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['album', eventId],
@@ -179,6 +210,101 @@ export default function AlbumDetailScreen() {
       void supabase.rpc('mark_album_viewed', { p_plan_album_id: data.album.id });
     }
   }, [data?.album?.id]);
+
+  // Hydrate metadata drafts from server when payload changes.
+  useEffect(() => {
+    const nm = data?.myMetadata?.custom_name ?? null;
+    const nt = data?.myMetadata?.memory_note ?? null;
+    setNameDraft(nm);
+    setNoteDraft(nt);
+    setSavedName(nm);
+    setSavedNote(nt);
+    setMuted(!!data?.myMetadata?.notifications_muted);
+  }, [data?.myMetadata?.custom_name, data?.myMetadata?.memory_note, data?.myMetadata?.notifications_muted]);
+
+  // Debounced save: any draft change persists 600ms after the last keystroke.
+  useEffect(() => {
+    if (!data?.album?.id) return;
+    const sameName = (nameDraft ?? '') === (savedName ?? '');
+    const sameNote = (noteDraft ?? '') === (savedNote ?? '');
+    if (sameName && sameNote) return;
+
+    const t = setTimeout(async () => {
+      const { error } = await supabase.rpc('set_album_user_metadata', {
+        p_plan_album_id: data.album!.id,
+        p_custom_name: nameDraft ?? '',
+        p_memory_note: noteDraft ?? '',
+        p_notifications_muted: muted,
+      });
+      if (!error) {
+        setSavedName(nameDraft);
+        setSavedNote(noteDraft);
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [nameDraft, noteDraft, savedName, savedNote, data?.album?.id, muted]);
+
+  const toggleMute = useCallback(async () => {
+    if (!data?.album?.id) return;
+    const next = !muted;
+    setMuted(next);
+    const { error } = await supabase.rpc('set_album_user_metadata', {
+      p_plan_album_id: data.album.id,
+      p_custom_name: savedName ?? '',
+      p_memory_note: savedNote ?? '',
+      p_notifications_muted: next,
+    });
+    if (error) {
+      setMuted(!next);
+      Alert.alert('Could not update notifications', error.message);
+    }
+  }, [data?.album?.id, muted, savedName, savedNote]);
+
+  const handleShareViewedPhoto = useCallback(async () => {
+    if (sharing) return;
+    if (viewerIndex == null) return;
+    setSharing(true);
+    try {
+      // Capture the off-screen BrandedShareCanvas which is already rendered
+      // with the current viewer photo + plan title. Brief delay lets the
+      // image asset settle before capture.
+      await new Promise((r) => setTimeout(r, 300));
+      const uri = await captureRef(shareCanvasRef as any, {
+        format: 'jpg',
+        quality: 0.95,
+        result: 'tmpfile',
+      });
+      // iOS supports `url` for file shares; Android falls back to text+url.
+      // expo-sharing would handle Android files better — defer to 1.0.4.
+      await Share.share(
+        Platform.OS === 'ios'
+          ? { url: uri }
+          : { message: 'Check out our album from washedup', url: uri },
+      );
+    } catch (err) {
+      Alert.alert('Could not share', err instanceof Error ? err.message : String(err));
+    } finally {
+      setSharing(false);
+    }
+  }, [sharing, viewerIndex]);
+
+  const showHeaderMenu = useCallback(() => {
+    const muteLabel = muted ? 'Unmute notifications' : 'Mute notifications';
+    const onPick = (idx: number) => {
+      if (idx === 0) void toggleMute();
+    };
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: [muteLabel, 'Cancel'], cancelButtonIndex: 1 },
+        onPick,
+      );
+    } else {
+      Alert.alert('Album options', undefined, [
+        { text: muteLabel, onPress: () => onPick(0) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  }, [muted, toggleMute]);
 
   const coverUri = useMemo(() => {
     return data?.uploads?.[0]?.signed_display_url ?? null;
@@ -239,6 +365,10 @@ export default function AlbumDetailScreen() {
   }, [refetch]);
 
   const showTileActions = useCallback((uploadId: string, isOwn: boolean) => {
+    // Spec includes a "Save to phone" option here. Deferred to 1.0.4 — needs
+    // expo-media-library (native module). Once installed, add a third option
+    // that fetches the original signed URL and writes it to the photo album
+    // via MediaLibrary.saveToLibraryAsync(localPath).
     const hearted = isHearted(uploadId);
     const heartLabel = hearted ? 'Unheart' : 'Heart';
     const ownActionLabel = isOwn ? 'Delete' : 'Hide from my view';
@@ -328,9 +458,14 @@ export default function AlbumDetailScreen() {
             style={styles.heroGradient}
           />
           <SafeAreaView edges={['top']} style={styles.heroOverlay}>
-            <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-              <Ionicons name="chevron-back" size={26} color={Colors.white} />
-            </Pressable>
+            <View style={styles.heroBar}>
+              <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+                <Ionicons name="chevron-back" size={26} color={Colors.white} />
+              </Pressable>
+              <Pressable onPress={showHeaderMenu} hitSlop={12} style={styles.backBtn}>
+                <Ionicons name="ellipsis-horizontal" size={22} color={Colors.white} />
+              </Pressable>
+            </View>
           </SafeAreaView>
           <View style={styles.heroText}>
             <Text style={styles.heroTitle} numberOfLines={2}>{album.event_title}</Text>
@@ -364,11 +499,37 @@ export default function AlbumDetailScreen() {
           <Text style={styles.attendeeNames}>{attendeeSummary}</Text>
         </View>
 
+        {/* Personal name + memory note (per-user; others see their own) */}
+        <View style={styles.personalSection}>
+          <View style={styles.nameRow}>
+            <TextInput
+              style={styles.nameInput}
+              value={nameDraft ?? album.event_title}
+              onChangeText={(v) => setNameDraft(v)}
+              placeholder={album.event_title}
+              placeholderTextColor={Colors.warmGray}
+              maxLength={80}
+            />
+            <Ionicons name="pencil-outline" size={16} color={Colors.warmGray} />
+          </View>
+          <View style={styles.noteWrap}>
+            <TextInput
+              style={styles.noteInput}
+              value={noteDraft ?? ''}
+              onChangeText={(v) => setNoteDraft(v)}
+              placeholder="Add a memory or note about this day..."
+              placeholderTextColor={Colors.warmGray}
+              multiline
+              maxLength={500}
+            />
+          </View>
+        </View>
+
         {/* Photo grid */}
         {uploads.length === 0 ? (
           <View style={styles.emptyGrid}>
             <Text style={styles.emptyGridTitle}>
-              {isReady ? 'No photos yet.' : "Your photos are developing…"}
+              {isReady ? 'Be the first to add some photos.' : "Your photos are developing…"}
             </Text>
             <Text style={styles.emptyGridSubtitle}>
               {isReady ? 'You were there, show us what happened.' : readyInLabel(album.first_upload_at)}
@@ -459,11 +620,25 @@ export default function AlbumDetailScreen() {
                 </Pressable>
               </SafeAreaView>
               <SafeAreaView edges={['bottom']} style={styles.viewerFooter}>
-                <Text style={styles.viewerCredit}>
-                  {uploads[viewerIndex].uploader_name
-                    ? `by ${uploads[viewerIndex].uploader_name}${uploads[viewerIndex].user_id === myUserId ? ' (you)' : ''}`
-                    : ''}
-                </Text>
+                <View style={styles.viewerCreditRow}>
+                  <Text style={styles.viewerCredit}>
+                    {uploads[viewerIndex].uploader_name
+                      ? `by ${uploads[viewerIndex].uploader_name}${uploads[viewerIndex].user_id === myUserId ? ' (you)' : ''}`
+                      : ''}
+                  </Text>
+                  <Pressable
+                    onPress={handleShareViewedPhoto}
+                    hitSlop={10}
+                    style={styles.viewerShareBtn}
+                    disabled={sharing}
+                  >
+                    {sharing ? (
+                      <ActivityIndicator color={Colors.white} />
+                    ) : (
+                      <Ionicons name="share-outline" size={22} color={Colors.white} />
+                    )}
+                  </Pressable>
+                </View>
                 <View style={styles.viewerNav}>
                   <Pressable
                     onPress={() => setViewerIndex((i) => (i === null || i <= 0 ? i : i - 1))}
@@ -490,6 +665,14 @@ export default function AlbumDetailScreen() {
           )}
         </View>
       </Modal>
+
+      {/* Off-screen branded share canvas — captured on share button press. */}
+      <BrandedShareCanvas
+        ref={shareCanvasRef}
+        photoUri={viewerIndex != null ? (uploads[viewerIndex]?.signed_display_url ?? null) : null}
+        title={album.event_title}
+        dateText={formatDate(album.event_start_time)}
+      />
     </View>
   );
 }
@@ -507,6 +690,7 @@ const styles = StyleSheet.create({
   heroPlaceholderText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   heroGradient: { ...StyleSheet.absoluteFillObject },
   heroOverlay: { position: 'absolute', top: 0, left: 0, right: 0 },
+  heroBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 },
   backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
   heroText: { position: 'absolute', bottom: 18, left: 18, right: 18 },
   heroTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayLG, color: Colors.white },
@@ -517,6 +701,20 @@ const styles = StyleSheet.create({
   attendeeFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
   attendeeFallbackText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.warmGray },
   attendeeNames: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  personalSection: { paddingHorizontal: GRID_PADDING, paddingTop: 16, gap: 10 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  nameInput: {
+    flex: 1, fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD,
+    color: Colors.asphalt, paddingVertical: 4,
+  },
+  noteWrap: {
+    borderLeftWidth: 2, borderLeftColor: Colors.brandBorderSoft,
+    paddingLeft: 12, paddingVertical: 4,
+  },
+  noteInput: {
+    fontFamily: Fonts.displayItalic, fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium, lineHeight: 22, minHeight: 22,
+  },
   emptyGrid: { paddingHorizontal: 24, paddingVertical: 48, alignItems: 'center', gap: 6 },
   emptyGridTitle: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, textAlign: 'center' },
   emptyGridSubtitle: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, textAlign: 'center' },
@@ -551,7 +749,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12, gap: 8,
     backgroundColor: Colors.overlayDark40,
   },
-  viewerCredit: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.white },
+  viewerCreditRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  viewerCredit: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.white },
+  viewerShareBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   viewerNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   viewerNavBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   viewerNavBtnDisabled: { opacity: 0.3 },

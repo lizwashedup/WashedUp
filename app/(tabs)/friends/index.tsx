@@ -122,6 +122,45 @@ export default function YourPeopleScreen() {
     },
   });
 
+  // Albums tab badge: count of ready albums the user hasn't opened since the
+  // first upload landed. Refetched when the screen regains focus so the dot
+  // clears after viewing.
+  const { data: unviewedAlbumCount = 0, refetch: refetchAlbumBadge } = useQuery({
+    queryKey: ['albumsTabBadge', userId],
+    queryFn: async () => {
+      if (!userId) return 0;
+      const { data: members } = await supabase
+        .from('event_members').select('event_id')
+        .eq('user_id', userId).eq('status', 'joined');
+      const eventIds = (members ?? []).map((m) => m.event_id);
+      if (eventIds.length === 0) return 0;
+      const { data: albums } = await supabase
+        .from('plan_albums')
+        .select('id, first_upload_at, status')
+        .in('event_id', eventIds)
+        .eq('status', 'ready');
+      const albumIds = (albums ?? []).map((a) => a.id);
+      if (albumIds.length === 0) return 0;
+      const { data: meta } = await supabase
+        .from('album_user_metadata')
+        .select('plan_album_id, last_viewed_at')
+        .in('plan_album_id', albumIds)
+        .eq('user_id', userId);
+      const lastByAlbum = new Map((meta ?? []).map((m) => [m.plan_album_id, m.last_viewed_at]));
+      let unread = 0;
+      for (const a of albums ?? []) {
+        const last = lastByAlbum.get(a.id) as string | null | undefined;
+        if (!last) { unread += 1; continue; }
+        if (a.first_upload_at && new Date(last) < new Date(a.first_upload_at)) unread += 1;
+      }
+      return unread;
+    },
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+
+  useFocusEffect(useCallback(() => { void refetchAlbumBadge(); }, [refetchAlbumBadge]));
+
   // Debounced handle availability check (500ms)
   React.useEffect(() => {
     const clean = handleInput.toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -646,9 +685,12 @@ export default function YourPeopleScreen() {
           onPress={() => setActiveTab('albums')}
           style={[styles.albumsTab, activeTab === 'albums' && styles.albumsTabActive]}
         >
-          <Text style={[styles.albumsTabText, activeTab === 'albums' && styles.albumsTabTextActive]}>
-            Albums
-          </Text>
+          <View style={styles.albumsTabLabelWrap}>
+            <Text style={[styles.albumsTabText, activeTab === 'albums' && styles.albumsTabTextActive]}>
+              Albums
+            </Text>
+            {unviewedAlbumCount > 0 && <View style={styles.albumsTabDot} />}
+          </View>
         </Pressable>
       </View>
 
@@ -1229,6 +1271,10 @@ const styles = StyleSheet.create({
   albumsTabTextActive: {
     color: Colors.asphalt,
     fontFamily: Fonts.sansBold,
+  },
+  albumsTabLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  albumsTabDot: {
+    width: 7, height: 7, borderRadius: 3.5, backgroundColor: Colors.terracotta,
   },
   header: {
     flexDirection: 'row',

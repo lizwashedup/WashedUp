@@ -1,11 +1,62 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
 import { PolaroidCard, PolaroidStatus } from './PolaroidCard';
+
+// Same AsyncStorage key the upload-prompt modal uses to remember which prompt
+// notifications the user has dismissed locally.
+const PROMPT_DISMISSED_KEY = 'albumUploadPrompt.dismissedV1';
+
+type DismissedPrompt = { event_id: string; title: string };
+
+async function fetchDismissedPrompt(userId: string): Promise<DismissedPrompt | null> {
+  const raw = await AsyncStorage.getItem(PROMPT_DISMISSED_KEY);
+  if (!raw) return null;
+  let ids: string[];
+  try { ids = JSON.parse(raw) as string[]; } catch { return null; }
+  if (ids.length === 0) return null;
+
+  // For each dismissed notification id, find its event + title and check
+  // whether the user has uploaded yet. Return the first one that's still
+  // "open" (no uploads from this user).
+  const { data: notifs } = await supabase
+    .from('app_notifications')
+    .select('id, event_id, title')
+    .in('id', ids)
+    .eq('type', 'album_upload_prompt');
+  if (!notifs || notifs.length === 0) return null;
+
+  const eventIds = notifs.map((n) => n.event_id).filter(Boolean) as string[];
+  if (eventIds.length === 0) return null;
+
+  // Find which of these events the user has already uploaded to.
+  const { data: myAlbums } = await supabase
+    .from('plan_albums').select('id, event_id').in('event_id', eventIds);
+  const albumIdByEvent = new Map((myAlbums ?? []).map((a) => [a.event_id, a.id]));
+  const albumIds = (myAlbums ?? []).map((a) => a.id);
+  let uploadedEventIds = new Set<string>();
+  if (albumIds.length > 0) {
+    const { data: ups } = await supabase
+      .from('album_uploads').select('plan_album_id')
+      .in('plan_album_id', albumIds).eq('user_id', userId).is('deleted_at', null);
+    const uploadedAlbumIds = new Set((ups ?? []).map((u) => u.plan_album_id));
+    uploadedEventIds = new Set(
+      Array.from(albumIdByEvent.entries())
+        .filter(([, id]) => uploadedAlbumIds.has(id))
+        .map(([eventId]) => eventId),
+    );
+  }
+
+  const stillOpen = notifs.find((n) => n.event_id && !uploadedEventIds.has(n.event_id));
+  if (!stillOpen) return null;
+  return { event_id: stillOpen.event_id!, title: stillOpen.title ?? 'Plan' };
+}
 
 type AlbumRow = {
   id: string;
@@ -119,8 +170,18 @@ export function AlbumsGrid({ userId }: Props) {
     staleTime: 60_000,
   });
 
+  const { data: dismissedPrompt, refetch: refetchPrompt } = useQuery({
+    queryKey: ['albumsGrid.dismissedPrompt', userId],
+    queryFn: () => fetchDismissedPrompt(userId),
+    enabled: !!userId,
+    staleTime: 60_000,
+  });
+
   // Refresh when the user switches back to this tab after uploading.
-  useFocusEffect(useCallback(() => { void refetch(); }, [refetch]));
+  useFocusEffect(useCallback(() => {
+    void refetch();
+    void refetchPrompt();
+  }, [refetch, refetchPrompt]));
 
   const handleAlbumPress = useCallback((eventId: string) => {
     router.push(`/album/${eventId}` as any);
@@ -145,7 +206,7 @@ export function AlbumsGrid({ userId }: Props) {
   if (!albums || albums.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyTitle}>Nothing here yet.</Text>
+        <Text style={styles.emptyTitle}>Your albums will live here.</Text>
         <Text style={styles.emptySubtitle}>Go do something, then relive it here.</Text>
         <TouchableOpacity
           style={styles.emptyButton}
@@ -159,24 +220,39 @@ export function AlbumsGrid({ userId }: Props) {
   }
 
   return (
-    <FlatList
-      data={albums}
-      keyExtractor={(a) => a.id}
-      numColumns={2}
-      contentContainerStyle={styles.gridContent}
-      columnWrapperStyle={styles.gridRow}
-      renderItem={({ item, index }) => (
-        <PolaroidCard
-          index={index}
-          title={item.event_title}
-          dateText={formatDate(item.event_start_time)}
-          coverUri={item.cover_signed_url}
-          status={item.status}
-          readyInLabel={item.status === 'developing' ? readyInLabel(item.first_upload_at) : undefined}
-          onPress={() => handleAlbumPress(item.event_id)}
-        />
+    <View style={{ flex: 1 }}>
+      {dismissedPrompt && (
+        <Pressable
+          onPress={() => router.push(`/album/upload/${dismissedPrompt.event_id}` as any)}
+          style={styles.dismissedBanner}
+        >
+          <Ionicons name="camera-outline" size={16} color={Colors.terracotta} />
+          <Text style={styles.dismissedBannerText} numberOfLines={2}>
+            <Text style={styles.dismissedBannerTitle}>{dismissedPrompt.title}</Text>
+            <Text> album is collecting photos. Add yours.</Text>
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={Colors.terracotta} />
+        </Pressable>
       )}
-    />
+      <FlatList
+        data={albums}
+        keyExtractor={(a) => a.id}
+        numColumns={2}
+        contentContainerStyle={styles.gridContent}
+        columnWrapperStyle={styles.gridRow}
+        renderItem={({ item, index }) => (
+          <PolaroidCard
+            index={index}
+            title={item.event_title}
+            dateText={formatDate(item.event_start_time)}
+            coverUri={item.cover_signed_url}
+            status={item.status}
+            readyInLabel={item.status === 'developing' ? readyInLabel(item.first_upload_at) : undefined}
+            onPress={() => handleAlbumPress(item.event_id)}
+          />
+        )}
+      />
+    </View>
   );
 }
 
@@ -210,4 +286,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, paddingBottom: 60,
   },
   gridRow: { justifyContent: 'space-between' },
+  dismissedBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: 16, marginTop: 8,
+    paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: Colors.brandSoft, borderRadius: 12,
+  },
+  dismissedBannerText: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.asphalt },
+  dismissedBannerTitle: { fontFamily: Fonts.sansBold },
 });
