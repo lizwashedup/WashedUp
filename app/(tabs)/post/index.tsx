@@ -303,7 +303,14 @@ export default function PostScreen() {
     prefillDescription?: string;
     prefillImageUrl?: string;
     prefillLocation?: string;
+    prefillLocationLat?: string;
+    prefillLocationLng?: string;
+    prefillNeighborhood?: string;
     prefillCategory?: string;
+    prefillAgeRange?: string;
+    prefillGenderPref?: string;
+    prefillGroupSize?: string;
+    prefillTicketsUrl?: string;
     duplicatedFromEventId?: string;
   }>();
   const [exploreEventId, setExploreEventId] = useState<string | null>(null);
@@ -316,9 +323,12 @@ export default function PostScreen() {
       setExploreEventId(params.prefillExploreEventId);
     }
 
-    // Date — prefer event_date (always a local date string like "2025-03-22")
+    // Date — accepts either a date string ("2025-03-22") or a full ISO
+    // timestamp (the duplicate flow used to pass start_time directly, which
+    // appended "T12:00:00" produced an invalid date and silently no-op'd).
     if (params.prefillEventDate) {
-      const d = new Date(`${params.prefillEventDate}T12:00:00`);
+      const raw = params.prefillEventDate;
+      const d = raw.includes('T') ? new Date(raw) : new Date(`${raw}T12:00:00`);
       if (!isNaN(d.getTime())) {
         setDateMonth(d.getMonth());
         setDateDay(d.getDate());
@@ -407,15 +417,70 @@ export default function PostScreen() {
       );
       if (matched) setCategory(matched);
     }
+
+    // Location coords — paired with prefillLocation text. Both are needed
+    // for the post-submit insert; without them the geocoding fallback fires.
+    if (params.prefillLocationLat && params.prefillLocationLng) {
+      const lat = parseFloat(params.prefillLocationLat);
+      const lng = parseFloat(params.prefillLocationLng);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        setLocationLat(lat);
+        setLocationLng(lng);
+      }
+    }
+    if (params.prefillNeighborhood) {
+      // Pass through raw — UI's existing "Other" branch handles non-canonical values.
+      setNeighborhood(params.prefillNeighborhood);
+    }
+    if (params.prefillTicketsUrl) {
+      setTicketUrl(params.prefillTicketsUrl);
+    }
+    if (params.prefillAgeRange) {
+      const parsed = params.prefillAgeRange
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s): s is AgeRange => (AGE_RANGES as readonly string[]).includes(s));
+      if (parsed.length > 0) setAgeRanges(parsed);
+    }
+    if (params.prefillGenderPref) {
+      const valid: GenderPreference[] = ['mixed', 'women_only', 'men_only', 'nonbinary_only'];
+      if ((valid as string[]).includes(params.prefillGenderPref)) {
+        setGenderPref(params.prefillGenderPref as GenderPreference);
+      }
+    }
+    if (params.prefillGroupSize) {
+      const n = parseInt(params.prefillGroupSize, 10);
+      if (!isNaN(n)) {
+        // groupSize state stores max_invites directly; UI displays groupSize+1
+        // as "people total". Clamp to the [MIN_GROUP-1, MAX_GROUP-1] window
+        // the stepper allows.
+        const clamped = Math.min(Math.max(n, MIN_GROUP - 1), MAX_GROUP - 1);
+        setGroupSize(clamped);
+      }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.prefillTitle, params.prefillExploreEventId, params.prefillStartTime,
       params.prefillEventDate, params.prefillEndTime, params.prefillDropIn,
       params.prefillDescription, params.prefillImageUrl,
-      params.prefillLocation, params.prefillCategory]);
+      params.prefillLocation, params.prefillLocationLat, params.prefillLocationLng,
+      params.prefillNeighborhood, params.prefillCategory,
+      params.prefillAgeRange, params.prefillGenderPref,
+      params.prefillGroupSize, params.prefillTicketsUrl]);
+
 
   const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
   // Used to prevent onChangeText from clearing coordinates after a Place selection
   const placeJustSelectedRef = useRef(false);
+
+  // Sync the GooglePlacesAutocomplete input text once the ref is attached.
+  // The main prefill effect runs before the form mounts (form is gated on
+  // screenReady, set after an async profile fetch), so placesRef.current is
+  // null at that moment and the setAddressText call silently no-ops. This
+  // re-fires once the form is on screen.
+  useEffect(() => {
+    if (!params.prefillLocation || !screenReady) return;
+    placesRef.current?.setAddressText(params.prefillLocation);
+  }, [params.prefillLocation, screenReady]);
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();

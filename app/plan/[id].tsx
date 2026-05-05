@@ -1774,12 +1774,24 @@ export default function PlanDetailScreen() {
                       prefillTitle: plan?.title ?? '',
                       prefillDescription: plan?.description ?? '',
                       prefillLocation: plan?.location_text ?? '',
+                      prefillLocationLat: plan?.location_lat != null ? String(plan.location_lat) : '',
+                      prefillLocationLng: plan?.location_lng != null ? String(plan.location_lng) : '',
+                      prefillNeighborhood: plan?.neighborhood ?? '',
                       prefillCategory: plan?.primary_vibe ?? '',
                       prefillImageUrl: plan?.image_url ?? '',
                       prefillStartTime: plan?.start_time ?? '',
-                      prefillEventDate: plan?.start_time ?? '',
+                      // Date param expects YYYY-MM-DD; sending the full ISO
+                      // breaks the receiver's parser (silently no-ops).
+                      prefillEventDate: plan?.start_time?.slice(0, 10) ?? '',
                       prefillEndTime: plan?.end_time ?? '',
                       prefillDropIn: plan?.drop_in === false ? 'false' : 'true',
+                      prefillAgeRange: minMaxToAgeRanges(
+                        plan?.target_age_min ?? null,
+                        plan?.target_age_max ?? null,
+                      ).join(','),
+                      prefillGenderPref: plan?.gender_rule ?? 'mixed',
+                      prefillGroupSize: plan?.max_invites != null ? String(plan.max_invites) : '',
+                      prefillTicketsUrl: plan?.tickets_url ?? '',
                       duplicatedFromEventId: id ?? '',
                     },
                   });
