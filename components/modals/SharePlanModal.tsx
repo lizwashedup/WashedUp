@@ -20,7 +20,6 @@ export interface SharePlanModalProps {
   planTitle: string;
   planId: string;
   slug?: string | null;
-  spotsLeft?: number;
   genderLabel?: string;
   variant: 'posted' | 'joined';
 }
@@ -31,19 +30,17 @@ export function SharePlanModal({
   planTitle,
   planId,
   slug,
-  spotsLeft,
   genderLabel,
   variant,
 }: SharePlanModalProps) {
   const shareUrl = slug ? `https://washedup.app/plans/${slug}` : planId ? `https://washedup.app/e/${planId}` : 'https://washedup.app';
 
-  const spotsText = spotsLeft !== undefined && spotsLeft > 0 ? `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left` : 'Waitlist open';
-  const shareText = `${planTitle}\n${spotsText} \u00B7 ${shareUrl}`;
+  const shareText = `${planTitle}\n${shareUrl}`;
 
   const handleShare = async () => {
     hapticMedium();
     try {
-      await Share.share({ message: shareText.replace(shareUrl, '').trim(), url: shareUrl });
+      await Share.share({ message: shareText, url: shareUrl });
     } catch {}
   };
 
@@ -81,7 +78,7 @@ export function SharePlanModal({
 
           <View style={styles.growthCard}>
             <Text style={styles.growthText}>
-              We're brand new and growing! The best way to fill your plan is sharing it where people are looking for things to do — Facebook groups, Reddit, Instagram stories, group chats. It really helps!
+              We're brand new and growing! The best way to fill your plan is sharing it where people are looking for things to do: Facebook groups, Reddit, Instagram stories, group chats. It really helps!
             </Text>
           </View>
 

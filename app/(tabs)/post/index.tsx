@@ -1341,7 +1341,6 @@ export default function PostScreen() {
         planTitle={postedPlanTitle}
         planId={postedPlanId || ''}
         slug={null}
-        spotsLeft={postedSpotsLeft}
         genderLabel={postedGenderLabel}
         variant="posted"
       />

@@ -109,11 +109,9 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
       start_time: plan.start_time,
       location_text: plan.location_text,
       slug: plan.slug ?? null,
-      member_count: plan.member_count,
-      max_invites: plan.max_invites,
     });
     Share.share({ message: share.message, url: share.url });
-  }, [plan.id, plan.title, plan.start_time, plan.location_text, plan.slug, plan.member_count, plan.max_invites]);
+  }, [plan.id, plan.title, plan.start_time, plan.location_text, plan.slug]);
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

@@ -83,7 +83,6 @@ export default function PhoneEntryScreen() {
         params: { phone },
       });
     } catch (e: unknown) {
-      console.log('[phone-entry] signInWithOtp error:', e);
       hapticError();
       const status = (e as { status?: number } | null)?.status;
       const message = (e as { message?: string } | null)?.message ?? '';
