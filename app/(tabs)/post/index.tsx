@@ -223,6 +223,42 @@ export default function PostScreen() {
     })();
   }, []);
 
+  // Next Time! — list of people who said they'd go next time on any of the
+  // creator's past plans. The choices map holds the creator's per-row decision
+  // (invite or skip); we replay it after the new event is created.
+  type InterestRow = {
+    signal_id: string;
+    interested_user_id: string;
+    interested_name: string | null;
+    interested_photo_url: string | null;
+    origin_event_id: string;
+    origin_event_title: string | null;
+    created_at: string;
+  };
+  const [interestSignals, setInterestSignals] = useState<InterestRow[]>([]);
+  const [interestChoices, setInterestChoices] = useState<Map<string, 'invite' | 'skip'>>(new Map());
+  const [interestExpanded, setInterestExpanded] = useState(true);
+  const [interestShowAll, setInterestShowAll] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.rpc('get_creator_interest_signals');
+      if (error || !data) return;
+      setInterestSignals(data as InterestRow[]);
+      // Auto-collapse if there are 6+ signals.
+      setInterestExpanded((data as InterestRow[]).length <= 5);
+    })();
+  }, []);
+
+  const setInterestChoice = useCallback((userId: string, choice: 'invite' | 'skip') => {
+    hapticLight();
+    setInterestChoices(prev => {
+      const next = new Map(prev);
+      next.set(userId, choice);
+      return next;
+    });
+  }, []);
+
   const genderOptions = useMemo(() => {
     const opts: { label: string; value: GenderPreference }[] = [
       { label: 'Mixed', value: 'mixed' },
@@ -766,6 +802,29 @@ export default function PostScreen() {
             if (notifyErr) console.warn('[post] notify_waitlist_duplicate_plan failed:', notifyErr.message);
           });
         }
+
+        // Next Time! — replay the creator's invite/skip choices against the
+        // new event. Only runs after both event creation AND auto-join have
+        // succeeded; if we got here those are guaranteed. Fire-and-forget
+        // per choice so a single RPC failure doesn't roll back the post.
+        if (interestChoices.size > 0) {
+          const newEventId = insertedEvent.id;
+          const choices = Array.from(interestChoices.entries());
+          Promise.allSettled(
+            choices.map(([userId, action]) =>
+              supabase.rpc('act_on_interest', {
+                p_interested_user_id: userId,
+                p_new_event_id: newEventId,
+                p_action: action,
+              })
+            )
+          ).then(results => {
+            const failed = results.filter(r => r.status === 'rejected' || (r as any).value?.error);
+            if (failed.length > 0) console.warn('[post] act_on_interest failures:', failed);
+          });
+          // Clear so a back-nav + re-post doesn't double-fire.
+          setInterestChoices(new Map());
+        }
       }
 
       hapticSuccess();
@@ -1269,6 +1328,104 @@ export default function PostScreen() {
             </View>
             <Text style={styles.stepperHint}>including you</Text>
           </View>
+
+          {/* Next Time! — "People who want in" — surfaces past interest signals
+              for this creator, lets them invite or skip per row. Choices are
+              replayed via act_on_interest after the event is successfully posted. */}
+          {interestSignals.length > 0 && (
+            <View style={styles.interestSection}>
+              <TouchableOpacity
+                style={styles.interestHeaderRow}
+                onPress={() => { hapticLight(); setInterestExpanded(e => !e); }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.interestHeaderTextWrap}>
+                  <Text style={styles.interestSectionTitle}>People who want in</Text>
+                  <Text style={styles.interestSectionSub}>
+                    {interestSignals.length === 1
+                      ? '1 person said they’d go next time'
+                      : `${interestSignals.length} people said they’d go next time`}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={interestExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color={Colors.textMedium}
+                />
+              </TouchableOpacity>
+              {interestExpanded && (
+                <View style={styles.interestList}>
+                  {(interestShowAll ? interestSignals : interestSignals.slice(0, 10)).map(row => {
+                    const choice = interestChoices.get(row.interested_user_id);
+                    return (
+                      <View key={row.signal_id} style={styles.interestRow}>
+                        {row.interested_photo_url ? (
+                          <Image source={{ uri: row.interested_photo_url }} style={styles.interestAvatar} />
+                        ) : (
+                          <View style={[styles.interestAvatar, styles.interestAvatarPlaceholder]}>
+                            <Text style={styles.interestAvatarInitial}>
+                              {row.interested_name?.[0]?.toUpperCase() ?? '?'}
+                            </Text>
+                          </View>
+                        )}
+                        <View style={styles.interestRowText}>
+                          <Text style={styles.interestRowName} numberOfLines={1}>
+                            {row.interested_name ?? 'Someone'}
+                          </Text>
+                          <Text style={styles.interestRowOrigin} numberOfLines={1}>
+                            {row.origin_event_title ?? 'a past plan'}
+                          </Text>
+                        </View>
+                        <View style={styles.interestRowActions}>
+                          <TouchableOpacity
+                            style={[
+                              styles.interestInviteBtn,
+                              choice === 'invite' && styles.interestInviteBtnActive,
+                            ]}
+                            onPress={() => setInterestChoice(row.interested_user_id, 'invite')}
+                            activeOpacity={0.8}
+                          >
+                            <Text
+                              style={[
+                                styles.interestInviteBtnText,
+                                choice === 'invite' && styles.interestInviteBtnTextActive,
+                              ]}
+                            >
+                              {choice === 'invite' ? 'Inviting' : 'Invite to this plan'}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.interestSkipBtn}
+                            onPress={() => setInterestChoice(row.interested_user_id, 'skip')}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.interestSkipBtnText,
+                                choice === 'skip' && styles.interestSkipBtnTextActive,
+                              ]}
+                            >
+                              {choice === 'skip' ? 'Maybe next one ✓' : 'Maybe next one'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {interestSignals.length > 10 && !interestShowAll && (
+                    <TouchableOpacity
+                      style={styles.interestShowAllBtn}
+                      onPress={() => { hapticLight(); setInterestShowAll(true); }}
+                    >
+                      <Text style={styles.interestShowAllText}>
+                        {`Show all ${interestSignals.length}`}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Bottom spacer so content isn't hidden behind sticky button */}
           <View style={{ height: 100 }} />
@@ -1844,6 +2001,111 @@ const styles = StyleSheet.create({
   stepperValueText: { fontSize: FontSizes.displayLG, fontFamily: Fonts.sansBold, color: Colors.terracotta },
   stepperValueSub: { fontSize: FontSizes.caption, color: Colors.textLight, marginTop: -2 },
   stepperHint: { fontSize: FontSizes.caption, color: Colors.textLight, marginTop: 6 },
+
+  // Next Time! "People who want in" section. Gold per CLAUDE.md documented
+  // exception: warm/optional invite, not a primary CTA.
+  interestSection: {
+    marginTop: 28,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  interestHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  interestHeaderTextWrap: { flex: 1 },
+  interestSectionTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  interestSectionSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    marginTop: 2,
+  },
+  interestList: { marginTop: 12, gap: 12 },
+  interestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  interestAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  interestAvatarPlaceholder: {
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  interestAvatarInitial: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
+  interestRowText: { flex: 1, minWidth: 0 },
+  interestRowName: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  interestRowOrigin: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.textMedium,
+    marginTop: 2,
+  },
+  interestRowActions: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  interestInviteBtn: {
+    backgroundColor: Colors.goldAccent,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  interestInviteBtnActive: {
+    backgroundColor: Colors.quoteText,
+  },
+  interestInviteBtnText: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: FontSizes.caption,
+    color: Colors.quoteText,
+  },
+  interestInviteBtnTextActive: {
+    color: Colors.white,
+  },
+  interestSkipBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  interestSkipBtnText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.warmGray,
+  },
+  interestSkipBtnTextActive: {
+    color: Colors.asphalt,
+    fontFamily: Fonts.sansSemibold,
+  },
+  interestShowAllBtn: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  interestShowAllText: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
 
   stickyFooter: {
     paddingHorizontal: 20,

@@ -445,6 +445,9 @@ export default function ProfileScreen() {
   const supportRows = [
     { icon: 'mail-outline', label: 'Contact Us', onPress: () => Linking.openURL('mailto:hello@washedup.app') },
   ];
+  const interestRows = [
+    { icon: 'heart-outline', label: "Plans you're interested in", onPress: () => router.push('/settings/interests' as any) },
+  ];
 
   // ── Loading ─────────────────────────────────────────────────────────────────
 
@@ -888,6 +891,14 @@ export default function ProfileScreen() {
         </View>
         <View style={styles.settingsGroup}>
           {notificationRows.map((row, i) => renderSettingsRow(row, i === notificationRows.length - 1))}
+        </View>
+
+        {/* Plans */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Plans</Text>
+        </View>
+        <View style={styles.settingsGroup}>
+          {interestRows.map((row, i) => renderSettingsRow(row, i === interestRows.length - 1))}
         </View>
 
         {/* Legal */}

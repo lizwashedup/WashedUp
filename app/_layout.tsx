@@ -295,7 +295,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
       const type = data?.type as string | undefined;
 
-      if ((type === 'plan_invite' || type === 'waitlist_spot' || type === 'duplicate_plan') && data?.eventId) {
+      if (
+        (type === 'plan_invite' ||
+          type === 'waitlist_spot' ||
+          type === 'duplicate_plan' ||
+          type === 'interest_signal' ||
+          type === 'interest_invite') &&
+        data?.eventId
+      ) {
         router.push(`/plan/${data.eventId}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
