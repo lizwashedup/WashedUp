@@ -129,7 +129,7 @@ export function AlbumUploadPromptModal({ userId }: { userId: string | null }) {
 
 const styles = StyleSheet.create({
   backdrop: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    flex: 1, backgroundColor: Colors.overlayDark,
     alignItems: 'center', justifyContent: 'center', padding: 24,
   },
   card: {
@@ -148,8 +148,8 @@ const styles = StyleSheet.create({
   primaryBtn: {
     backgroundColor: Colors.terracotta, paddingVertical: 14, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center', marginTop: 6,
-    shadowColor: 'rgba(181,82,46,0.3)', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1, shadowRadius: 8,
+    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 8,
   },
   primaryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   secondaryBtn: {

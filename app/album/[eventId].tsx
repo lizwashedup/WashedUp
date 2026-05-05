@@ -1,11 +1,11 @@
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Dimensions, FlatList, Modal, Pressable, ScrollView,
-  StyleSheet, Text, TouchableOpacity, View,
+  ActionSheetIOS, ActivityIndicator, Alert, Dimensions, FlatList, Modal,
+  Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -53,6 +53,8 @@ type AlbumPayload = {
   }>;
   attendees: Attendee[];
   myUserId: string;
+  // Set of upload_ids the caller has already hearted.
+  myHeartedIds: Set<string>;
 };
 
 async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
@@ -111,6 +113,17 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
     );
   }
 
+  // 5. Caller's existing hearts on these uploads (drives the heart-toggle UI).
+  let myHeartedIds = new Set<string>();
+  if (uploads.length > 0) {
+    const { data: hearts } = await supabase
+      .from('album_hearts')
+      .select('upload_id')
+      .eq('user_id', user.id)
+      .in('upload_id', uploads.map((u) => u.id));
+    myHeartedIds = new Set((hearts ?? []).map((h) => h.upload_id));
+  }
+
   return {
     album: albumRow ? {
       id: albumRow.id,
@@ -124,6 +137,7 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
     uploads,
     attendees,
     myUserId: user.id,
+    myHeartedIds,
   };
 }
 
@@ -144,12 +158,20 @@ export default function AlbumDetailScreen() {
   const router = useRouter();
 
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  // Optimistic per-upload state. Keyed by upload_id. Lets the heart icon
+  // animate on tap before the round-trip + refetch completes.
+  const [optimisticHearted, setOptimisticHearted] = useState<Record<string, boolean>>({});
+  const [optimisticHiddenIds, setOptimisticHiddenIds] = useState<Set<string>>(new Set());
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['album', eventId],
     queryFn: () => fetchAlbumByEvent(String(eventId)),
     enabled: !!eventId,
   });
+
+  // Refetch when the screen regains focus — covers returning from the upload
+  // flow with new uploads, and refreshes signed URLs that may have aged out.
+  useFocusEffect(useCallback(() => { void refetch(); }, [refetch]));
 
   // Mark album viewed (clears unread badge) when data resolves.
   useEffect(() => {
@@ -161,6 +183,100 @@ export default function AlbumDetailScreen() {
   const coverUri = useMemo(() => {
     return data?.uploads?.[0]?.signed_display_url ?? null;
   }, [data]);
+
+  // ── Action handlers (heart / hide / delete) ────────────────────────────────
+  const isHearted = useCallback((uploadId: string): boolean => {
+    if (uploadId in optimisticHearted) return optimisticHearted[uploadId];
+    return !!data?.myHeartedIds?.has(uploadId);
+  }, [optimisticHearted, data]);
+
+  const toggleHeart = useCallback(async (uploadId: string) => {
+    const wasHearted = isHearted(uploadId);
+    setOptimisticHearted((prev) => ({ ...prev, [uploadId]: !wasHearted }));
+    try {
+      const fn = wasHearted ? 'remove_album_heart' : 'record_album_heart';
+      const { error } = await supabase.rpc(fn, { p_upload_id: uploadId });
+      if (error) throw error;
+      void refetch();
+    } catch (err) {
+      // Revert optimistic state on failure.
+      setOptimisticHearted((prev) => ({ ...prev, [uploadId]: wasHearted }));
+      Alert.alert('Could not update heart', err instanceof Error ? err.message : String(err));
+    }
+  }, [isHearted, refetch]);
+
+  const hideFromView = useCallback(async (uploadId: string) => {
+    setOptimisticHiddenIds((prev) => {
+      const next = new Set(prev); next.add(uploadId); return next;
+    });
+    const { error } = await supabase
+      .from('album_visibility')
+      .update({ hidden_by_viewer: true })
+      .eq('upload_id', uploadId);
+    if (error) {
+      setOptimisticHiddenIds((prev) => {
+        const next = new Set(prev); next.delete(uploadId); return next;
+      });
+      Alert.alert('Could not hide', error.message);
+      return;
+    }
+    void refetch();
+  }, [refetch]);
+
+  const deleteOwnUpload = useCallback(async (uploadId: string) => {
+    setOptimisticHiddenIds((prev) => {
+      const next = new Set(prev); next.add(uploadId); return next;
+    });
+    const { error } = await supabase.rpc('soft_delete_album_upload', { p_upload_id: uploadId });
+    if (error) {
+      setOptimisticHiddenIds((prev) => {
+        const next = new Set(prev); next.delete(uploadId); return next;
+      });
+      Alert.alert('Could not delete', error.message);
+      return;
+    }
+    void refetch();
+  }, [refetch]);
+
+  const showTileActions = useCallback((uploadId: string, isOwn: boolean) => {
+    const hearted = isHearted(uploadId);
+    const heartLabel = hearted ? 'Unheart' : 'Heart';
+    const ownActionLabel = isOwn ? 'Delete' : 'Hide from my view';
+    const options = [heartLabel, ownActionLabel, 'Cancel'];
+    const cancelIndex = 2;
+    const destructiveIndex = 1;
+
+    const onPick = (idx: number) => {
+      if (idx === 0) void toggleHeart(uploadId);
+      else if (idx === 1) {
+        if (isOwn) {
+          Alert.alert(
+            'Delete this for everyone?',
+            'It will disappear from everyone\'s album immediately.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => void deleteOwnUpload(uploadId) },
+            ],
+          );
+        } else {
+          void hideFromView(uploadId);
+        }
+      }
+    };
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
+        onPick,
+      );
+    } else {
+      Alert.alert('Photo options', undefined, [
+        { text: heartLabel, onPress: () => onPick(0) },
+        { text: ownActionLabel, style: 'destructive', onPress: () => onPick(1) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  }, [isHearted, toggleHeart, hideFromView, deleteOwnUpload]);
 
   const attendeeSummary = useMemo(() => {
     if (!data?.attendees) return '';
@@ -208,7 +324,7 @@ export default function AlbumDetailScreen() {
             </View>
           )}
           <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.55)']}
+            colors={['transparent', Colors.overlayDark55]}
             style={styles.heroGradient}
           />
           <SafeAreaView edges={['top']} style={styles.heroOverlay}>
@@ -260,31 +376,47 @@ export default function AlbumDetailScreen() {
           </View>
         ) : (
           <View style={styles.grid}>
-            {uploads.map((u, idx) => (
-              <Pressable key={u.id} style={styles.tile} onPress={() => setViewerIndex(idx)}>
-                {u.signed_display_url ? (
-                  <Image source={{ uri: u.signed_display_url }} style={styles.tileImage} contentFit="cover" />
-                ) : (
-                  <View style={[styles.tileImage, styles.tilePlaceholder]} />
-                )}
-                {u.content_type === 'video' && (
-                  <View style={styles.playOverlay}>
-                    <Ionicons name="play-circle" size={36} color={Colors.white} />
-                  </View>
-                )}
-                <View style={styles.tileFooter}>
-                  <Text style={styles.tileCredit} numberOfLines={1}>
-                    {u.uploader_name ? `by ${u.uploader_name}${u.user_id === myUserId ? ' (you)' : ''}` : ''}
-                  </Text>
-                  {u.heart_count > 0 && (
-                    <View style={styles.heartChip}>
-                      <Ionicons name="heart" size={11} color={Colors.terracotta} />
-                      <Text style={styles.heartCount}>{u.heart_count}</Text>
+            {uploads
+              .filter((u) => !optimisticHiddenIds.has(u.id))
+              .map((u, idx) => {
+                const hearted = isHearted(u.id);
+                const isOwn = u.user_id === myUserId;
+                return (
+                  <Pressable
+                    key={u.id}
+                    style={styles.tile}
+                    onPress={() => setViewerIndex(idx)}
+                    onLongPress={() => showTileActions(u.id, isOwn)}
+                    delayLongPress={250}
+                  >
+                    {u.signed_display_url ? (
+                      <Image source={{ uri: u.signed_display_url }} style={styles.tileImage} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.tileImage, styles.tilePlaceholder]} />
+                    )}
+                    {u.content_type === 'video' && (
+                      <View style={styles.playOverlay}>
+                        <Ionicons name="play-circle" size={36} color={Colors.white} />
+                      </View>
+                    )}
+                    <View style={styles.tileFooter}>
+                      <Text style={styles.tileCredit} numberOfLines={1}>
+                        {u.uploader_name ? `by ${u.uploader_name}${isOwn ? ' (you)' : ''}` : ''}
+                      </Text>
+                      {(u.heart_count > 0 || hearted) && (
+                        <View style={styles.heartChip}>
+                          <Ionicons
+                            name={hearted ? 'heart' : 'heart-outline'}
+                            size={11}
+                            color={Colors.terracotta}
+                          />
+                          {u.heart_count > 0 && <Text style={styles.heartCount}>{u.heart_count}</Text>}
+                        </View>
+                      )}
                     </View>
-                  )}
-                </View>
-              </Pressable>
-            ))}
+                  </Pressable>
+                );
+              })}
           </View>
         )}
 
@@ -404,11 +536,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 6,
     alignSelf: 'center', backgroundColor: Colors.terracotta,
     paddingHorizontal: 22, paddingVertical: 12, borderRadius: 999, marginTop: 28,
-    shadowColor: 'rgba(181,82,46,0.3)', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1, shadowRadius: 8,
+    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 8,
   },
   addBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  viewerRoot: { flex: 1, backgroundColor: 'black', justifyContent: 'center' },
+  viewerRoot: { flex: 1, backgroundColor: Colors.shadowBlack, justifyContent: 'center' },
   viewerImage: { width: '100%', height: '100%' },
   viewerVideoFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   viewerVideoText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.white },
@@ -417,7 +549,7 @@ const styles = StyleSheet.create({
   viewerFooter: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     paddingHorizontal: 16, paddingVertical: 12, gap: 8,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: Colors.overlayDark40,
   },
   viewerCredit: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.white },
   viewerNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

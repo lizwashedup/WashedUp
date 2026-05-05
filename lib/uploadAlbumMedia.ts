@@ -44,6 +44,8 @@ export type AlbumUploadOptions = {
   testimonial?: string;
 };
 
+const MAX_UPLOAD_ATTEMPTS = 3;
+
 type QueueItem = {
   uploadId: string;
   batchId: string;
@@ -55,7 +57,8 @@ type QueueItem = {
   fileSizeBytes: number;          // resolved at enqueue time (best-effort)
   videoDurationSec?: number;
   storagePath: string;            // {event_id}/{user_id}/{upload_id}/original.{ext}
-  status: 'pending' | 'uploading' | 'uploaded' | 'failed';
+  status: 'pending' | 'uploading' | 'uploaded' | 'failed' | 'permanently_failed';
+  attempts: number;
   error?: string;
 };
 
@@ -110,6 +113,7 @@ export async function enqueueAlbumUploadBatch(
       videoDurationSec: input.videoDurationSec,
       storagePath: `${eventId}/${userId}/${uploadId}/original.${ext}`,
       status: 'pending',
+      attempts: 0,
     };
   });
 
@@ -131,6 +135,7 @@ export async function getBatchStatus(batchId: string): Promise<{
   total: number;
   uploaded: number;
   failed: number;
+  permanentlyFailed: number;
   rpcCalled: boolean;
 } | null> {
   const queue = await readQueue();
@@ -140,6 +145,7 @@ export async function getBatchStatus(batchId: string): Promise<{
     total: batch.items.length,
     uploaded: batch.items.filter((i) => i.status === 'uploaded').length,
     failed: batch.items.filter((i) => i.status === 'failed').length,
+    permanentlyFailed: batch.items.filter((i) => i.status === 'permanently_failed').length,
     rpcCalled: batch.rpcCalled,
   };
 }
@@ -172,9 +178,10 @@ async function processQueue(): Promise<void> {
       // Upload any items still pending or in 'uploading' (treat as crash-recovered).
       for (let i = 0; i < batch.items.length; i++) {
         const item = batch.items[i];
-        if (item.status === 'uploaded' || item.status === 'failed') continue;
+        if (item.status === 'uploaded' || item.status === 'permanently_failed') continue;
 
         item.status = 'uploading';
+        item.attempts += 1;
         await persistQueueWithBatch(batch);
 
         try {
@@ -182,20 +189,32 @@ async function processQueue(): Promise<void> {
           item.status = 'uploaded';
           item.error = undefined;
         } catch (err) {
-          item.status = 'failed';
           item.error = err instanceof Error ? err.message : String(err);
+          item.status = item.attempts >= MAX_UPLOAD_ATTEMPTS ? 'permanently_failed' : 'failed';
         }
         await persistQueueWithBatch(batch);
       }
 
       const uploadedCount = batch.items.filter((i) => i.status === 'uploaded').length;
-      const failedCount   = batch.items.filter((i) => i.status === 'failed').length;
+      const transientFailures = batch.items.filter((i) => i.status === 'failed').length;
+      const permanentFailures = batch.items.filter((i) => i.status === 'permanently_failed').length;
 
-      // Strict v1: if any item failed, leave the batch in the queue without
-      // calling the RPC. Next foreground will retry only the failed items.
-      if (failedCount > 0) {
-        // Reset failed → pending so next pass tries again. Simple retry policy
-        // (no max retries yet — caller can clear via clearAlbumBatch).
+      // Drop permanently-failed items from the batch — without them, the rest
+      // can still complete the RPC. If everything permanently failed, abandon
+      // the batch entirely (caller can re-enqueue).
+      if (permanentFailures > 0 && uploadedCount === 0) {
+        const q = await readQueue();
+        q.batches = q.batches.filter((b) => b.batchId !== batch.batchId);
+        await writeQueue(q);
+        break;
+      }
+      if (permanentFailures > 0) {
+        batch.items = batch.items.filter((i) => i.status !== 'permanently_failed');
+        await persistQueueWithBatch(batch);
+      }
+
+      // Transient failures: reset to pending so the next foreground retries.
+      if (transientFailures > 0) {
         for (const item of batch.items) {
           if (item.status === 'failed') item.status = 'pending';
         }

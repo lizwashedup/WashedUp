@@ -1224,7 +1224,7 @@ const styles = StyleSheet.create({
   albumsTabText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
-    color: Colors.warmGray,
+    color: Colors.tertiary,
   },
   albumsTabTextActive: {
     color: Colors.asphalt,

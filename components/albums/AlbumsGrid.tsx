@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors from '../../constants/Colors';
@@ -112,12 +112,15 @@ type Props = { userId: string };
 export function AlbumsGrid({ userId }: Props) {
   const router = useRouter();
 
-  const { data: albums, isLoading, error } = useQuery({
+  const { data: albums, isLoading, error, refetch } = useQuery({
     queryKey: ['albumsGrid', userId],
     queryFn: () => fetchAlbumsForUser(userId),
     enabled: !!userId,
     staleTime: 60_000,
   });
+
+  // Refresh when the user switches back to this tab after uploading.
+  useFocusEffect(useCallback(() => { void refetch(); }, [refetch]));
 
   const handleAlbumPress = useCallback((eventId: string) => {
     router.push(`/album/${eventId}` as any);
@@ -197,8 +200,8 @@ const styles = StyleSheet.create({
   emptyButton: {
     marginTop: 8, backgroundColor: Colors.terracotta,
     paddingVertical: 12, paddingHorizontal: 24, borderRadius: 999,
-    shadowColor: 'rgba(181,82,46,0.3)', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1, shadowRadius: 8,
+    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 8,
   },
   emptyButtonText: {
     color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD,

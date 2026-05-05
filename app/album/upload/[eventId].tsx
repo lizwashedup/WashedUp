@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
   previewImage: { width: '100%', height: '100%' },
   previewVideo: {
     position: 'absolute', bottom: 4, left: 4,
-    width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.55)',
+    width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.overlayDark55,
     alignItems: 'center', justifyContent: 'center',
   },
   previewRemove: { position: 'absolute', top: 2, right: 2 },
@@ -458,8 +458,8 @@ const styles = StyleSheet.create({
   uploadBtn: {
     backgroundColor: Colors.terracotta, paddingVertical: 14, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: 'rgba(181,82,46,0.3)', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1, shadowRadius: 8,
+    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 8,
   },
   uploadBtnDisabled: { opacity: 0.45 },
   uploadBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
