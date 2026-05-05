@@ -303,7 +303,12 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           type === 'interest_invite') &&
         data?.eventId
       ) {
-        router.push(`/plan/${data.eventId}` as any);
+        // Tag the URL when the push is the creator-side "someone signaled
+        // interest" notification, so the plan detail can surface the
+        // "Would go next time" section explicitly. Receiver may currently
+        // no-op on the param; it's a marker for future scroll/analytics.
+        const focusParam = type === 'interest_signal' ? '?focus=interest' : '';
+        router.push(`/plan/${data.eventId}${focusParam}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
       } else if (data?.eventId) {
