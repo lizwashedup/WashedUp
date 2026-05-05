@@ -36,13 +36,20 @@ async function fetchInboxCount(): Promise<number> {
       .eq('recipient_id', user.id)
       .eq('status', 'pending')
       .in('events.status', ['forming', 'active', 'full']),
+    // Exclude notifications whose expires_at has passed but whose status is
+    // still 'unread' — the modal expires them on open via expire_stale_
+    // notifications RPC, so without this filter the bell count shows N but
+    // the modal opens to nothing (and the badge briefly stays high until
+    // the post-open invalidation refetches). Filtering here makes the
+    // count agree with what the modal will actually display.
     supabase
       .from('app_notifications')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .eq('status', 'unread')
       .neq('type', 'plan_invite')
-      .neq('type', 'new_message'),
+      .neq('type', 'new_message')
+      .or('expires_at.is.null,expires_at.gt.now()'),
   ]);
 
   const activeInviteCount = (invites.data ?? []).length;
