@@ -167,6 +167,7 @@ interface PlanDetail {
   target_age_min: number | null;
   target_age_max: number | null;
   end_time: string | null;
+  drop_in: boolean;
   neighborhood: string | null;
   slug: string | null;
   status: string;
@@ -270,7 +271,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
   const { data, error } = await supabase
     .from('events')
     .select(`
-      id, title, description, host_message, start_time, end_time,
+      id, title, description, host_message, start_time, end_time, drop_in,
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
@@ -309,6 +310,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     host_message: row.host_message ?? null,
     start_time: row.start_time,
     end_time: row.end_time ?? null,
+    drop_in: row.drop_in ?? true,
     location_text: row.location_text ?? null,
     location_lat: row.location_lat ?? null,
     location_lng: row.location_lng ?? null,
@@ -1628,9 +1630,9 @@ export default function PlanDetailScreen() {
         >
           <Pressable style={duplicateSheetStyles.sheet} onPress={() => {}}>
             <View style={duplicateSheetStyles.handle} />
-            <Text style={duplicateSheetStyles.title}>don't want to wait?</Text>
+            <Text style={duplicateSheetStyles.title}>duplicate this plan</Text>
             <Text style={duplicateSheetStyles.body}>
-              you can skip the wait by making your own version of this plan. anyone else on the waitlist can join you instead.
+              skip the wait. we'll let everyone on the waitlist know to join you!
             </Text>
             <TouchableOpacity
               style={duplicateSheetStyles.primaryBtn}
@@ -1650,6 +1652,10 @@ export default function PlanDetailScreen() {
                       prefillLocation: plan?.location_text ?? '',
                       prefillCategory: plan?.primary_vibe ?? '',
                       prefillImageUrl: plan?.image_url ?? '',
+                      prefillStartTime: plan?.start_time ?? '',
+                      prefillEventDate: plan?.start_time ?? '',
+                      prefillEndTime: plan?.end_time ?? '',
+                      prefillDropIn: plan?.drop_in === false ? 'false' : 'true',
                       duplicatedFromEventId: id ?? '',
                     },
                   });
@@ -1657,9 +1663,9 @@ export default function PlanDetailScreen() {
               }}
               activeOpacity={0.85}
               accessibilityRole="button"
-              accessibilityLabel="post a duplicate hangout"
+              accessibilityLabel="post a duplicate plan"
             >
-              <Text style={duplicateSheetStyles.primaryBtnText}>post a duplicate hangout</Text>
+              <Text style={duplicateSheetStyles.primaryBtnText}>post a duplicate plan</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={duplicateSheetStyles.secondaryBtn}
@@ -3224,32 +3230,29 @@ const duplicateSheetStyles = StyleSheet.create({
   },
   primaryBtn: {
     backgroundColor: Colors.terracotta,
-    borderRadius: 999,
+    borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
-    shadowColor: Colors.terracotta,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 3,
   },
   primaryBtnText: {
     fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
+    fontSize: FontSizes.displaySM,
     color: Colors.white,
   },
   secondaryBtn: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 14,
+    borderRadius: 14,
+    paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   secondaryBtnText: {
     fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
+    fontSize: FontSizes.displaySM,
     color: Colors.terracotta,
   },
 });

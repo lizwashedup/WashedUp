@@ -111,8 +111,18 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
   });
 
   return (
-    <Pressable onPress={focus} accessibilityRole="text" disabled={!editable}>
-      <Animated.View style={[styles.row, { transform: [{ translateX }] }]}>
+    <Pressable
+      onPress={focus}
+      accessibilityRole="button"
+      accessibilityLabel="enter verification code"
+      accessibilityHint="six digit code from your text message"
+      disabled={!editable}
+    >
+      <Animated.View
+        style={[styles.row, { transform: [{ translateX }] }]}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
         {cells}
       </Animated.View>
       <TextInput

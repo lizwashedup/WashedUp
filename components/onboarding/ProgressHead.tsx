@@ -34,14 +34,19 @@ export function ProgressHead({ step, totalSteps = 4, onBack }: Props) {
   return (
     <View style={styles.wrap}>
       <View style={styles.topRow}>
-        <TouchableOpacity
-          style={styles.backHit}
-          onPress={onBack}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          disabled={!onBack}
-        >
-          <Ionicons name="chevron-back" size={24} color={Colors.text1} />
-        </TouchableOpacity>
+        {onBack ? (
+          <TouchableOpacity
+            style={styles.backHit}
+            onPress={onBack}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel="back"
+          >
+            <Ionicons name="chevron-back" size={24} color={Colors.text1} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.backHit} />
+        )}
         <View style={styles.labelRow}>
           <Text style={styles.stepLabel}>step {step} of {totalSteps}</Text>
           <Text style={styles.percentLabel}>{percentLabel}</Text>

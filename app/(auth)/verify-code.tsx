@@ -133,6 +133,24 @@ export default function VerifyCodeScreen() {
           type: verifyType,
         });
         if (error) throw error;
+
+        const e164 = formatToE164(phone);
+        const { data: { user: verifiedUser } } = await supabase.auth.getUser();
+
+        // Post-commit assertion (migration only): verifyOtp can return
+        // success while Supabase fails to actually attach the phone to
+        // auth.users / auth.identities. If we then write profiles.phone_number
+        // anyway, the two stores drift — the next signInWithOtp won't match
+        // the user and creates an orphan account that steals the phone. Catch
+        // the half-commit here before doing anything else.
+        if (mode === 'migration') {
+          const expectedDigits = e164.replace(/\D/g, '');
+          const actualDigits = (verifiedUser?.phone ?? '').replace(/\D/g, '');
+          if (!verifiedUser || actualDigits !== expectedDigits) {
+            throw new Error('PHONE_NOT_COMMITTED');
+          }
+        }
+
         // Tell the root auth listener to skip its SIGNED_IN auto-route —
         // we own routing for the next ~600ms while the success animation
         // plays. Cleared in finally.
@@ -148,9 +166,6 @@ export default function VerifyCodeScreen() {
           easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: false,
         }).start();
-
-        const e164 = formatToE164(phone);
-        const { data: { user: verifiedUser } } = await supabase.auth.getUser();
         if (verifiedUser) {
           // Update the cached profile synchronously so the tabs guard reads
           // the new phone on the next mount instead of the stale cached null.
@@ -221,6 +236,11 @@ export default function VerifyCodeScreen() {
 
         if (isRateLimit) {
           setMicroError('too many attempts. try again in a few minutes.');
+        } else if (message === 'PHONE_NOT_COMMITTED') {
+          // verifyOtp returned success but auth.users.phone didn't actually
+          // get set. Tell the user to retry from the migration gate so a
+          // fresh updateUser→verifyOtp pair runs. Don't write to profiles.
+          setMicroError("couldn't save your number. tap 'wrong number?' to try again.");
         } else {
           // Supabase returns the same "Token has expired or is invalid"
           // message for both wrong codes and truly expired ones — we can't

@@ -23,7 +23,7 @@ ALTER TABLE events
   REFERENCES events(id) ON DELETE SET NULL;
 
 COMMENT ON COLUMN events.duplicated_from_event_id IS
-  'Set when this plan was created via the "post a duplicate hangout" flow. Forms a tree (root = NULL, leaves point at parents). Walk via get_plan_lineage(). ON DELETE SET NULL so deleting an ancestor breaks the chain rather than orphaning descendants.';
+  'Set when this plan was created via the "post a duplicate plan" flow. Forms a tree (root = NULL, leaves point at parents). Walk via get_plan_lineage(). ON DELETE SET NULL so deleting an ancestor breaks the chain rather than orphaning descendants.';
 
 CREATE INDEX IF NOT EXISTS idx_events_duplicated_from
   ON events(duplicated_from_event_id)

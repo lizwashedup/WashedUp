@@ -1,5 +1,5 @@
 -- duplicate_plan notification: when a user creates a plan as a duplicate of
--- another (via the "post a duplicate hangout" CTA in the waitlist sheet),
+-- another (via the "post a duplicate plan" CTA in the waitlist sheet),
 -- notify everyone on the ORIGINAL plan's waitlist so they can hop into the
 -- new one without waiting.
 --

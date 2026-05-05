@@ -55,6 +55,8 @@ function is18Plus(birthday: Date): boolean {
 export default function OnboardingBasicsScreen() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [birthday, setBirthday] = useState<Date | null>(null);
   const [gender, setGender] = useState<Gender | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -86,12 +88,14 @@ export default function OnboardingBasicsScreen() {
         }
         const { data: profile } = await supabase
           .from('profiles')
-          .select('first_name_display, last_name, birthday, gender')
+          .select('first_name_display, last_name, birthday, gender, email, marketing_opt_in')
           .eq('id', user.id)
           .maybeSingle();
         if (cancelled) return;
         if (profile?.first_name_display) setFirstName(profile.first_name_display);
         if (profile?.last_name) setLastName(profile.last_name);
+        if (profile?.email) setEmail(profile.email);
+        if (profile?.marketing_opt_in) setMarketingOptIn(true);
         if (profile?.birthday) {
           const [y, m, d] = profile.birthday.split('-').map(Number);
           if (y && m && d) setBirthday(new Date(y, m - 1, d));
@@ -167,25 +171,40 @@ export default function OnboardingBasicsScreen() {
         onboarding_status: string;
         first_name_display?: string;
         last_name?: string;
+        email: string | null;
+        marketing_opt_in: boolean;
       };
+      const trimmedEmail = email.trim();
       const updates: ProfileUpdate = {
         birthday: isoBirthday,
         gender: GENDER_TO_ENUM[gender],
         onboarding_status: 'la_check',
         first_name_display: firstName.trim(),
         last_name: lastName.trim(),
+        email: trimmedEmail || null,
+        marketing_opt_in: marketingOptIn,
       };
       const { error } = await supabase
         .from('profiles')
         .update(updates)
         .eq('id', user.id);
       if (error) throw error;
+      // Fire-and-forget Resend audience sync. The column is the source of
+      // truth; if this fails the address is still persisted and a future
+      // settings-page sync (or retry on next submit) can pick it up.
+      if (marketingOptIn && trimmedEmail) {
+        supabase.functions
+          .invoke('add-to-resend-audience')
+          .catch((err: unknown) => {
+            console.warn('[basics] add-to-resend-audience failed:', err);
+          });
+      }
       hapticLight();
       router.replace('/onboarding/la-check');
     } catch (e: unknown) {
       const message = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
-        : 'something went wrong. please try again.';
+        : 'something went wrong. try again.';
       setSaveError(message);
     } finally {
       submit.release();
@@ -232,31 +251,74 @@ export default function OnboardingBasicsScreen() {
 
             <View style={styles.gap28} />
 
-            <Text style={styles.label}>first name</Text>
+            <View style={styles.nameRow}>
+              <View style={styles.nameCol}>
+                <Text style={styles.label}>first name</Text>
+                <TextInput
+                  style={styles.input}
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  placeholder="first name"
+                  placeholderTextColor={Colors.text3}
+                  autoCapitalize="words"
+                  textContentType="givenName"
+                  returnKeyType="next"
+                />
+              </View>
+              <View style={styles.nameCol}>
+                <Text style={styles.label}>last name</Text>
+                <TextInput
+                  style={styles.input}
+                  value={lastName}
+                  onChangeText={setLastName}
+                  placeholder="last name"
+                  placeholderTextColor={Colors.text3}
+                  autoCapitalize="words"
+                  textContentType="familyName"
+                  returnKeyType="next"
+                />
+              </View>
+            </View>
+            <View style={styles.gap16} />
+
+            <Text style={styles.label}>
+              email <Text style={styles.labelHint}>(optional)</Text>
+            </Text>
             <TextInput
               style={styles.input}
-              value={firstName}
-              onChangeText={setFirstName}
-              placeholder="first name"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
               placeholderTextColor={Colors.text3}
-              autoCapitalize="words"
-              textContentType="givenName"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect={false}
               returnKeyType="next"
             />
             <View style={styles.gap16} />
 
-            <Text style={styles.label}>last name</Text>
-            <TextInput
-              style={styles.input}
-              value={lastName}
-              onChangeText={setLastName}
-              placeholder="last name"
-              placeholderTextColor={Colors.text3}
-              autoCapitalize="words"
-              textContentType="familyName"
-              returnKeyType="done"
-            />
-            <View style={styles.gap16} />
+            <Pressable
+              style={styles.optInRow}
+              onPress={() => {
+                hapticLight();
+                setMarketingOptIn((v) => !v);
+              }}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: marketingOptIn }}
+              accessibilityLabel="keep me updated on plans and events near me"
+            >
+              <View style={[styles.checkbox, marketingOptIn && styles.checkboxChecked]}>
+                {marketingOptIn && (
+                  <Ionicons name="checkmark" size={14} color={Colors.surface} />
+                )}
+              </View>
+              <Text style={styles.optInLabel}>
+                keep me updated on plans and events near me
+              </Text>
+            </Pressable>
+            <View style={styles.gap20} />
 
             <Text style={styles.label}>birthday</Text>
             <TouchableOpacity
@@ -419,6 +481,47 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: Colors.text2,
     marginBottom: 8,
+  },
+  labelHint: {
+    fontFamily: Fonts.sans,
+    fontSize: 11,
+    letterSpacing: 0.2,
+    textTransform: 'none',
+    color: Colors.text3,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  nameCol: {
+    flex: 1,
+  },
+  optInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.borderWarm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  checkboxChecked: {
+    backgroundColor: Colors.brand,
+    borderColor: Colors.brand,
+  },
+  optInLabel: {
+    flex: 1,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.text1,
   },
   input: {
     height: 56,

@@ -82,6 +82,42 @@ function getDaysInMonth(month: number, year: number): number {
   return new Date(year, month + 1, 0).getDate();
 }
 
+// "Today" in America/Los_Angeles, returned as 0-indexed month + day-of-month +
+// year. Used so the calendar grid disables past days against the LA boundary
+// regardless of the device's timezone.
+function getTodayInLA(): { y: number; m: number; d: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+  }).formatToParts(new Date());
+  const get = (k: 'year' | 'month' | 'day') =>
+    Number(parts.find((p) => p.type === k)!.value);
+  return { y: get('year'), m: get('month') - 1, d: get('day') };
+}
+
+function isBeforeTodayLA(y: number, m: number, d: number): boolean {
+  const t = getTodayInLA();
+  if (y !== t.y) return y < t.y;
+  if (m !== t.m) return m < t.m;
+  return d < t.d;
+}
+
+// Sunday-first month grid: rows of 7, leading/trailing nulls for cells that
+// don't belong to the displayed month.
+function buildMonthGrid(year: number, month: number): (number | null)[][] {
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const days = getDaysInMonth(month, year);
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= days; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const rows: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+  return rows;
+}
+
+const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
 function buildDatetime(
   month: number, day: number, year: number,
   hour: number, minute: string, period: 'AM' | 'PM',
@@ -226,6 +262,8 @@ export default function PostScreen() {
     prefillExploreEventId?: string;
     prefillStartTime?: string;
     prefillEventDate?: string;
+    prefillEndTime?: string;
+    prefillDropIn?: string;
     prefillDescription?: string;
     prefillImageUrl?: string;
     prefillLocation?: string;
@@ -282,6 +320,40 @@ export default function PostScreen() {
       }
     }
 
+    // End time prefill — same parser as start_time
+    if (params.prefillEndTime) {
+      let hours: number | null = null;
+      let minutes: number | null = null;
+      if (params.prefillEndTime.includes('T')) {
+        const d = new Date(params.prefillEndTime);
+        if (!isNaN(d.getTime())) {
+          hours = d.getHours();
+          minutes = d.getMinutes();
+        }
+      } else if (params.prefillEndTime.includes(':')) {
+        const parts = params.prefillEndTime.split(':');
+        hours = parseInt(parts[0], 10);
+        minutes = parseInt(parts[1] ?? '0', 10);
+      }
+      if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
+        const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
+        let displayHour = hours % 12;
+        if (displayHour === 0) displayHour = 12;
+        const nearestMinute = MINUTE_OPTIONS.reduce((prev, curr) =>
+          Math.abs(parseInt(curr) - minutes!) < Math.abs(parseInt(prev) - minutes!) ? curr : prev
+        );
+        setEndHour(displayHour);
+        setEndMinute(nearestMinute);
+        setEndPeriod(period);
+        setEndTimeSelected(true);
+      }
+    }
+
+    // Drop-in prefill — duplicates pass "true"/"false" as a string
+    if (params.prefillDropIn !== undefined) {
+      setDropIn(params.prefillDropIn !== 'false');
+    }
+
     if (params.prefillDescription) {
       setDescription(params.prefillDescription);
     }
@@ -301,7 +373,8 @@ export default function PostScreen() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.prefillTitle, params.prefillExploreEventId, params.prefillStartTime,
-      params.prefillEventDate, params.prefillDescription, params.prefillImageUrl,
+      params.prefillEventDate, params.prefillEndTime, params.prefillDropIn,
+      params.prefillDescription, params.prefillImageUrl,
       params.prefillLocation, params.prefillCategory]);
 
   const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
@@ -384,9 +457,12 @@ export default function PostScreen() {
   const [dateYear, setDateYear] = useState(currentYear);
   const [dateSelected, setDateSelected] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [tempMonth, setTempMonth] = useState(now.getMonth());
-  const [tempDay, setTempDay] = useState(now.getDate());
-  const [tempYear, setTempYear] = useState(currentYear);
+  // Calendar view state — independent of the committed selection so the user
+  // can browse months without changing what's actually picked yet. Initialised
+  // from LA today so the first open lands on the right month regardless of
+  // device timezone.
+  const [viewMonth, setViewMonth] = useState(() => getTodayInLA().m);
+  const [viewYear, setViewYear] = useState(() => getTodayInLA().y);
 
   // Time
   const [timeHour, setTimeHour] = useState(8);
@@ -397,6 +473,21 @@ export default function PostScreen() {
   const [tempHour, setTempHour] = useState(8);
   const [tempMinute, setTempMinute] = useState<string>('00');
   const [tempPeriod, setTempPeriod] = useState<'AM' | 'PM'>('PM');
+
+  // End time (optional — disappears from feed at this point if drop_in is off, or
+  // caps the "happening now" window if drop_in is on)
+  const [endHour, setEndHour] = useState(11);
+  const [endMinute, setEndMinute] = useState<string>('00');
+  const [endPeriod, setEndPeriod] = useState<'AM' | 'PM'>('PM');
+  const [endTimeSelected, setEndTimeSelected] = useState(false);
+  const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+  const [tempEndHour, setTempEndHour] = useState(11);
+  const [tempEndMinute, setTempEndMinute] = useState<string>('00');
+  const [tempEndPeriod, setTempEndPeriod] = useState<'AM' | 'PM'>('PM');
+
+  // Drop-in flag — when false, plan vanishes from the feed for non-members
+  // the moment start_time passes (used for one-shot moments like a movie)
+  const [dropIn, setDropIn] = useState(true);
 
   // Submit
   const [loading, setLoading] = useState(false);
@@ -466,29 +557,46 @@ export default function PostScreen() {
     await saveDrafts(updated);
   }, [drafts]);
 
-  const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
-  const safeTempDay = Math.min(tempDay, daysInTempMonth);
-
   // locationText is used for hint display only — location is validated at submit time via ref
   const locationText = locationRaw.trim() || location.trim() || '';
   const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
 
-  // ─── Date picker ─────────────────────────────────────────────────────────────
+  // ─── Date picker (calendar grid) ─────────────────────────────────────────────
 
   const openDatePicker = () => {
-    setTempMonth(dateMonth);
-    setTempDay(dateDay);
-    setTempYear(dateYear);
+    // Browse from the currently-selected month if there is one; otherwise
+    // start at this month in LA.
+    if (dateSelected) {
+      setViewMonth(dateMonth);
+      setViewYear(dateYear);
+    } else {
+      const t = getTodayInLA();
+      setViewMonth(t.m);
+      setViewYear(t.y);
+    }
     setShowDatePicker(true);
   };
 
-  const confirmDate = () => {
-    setDateMonth(tempMonth);
-    setDateDay(safeTempDay);
-    setDateYear(tempYear);
+  const selectDate = (day: number) => {
+    setDateMonth(viewMonth);
+    setDateDay(day);
+    setDateYear(viewYear);
     setDateSelected(true);
     setShowDatePicker(false);
     hapticLight();
+  };
+
+  const stepMonth = (delta: -1 | 1) => {
+    let m = viewMonth + delta;
+    let y = viewYear;
+    if (m < 0) { m = 11; y -= 1; }
+    if (m > 11) { m = 0; y += 1; }
+    // Clamp: never let the user view a month entirely before today in LA.
+    const t = getTodayInLA();
+    if (y < t.y || (y === t.y && m < t.m)) return;
+    setViewMonth(m);
+    setViewYear(y);
+    hapticSelection();
   };
 
   // ─── Time picker ─────────────────────────────────────────────────────────────
@@ -506,6 +614,30 @@ export default function PostScreen() {
     setTimePeriod(tempPeriod);
     setTimeSelected(true);
     setShowTimePicker(false);
+    hapticLight();
+  };
+
+  // ─── End-time picker ────────────────────────────────────────────────────────
+
+  const openEndTimePicker = () => {
+    setTempEndHour(endHour);
+    setTempEndMinute(endMinute);
+    setTempEndPeriod(endPeriod);
+    setShowEndTimePicker(true);
+  };
+
+  const confirmEndTime = () => {
+    setEndHour(tempEndHour);
+    setEndMinute(tempEndMinute);
+    setEndPeriod(tempEndPeriod);
+    setEndTimeSelected(true);
+    setShowEndTimePicker(false);
+    hapticLight();
+  };
+
+  const clearEndTime = () => {
+    setEndTimeSelected(false);
+    setShowEndTimePicker(false);
     hapticLight();
   };
 
@@ -545,6 +677,20 @@ export default function PostScreen() {
         return;
       }
 
+      let endTime: Date | null = null;
+      if (endTimeSelected) {
+        endTime = buildDatetime(dateMonth, dateDay, dateYear, endHour, endMinute, endPeriod);
+        // Allow same-day overnight (e.g. 8pm → 1am next day): if end <= start, push to next day.
+        if (endTime <= startTime) {
+          endTime = new Date(endTime.getTime() + 24 * 60 * 60 * 1000);
+        }
+        if (endTime.getTime() - startTime.getTime() < 30 * 60 * 1000) {
+          setAlertInfo({ title: 'Invalid end time', message: 'End time must be at least 30 minutes after the start time.' });
+          setLoading(false);
+          return;
+        }
+      }
+
       const ageBounds = ageRangesToMinMax(ageRanges);
 
       const { data: insertedEvent, error } = await supabase
@@ -552,6 +698,8 @@ export default function PostScreen() {
         .insert({
           title: title.trim(),
           start_time: startTime.toISOString(),
+          end_time: endTime ? endTime.toISOString() : null,
+          drop_in: dropIn,
           location_text: effectiveLocation || null,
           location_lat: locationLat,
           location_lng: locationLng,
@@ -650,7 +798,27 @@ export default function PostScreen() {
       setGenderPref('mixed'); setAgeRanges([]);
       setDescription(''); setCreatorMessage(''); setGroupSize(6);
       setDateSelected(false); setTimeSelected(false);
+      setEndTimeSelected(false); setDropIn(true);
       placesRef.current?.clear();
+      // Clear URL prefill params so they don't leak into the next post.
+      // Without this, tapping "post a duplicate plan" once leaves
+      // duplicatedFromEventId in the route state, which would (a) skip
+      // the drafts list on the next post and (b) tag a fresh unrelated
+      // plan as a duplicate of the prior one — fanning a forged
+      // notification to the prior plan's waitlist.
+      router.setParams({
+        prefillTitle: undefined,
+        prefillExploreEventId: undefined,
+        prefillStartTime: undefined,
+        prefillEventDate: undefined,
+        prefillEndTime: undefined,
+        prefillDropIn: undefined,
+        prefillDescription: undefined,
+        prefillImageUrl: undefined,
+        prefillLocation: undefined,
+        prefillCategory: undefined,
+        duplicatedFromEventId: undefined,
+      } as any);
     } catch (e: unknown) {
       const rawMsg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
@@ -782,23 +950,24 @@ export default function PostScreen() {
             />
           </View>
 
-          {/* ── Date & Time row ── */}
+          {/* ── Date (full row) ── */}
+          <View style={styles.field}>
+            <Text style={styles.label}>Date <Text style={styles.required}>*</Text></Text>
+            <TouchableOpacity
+              style={[styles.input, styles.pickerButton, !dateSelected && styles.pickerPlaceholder]}
+              onPress={openDatePicker}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.pickerText, !dateSelected && styles.placeholderText]}>
+                {dateSelected ? displayDate(dateMonth, dateDay, dateYear) : 'Select date'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── Start / End time row ── */}
           <View style={styles.row}>
             <View style={[styles.field, styles.flex]}>
-              <Text style={styles.label}>Date <Text style={styles.required}>*</Text></Text>
-              <TouchableOpacity
-                style={[styles.input, styles.pickerButton, !dateSelected && styles.pickerPlaceholder]}
-                onPress={openDatePicker}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.pickerText, !dateSelected && styles.placeholderText]}>
-                  {dateSelected ? displayDate(dateMonth, dateDay, dateYear) : 'Select date'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.rowSpacer} />
-            <View style={[styles.field, styles.flex]}>
-              <Text style={styles.label}>Time <Text style={styles.required}>*</Text></Text>
+              <Text style={styles.label}>Start time <Text style={styles.required}>*</Text></Text>
               <TouchableOpacity
                 style={[styles.input, styles.pickerButton, !timeSelected && styles.pickerPlaceholder]}
                 onPress={openTimePicker}
@@ -809,14 +978,43 @@ export default function PostScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+            <View style={styles.rowSpacer} />
+            <View style={[styles.field, styles.flex]}>
+              <Text style={styles.label}>End time</Text>
+              <TouchableOpacity
+                style={[styles.input, styles.pickerButton, !endTimeSelected && styles.pickerPlaceholder]}
+                onPress={openEndTimePicker}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.pickerText, !endTimeSelected && styles.placeholderText]}>
+                  {endTimeSelected ? displayTime(endHour, endMinute, endPeriod) : 'Optional'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
+
+          {/* ── Drop-in toggle ── */}
+          <TouchableOpacity
+            style={styles.dropInRow}
+            onPress={() => { hapticLight(); setDropIn((v) => !v); }}
+            activeOpacity={0.7}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: dropIn }}
+            accessibilityLabel="drop in anytime"
+          >
+            <View style={[styles.checkbox, dropIn && styles.checkboxChecked]}>
+              {dropIn && <Ionicons name="checkmark" size={16} color={Colors.white} />}
+            </View>
+            <Text style={styles.dropInLabel}>drop in anytime</Text>
+          </TouchableOpacity>
+          <Text style={styles.dropInHint}>people can still find and join after it starts</Text>
 
           {/* ── Location (Google Places) ── */}
           <View style={[styles.field, styles.placesField]}>
             <Text style={styles.label}>Location <Text style={styles.required}>*</Text></Text>
             <GooglePlacesAutocomplete
               ref={placesRef}
-              placeholder="Venue or neighborhood"
+              placeholder="Address of the plan"
               fetchDetails
               disableScroll={true}
               onPress={(data, details) => {
@@ -886,15 +1084,18 @@ export default function PostScreen() {
           </View>
 
           {/* ── Neighborhood ── */}
-          <View style={{ marginTop: 12 }}>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: '#78695C', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Neighborhood</Text>
+          <View style={styles.field}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Neighborhood</Text>
+              <Text style={styles.labelOptional}>(optional)</Text>
+            </View>
             <TouchableOpacity
               style={styles.neighborhoodPickerBtn}
               onPress={() => { hapticLight(); Keyboard.dismiss(); setShowNeighborhoodPicker(true); }}
               activeOpacity={0.8}
             >
               <Text style={neighborhood ? styles.neighborhoodPickerValue : styles.neighborhoodPickerPlaceholder}>
-                {neighborhood || 'Select your neighborhood'}
+                {neighborhood || 'Select neighborhood'}
               </Text>
               <Ionicons name="chevron-down" size={18} color={Colors.textLight} />
             </TouchableOpacity>
@@ -1198,53 +1399,91 @@ export default function PostScreen() {
             onPress={(e) => e.stopPropagation()}
           >
             <Text style={styles.modalTitle}>Select date</Text>
-            <View style={styles.pickerRow}>
-              {/* Month */}
-              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
-                {MONTHS.map((m, i) => (
-                  <Pressable
-                    key={m}
-                    style={[styles.pickerItem, tempMonth === i && styles.pickerItemSelected]}
-                    onPress={() => setTempMonth(i)}
-                  >
-                    <Text style={[styles.pickerItemText, tempMonth === i && styles.pickerItemTextSel]}>
-                      {m.slice(0, 3)}
+
+            {/* Month nav */}
+            <View style={styles.calendarHeader}>
+              {(() => {
+                const t = getTodayInLA();
+                const onCurrentMonth = viewYear === t.y && viewMonth <= t.m;
+                return (
+                  <>
+                    <TouchableOpacity
+                      onPress={() => stepMonth(-1)}
+                      disabled={onCurrentMonth}
+                      style={styles.calendarNavBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityLabel="previous month"
+                    >
+                      <Ionicons
+                        name="chevron-back"
+                        size={22}
+                        color={onCurrentMonth ? Colors.textLight : Colors.asphalt}
+                      />
+                    </TouchableOpacity>
+                    <Text style={styles.calendarMonthLabel}>
+                      {MONTHS[viewMonth]} {viewYear}
                     </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-              {/* Day */}
-              <ScrollView decelerationRate="normal" style={styles.pickerColSm} showsVerticalScrollIndicator={false}>
-                {Array.from({ length: daysInTempMonth }, (_, i) => i + 1).map((d) => (
-                  <Pressable
-                    key={d}
-                    style={[styles.pickerItem, safeTempDay === d && styles.pickerItemSelected]}
-                    onPress={() => setTempDay(d)}
-                  >
-                    <Text style={[styles.pickerItemText, safeTempDay === d && styles.pickerItemTextSel]}>
-                      {d}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-              {/* Year */}
-              <ScrollView decelerationRate="normal" style={styles.pickerColSm} showsVerticalScrollIndicator={false}>
-                {years.map((y) => (
-                  <Pressable
-                    key={y}
-                    style={[styles.pickerItem, tempYear === y && styles.pickerItemSelected]}
-                    onPress={() => setTempYear(y)}
-                  >
-                    <Text style={[styles.pickerItemText, tempYear === y && styles.pickerItemTextSel]}>
-                      {y}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
+                    <TouchableOpacity
+                      onPress={() => stepMonth(1)}
+                      style={styles.calendarNavBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityLabel="next month"
+                    >
+                      <Ionicons name="chevron-forward" size={22} color={Colors.asphalt} />
+                    </TouchableOpacity>
+                  </>
+                );
+              })()}
             </View>
-            <TouchableOpacity style={styles.modalBtn} onPress={confirmDate}>
-              <Text style={styles.modalBtnText}>Done</Text>
-            </TouchableOpacity>
+
+            {/* Weekday header */}
+            <View style={styles.weekdayRow}>
+              {WEEKDAY_LABELS.map((label, i) => (
+                <Text key={i} style={styles.weekdayLabel}>{label}</Text>
+              ))}
+            </View>
+
+            {/* Grid */}
+            {buildMonthGrid(viewYear, viewMonth).map((row, ri) => (
+              <View key={ri} style={styles.calendarRow}>
+                {row.map((day, ci) => {
+                  if (day === null) {
+                    return <View key={ci} style={styles.calendarCell} />;
+                  }
+                  const isPast = isBeforeTodayLA(viewYear, viewMonth, day);
+                  const t = getTodayInLA();
+                  const isToday = viewYear === t.y && viewMonth === t.m && day === t.d;
+                  const isSelected =
+                    dateSelected && dateYear === viewYear && dateMonth === viewMonth && dateDay === day;
+                  return (
+                    <TouchableOpacity
+                      key={ci}
+                      style={[
+                        styles.calendarCell,
+                        isToday && !isSelected && styles.calendarCellToday,
+                        isSelected && styles.calendarCellSelected,
+                      ]}
+                      onPress={() => selectDate(day)}
+                      disabled={isPast}
+                      activeOpacity={0.75}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${MONTHS[viewMonth]} ${day}, ${viewYear}`}
+                      accessibilityState={{ disabled: isPast, selected: isSelected }}
+                    >
+                      <Text
+                        style={[
+                          styles.calendarCellText,
+                          isPast && styles.calendarCellTextDisabled,
+                          isSelected && styles.calendarCellTextSelected,
+                        ]}
+                      >
+                        {day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
           </Pressable>
         </Pressable>
       </Modal>
@@ -1304,6 +1543,70 @@ export default function PostScreen() {
             <TouchableOpacity style={styles.modalBtn} onPress={confirmTime}>
               <Text style={styles.modalBtnText}>Done</Text>
             </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── End Time Picker Modal ── */}
+      <Modal visible={showEndTimePicker} transparent animationType="slide" onRequestClose={() => setShowEndTimePicker(false)} statusBarTranslucent>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowEndTimePicker(false)}>
+          <Pressable
+            style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.modalTitle}>End time</Text>
+            <View style={styles.pickerRow}>
+              {/* Hour */}
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+                {HOURS.map((h) => (
+                  <Pressable
+                    key={h}
+                    style={[styles.pickerItem, tempEndHour === h && styles.pickerItemSelected]}
+                    onPress={() => setTempEndHour(h)}
+                  >
+                    <Text style={[styles.pickerItemText, tempEndHour === h && styles.pickerItemTextSel]}>
+                      {h}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {/* Minute */}
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+                {MINUTE_OPTIONS.map((m) => (
+                  <Pressable
+                    key={m}
+                    style={[styles.pickerItem, tempEndMinute === m && styles.pickerItemSelected]}
+                    onPress={() => setTempEndMinute(m)}
+                  >
+                    <Text style={[styles.pickerItemText, tempEndMinute === m && styles.pickerItemTextSel]}>
+                      :{m}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {/* AM/PM */}
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+                {PERIODS.map((p) => (
+                  <Pressable
+                    key={p}
+                    style={[styles.pickerItem, tempEndPeriod === p && styles.pickerItemSelected]}
+                    onPress={() => setTempEndPeriod(p)}
+                  >
+                    <Text style={[styles.pickerItemText, tempEndPeriod === p && styles.pickerItemTextSel]}>
+                      {p}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+            <TouchableOpacity style={styles.modalBtn} onPress={confirmEndTime}>
+              <Text style={styles.modalBtnText}>Done</Text>
+            </TouchableOpacity>
+            {endTimeSelected && (
+              <TouchableOpacity style={styles.modalClearBtn} onPress={clearEndTime}>
+                <Text style={styles.modalClearBtnText}>Clear end time</Text>
+              </TouchableOpacity>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -1596,6 +1899,106 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBtnText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansBold, color: Colors.white },
+  modalClearBtn: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  modalClearBtnText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.textMedium },
+
+  calendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  calendarMonthLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.asphalt,
+  },
+  calendarNavBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  weekdayRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  weekdayLabel: {
+    flex: 1,
+    textAlign: 'center',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
+    letterSpacing: 0.5,
+  },
+  calendarRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  calendarCell: {
+    flex: 1,
+    aspectRatio: 1,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 2,
+    borderRadius: 12,
+  },
+  calendarCellToday: {
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+  },
+  calendarCellSelected: {
+    backgroundColor: Colors.terracotta,
+  },
+  calendarCellText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  calendarCellTextDisabled: {
+    color: Colors.textLight,
+    opacity: 0.4,
+  },
+  calendarCellTextSelected: {
+    color: Colors.white,
+    fontFamily: Fonts.sansMedium,
+  },
+
+  dropInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingBottom: 4,
+    marginTop: -8,
+  },
+  dropInHint: {
+    fontSize: FontSizes.bodySM,
+    fontFamily: Fonts.sans,
+    color: Colors.textLight,
+    marginLeft: 32,
+    marginBottom: 20,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.cardBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
+  },
+  dropInLabel: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.asphalt },
 
   required: { color: Colors.errorRed, fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans },
 

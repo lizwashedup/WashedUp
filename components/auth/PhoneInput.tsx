@@ -40,7 +40,10 @@ export const PhoneInput = forwardRef<PhoneInputHandle, Props>(function PhoneInpu
   return (
     <View style={styles.wrap}>
       <View style={[styles.fieldRow, hasError && styles.fieldRowError]}>
-        <View style={styles.prefix}>
+        <View
+          style={styles.prefix}
+          accessibilityLabel="country code: united states, plus one"
+        >
           <Text style={styles.flag}>🇺🇸</Text>
           <Text style={styles.prefixText}>+1</Text>
         </View>

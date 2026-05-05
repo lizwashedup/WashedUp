@@ -396,6 +396,14 @@ function groupIntoFeedItems(plans: Plan[]): FeedItem[] {
     members.sort((a, b) => feedItemSpotsRemaining(b) - feedItemSpotsRemaining(a));
     items.push({ kind: 'cluster', rootId, plans: members });
   }
+  // Final chronological pass: clusters slot in by their earliest member's
+  // start_time, interleaved with standalones — otherwise clusters all bunch
+  // at the end of insertion order regardless of when their plans actually are.
+  items.sort(
+    (a, b) =>
+      new Date(feedItemSortTime(a)).getTime() -
+      new Date(feedItemSortTime(b)).getTime(),
+  );
   return items;
 }
 

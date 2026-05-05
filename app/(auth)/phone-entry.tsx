@@ -21,10 +21,8 @@ import { hapticLight, hapticError } from '../../lib/haptics';
 import { formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
 import { wasOtpRecentlySent, markOtpSent } from '../../lib/navState';
 import { useSubmitGuard } from '../../hooks/useSubmitGuard';
+import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 import PhoneInput from '../../components/auth/PhoneInput';
-
-const HERO_PHOTO_URI =
-  'https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?w=900&q=80';
 
 const TERMS_URL = 'https://washedup.app/terms';
 const PRIVACY_URL = 'https://washedup.app/privacy';
@@ -52,26 +50,22 @@ export default function PhoneEntryScreen() {
     setSubmitting(true);
     try {
       const e164 = formatToE164(phone);
-      // Sign out any active session BEFORE initiating a new OTP. Otherwise
-      // signInWithOtp creates a fresh auth.users row for the new phone but
-      // leaves the client's session pointing at the old user — onboarding
-      // writes then silently land on the old account and the new one becomes
-      // an orphan with no profile data. (Discovered while testing 2026-05-03.)
+      // Defensive guard: phone-entry is only for unauthenticated users.
+      // If somehow an already-signed-in user lands here (routing regression,
+      // deep link, stale session), running signInWithOtp would create a
+      // duplicate auth.users row and orphan the existing user's data —
+      // the bug originally patched in commit 5cf9927 via signOut+resignin.
+      //
+      // The correct flow for an authed user without a phone is the
+      // migration-gate (auth.updateUser({phone}) → phone_change verifyOtp
+      // on the SAME user id). authedDest() already routes them there;
+      // this guard is the per-screen safety net.
       const { data: { session: existingSession } } = await supabase.auth.getSession();
-      if (existingSession) {
-        await supabase.auth.signOut().catch(() => {
-          // Don't block the user if signOut fails — the next signInWithOtp
-          // will replace the session anyway. Worst case is a stale ghost
-          // session that gets overwritten on verifyOtp success.
-        });
-        // Let the root onAuthStateChange listener's queued navigation drain
-        // before signInWithOtp triggers another auth event. Without this,
-        // the SIGNED_OUT-driven router.replace can land AFTER we navigate
-        // to /verify-code and bounce the user back to /phone-entry.
-        // Supabase dispatches via an internal timer chain so a single
-        // microtask yield isn't enough — 100ms is enough on any device
-        // we've seen and is unnoticeable in the UX.
-        await new Promise<void>((r) => setTimeout(r, 100));
+      if (existingSession?.user?.id) {
+        submit.release();
+        setSubmitting(false);
+        router.replace('/migration-gate');
+        return;
       }
       // If we've sent an OTP to this number recently (e.g., user backed out
       // of /verify-code and re-tapped continue), skip the API and let them
@@ -108,7 +102,7 @@ export default function PhoneEntryScreen() {
 
   return (
     <ImageBackground
-      source={{ uri: HERO_PHOTO_URI }}
+      source={{ uri: WELCOME_HERO_URI }}
       style={styles.bg}
       resizeMode="cover"
     >
@@ -171,16 +165,16 @@ export default function PhoneEntryScreen() {
 
             {/* Escape hatch for existing email/Apple/Google users — without
                 this they'd accidentally create a duplicate account by
-                entering their phone above. */}
+                entering their phone above. Full-width secondary button so
+                it's easy to find but visually subordinate to "continue". */}
             <TouchableOpacity
               onPress={() => router.push('/login')}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={styles.existingHit}
+              activeOpacity={0.85}
+              style={styles.ctaSecondary}
+              accessibilityRole="button"
+              accessibilityLabel="already on washedup? sign in"
             >
-              <Text style={styles.existingText}>
-                already on washedup?{' '}
-                <Text style={styles.existingLink}>sign in here</Text>
-              </Text>
+              <Text style={styles.ctaSecondaryText}>already a member? sign in</Text>
             </TouchableOpacity>
 
             <Text style={styles.legal}>
@@ -297,20 +291,20 @@ const styles = StyleSheet.create({
     color: Colors.creamHigh,
     textDecorationLine: 'underline',
   },
-  existingHit: {
-    alignSelf: 'center',
-    marginTop: 14,
+  ctaSecondary: {
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: Colors.creamHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
   },
-  existingText: {
-    fontFamily: Fonts.sans,
-    fontSize: 13,
-    lineHeight: 18,
-    color: Colors.creamMuted,
-    textAlign: 'center',
-  },
-  existingLink: {
-    fontFamily: Fonts.sansSemibold,
+  ctaSecondaryText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 16,
     color: Colors.creamHigh,
-    textDecorationLine: 'underline',
+    letterSpacing: 0.2,
   },
 });

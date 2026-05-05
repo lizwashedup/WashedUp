@@ -8,6 +8,7 @@ import { Eye, EyeOff } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    ImageBackground,
     Keyboard,
     KeyboardAvoidingView,
     Modal,
@@ -30,6 +31,7 @@ import { friendlyAppleError, friendlyGoogleError } from '../../lib/socialAuthErr
 import { supabase } from '../../lib/supabase';
 import { PHONE_AUTH_ENABLED } from '../../constants/FeatureFlags';
 import { postAuthTransitionRef } from '../../lib/navState';
+import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 
 const SOCIAL_PROOF = '1500+ people in LA already joined';
 
@@ -158,9 +160,19 @@ export default function LoginScreen() {
   const triggerHaptic = () => hapticLight();
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <StatusBar style="dark" />
-      <KeyboardAvoidingView
+    <ImageBackground
+      source={{ uri: WELCOME_HERO_URI }}
+      style={styles.bg}
+      blurRadius={14}
+      resizeMode="cover"
+    >
+      {/* Parchment overlay so the photo bleeds through at ~15% — keeps a
+          cohesive transition from the phone-entry hero without competing
+          with the form fields. */}
+      <View style={styles.bgOverlay} pointerEvents="none" />
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
@@ -398,21 +410,32 @@ export default function LoginScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-      <BrandedAlert
-        visible={!!alertInfo}
-        title={alertInfo?.title ?? ''}
-        message={alertInfo?.message}
-        buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
-      />
-    </SafeAreaView>
+        <BrandedAlert
+          visible={!!alertInfo}
+          title={alertInfo?.title ?? ''}
+          message={alertInfo?.message}
+          buttons={alertInfo?.buttons}
+          onClose={() => setAlertInfo(null)}
+        />
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
+  bg: {
     flex: 1,
     backgroundColor: Colors.parchment,
+  },
+  bgOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    // Cream at ~85% so the blurred sunset bleeds through at ~15%, matching
+    // the user-spec range and keeping form text readable.
+    backgroundColor: 'rgba(248, 245, 240, 0.85)',
+  },
+  safe: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   keyboardView: {
     flex: 1,
