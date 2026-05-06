@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -322,8 +323,17 @@ export default function AlbumUploadScreen() {
               color={marketingConsent ? Colors.terracotta : Colors.warmGray}
             />
             <Text style={styles.consentText}>
-              WashedUp can use my photos, videos, and note for marketing (social media, website, promos)
+              Let WashedUp use these for promotion. Your photos and videos may appear on our social channels and website.
             </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => WebBrowser.openBrowserAsync('https://washedup.app/photo-consent')}
+            style={styles.learnMoreWrap}
+            hitSlop={8}
+            accessibilityRole="link"
+            accessibilityLabel="Learn more about how WashedUp uses your photos"
+          >
+            <Text style={styles.learnMoreLink}>Learn more</Text>
           </Pressable>
 
           {marketingConsent && (
@@ -459,6 +469,12 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: Colors.border, marginTop: 24 },
   consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 8 },
   consentText: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, lineHeight: 20 },
+  learnMoreWrap: { paddingLeft: 32, paddingVertical: 4 },
+  learnMoreLink: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
   consentDetails: { gap: 12, marginTop: 4 },
   field: { gap: 6 },
   fieldLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium },
