@@ -187,54 +187,28 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
     (async () => {
       try {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-        const { data: plans } = await supabase
-          .from('event_members')
-          .select('event_id, events!inner(id, title, image_url, status, start_time, is_featured)')
-          .eq('user_id', authedUserId)
-          .eq('status', 'joined')
-          .eq('events.status', 'completed')
-          .gte('events.start_time', sevenDaysAgo.toISOString())
-          .order('events(start_time)', { ascending: false })
-          .limit(5);
-
-        if (!plans || plans.length === 0) return;
-
-        const eventIds = plans.map((p: any) => p.event_id);
-        const { data: existing } = await supabase
-          .from('plan_feedback')
-          .select('event_id')
-          .eq('user_id', authedUserId)
-          .in('event_id', eventIds);
-
-        const feedbackSet = new Set((existing ?? []).map((r: any) => r.event_id));
-        const needsSurvey = plans.find((p: any) => !feedbackSet.has(p.event_id));
-        if (!needsSurvey) return;
-
-        const event = (needsSurvey as any).events;
-        setSurveyPlan({
-          id: event.id,
-          title: event.title,
-          image_url: event.image_url ?? null,
-        });
-
-        const { data: memberData } = await supabase
-          .from('event_members')
-          .select('user_id, profiles_public!inner(id, first_name_display, profile_photo_url)')
-          .eq('event_id', event.id)
-          .eq('status', 'joined');
-
-        if (memberData) {
-          setSurveyMembers(
-            memberData.map((m: any) => ({
-              id: m.profiles_public.id,
-              first_name_display: m.profiles_public.first_name_display,
-              profile_photo_url: m.profiles_public.profile_photo_url,
-            }))
-          );
+        // Single round-trip RPC. Eligibility is enforced server-side with
+        // AT TIME ZONE 'America/Los_Angeles' so a plan that happened earlier
+        // today PT does NOT trigger the modal — only plans on a strictly
+        // earlier PT calendar day do. Returns null when nothing is eligible.
+        const { data, error } = await supabase.rpc('get_pending_post_plan_survey');
+        if (error) {
+          console.warn('[WashedUp] Survey RPC failed:', error.message);
+          return;
         }
+        if (!data) return;
+
+        const payload = data as {
+          plan: { id: string; title: string; image_url: string | null };
+          members: Array<{ id: string; first_name_display: string | null; profile_photo_url: string | null }>;
+        };
+
+        setSurveyPlan({
+          id: payload.plan.id,
+          title: payload.plan.title,
+          image_url: payload.plan.image_url ?? null,
+        });
+        setSurveyMembers(payload.members ?? []);
       } catch (e) { console.warn('[WashedUp] Survey check failed:', e); }
       finally { setSurveyCheckDone(true); }
     })();
