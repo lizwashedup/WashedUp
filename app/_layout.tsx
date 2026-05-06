@@ -315,6 +315,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
       } else if (data?.eventId) {
         router.push(`/(tabs)/chats/${data.eventId}` as any);
+      } else {
+        // Final fallback for notification types that carry neither eventId
+        // nor chatId (e.g. broadcast, future admin pings). Drop the user on
+        // the chats list rather than no-op'ing the tap.
+        router.push('/(tabs)/chats' as any);
       }
     };
 

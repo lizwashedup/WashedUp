@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet,
+  ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet,
   Switch, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -109,16 +109,21 @@ export default function AlbumUploadScreen() {
       return;
     }
 
+    // videoExportPreset is iOS-only (silently ignored on Android). Wrapping it
+    // in a Platform check makes the divergence intentional: iOS forces H.264
+    // MP4 re-export at pick time so iPhone MOV files play in cross-platform
+    // clients; Android takes the device's native export (typically H.264 MP4
+    // already on modern cameras). Server-side ffmpeg transcode for non-MP4
+    // edge cases is deferred to v1.1.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: true,
       selectionLimit: PHOTO_CAP + VIDEO_CAP,
       quality: 1,
       videoMaxDuration: MAX_VIDEO_SEC,
-      // iOS-only: force H.264 MP4 re-export at pick time so iPhone MOV files
-      // play in cross-platform clients (Android web, Vercel previews, etc).
-      // Spec wanted server-side ffmpeg transcode; deferred to v1.1.
-      videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality,
+      ...(Platform.OS === 'ios'
+        ? { videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality }
+        : {}),
     });
     if (result.canceled || !result.assets) return;
 
