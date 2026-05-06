@@ -4,6 +4,7 @@ const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
 const PLAN_ALERT_EMAIL = 'liz@washedup.app';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
 interface PlanPayload {
   record: {
@@ -82,32 +83,77 @@ Deno.serve(async (req) => {
       }),
     });
 
-    // ── 2. Push notification to admin devices via OneSignal ────────────────────
-    // Admins are targeted by external_id alias (= user_id, set by OneSignal.login
-    // on the client). One API call fans out to every device every admin has
-    // registered. OneSignal silently handles admins with no subscriptions.
+    // ── 2. Push notification to admin devices (dual-send during cutover) ──────
+    // Same routing rule as send-push-notifications: OneSignal if the admin has
+    // a device_tokens row, Expo Push if they only have an expo_push_token, no
+    // push if they have neither. Both legs fire in parallel.
     const { data: adminRows } = await supabase
       .from('admin_users')
       .select('user_id');
 
-    if (adminRows && adminRows.length > 0) {
-      const adminIds = adminRows.map((r: { user_id: string }) => r.user_id);
+    const adminIds: string[] = ((adminRows ?? []) as Array<{ user_id: string }>)
+      .map((r) => r.user_id);
 
-      await fetch('https://api.onesignal.com/notifications', {
-        method: 'POST',
-        headers: {
-          Authorization: `Key ${Deno.env.get('ONESIGNAL_REST_API_KEY')!}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          app_id: Deno.env.get('ONESIGNAL_APP_ID')!,
-          target_channel: 'push',
-          include_aliases: { external_id: adminIds },
-          headings: { en: '📋 New plan posted' },
-          contents: { en: `"${plan.title}" by ${creatorName}` },
-          data: { planId: plan.id, type: 'admin_plan_alert' },
-        }),
-      });
+    if (adminIds.length > 0) {
+      // OneSignal-capable admins
+      const { data: osAdminRows } = await supabase
+        .from('device_tokens')
+        .select('user_id')
+        .in('user_id', adminIds);
+      const osAdminSet = new Set<string>(
+        ((osAdminRows ?? []) as Array<{ user_id: string }>).map((r) => r.user_id),
+      );
+      const osAdminIds = [...osAdminSet];
+
+      // Expo-only admins (admins with no OneSignal row, fallback to expo_push_token)
+      const expoOnlyAdminIds = adminIds.filter((id) => !osAdminSet.has(id));
+      let expoTokens: string[] = [];
+      if (expoOnlyAdminIds.length > 0) {
+        const { data: expoAdminProfiles } = await supabase
+          .from('profiles')
+          .select('expo_push_token')
+          .in('id', expoOnlyAdminIds)
+          .not('expo_push_token', 'is', null);
+        expoTokens = ((expoAdminProfiles ?? []) as Array<{ expo_push_token: string | null }>)
+          .map((p) => p.expo_push_token)
+          .filter((t): t is string => !!t);
+      }
+
+      const sendOneSignal: Promise<unknown> = osAdminIds.length > 0
+        ? fetch('https://api.onesignal.com/notifications', {
+            method: 'POST',
+            headers: {
+              Authorization: `Key ${Deno.env.get('ONESIGNAL_REST_API_KEY')!}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              app_id: Deno.env.get('ONESIGNAL_APP_ID')!,
+              target_channel: 'push',
+              include_aliases: { external_id: osAdminIds },
+              headings: { en: '📋 New plan posted' },
+              contents: { en: `"${plan.title}" by ${creatorName}` },
+              data: { planId: plan.id, type: 'admin_plan_alert' },
+            }),
+          }).catch((err) => console.error('[notify-plan-posted] OneSignal error:', err))
+        : Promise.resolve();
+
+      const sendExpo: Promise<unknown> = expoTokens.length > 0
+        ? fetch(EXPO_PUSH_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(
+              expoTokens.map((token) => ({
+                to: token,
+                title: '📋 New plan posted',
+                body: `"${plan.title}" by ${creatorName}`,
+                data: { planId: plan.id, type: 'admin_plan_alert' },
+                sound: 'default',
+              })),
+            ),
+          }).catch((err) => console.error('[notify-plan-posted] Expo error:', err))
+        : Promise.resolve();
+
+      await Promise.all([sendOneSignal, sendExpo]);
     }
 
     const emailBody = await emailRes.json();
