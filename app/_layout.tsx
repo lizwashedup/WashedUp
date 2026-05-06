@@ -35,7 +35,7 @@ LogBox.ignoreLogs([
   'Failed to upsert device_tokens',
 ]);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { PostHogProvider } from 'posthog-react-native';
+import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -153,6 +153,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const lastNavRef = useRef({ dest: '', ts: 0 });
   usePushNotifications(authedUserId);
   useSessionLogger(authedUserId);
+
+  // PostHog: identify on login, reset on logout. Hook returns null when the
+  // provider is in disabled mode (no key configured), so the optional chaining
+  // keeps this safe in misconfigured environments.
+  const posthog = usePostHog();
+  useEffect(() => {
+    if (!posthog) return;
+    if (authedUserId) {
+      posthog.identify(authedUserId);
+    } else {
+      posthog.reset();
+    }
+  }, [authedUserId, posthog]);
 
   // Resume any in-flight album upload batches once on mount, and re-nudge on
   // app foreground. Worker is idempotent — safe to call repeatedly.
