@@ -311,8 +311,20 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         if (data?.eventId) router.push(`/album/upload/${data.eventId}` as any);
       } else if (type === 'album_ready' || type === 'album_someone_uploaded' || type === 'album_more_photos_added' || type === 'album_hearts_batched') {
         if (data?.eventId) router.push(`/album/${data.eventId}` as any);
-      } else if ((type === 'plan_invite' || type === 'waitlist_spot' || type === 'duplicate_plan') && data?.eventId) {
-        router.push(`/plan/${data.eventId}` as any);
+      } else if (
+        (type === 'plan_invite' ||
+          type === 'waitlist_spot' ||
+          type === 'duplicate_plan' ||
+          type === 'interest_signal' ||
+          type === 'interest_invite') &&
+        data?.eventId
+      ) {
+        // Tag the URL when the push is the creator-side "someone signaled
+        // interest" notification, so the plan detail can surface the
+        // "Would go next time" section explicitly. Receiver may currently
+        // no-op on the param; it's a marker for future scroll/analytics.
+        const focusParam = type === 'interest_signal' ? '?focus=interest' : '';
+        router.push(`/plan/${data.eventId}${focusParam}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
       } else if (data?.eventId) {

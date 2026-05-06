@@ -429,9 +429,10 @@ const styles = StyleSheet.create({
   },
   bgOverlay: {
     ...StyleSheet.absoluteFillObject,
-    // Cream at ~85% so the blurred sunset bleeds through at ~15%, matching
-    // the user-spec range and keeping form text readable.
-    backgroundColor: 'rgba(248, 245, 240, 0.85)',
+    // Cream at 75% so the blurred sunset bleeds through at ~25%. Tuned by
+    // eye on-device — 0.85 was nearly invisible, 0.75 keeps form text
+    // readable while letting the warm gradient breathe.
+    backgroundColor: 'rgba(248, 245, 240, 0.75)',
   },
   safe: {
     flex: 1,

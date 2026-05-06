@@ -108,13 +108,21 @@ Always reference Fonts.* from `constants/Typography.ts`. Do not add new font fam
 - Include a CTA button
 
 ### Things to NEVER do
-- Never use gold (#D4BF82 or #C5A55A) for text — decorative only (exception: phone-auth OTP success state uses #C5A55A intentionally)
+- Never use gold (#D4BF82 or #C5A55A) for text — decorative only (see Documented exceptions below)
 - Never hardcode fontFamily strings — always reference Fonts from constants/Typography.ts
 - Never hardcode colors — always reference the Colors file (constants/Colors.ts)
 - Never say "host", "hosting", "Posted by", or "is going to" — always just "posted"
 - Never remove the + button from the tab bar
 - Never remove user profile photos from cards
 - Never use #D97746, #A84B2A, #E8955A, or any other orange variant — only #B5522E
+
+### Documented exceptions
+The "gold is decorative only" rule has two intentional exceptions where gold *is* applied to a tappable surface. Both are tied to a specific psychological framing — gold signals "warm, optional, no pressure," in deliberate contrast to terracotta's "do this now."
+
+- **Phone-auth OTP success state** uses #C5A55A intentionally (success affirmation, not a CTA).
+- **"I'd go next time" interest signal button** (Next Time! feature, plan detail screen) uses #D4BF82 as a filled button. Reasoning: terracotta is reserved for primary CTAs ("I'm going," "Post It") that say "act now." Gold says "this is a low-pressure, optional micro-commitment." Treating this button as a primary terracotta CTA would over-weight what is by design a foot-in-the-door signal, not an action. The button after-tap state (checkmark + "[Creator] knows you're interested") also uses gold for the same reason.
+
+Do not extend this exception to additional buttons without writing it here first.
 
 ## General Rules
 

@@ -46,6 +46,7 @@ import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import { friendlyError } from '../../lib/friendlyError';
+import { isPlanPast } from '../../lib/planTime';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 // Lazy-load react-native-map-link so older production binaries (built before
 // this dep was added) don't crash when this screen's module is imported.
@@ -516,6 +517,37 @@ export default function PlanDetailScreen() {
     staleTime: 60_000,
   });
 
+  // Next Time! — has the current user already signaled interest in this plan?
+  const { data: myInterest = null } = useQuery({
+    queryKey: ['events', 'my-interest', id, currentUserId],
+    queryFn: async () => {
+      if (!currentUserId || !id) return null;
+      const { data } = await supabase
+        .from('event_interest_signals')
+        .select('id, status')
+        .eq('event_id', id)
+        .eq('interested_user_id', currentUserId)
+        .eq('status', 'active')
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!id && !!currentUserId,
+    staleTime: 60_000,
+  });
+
+  // Next Time! — creator-only: who's signaled they'd go next time on this plan?
+  const { data: creatorInterestList = [] } = useQuery({
+    queryKey: ['events', 'creator-interest', id, currentUserId],
+    queryFn: async () => {
+      if (!id) return [];
+      const { data, error } = await supabase.rpc('get_event_interest_signals', { p_event_id: id });
+      if (error) return [];
+      return data ?? [];
+    },
+    enabled: !!id && !!currentUserId && plan?.creator_user_id === currentUserId,
+    staleTime: 60_000,
+  });
+
   // Sync featured state with plan data
   useEffect(() => {
     if (!plan) return;
@@ -620,6 +652,12 @@ export default function PlanDetailScreen() {
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
   const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
+  // Next Time! uses the end_time-aware "past" check so users can still
+  // signal interest on a plan that's already started but not yet ended.
+  const interestPlanEnded = plan ? isPlanPast(plan.start_time, plan.end_time) : true;
+  const canShowInterestButton =
+    !!plan && !!currentUserId && !isCreator && !isMember && !interestPlanEnded && myInterest === null;
+  const interestAlreadySent = !!myInterest;
   const isHappeningNow =
     !!plan &&
     new Date(plan.start_time) <= new Date() &&
@@ -772,6 +810,33 @@ export default function PlanDetailScreen() {
       setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
     },
   });
+
+  // ─── Next Time! interest signal ──────────────────────────────────────────
+
+  const interestMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentUserId || !id) throw new Error('Not authenticated');
+      const { error } = await supabase.rpc('send_interest_signal', { p_event_id: id });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      hapticSuccess();
+      queryClient.invalidateQueries({ queryKey: ['events', 'my-interest', id, currentUserId] });
+    },
+    onError: (error: any) => {
+      setBrandedAlert({
+        visible: true,
+        title: 'Oops',
+        message: friendlyError(error, "Couldn't send your interest. Try again."),
+      });
+    },
+  });
+
+  const handleSendInterest = () => {
+    if (interestMutation.isPending) return;
+    hapticLight();
+    interestMutation.mutate();
+  };
 
   const handleLeave = () => {
     setBrandedAlert({
@@ -1378,6 +1443,67 @@ export default function PlanDetailScreen() {
           ))}
         </View>
 
+        {/* F-2. Next Time! — interest signal button (non-creator, non-member, plan still upcoming) */}
+        {canShowInterestButton && (
+          <TouchableOpacity
+            style={styles.interestButton}
+            onPress={handleSendInterest}
+            activeOpacity={0.8}
+            disabled={interestMutation.isPending}
+          >
+            {interestMutation.isPending ? (
+              <ActivityIndicator size="small" color={Colors.quoteText} />
+            ) : (
+              <>
+                <Ionicons name="heart-outline" size={18} color={Colors.quoteText} />
+                <Text style={styles.interestButtonText}>
+                  {`Tell ${plan?.creator?.first_name_display ?? 'them'} I'd go next time`}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+        {interestAlreadySent && !isCreator && !isMember && (
+          <View style={styles.interestSent}>
+            <Ionicons name="checkmark-circle" size={18} color={Colors.quoteText} />
+            <Text style={styles.interestSentText}>
+              {plan?.creator?.first_name_display
+                ? `${plan.creator.first_name_display} knows you're interested`
+                : "They know you're interested"}
+            </Text>
+          </View>
+        )}
+
+        {/* F-3. Next Time! — creator-only "Would go next time" section */}
+        {isCreator && creatorInterestList.length > 0 && (
+          <View style={styles.creatorInterestBlock}>
+            <Text style={styles.creatorInterestTitle}>Would go next time</Text>
+            <View style={styles.memberAvatarRow}>
+              {creatorInterestList.map((row: any) => (
+                <View key={row.signal_id} style={styles.memberAvatarWrapper}>
+                  {row.interested_photo_url ? (
+                    <Image source={{ uri: row.interested_photo_url }} style={styles.memberAvatar} />
+                  ) : (
+                    <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
+                      <Text style={styles.memberAvatarInitial}>
+                        {row.interested_name?.[0]?.toUpperCase() ?? '?'}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={styles.memberAvatarName} numberOfLines={1}>
+                    {row.interested_name ?? 'Someone'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.creatorInterestSub}>
+              {creatorInterestList.length === 1
+                ? '1 person wants to go next time'
+                : `${creatorInterestList.length} people want to go next time`}
+            </Text>
+          </View>
+        )}
+
         {/* H. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && isEligible && !isFull && (
           <View style={styles.ctaBlock}>
@@ -1648,12 +1774,24 @@ export default function PlanDetailScreen() {
                       prefillTitle: plan?.title ?? '',
                       prefillDescription: plan?.description ?? '',
                       prefillLocation: plan?.location_text ?? '',
+                      prefillLocationLat: plan?.location_lat != null ? String(plan.location_lat) : '',
+                      prefillLocationLng: plan?.location_lng != null ? String(plan.location_lng) : '',
+                      prefillNeighborhood: plan?.neighborhood ?? '',
                       prefillCategory: plan?.primary_vibe ?? '',
                       prefillImageUrl: plan?.image_url ?? '',
                       prefillStartTime: plan?.start_time ?? '',
-                      prefillEventDate: plan?.start_time ?? '',
+                      // Date param expects YYYY-MM-DD; sending the full ISO
+                      // breaks the receiver's parser (silently no-ops).
+                      prefillEventDate: plan?.start_time?.slice(0, 10) ?? '',
                       prefillEndTime: plan?.end_time ?? '',
                       prefillDropIn: plan?.drop_in === false ? 'false' : 'true',
+                      prefillAgeRange: minMaxToAgeRanges(
+                        plan?.target_age_min ?? null,
+                        plan?.target_age_max ?? null,
+                      ).join(','),
+                      prefillGenderPref: plan?.gender_rule ?? 'mixed',
+                      prefillGroupSize: plan?.max_invites != null ? String(plan.max_invites) : '',
+                      prefillTicketsUrl: plan?.tickets_url ?? '',
                       duplicatedFromEventId: id ?? '',
                     },
                   });
@@ -2535,6 +2673,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   memberAvatarOverflowText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  // Next Time! — gold-filled button. See CLAUDE.md "Documented exceptions":
+  // gold says "warm, optional," in deliberate contrast to terracotta's "do this now."
+  interestButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.goldAccent,
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  interestButtonText: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.quoteText,
+  },
+  interestSent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  interestSentText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.quoteText,
+  },
+  creatorInterestBlock: {
+    marginTop: 4,
+    marginBottom: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  creatorInterestTitle: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    marginBottom: 12,
+  },
+  creatorInterestSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    marginTop: 4,
+  },
   ctaBlock: {
     marginTop: 8,
   },

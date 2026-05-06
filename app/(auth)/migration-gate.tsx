@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
+  ImageBackground,
   ScrollView,
   Platform,
   KeyboardAvoidingView,
@@ -19,6 +20,7 @@ import { supabase } from '../../lib/supabase';
 import { hapticLight, hapticError } from '../../lib/haptics';
 import { formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
 import { snoozeMigrationGate } from '../../lib/migrationGateSnooze';
+import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 import PhoneInput from '../../components/auth/PhoneInput';
 import { useSubmitGuard } from '../../hooks/useSubmitGuard';
 
@@ -81,12 +83,21 @@ export default function MigrationGateScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <StatusBar style="dark" />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.kav}
-      >
+    <ImageBackground
+      source={{ uri: WELCOME_HERO_URI }}
+      style={styles.bg}
+      blurRadius={14}
+      resizeMode="cover"
+    >
+      {/* Cream overlay at ~85% so the blurred sunset bleeds through at ~15%,
+          matching login + phone-entry. */}
+      <View style={styles.bgOverlay} pointerEvents="none" />
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.kav}
+        >
         <ScrollView
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
@@ -181,11 +192,18 @@ export default function MigrationGateScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.cream },
+  bg: { flex: 1, backgroundColor: Colors.parchment },
+  bgOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    // Match login.tsx — cream at 75% lets the blurred sunset bleed at ~25%.
+    backgroundColor: 'rgba(248, 245, 240, 0.75)',
+  },
+  safe: { flex: 1, backgroundColor: 'transparent' },
   kav: { flex: 1 },
   scroll: {
     paddingHorizontal: 28,
