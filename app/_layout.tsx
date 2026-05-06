@@ -218,7 +218,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           id: event.id,
           title: event.title,
           image_url: event.image_url ?? null,
-          is_featured: event.is_featured ?? false,
         });
 
         const { data: memberData } = await supabase

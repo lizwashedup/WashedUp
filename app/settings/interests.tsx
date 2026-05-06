@@ -120,7 +120,7 @@ export default function InterestsSettingsScreen() {
         <View style={styles.centered}>
           <Ionicons name="heart-outline" size={32} color={Colors.warmGray} />
           <Text style={styles.emptyText}>
-            Nothing here. When you tell someone you’d go next time, it shows up here.
+            Tell a creator you’d go next time on a plan you can’t make. Your interests will live here.
           </Text>
         </View>
       ) : (
