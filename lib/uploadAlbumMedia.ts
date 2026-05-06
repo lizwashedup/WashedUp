@@ -180,8 +180,14 @@ async function processQueue(): Promise<void> {
         const item = batch.items[i];
         if (item.status === 'uploaded' || item.status === 'permanently_failed') continue;
 
+        // Only count this as a NEW attempt when transitioning from pending →
+        // uploading. A status of 'uploading' on disk means the worker crashed
+        // mid-upload last time, so the previous attempt already consumed an
+        // attempt slot — don't burn another one on resume. Without this guard
+        // a single crash drops the user's remaining retries from 3 to 1.
+        const isResumingFromCrash = item.status === 'uploading';
         item.status = 'uploading';
-        item.attempts += 1;
+        if (!isResumingFromCrash) item.attempts += 1;
         await persistQueueWithBatch(batch);
 
         try {

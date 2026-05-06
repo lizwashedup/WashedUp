@@ -17,6 +17,12 @@ import { enqueueAlbumUploadBatch, AlbumUploadInput } from '../../../lib/uploadAl
 const PHOTO_CAP = 20;
 const VIDEO_CAP = 6;
 const MAX_VIDEO_SEC = 60;
+// Hard memory cap on video file size. Defends against React Native's
+// ~200-400 MB JS heap getting blown out when the orchestrator reads the
+// whole file via fetch().arrayBuffer(). 200 MB safely covers iPhone HEVC
+// 4K@60 (~150 MB / 60s) and any reasonable H.264 recording. Streaming
+// upload via expo-file-system is the v1.1 fix that lifts this cap.
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 
 type Attendee = {
   user_id: string;
@@ -108,6 +114,10 @@ export default function AlbumUploadScreen() {
       selectionLimit: PHOTO_CAP + VIDEO_CAP,
       quality: 1,
       videoMaxDuration: MAX_VIDEO_SEC,
+      // iOS-only: force H.264 MP4 re-export at pick time so iPhone MOV files
+      // play in cross-platform clients (Android web, Vercel previews, etc).
+      // Spec wanted server-side ffmpeg transcode; deferred to v1.1.
+      videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality,
     });
     if (result.canceled || !result.assets) return;
 
@@ -117,6 +127,22 @@ export default function AlbumUploadScreen() {
       const ext = formatExtFromName(a.fileName) || (isVideo ? 'mp4' : 'jpg');
       if (isVideo && (a.duration ?? 0) > MAX_VIDEO_SEC * 1000) {
         Alert.alert('Video too long', 'Videos must be 60 seconds or less. Trim this video or choose another.');
+        continue;
+      }
+      if (isVideo && (a.fileSize ?? 0) > MAX_VIDEO_BYTES) {
+        Alert.alert(
+          'Video too large',
+          'This video is over 200 MB and might crash the upload. Try a shorter clip or a lower-resolution recording.',
+        );
+        continue;
+      }
+      if (isVideo && !a.duration) {
+        // Defense against malformed video metadata that would slip past the
+        // 60-second cap on the server (the duration column allows NULL).
+        Alert.alert(
+          'Couldn’t read this video',
+          'We couldn’t read the length of this video. Try a different one.',
+        );
         continue;
       }
       newAssets.push({
