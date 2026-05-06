@@ -300,6 +300,7 @@ export default function PostScreen() {
     prefillEventDate?: string;
     prefillEndTime?: string;
     prefillDropIn?: string;
+    prefillAllowDuplicate?: string;
     prefillDescription?: string;
     prefillImageUrl?: string;
     prefillLocation?: string;
@@ -398,6 +399,11 @@ export default function PostScreen() {
     // Drop-in prefill — duplicates pass "true"/"false" as a string
     if (params.prefillDropIn !== undefined) {
       setDropIn(params.prefillDropIn !== 'false');
+    }
+
+    // Allow-duplicate prefill — same string-encoded shape as prefillDropIn.
+    if (params.prefillAllowDuplicate !== undefined) {
+      setAllowDuplicate(params.prefillAllowDuplicate !== 'false');
     }
 
     if (params.prefillDescription) {
@@ -585,6 +591,11 @@ export default function PostScreen() {
   const [tempEndHour, setTempEndHour] = useState(11);
   const [tempEndMinute, setTempEndMinute] = useState<string>('00');
   const [tempEndPeriod, setTempEndPeriod] = useState<'AM' | 'PM'>('PM');
+
+  // Allow-duplicate flag — when false, the "post a duplicate plan" sheet on
+  // the plan detail page (shown when plan is full) is suppressed and only
+  // the waitlist option appears. Defaults true.
+  const [allowDuplicate, setAllowDuplicate] = useState(true);
 
   // Drop-in flag — when false, plan vanishes from the feed for non-members
   // the moment start_time passes (used for one-shot moments like a movie)
@@ -801,6 +812,7 @@ export default function PostScreen() {
           start_time: startTime.toISOString(),
           end_time: endTime ? endTime.toISOString() : null,
           drop_in: dropIn,
+          allow_duplicate: allowDuplicate,
           location_text: effectiveLocation || null,
           location_lat: locationLat,
           location_lng: locationLng,
@@ -1132,6 +1144,22 @@ export default function PostScreen() {
             <Text style={styles.dropInLabel}>drop in anytime</Text>
           </TouchableOpacity>
           <Text style={styles.dropInHint}>people can still find and join after it starts</Text>
+
+          {/* ── Allow-duplicate toggle ── */}
+          <TouchableOpacity
+            style={styles.dropInRow}
+            onPress={() => { hapticLight(); setAllowDuplicate((v) => !v); }}
+            activeOpacity={0.7}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: allowDuplicate }}
+            accessibilityLabel="let others make their own version"
+          >
+            <View style={[styles.checkbox, allowDuplicate && styles.checkboxChecked]}>
+              {allowDuplicate && <Ionicons name="checkmark" size={16} color={Colors.white} />}
+            </View>
+            <Text style={styles.dropInLabel}>let others make their own version</Text>
+          </TouchableOpacity>
+          <Text style={styles.dropInHint}>people can duplicate this plan and put their own spin on it</Text>
 
           {/* ── Location (Google Places) ── */}
           <View style={[styles.field, styles.placesField]}>

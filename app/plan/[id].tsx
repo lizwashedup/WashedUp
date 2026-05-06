@@ -169,6 +169,7 @@ interface PlanDetail {
   target_age_max: number | null;
   end_time: string | null;
   drop_in: boolean;
+  allow_duplicate: boolean;
   neighborhood: string | null;
   slug: string | null;
   status: string;
@@ -272,7 +273,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
   const { data, error } = await supabase
     .from('events')
     .select(`
-      id, title, description, host_message, start_time, end_time, drop_in,
+      id, title, description, host_message, start_time, end_time, drop_in, allow_duplicate,
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
@@ -312,6 +313,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     start_time: row.start_time,
     end_time: row.end_time ?? null,
     drop_in: row.drop_in ?? true,
+    allow_duplicate: row.allow_duplicate ?? true,
     location_text: row.location_text ?? null,
     location_lat: row.location_lat ?? null,
     location_lng: row.location_lng ?? null,
@@ -1593,6 +1595,11 @@ export default function PlanDetailScreen() {
             onPress={() => {
               if (isOnWaitlist) {
                 handleJoinWaitlist();
+              } else if (plan?.allow_duplicate === false) {
+                // Creator opted out of letting others duplicate this plan;
+                // skip the "post your own version" sheet and just queue the
+                // user on the waitlist.
+                handleJoinWaitlist();
               } else {
                 hapticLight();
                 setShowDuplicateSheet(true);
@@ -1785,6 +1792,7 @@ export default function PlanDetailScreen() {
                       prefillEventDate: plan?.start_time?.slice(0, 10) ?? '',
                       prefillEndTime: plan?.end_time ?? '',
                       prefillDropIn: plan?.drop_in === false ? 'false' : 'true',
+                      prefillAllowDuplicate: plan?.allow_duplicate === false ? 'false' : 'true',
                       prefillAgeRange: minMaxToAgeRanges(
                         plan?.target_age_min ?? null,
                         plan?.target_age_max ?? null,
