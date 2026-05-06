@@ -22,6 +22,7 @@ import { supabase } from './supabase';
 
 const QUEUE_KEY = 'albumUpload.queueV1';
 const BUCKET = 'album-media';
+const MARKETING_BUCKET = 'marketing-media';
 
 export type AlbumUploadInput = {
   // Local file URI from expo-image-picker
@@ -191,7 +192,7 @@ async function processQueue(): Promise<void> {
         await persistQueueWithBatch(batch);
 
         try {
-          await uploadOne(item);
+          await uploadOne(item, batch.options.marketingConsent);
           item.status = 'uploaded';
           item.error = undefined;
         } catch (err) {
@@ -261,7 +262,7 @@ async function persistQueueWithBatch(batch: Batch): Promise<void> {
   }
 }
 
-async function uploadOne(item: QueueItem): Promise<void> {
+async function uploadOne(item: QueueItem, marketingConsent: boolean): Promise<void> {
   let arrayBuffer: ArrayBuffer;
   let httpContentType: string;
 
@@ -295,6 +296,31 @@ async function uploadOne(item: QueueItem): Promise<void> {
 
   // 23505 / "already exists" = treat as success (resume case).
   if (error && !/already exists/i.test(error.message)) throw error;
+
+  // Best-effort marketing copy. The album viewer reads only from album-media,
+  // so failures here never block the batch or the user. Logged for triage.
+  // Path layout matches album-media exactly so a glance at the marketing
+  // bucket in the Supabase dashboard mirrors the album bucket structure.
+  if (marketingConsent) {
+    try {
+      const { error: mErr } = await supabase.storage
+        .from(MARKETING_BUCKET)
+        .upload(item.storagePath, arrayBuffer, {
+          contentType: httpContentType,
+          upsert: false,
+        });
+      if (mErr && !/already exists/i.test(mErr.message)) {
+        console.warn(
+          '[albumUpload] marketing-media copy failed for',
+          item.storagePath,
+          ':',
+          mErr.message,
+        );
+      }
+    } catch (err) {
+      console.warn('[albumUpload] marketing-media copy threw:', err);
+    }
+  }
 }
 
 function guessVideoMime(format: string): string {
