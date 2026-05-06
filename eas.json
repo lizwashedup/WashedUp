@@ -23,7 +23,10 @@
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_POSTHOG_API_KEY": "phc_CERHPC5vuHZmoZu7Q6JBwsEiuNqnavU8gf2tCfWye6fL"
+      }
     }
   },
   "submit": {
