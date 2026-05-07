@@ -221,7 +221,7 @@ export default function AlbumUploadScreen() {
       // Navigate to album detail; the queue uploads in background.
       router.replace(`/album/${eventId}` as any);
     } catch (err) {
-      Alert.alert('Upload error', err instanceof Error ? err.message : 'Could not start upload.');
+      Alert.alert('Upload error', 'Could not start upload. Please try again.');
       setSubmitting(false);
     }
   }, [assets, myUserId, eventId, visibleToUserIds, marketingConsent, instagram, tiktok, testimonial, router]);

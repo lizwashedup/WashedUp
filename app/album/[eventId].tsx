@@ -256,7 +256,7 @@ export default function AlbumDetailScreen() {
     });
     if (error) {
       setMuted(!next);
-      Alert.alert('Could not update notifications', error.message);
+      Alert.alert('Could not update notifications', 'Please try again.');
     }
   }, [data?.album?.id, muted, savedName, savedNote]);
 
@@ -282,7 +282,7 @@ export default function AlbumDetailScreen() {
           : { message: 'Check out our album from washedup', url: uri },
       );
     } catch (err) {
-      Alert.alert('Could not share', err instanceof Error ? err.message : String(err));
+      Alert.alert('Could not share', 'Please try again.');
     } finally {
       setSharing(false);
     }
@@ -327,7 +327,7 @@ export default function AlbumDetailScreen() {
     } catch (err) {
       // Revert optimistic state on failure.
       setOptimisticHearted((prev) => ({ ...prev, [uploadId]: wasHearted }));
-      Alert.alert('Could not update heart', err instanceof Error ? err.message : String(err));
+      Alert.alert('Could not update heart', 'Please try again.');
     }
   }, [isHearted, refetch]);
 
@@ -343,7 +343,7 @@ export default function AlbumDetailScreen() {
       setOptimisticHiddenIds((prev) => {
         const next = new Set(prev); next.delete(uploadId); return next;
       });
-      Alert.alert('Could not hide', error.message);
+      Alert.alert('Could not hide', 'Please try again.');
       return;
     }
     void refetch();
@@ -358,7 +358,7 @@ export default function AlbumDetailScreen() {
       setOptimisticHiddenIds((prev) => {
         const next = new Set(prev); next.delete(uploadId); return next;
       });
-      Alert.alert('Could not delete', error.message);
+      Alert.alert('Could not delete', 'Please try again.');
       return;
     }
     void refetch();

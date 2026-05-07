@@ -1044,7 +1044,7 @@ export default function PostScreen() {
             >
               <ImagePlus size={32} color={Colors.terracotta} strokeWidth={2} />
               <Text style={styles.photoUploadText}>Add a photo</Text>
-              <Text style={styles.photoUploadHint}>Optional — your plan works without one</Text>
+              <Text style={styles.photoUploadHint}>Optional. Your plan works without one.</Text>
             </TouchableOpacity>
           ) : (
             <View style={styles.photoPreview}>

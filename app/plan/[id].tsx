@@ -233,7 +233,7 @@ function buildCalendarUrl(title: string, startTime: string, endTime?: string | n
     text: title,
     dates: `${fmt(start)}/${fmt(end)}`,
     location: location || '',
-    details: 'washedup plan — washedup.app',
+    details: 'washedup plan, washedup.app',
   });
   return `https://calendar.google.com/calendar/event?${params.toString()}`;
 }
@@ -1511,7 +1511,7 @@ export default function PlanDetailScreen() {
           <View style={styles.ctaBlock}>
             {!isFeatured && spotsLeft > 0 && spotsLeft <= 2 && (
               <Text style={styles.ctaInfo}>
-                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left — group closes soon
+                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left, group closes soon
               </Text>
             )}
             <Text style={styles.ctaSub}>A group chat opens the moment you join</Text>
@@ -2119,7 +2119,7 @@ export default function PlanDetailScreen() {
                   <View style={manageStyles.featuredRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={manageStyles.label}>Feature this Plan</Text>
-                      <Text style={manageStyles.hint}>Allows custom capacity (50–500)</Text>
+                      <Text style={manageStyles.hint}>Allows custom capacity (50 to 500)</Text>
                     </View>
                     <Switch
                       value={featuredToggle}
