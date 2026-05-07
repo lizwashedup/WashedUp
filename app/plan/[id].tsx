@@ -1184,7 +1184,7 @@ export default function PlanDetailScreen() {
     ].filter(Boolean);
   const isWomenOnly = plan.gender_rule === 'women_only';
 
-  const groupSizeLabel = isFeatured ? 'WashedUp Event' : totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
+  const groupSizeLabel = isFeatured ? (isBirthdayParty ? 'Birthday Party' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
