@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
+import { unauthedRoute } from '../../../lib/authRouting';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
@@ -216,6 +217,28 @@ export default function OnboardingBasicsScreen() {
     await supabase.auth.signOut();
   };
 
+  const [escapeError, setEscapeError] = useState<string | null>(null);
+  const escapingRef = useRef(false);
+
+  const handleEscapeToLogin = async () => {
+    if (escapingRef.current) return;
+    escapingRef.current = true;
+    setEscapeError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-ghost-account');
+      if (error || !data?.success) {
+        setEscapeError('Hmm, something went wrong. Contact support.');
+        escapingRef.current = false;
+        return;
+      }
+      await supabase.auth.signOut();
+      router.replace(unauthedRoute() as never);
+    } catch {
+      setEscapeError('Hmm, something went wrong. Contact support.');
+      escapingRef.current = false;
+    }
+  };
+
   if (bootstrapping) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -383,6 +406,16 @@ export default function OnboardingBasicsScreen() {
             >
               <Text style={styles.signOutText}>sign out</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.escapeHit}
+              onPress={handleEscapeToLogin}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.escapeText}>Already on WashedUp? Log in here</Text>
+            </TouchableOpacity>
+            {escapeError ? (
+              <Text style={styles.escapeError}>{escapeError}</Text>
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -619,6 +652,20 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: 13,
     color: Colors.text3,
+  },
+  escapeHit: { alignSelf: 'center', paddingVertical: 6, marginTop: 4 },
+  escapeText: {
+    fontFamily: Fonts.sans,
+    fontSize: 13,
+    color: Colors.text3,
+    textDecorationLine: 'underline',
+  },
+  escapeError: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 12,
+    color: Colors.text2,
+    textAlign: 'center',
+    marginTop: 6,
   },
 
   modalOverlay: {
