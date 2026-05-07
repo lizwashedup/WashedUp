@@ -33,6 +33,7 @@ Key typography values:
 - Fonts.sansMedium — DM Sans Medium (UI text, chips)
 - Fonts.sans — DM Sans Regular (body, meta)
 - Fonts.displayBold — Cormorant Garamond Bold (plan titles, editorial)
+- Fonts.headline — Plus Jakarta Sans Bold (onboarding headlines, phone-auth flow)
 - FontSizes.bodyLG = 16, bodyMD = 14, bodySM = 13, caption = 11
 
 ## Navigation
@@ -70,10 +71,13 @@ NEVER use #D97746, #A84B2A, #E8955A, or any other orange. Only #B5522E.
 - #C43D2E — error states only
 
 ### Fonts
-- DO NOT install or use Plus Jakarta Sans, DM Sans, or any custom fonts
-- Use the system font for everything (the default iOS/Android font)
-- Cochin is ONLY used for the logo wordmark. Never use Cochin anywhere else in the app. Creator messages use system font italic.
-- The header wordmark "washedup" is a PNG image, not a font
+This project uses three custom font families, all loaded in `app/_layout.tsx` via `@expo-google-fonts`:
+
+- **DM Sans** — all UI text, body, buttons, labels (Fonts.sans, Fonts.sansMedium, Fonts.sansSemibold, Fonts.sansBold)
+- **Cormorant Garamond** — editorial display, hero headlines, plan titles (Fonts.display, Fonts.displayBold, Fonts.displayItalic)
+- **Plus Jakarta Sans** — onboarding section headlines, phone-auth flow (Fonts.headline, Fonts.headlineMedium)
+
+Always reference Fonts.* from `constants/Typography.ts`. Do not add new font families without discussion. Never hardcode fontFamily strings. The header wordmark "washedup" is a PNG image, not a font.
 
 ### Plan card pattern
 - Creator avatar (real photo, 36px circle) with name + "posted" below
@@ -104,13 +108,21 @@ NEVER use #D97746, #A84B2A, #E8955A, or any other orange. Only #B5522E.
 - Include a CTA button
 
 ### Things to NEVER do
-- Never use gold (#D4BF82 or #C5A55A) for text — decorative only
-- Never use custom fonts — system font only
+- Never use gold (#D4BF82 or #C5A55A) for text — decorative only (see Documented exceptions below)
+- Never hardcode fontFamily strings — always reference Fonts from constants/Typography.ts
 - Never hardcode colors — always reference the Colors file (constants/Colors.ts)
 - Never say "host", "hosting", "Posted by", or "is going to" — always just "posted"
 - Never remove the + button from the tab bar
 - Never remove user profile photos from cards
 - Never use #D97746, #A84B2A, #E8955A, or any other orange variant — only #B5522E
+
+### Documented exceptions
+The "gold is decorative only" rule has two intentional exceptions where gold *is* applied to a tappable surface. Both are tied to a specific psychological framing — gold signals "warm, optional, no pressure," in deliberate contrast to terracotta's "do this now."
+
+- **Phone-auth OTP success state** uses #C5A55A intentionally (success affirmation, not a CTA).
+- **"I'd go next time" interest signal button** (Next Time! feature, plan detail screen) uses #D4BF82 as a filled button. Reasoning: terracotta is reserved for primary CTAs ("I'm going," "Post It") that say "act now." Gold says "this is a low-pressure, optional micro-commitment." Treating this button as a primary terracotta CTA would over-weight what is by design a foot-in-the-door signal, not an action. The button after-tap state (checkmark + "[Creator] knows you're interested") also uses gold for the same reason.
+
+Do not extend this exception to additional buttons without writing it here first.
 
 ## General Rules
 

@@ -82,6 +82,10 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       if (!userId) return [];
       try {
         try { await supabase.rpc('expire_stale_notifications'); } catch {}
+        // Filter expired-but-still-unread rows directly so the display
+        // doesn't depend on the RPC above succeeding. Mirrors the same
+        // filter on the bell-count query in ProfileButton so the two
+        // always agree.
         const { data } = await supabase
           .from('app_notifications')
           .select('id, type, title, body, event_id, status, expires_at, created_at')
@@ -89,15 +93,22 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
           .eq('status', 'unread')
           .neq('type', 'plan_invite')
           .neq('type', 'new_message')
+          .or('expires_at.is.null,expires_at.gt.now()')
           .order('created_at', { ascending: false })
           .limit(30);
 
         if (!data || data.length === 0) return [];
 
         // Try to extract sender name from title (e.g. "Hello joined your plan!" → "Hello")
-        // and look up their profile photo
+        // and look up their profile photo. interest_signal/interest_invite both
+        // start with the relevant person's first name in their title.
         const nameMatches = data
-          .filter((n: any) => n.type === 'member_joined' || n.type === 'invite_accepted')
+          .filter((n: any) =>
+            n.type === 'member_joined' ||
+            n.type === 'invite_accepted' ||
+            n.type === 'interest_signal' ||
+            n.type === 'interest_invite'
+          )
           .map((n: any) => {
             const match = n.title?.match(/^(\S+)\s/);
             return match?.[1] ?? null;

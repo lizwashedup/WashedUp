@@ -15,14 +15,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { router, useRouter } from 'expo-router';
+import { router } from 'expo-router';
 import { hapticLight } from '../../../lib/haptics';
-import { ChevronLeft } from 'lucide-react-native';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
+import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import { Fonts } from '../../../constants/Typography';
+import ProgressHead from '../../../components/onboarding/ProgressHead';
 
 if (
   Platform.OS === 'android' &&
@@ -34,22 +35,21 @@ if (
 type Option = { label: string; value: string };
 
 const OPTIONS: Option[] = [
-  { label: 'Facebook', value: 'facebook' },
-  { label: 'Reddit', value: 'reddit' },
-  { label: 'Instagram', value: 'instagram' },
-  { label: 'Threads', value: 'threads' },
-  { label: 'TikTok', value: 'tiktok' },
-  { label: 'Bumble BFF', value: 'bumble' },
-  { label: 'Nextdoor', value: 'nextdoor' },
-  { label: 'Google', value: 'google' },
-  { label: 'AI (ChatGPT, etc.)', value: 'ai' },
-  { label: 'Press', value: 'press' },
-  { label: 'Friend', value: 'friend' },
-  { label: 'Other', value: 'other' },
+  { label: 'facebook', value: 'facebook' },
+  { label: 'reddit', value: 'reddit' },
+  { label: 'instagram', value: 'instagram' },
+  { label: 'threads', value: 'threads' },
+  { label: 'tiktok', value: 'tiktok' },
+  { label: 'bumble bff', value: 'bumble' },
+  { label: 'nextdoor', value: 'nextdoor' },
+  { label: 'google', value: 'google' },
+  { label: 'ai (chatgpt, etc.)', value: 'ai' },
+  { label: 'press', value: 'press' },
+  { label: 'friend', value: 'friend' },
+  { label: 'other', value: 'other' },
 ];
 
 export default function OnboardingReferralScreen() {
-  const routerBack = useRouter();
   const [selected, setSelected] = useState<string | null>(null);
   const [otherText, setOtherText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -77,8 +77,11 @@ export default function OnboardingReferralScreen() {
     }
   }, [isOther]);
 
+  const submit = useSubmitGuard();
+
   const handleContinue = async () => {
     if (!canContinue || loading) return;
+    if (!submit.tryAcquire()) return;
     hapticLight();
     setLoading(true);
     try {
@@ -87,8 +90,8 @@ export default function OnboardingReferralScreen() {
       } = await supabase.auth.getUser();
       if (!user) {
         setAlertInfo({
-          title: 'Session expired',
-          message: 'Please sign in again.',
+          title: 'session expired',
+          message: 'please sign in again.',
         });
         await supabase.auth.signOut();
         return;
@@ -99,8 +102,8 @@ export default function OnboardingReferralScreen() {
         const filter = checkContent(trimmed);
         if (!filter.ok) {
           setAlertInfo({
-            title: 'Content not allowed',
-            message: filter.reason ?? 'Please try different wording.',
+            title: 'content not allowed',
+            message: filter.reason ?? 'please try different wording.',
           });
           return;
         }
@@ -108,12 +111,8 @@ export default function OnboardingReferralScreen() {
       } else {
         referralValue = selected as string;
       }
-      // Smart-advance: in the normal flow the user arrives here with
-      // status='referral' and we advance to 'photo'. When the routing
-      // backstop bounced a mid-flow user here from 'photo' or 'vibes'
-      // (because their older client skipped the referral step), we
-      // preserve their existing status and resume at that step instead
-      // of regressing them.
+      // Smart-advance preserves status if a mid-flow user was bounced
+      // back here from photo (older clients skipped referral).
       const { data: existing } = await supabase
         .from('profiles')
         .select('onboarding_status')
@@ -121,7 +120,7 @@ export default function OnboardingReferralScreen() {
         .single();
       const currentStatus = existing?.onboarding_status ?? 'referral';
       const nextStatus =
-        currentStatus === 'photo' || currentStatus === 'vibes'
+        currentStatus === 'photo'
           ? currentStatus
           : 'photo';
       const { error } = await supabase
@@ -133,15 +132,14 @@ export default function OnboardingReferralScreen() {
         .eq('id', user.id);
       if (error) {
         setAlertInfo({
-          title: 'Something went wrong',
-          message: 'Could not save. Please try again.',
+          title: 'something went wrong',
+          message: 'could not save. please try again.',
         });
         return;
       }
-      const destPath =
-        nextStatus === 'vibes' ? '/onboarding/vibes' : '/onboarding/photo';
-      router.push(destPath);
+      router.replace('/onboarding/photo');
     } finally {
+      submit.release();
       setLoading(false);
     }
   };
@@ -150,26 +148,12 @@ export default function OnboardingReferralScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <KeyboardAvoidingView
-        style={styles.keyboardView}
+        style={styles.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
         <View style={styles.container}>
-          <View style={styles.progressWrap}>
-            <View style={[styles.progressBar, { width: '60%' }]} />
-          </View>
-          <View style={styles.headerRow}>
-            <TouchableOpacity
-              onPress={() => {
-                hapticLight();
-                routerBack.back();
-              }}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              style={styles.backButton}
-            >
-              <ChevronLeft size={28} color={Colors.asphalt} />
-            </TouchableOpacity>
-          </View>
+          <ProgressHead step={3} totalSteps={4} onBack={() => router.replace('/onboarding/la-check')} />
 
           <ScrollView
             decelerationRate="normal"
@@ -178,12 +162,11 @@ export default function OnboardingReferralScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.heading}>how did you hear about us?</Text>
-            <Text style={styles.subtext}>
-              this helps us know where to show up
-            </Text>
+            <View style={styles.gap20} />
+            <Text style={styles.heading}>how’d you find us?</Text>
+            <Text style={styles.subline}>this helps us know where to show up.</Text>
 
-            <View style={styles.gap32} />
+            <View style={styles.gap28} />
 
             <View style={styles.pillWrap}>
               {OPTIONS.map((opt) => {
@@ -196,10 +179,7 @@ export default function OnboardingReferralScreen() {
                     activeOpacity={0.85}
                   >
                     <Text
-                      style={[
-                        styles.pillText,
-                        active && styles.pillTextSelected,
-                      ]}
+                      style={[styles.pillText, active && styles.pillTextSelected]}
                     >
                       {opt.label}
                     </Text>
@@ -214,7 +194,7 @@ export default function OnboardingReferralScreen() {
                   ref={otherInputRef}
                   style={styles.otherInput}
                   placeholder="tell us more"
-                  placeholderTextColor={Colors.warmGray}
+                  placeholderTextColor={Colors.text3}
                   value={otherText}
                   onChangeText={setOtherText}
                   editable={!loading}
@@ -226,21 +206,17 @@ export default function OnboardingReferralScreen() {
           </ScrollView>
 
           <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              (!canContinue || loading) && styles.primaryButtonDisabled,
-            ]}
+            style={[styles.cta, (!canContinue || loading) && styles.ctaDisabled]}
             onPress={handleContinue}
-            onPressIn={() => {
-              if (canContinue) hapticLight();
-            }}
             activeOpacity={0.9}
             disabled={!canContinue || loading}
           >
             {loading ? (
-              <ActivityIndicator color={Colors.white} />
+              <ActivityIndicator color={Colors.surface} />
             ) : (
-              <Text style={styles.primaryButtonText}>Continue</Text>
+              <Text style={[styles.ctaText, !canContinue && styles.ctaTextDisabled]}>
+                continue
+              </Text>
             )}
           </TouchableOpacity>
         </View>
@@ -257,96 +233,97 @@ export default function OnboardingReferralScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.parchment },
-  keyboardView: { flex: 1 },
-  container: { flex: 1, paddingHorizontal: 24, paddingBottom: 16 },
-  progressWrap: {
-    height: 4,
-    backgroundColor: Colors.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressBar: {
-    height: '100%',
-    backgroundColor: Colors.terracotta,
-    borderRadius: 2,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  backButton: { padding: 4 },
+  safe: { flex: 1, backgroundColor: Colors.cream },
+  kav: { flex: 1 },
+  container: { flex: 1, paddingHorizontal: 28, paddingBottom: 16 },
+
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 24 },
+  gap20: { height: 20 },
+  gap28: { height: 28 },
+
   heading: {
-    fontFamily: Fonts.displayItalic,
-    fontSize: FontSizes.displayMD,
-    color: Colors.asphalt,
+    fontFamily: Fonts.headline,
+    fontSize: 32,
+    lineHeight: 36,
+    color: Colors.text1,
+    marginTop: 16,
   },
-  subtext: {
+  subline: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.warmGray,
+    fontSize: 15,
+    lineHeight: 22,
+    color: Colors.text2,
     marginTop: 6,
-    lineHeight: 20,
   },
-  gap32: { height: 32 },
+
   pillWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
   pill: {
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: Colors.terracotta,
-    backgroundColor: Colors.white,
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.borderWarm,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pillSelected: {
-    backgroundColor: Colors.terracotta,
+    backgroundColor: Colors.brandSoft,
+    borderColor: Colors.brand,
   },
   pillText: {
     fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.terracotta,
+    fontSize: 14,
+    color: Colors.text1,
   },
   pillTextSelected: {
-    color: Colors.white,
+    fontFamily: Fonts.sansSemibold,
+    color: Colors.brandDeep,
   },
+
   otherInputWrap: {
-    marginTop: 24,
+    marginTop: 20,
   },
   otherInput: {
-    height: 44,
-    borderBottomWidth: 1.5,
-    borderBottomColor: Colors.terracotta,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    paddingHorizontal: 0,
-    paddingVertical: 8,
+    height: 56,
+    backgroundColor: Colors.inputBg,
+    borderWidth: 1,
+    borderColor: Colors.borderWarm,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 16,
+    color: Colors.text1,
   },
-  primaryButton: {
+
+  cta: {
     height: 52,
-    borderRadius: 14,
-    backgroundColor: Colors.terracotta,
-    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: Colors.brand,
     alignItems: 'center',
-    shadowColor: Colors.terracotta,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    justifyContent: 'center',
     marginTop: 8,
+    shadowColor: Colors.brandDeep,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 28,
+    elevation: 6,
   },
-  primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: {
+  ctaDisabled: {
+    backgroundColor: Colors.borderWarm,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  ctaText: {
     fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.displaySM,
-    color: Colors.white,
+    fontSize: 16,
+    color: Colors.surface,
+    letterSpacing: 0.2,
   },
+  ctaTextDisabled: { color: Colors.text3 },
 });

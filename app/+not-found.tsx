@@ -2,13 +2,14 @@ import { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import Colors from '../constants/Colors';
+import { unauthedRoute } from '../lib/authRouting';
 
 export default function NotFoundScreen() {
   const router = useRouter();
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      router.replace('/login');
+      router.replace(unauthedRoute() as never);
     }, 300);
     return () => clearTimeout(timer);
   }, []);

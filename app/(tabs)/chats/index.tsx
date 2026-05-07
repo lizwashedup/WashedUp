@@ -222,7 +222,7 @@ export default function ChatsScreen() {
           renderItem={renderChat}
           ListEmptyComponent={
             <View style={styles.noActiveState}>
-              <Text style={styles.noActiveText}>No active chats — join a plan to start chatting</Text>
+              <Text style={styles.noActiveText}>No active chats yet. Join a plan to start chatting.</Text>
               <TouchableOpacity
                 style={styles.noActiveButton}
                 onPress={() => router.push('/(tabs)/plans')}

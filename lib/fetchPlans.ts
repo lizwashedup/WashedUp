@@ -44,6 +44,7 @@ export interface Plan {
   host_message: string | null;
   is_featured: boolean;
   featured_type: 'washedup_event' | 'birthday_party' | null;
+  cluster_root_id: string | null;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -72,6 +73,7 @@ function mapRowToPlan(item: any): Plan {
     host_message: item.host_message ?? null,
     is_featured: item.is_featured ?? false,
     featured_type: (item.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
+    cluster_root_id: item.cluster_root_id ?? null,
     creator: (item.creator_user_id ?? item.host_id)
       ? {
           id: item.creator_user_id ?? item.host_id,

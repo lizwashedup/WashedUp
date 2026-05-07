@@ -82,6 +82,42 @@ function getDaysInMonth(month: number, year: number): number {
   return new Date(year, month + 1, 0).getDate();
 }
 
+// "Today" in America/Los_Angeles, returned as 0-indexed month + day-of-month +
+// year. Used so the calendar grid disables past days against the LA boundary
+// regardless of the device's timezone.
+function getTodayInLA(): { y: number; m: number; d: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+  }).formatToParts(new Date());
+  const get = (k: 'year' | 'month' | 'day') =>
+    Number(parts.find((p) => p.type === k)!.value);
+  return { y: get('year'), m: get('month') - 1, d: get('day') };
+}
+
+function isBeforeTodayLA(y: number, m: number, d: number): boolean {
+  const t = getTodayInLA();
+  if (y !== t.y) return y < t.y;
+  if (m !== t.m) return m < t.m;
+  return d < t.d;
+}
+
+// Sunday-first month grid: rows of 7, leading/trailing nulls for cells that
+// don't belong to the displayed month.
+function buildMonthGrid(year: number, month: number): (number | null)[][] {
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const days = getDaysInMonth(month, year);
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= days; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const rows: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+  return rows;
+}
+
+const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
 function buildDatetime(
   month: number, day: number, year: number,
   hour: number, minute: string, period: 'AM' | 'PM',
@@ -187,6 +223,42 @@ export default function PostScreen() {
     })();
   }, []);
 
+  // Next Time! — list of people who said they'd go next time on any of the
+  // creator's past plans. The choices map holds the creator's per-row decision
+  // (invite or skip); we replay it after the new event is created.
+  type InterestRow = {
+    signal_id: string;
+    interested_user_id: string;
+    interested_name: string | null;
+    interested_photo_url: string | null;
+    origin_event_id: string;
+    origin_event_title: string | null;
+    created_at: string;
+  };
+  const [interestSignals, setInterestSignals] = useState<InterestRow[]>([]);
+  const [interestChoices, setInterestChoices] = useState<Map<string, 'invite' | 'skip'>>(new Map());
+  const [interestExpanded, setInterestExpanded] = useState(true);
+  const [interestShowAll, setInterestShowAll] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.rpc('get_creator_interest_signals');
+      if (error || !data) return;
+      setInterestSignals(data as InterestRow[]);
+      // Auto-collapse if there are 6+ signals.
+      setInterestExpanded((data as InterestRow[]).length <= 5);
+    })();
+  }, []);
+
+  const setInterestChoice = useCallback((userId: string, choice: 'invite' | 'skip') => {
+    hapticLight();
+    setInterestChoices(prev => {
+      const next = new Map(prev);
+      next.set(userId, choice);
+      return next;
+    });
+  }, []);
+
   const genderOptions = useMemo(() => {
     const opts: { label: string; value: GenderPreference }[] = [
       { label: 'Mixed', value: 'mixed' },
@@ -226,10 +298,21 @@ export default function PostScreen() {
     prefillExploreEventId?: string;
     prefillStartTime?: string;
     prefillEventDate?: string;
+    prefillEndTime?: string;
+    prefillDropIn?: string;
+    prefillAllowDuplicate?: string;
     prefillDescription?: string;
     prefillImageUrl?: string;
     prefillLocation?: string;
+    prefillLocationLat?: string;
+    prefillLocationLng?: string;
+    prefillNeighborhood?: string;
     prefillCategory?: string;
+    prefillAgeRange?: string;
+    prefillGenderPref?: string;
+    prefillGroupSize?: string;
+    prefillTicketsUrl?: string;
+    duplicatedFromEventId?: string;
   }>();
   const [exploreEventId, setExploreEventId] = useState<string | null>(null);
 
@@ -241,9 +324,12 @@ export default function PostScreen() {
       setExploreEventId(params.prefillExploreEventId);
     }
 
-    // Date — prefer event_date (always a local date string like "2025-03-22")
+    // Date — accepts either a date string ("2025-03-22") or a full ISO
+    // timestamp (the duplicate flow used to pass start_time directly, which
+    // appended "T12:00:00" produced an invalid date and silently no-op'd).
     if (params.prefillEventDate) {
-      const d = new Date(`${params.prefillEventDate}T12:00:00`);
+      const raw = params.prefillEventDate;
+      const d = raw.includes('T') ? new Date(raw) : new Date(`${raw}T12:00:00`);
       if (!isNaN(d.getTime())) {
         setDateMonth(d.getMonth());
         setDateDay(d.getDate());
@@ -281,6 +367,45 @@ export default function PostScreen() {
       }
     }
 
+    // End time prefill — same parser as start_time
+    if (params.prefillEndTime) {
+      let hours: number | null = null;
+      let minutes: number | null = null;
+      if (params.prefillEndTime.includes('T')) {
+        const d = new Date(params.prefillEndTime);
+        if (!isNaN(d.getTime())) {
+          hours = d.getHours();
+          minutes = d.getMinutes();
+        }
+      } else if (params.prefillEndTime.includes(':')) {
+        const parts = params.prefillEndTime.split(':');
+        hours = parseInt(parts[0], 10);
+        minutes = parseInt(parts[1] ?? '0', 10);
+      }
+      if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
+        const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
+        let displayHour = hours % 12;
+        if (displayHour === 0) displayHour = 12;
+        const nearestMinute = MINUTE_OPTIONS.reduce((prev, curr) =>
+          Math.abs(parseInt(curr) - minutes!) < Math.abs(parseInt(prev) - minutes!) ? curr : prev
+        );
+        setEndHour(displayHour);
+        setEndMinute(nearestMinute);
+        setEndPeriod(period);
+        setEndTimeSelected(true);
+      }
+    }
+
+    // Drop-in prefill — duplicates pass "true"/"false" as a string
+    if (params.prefillDropIn !== undefined) {
+      setDropIn(params.prefillDropIn !== 'false');
+    }
+
+    // Allow-duplicate prefill — same string-encoded shape as prefillDropIn.
+    if (params.prefillAllowDuplicate !== undefined) {
+      setAllowDuplicate(params.prefillAllowDuplicate !== 'false');
+    }
+
     if (params.prefillDescription) {
       setDescription(params.prefillDescription);
     }
@@ -298,14 +423,70 @@ export default function PostScreen() {
       );
       if (matched) setCategory(matched);
     }
+
+    // Location coords — paired with prefillLocation text. Both are needed
+    // for the post-submit insert; without them the geocoding fallback fires.
+    if (params.prefillLocationLat && params.prefillLocationLng) {
+      const lat = parseFloat(params.prefillLocationLat);
+      const lng = parseFloat(params.prefillLocationLng);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        setLocationLat(lat);
+        setLocationLng(lng);
+      }
+    }
+    if (params.prefillNeighborhood) {
+      // Pass through raw — UI's existing "Other" branch handles non-canonical values.
+      setNeighborhood(params.prefillNeighborhood);
+    }
+    if (params.prefillTicketsUrl) {
+      setTicketUrl(params.prefillTicketsUrl);
+    }
+    if (params.prefillAgeRange) {
+      const parsed = params.prefillAgeRange
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s): s is AgeRange => (AGE_RANGES as readonly string[]).includes(s));
+      if (parsed.length > 0) setAgeRanges(parsed);
+    }
+    if (params.prefillGenderPref) {
+      const valid: GenderPreference[] = ['mixed', 'women_only', 'men_only', 'nonbinary_only'];
+      if ((valid as string[]).includes(params.prefillGenderPref)) {
+        setGenderPref(params.prefillGenderPref as GenderPreference);
+      }
+    }
+    if (params.prefillGroupSize) {
+      const n = parseInt(params.prefillGroupSize, 10);
+      if (!isNaN(n)) {
+        // groupSize state stores max_invites directly; UI displays groupSize+1
+        // as "people total". Clamp to the [MIN_GROUP-1, MAX_GROUP-1] window
+        // the stepper allows.
+        const clamped = Math.min(Math.max(n, MIN_GROUP - 1), MAX_GROUP - 1);
+        setGroupSize(clamped);
+      }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.prefillTitle, params.prefillExploreEventId, params.prefillStartTime,
-      params.prefillEventDate, params.prefillDescription, params.prefillImageUrl,
-      params.prefillLocation, params.prefillCategory]);
+      params.prefillEventDate, params.prefillEndTime, params.prefillDropIn,
+      params.prefillDescription, params.prefillImageUrl,
+      params.prefillLocation, params.prefillLocationLat, params.prefillLocationLng,
+      params.prefillNeighborhood, params.prefillCategory,
+      params.prefillAgeRange, params.prefillGenderPref,
+      params.prefillGroupSize, params.prefillTicketsUrl]);
+
 
   const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
   // Used to prevent onChangeText from clearing coordinates after a Place selection
   const placeJustSelectedRef = useRef(false);
+
+  // Sync the GooglePlacesAutocomplete input text once the ref is attached.
+  // The main prefill effect runs before the form mounts (form is gated on
+  // screenReady, set after an async profile fetch), so placesRef.current is
+  // null at that moment and the setAddressText call silently no-ops. This
+  // re-fires once the form is on screen.
+  useEffect(() => {
+    if (!params.prefillLocation || !screenReady) return;
+    placesRef.current?.setAddressText(params.prefillLocation);
+  }, [params.prefillLocation, screenReady]);
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -383,9 +564,12 @@ export default function PostScreen() {
   const [dateYear, setDateYear] = useState(currentYear);
   const [dateSelected, setDateSelected] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [tempMonth, setTempMonth] = useState(now.getMonth());
-  const [tempDay, setTempDay] = useState(now.getDate());
-  const [tempYear, setTempYear] = useState(currentYear);
+  // Calendar view state — independent of the committed selection so the user
+  // can browse months without changing what's actually picked yet. Initialised
+  // from LA today so the first open lands on the right month regardless of
+  // device timezone.
+  const [viewMonth, setViewMonth] = useState(() => getTodayInLA().m);
+  const [viewYear, setViewYear] = useState(() => getTodayInLA().y);
 
   // Time
   const [timeHour, setTimeHour] = useState(8);
@@ -396,6 +580,26 @@ export default function PostScreen() {
   const [tempHour, setTempHour] = useState(8);
   const [tempMinute, setTempMinute] = useState<string>('00');
   const [tempPeriod, setTempPeriod] = useState<'AM' | 'PM'>('PM');
+
+  // End time (optional — disappears from feed at this point if drop_in is off, or
+  // caps the "happening now" window if drop_in is on)
+  const [endHour, setEndHour] = useState(11);
+  const [endMinute, setEndMinute] = useState<string>('00');
+  const [endPeriod, setEndPeriod] = useState<'AM' | 'PM'>('PM');
+  const [endTimeSelected, setEndTimeSelected] = useState(false);
+  const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+  const [tempEndHour, setTempEndHour] = useState(11);
+  const [tempEndMinute, setTempEndMinute] = useState<string>('00');
+  const [tempEndPeriod, setTempEndPeriod] = useState<'AM' | 'PM'>('PM');
+
+  // Allow-duplicate flag — when false, the "post a duplicate plan" sheet on
+  // the plan detail page (shown when plan is full) is suppressed and only
+  // the waitlist option appears. Defaults true.
+  const [allowDuplicate, setAllowDuplicate] = useState(true);
+
+  // Drop-in flag — when false, plan vanishes from the feed for non-members
+  // the moment start_time passes (used for one-shot moments like a movie)
+  const [dropIn, setDropIn] = useState(true);
 
   // Submit
   const [loading, setLoading] = useState(false);
@@ -411,8 +615,13 @@ export default function PostScreen() {
   const [drafts, setDrafts] = useState<PlanDraft[]>([]);
 
   useEffect(() => {
+    // Skip the drafts list while a duplicate-plan prefill is active so the
+    // user can't accidentally clobber their prefilled state by tapping
+    // "load draft", and so saving from a duplicate doesn't silently overwrite
+    // a prior draft via stale state.
+    if (params.duplicatedFromEventId) return;
     loadDrafts().then(setDrafts);
-  }, []);
+  }, [params.duplicatedFromEventId]);
 
   const handleSaveDraft = useCallback(async () => {
     if (!title.trim()) {
@@ -460,29 +669,46 @@ export default function PostScreen() {
     await saveDrafts(updated);
   }, [drafts]);
 
-  const daysInTempMonth = getDaysInMonth(tempMonth, tempYear);
-  const safeTempDay = Math.min(tempDay, daysInTempMonth);
-
   // locationText is used for hint display only — location is validated at submit time via ref
   const locationText = locationRaw.trim() || location.trim() || '';
   const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
 
-  // ─── Date picker ─────────────────────────────────────────────────────────────
+  // ─── Date picker (calendar grid) ─────────────────────────────────────────────
 
   const openDatePicker = () => {
-    setTempMonth(dateMonth);
-    setTempDay(dateDay);
-    setTempYear(dateYear);
+    // Browse from the currently-selected month if there is one; otherwise
+    // start at this month in LA.
+    if (dateSelected) {
+      setViewMonth(dateMonth);
+      setViewYear(dateYear);
+    } else {
+      const t = getTodayInLA();
+      setViewMonth(t.m);
+      setViewYear(t.y);
+    }
     setShowDatePicker(true);
   };
 
-  const confirmDate = () => {
-    setDateMonth(tempMonth);
-    setDateDay(safeTempDay);
-    setDateYear(tempYear);
+  const selectDate = (day: number) => {
+    setDateMonth(viewMonth);
+    setDateDay(day);
+    setDateYear(viewYear);
     setDateSelected(true);
     setShowDatePicker(false);
     hapticLight();
+  };
+
+  const stepMonth = (delta: -1 | 1) => {
+    let m = viewMonth + delta;
+    let y = viewYear;
+    if (m < 0) { m = 11; y -= 1; }
+    if (m > 11) { m = 0; y += 1; }
+    // Clamp: never let the user view a month entirely before today in LA.
+    const t = getTodayInLA();
+    if (y < t.y || (y === t.y && m < t.m)) return;
+    setViewMonth(m);
+    setViewYear(y);
+    hapticSelection();
   };
 
   // ─── Time picker ─────────────────────────────────────────────────────────────
@@ -500,6 +726,30 @@ export default function PostScreen() {
     setTimePeriod(tempPeriod);
     setTimeSelected(true);
     setShowTimePicker(false);
+    hapticLight();
+  };
+
+  // ─── End-time picker ────────────────────────────────────────────────────────
+
+  const openEndTimePicker = () => {
+    setTempEndHour(endHour);
+    setTempEndMinute(endMinute);
+    setTempEndPeriod(endPeriod);
+    setShowEndTimePicker(true);
+  };
+
+  const confirmEndTime = () => {
+    setEndHour(tempEndHour);
+    setEndMinute(tempEndMinute);
+    setEndPeriod(tempEndPeriod);
+    setEndTimeSelected(true);
+    setShowEndTimePicker(false);
+    hapticLight();
+  };
+
+  const clearEndTime = () => {
+    setEndTimeSelected(false);
+    setShowEndTimePicker(false);
     hapticLight();
   };
 
@@ -539,6 +789,20 @@ export default function PostScreen() {
         return;
       }
 
+      let endTime: Date | null = null;
+      if (endTimeSelected) {
+        endTime = buildDatetime(dateMonth, dateDay, dateYear, endHour, endMinute, endPeriod);
+        // Allow same-day overnight (e.g. 8pm → 1am next day): if end <= start, push to next day.
+        if (endTime <= startTime) {
+          endTime = new Date(endTime.getTime() + 24 * 60 * 60 * 1000);
+        }
+        if (endTime.getTime() - startTime.getTime() < 30 * 60 * 1000) {
+          setAlertInfo({ title: 'Invalid end time', message: 'End time must be at least 30 minutes after the start time.' });
+          setLoading(false);
+          return;
+        }
+      }
+
       const ageBounds = ageRangesToMinMax(ageRanges);
 
       const { data: insertedEvent, error } = await supabase
@@ -546,6 +810,9 @@ export default function PostScreen() {
         .insert({
           title: title.trim(),
           start_time: startTime.toISOString(),
+          end_time: endTime ? endTime.toISOString() : null,
+          drop_in: dropIn,
+          allow_duplicate: allowDuplicate,
           location_text: effectiveLocation || null,
           location_lat: locationLat,
           location_lng: locationLng,
@@ -566,6 +833,7 @@ export default function PostScreen() {
           neighborhood: (neighborhood === NEIGHBORHOOD_OTHER
             ? neighborhoodOther.trim()
             : neighborhood.trim()) || null,
+          duplicated_from_event_id: params.duplicatedFromEventId || null,
         })
         .select('id')
         .single();
@@ -597,6 +865,42 @@ export default function PostScreen() {
             });
             return;
           }
+        }
+
+        // If this plan was created as a duplicate of another, notify the
+        // original plan's waitlist users. Fire-and-forget — a notification
+        // failure shouldn't block plan creation.
+        if (params.duplicatedFromEventId) {
+          supabase.rpc('notify_waitlist_duplicate_plan', {
+            p_original_event_id: params.duplicatedFromEventId,
+            p_new_event_id: insertedEvent.id,
+            p_creator_user_id: user.id,
+          }).then(({ error: notifyErr }) => {
+            if (notifyErr) console.warn('[post] notify_waitlist_duplicate_plan failed:', notifyErr.message);
+          });
+        }
+
+        // Next Time! — replay the creator's invite/skip choices against the
+        // new event. Only runs after both event creation AND auto-join have
+        // succeeded; if we got here those are guaranteed. Fire-and-forget
+        // per choice so a single RPC failure doesn't roll back the post.
+        if (interestChoices.size > 0) {
+          const newEventId = insertedEvent.id;
+          const choices = Array.from(interestChoices.entries());
+          Promise.allSettled(
+            choices.map(([userId, action]) =>
+              supabase.rpc('act_on_interest', {
+                p_interested_user_id: userId,
+                p_new_event_id: newEventId,
+                p_action: action,
+              })
+            )
+          ).then(results => {
+            const failed = results.filter(r => r.status === 'rejected' || (r as any).value?.error);
+            if (failed.length > 0) console.warn('[post] act_on_interest failures:', failed);
+          });
+          // Clear so a back-nav + re-post doesn't double-fire.
+          setInterestChoices(new Map());
         }
       }
 
@@ -630,7 +934,27 @@ export default function PostScreen() {
       setGenderPref('mixed'); setAgeRanges([]);
       setDescription(''); setCreatorMessage(''); setGroupSize(6);
       setDateSelected(false); setTimeSelected(false);
+      setEndTimeSelected(false); setDropIn(true);
       placesRef.current?.clear();
+      // Clear URL prefill params so they don't leak into the next post.
+      // Without this, tapping "post a duplicate plan" once leaves
+      // duplicatedFromEventId in the route state, which would (a) skip
+      // the drafts list on the next post and (b) tag a fresh unrelated
+      // plan as a duplicate of the prior one — fanning a forged
+      // notification to the prior plan's waitlist.
+      router.setParams({
+        prefillTitle: undefined,
+        prefillExploreEventId: undefined,
+        prefillStartTime: undefined,
+        prefillEventDate: undefined,
+        prefillEndTime: undefined,
+        prefillDropIn: undefined,
+        prefillDescription: undefined,
+        prefillImageUrl: undefined,
+        prefillLocation: undefined,
+        prefillCategory: undefined,
+        duplicatedFromEventId: undefined,
+      } as any);
     } catch (e: unknown) {
       const rawMsg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
@@ -720,7 +1044,7 @@ export default function PostScreen() {
             >
               <ImagePlus size={32} color={Colors.terracotta} strokeWidth={2} />
               <Text style={styles.photoUploadText}>Add a photo</Text>
-              <Text style={styles.photoUploadHint}>Optional — your plan works without one</Text>
+              <Text style={styles.photoUploadHint}>Optional. Your plan works without one.</Text>
             </TouchableOpacity>
           ) : (
             <View style={styles.photoPreview}>
@@ -762,23 +1086,24 @@ export default function PostScreen() {
             />
           </View>
 
-          {/* ── Date & Time row ── */}
+          {/* ── Date (full row) ── */}
+          <View style={styles.field}>
+            <Text style={styles.label}>Date <Text style={styles.required}>*</Text></Text>
+            <TouchableOpacity
+              style={[styles.input, styles.pickerButton, !dateSelected && styles.pickerPlaceholder]}
+              onPress={openDatePicker}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.pickerText, !dateSelected && styles.placeholderText]}>
+                {dateSelected ? displayDate(dateMonth, dateDay, dateYear) : 'Select date'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── Start / End time row ── */}
           <View style={styles.row}>
             <View style={[styles.field, styles.flex]}>
-              <Text style={styles.label}>Date <Text style={styles.required}>*</Text></Text>
-              <TouchableOpacity
-                style={[styles.input, styles.pickerButton, !dateSelected && styles.pickerPlaceholder]}
-                onPress={openDatePicker}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.pickerText, !dateSelected && styles.placeholderText]}>
-                  {dateSelected ? displayDate(dateMonth, dateDay, dateYear) : 'Select date'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.rowSpacer} />
-            <View style={[styles.field, styles.flex]}>
-              <Text style={styles.label}>Time <Text style={styles.required}>*</Text></Text>
+              <Text style={styles.label}>Start time <Text style={styles.required}>*</Text></Text>
               <TouchableOpacity
                 style={[styles.input, styles.pickerButton, !timeSelected && styles.pickerPlaceholder]}
                 onPress={openTimePicker}
@@ -789,14 +1114,59 @@ export default function PostScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+            <View style={styles.rowSpacer} />
+            <View style={[styles.field, styles.flex]}>
+              <Text style={styles.label}>End time</Text>
+              <TouchableOpacity
+                style={[styles.input, styles.pickerButton, !endTimeSelected && styles.pickerPlaceholder]}
+                onPress={openEndTimePicker}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.pickerText, !endTimeSelected && styles.placeholderText]}>
+                  {endTimeSelected ? displayTime(endHour, endMinute, endPeriod) : 'Optional'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
+
+          {/* ── Drop-in toggle ── */}
+          <TouchableOpacity
+            style={styles.dropInRow}
+            onPress={() => { hapticLight(); setDropIn((v) => !v); }}
+            activeOpacity={0.7}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: dropIn }}
+            accessibilityLabel="drop in anytime"
+          >
+            <View style={[styles.checkbox, dropIn && styles.checkboxChecked]}>
+              {dropIn && <Ionicons name="checkmark" size={16} color={Colors.white} />}
+            </View>
+            <Text style={styles.dropInLabel}>drop in anytime</Text>
+          </TouchableOpacity>
+          <Text style={styles.dropInHint}>people can still find and join after it starts</Text>
+
+          {/* ── Allow-duplicate toggle ── */}
+          <TouchableOpacity
+            style={styles.dropInRow}
+            onPress={() => { hapticLight(); setAllowDuplicate((v) => !v); }}
+            activeOpacity={0.7}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: allowDuplicate }}
+            accessibilityLabel="let others make their own version"
+          >
+            <View style={[styles.checkbox, allowDuplicate && styles.checkboxChecked]}>
+              {allowDuplicate && <Ionicons name="checkmark" size={16} color={Colors.white} />}
+            </View>
+            <Text style={styles.dropInLabel}>let others make their own version</Text>
+          </TouchableOpacity>
+          <Text style={styles.dropInHint}>people can duplicate this plan and put their own spin on it</Text>
 
           {/* ── Location (Google Places) ── */}
           <View style={[styles.field, styles.placesField]}>
             <Text style={styles.label}>Location <Text style={styles.required}>*</Text></Text>
             <GooglePlacesAutocomplete
               ref={placesRef}
-              placeholder="Venue or neighborhood"
+              placeholder="Address of the plan"
               fetchDetails
               disableScroll={true}
               onPress={(data, details) => {
@@ -866,15 +1236,18 @@ export default function PostScreen() {
           </View>
 
           {/* ── Neighborhood ── */}
-          <View style={{ marginTop: 12 }}>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: '#78695C', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Neighborhood</Text>
+          <View style={styles.field}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Neighborhood</Text>
+              <Text style={styles.labelOptional}>(optional)</Text>
+            </View>
             <TouchableOpacity
               style={styles.neighborhoodPickerBtn}
               onPress={() => { hapticLight(); Keyboard.dismiss(); setShowNeighborhoodPicker(true); }}
               activeOpacity={0.8}
             >
               <Text style={neighborhood ? styles.neighborhoodPickerValue : styles.neighborhoodPickerPlaceholder}>
-                {neighborhood || 'Select your neighborhood'}
+                {neighborhood || 'Select neighborhood'}
               </Text>
               <Ionicons name="chevron-down" size={18} color={Colors.textLight} />
             </TouchableOpacity>
@@ -1049,6 +1422,104 @@ export default function PostScreen() {
             <Text style={styles.stepperHint}>including you</Text>
           </View>
 
+          {/* Next Time! — "People who want in" — surfaces past interest signals
+              for this creator, lets them invite or skip per row. Choices are
+              replayed via act_on_interest after the event is successfully posted. */}
+          {interestSignals.length > 0 && (
+            <View style={styles.interestSection}>
+              <TouchableOpacity
+                style={styles.interestHeaderRow}
+                onPress={() => { hapticLight(); setInterestExpanded(e => !e); }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.interestHeaderTextWrap}>
+                  <Text style={styles.interestSectionTitle}>People who want in</Text>
+                  <Text style={styles.interestSectionSub}>
+                    {interestSignals.length === 1
+                      ? '1 person said they’d go next time'
+                      : `${interestSignals.length} people said they’d go next time`}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={interestExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color={Colors.textMedium}
+                />
+              </TouchableOpacity>
+              {interestExpanded && (
+                <View style={styles.interestList}>
+                  {(interestShowAll ? interestSignals : interestSignals.slice(0, 10)).map(row => {
+                    const choice = interestChoices.get(row.interested_user_id);
+                    return (
+                      <View key={row.signal_id} style={styles.interestRow}>
+                        {row.interested_photo_url ? (
+                          <Image source={{ uri: row.interested_photo_url }} style={styles.interestAvatar} />
+                        ) : (
+                          <View style={[styles.interestAvatar, styles.interestAvatarPlaceholder]}>
+                            <Text style={styles.interestAvatarInitial}>
+                              {row.interested_name?.[0]?.toUpperCase() ?? '?'}
+                            </Text>
+                          </View>
+                        )}
+                        <View style={styles.interestRowText}>
+                          <Text style={styles.interestRowName} numberOfLines={1}>
+                            {row.interested_name ?? 'Someone'}
+                          </Text>
+                          <Text style={styles.interestRowOrigin} numberOfLines={1}>
+                            {row.origin_event_title ?? 'a past plan'}
+                          </Text>
+                        </View>
+                        <View style={styles.interestRowActions}>
+                          <TouchableOpacity
+                            style={[
+                              styles.interestInviteBtn,
+                              choice === 'invite' && styles.interestInviteBtnActive,
+                            ]}
+                            onPress={() => setInterestChoice(row.interested_user_id, 'invite')}
+                            activeOpacity={0.8}
+                          >
+                            <Text
+                              style={[
+                                styles.interestInviteBtnText,
+                                choice === 'invite' && styles.interestInviteBtnTextActive,
+                              ]}
+                            >
+                              {choice === 'invite' ? 'Inviting' : 'Invite to this plan'}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.interestSkipBtn}
+                            onPress={() => setInterestChoice(row.interested_user_id, 'skip')}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.interestSkipBtnText,
+                                choice === 'skip' && styles.interestSkipBtnTextActive,
+                              ]}
+                            >
+                              {choice === 'skip' ? 'Maybe next one ✓' : 'Maybe next one'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {interestSignals.length > 10 && !interestShowAll && (
+                    <TouchableOpacity
+                      style={styles.interestShowAllBtn}
+                      onPress={() => { hapticLight(); setInterestShowAll(true); }}
+                    >
+                      <Text style={styles.interestShowAllText}>
+                        {`Show all ${interestSignals.length}`}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
+
           {/* Bottom spacer so content isn't hidden behind sticky button */}
           <View style={{ height: 100 }} />
         </ScrollView>
@@ -1120,7 +1591,6 @@ export default function PostScreen() {
         planTitle={postedPlanTitle}
         planId={postedPlanId || ''}
         slug={null}
-        spotsLeft={postedSpotsLeft}
         genderLabel={postedGenderLabel}
         variant="posted"
       />
@@ -1178,53 +1648,91 @@ export default function PostScreen() {
             onPress={(e) => e.stopPropagation()}
           >
             <Text style={styles.modalTitle}>Select date</Text>
-            <View style={styles.pickerRow}>
-              {/* Month */}
-              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
-                {MONTHS.map((m, i) => (
-                  <Pressable
-                    key={m}
-                    style={[styles.pickerItem, tempMonth === i && styles.pickerItemSelected]}
-                    onPress={() => setTempMonth(i)}
-                  >
-                    <Text style={[styles.pickerItemText, tempMonth === i && styles.pickerItemTextSel]}>
-                      {m.slice(0, 3)}
+
+            {/* Month nav */}
+            <View style={styles.calendarHeader}>
+              {(() => {
+                const t = getTodayInLA();
+                const onCurrentMonth = viewYear === t.y && viewMonth <= t.m;
+                return (
+                  <>
+                    <TouchableOpacity
+                      onPress={() => stepMonth(-1)}
+                      disabled={onCurrentMonth}
+                      style={styles.calendarNavBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityLabel="previous month"
+                    >
+                      <Ionicons
+                        name="chevron-back"
+                        size={22}
+                        color={onCurrentMonth ? Colors.textLight : Colors.asphalt}
+                      />
+                    </TouchableOpacity>
+                    <Text style={styles.calendarMonthLabel}>
+                      {MONTHS[viewMonth]} {viewYear}
                     </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-              {/* Day */}
-              <ScrollView decelerationRate="normal" style={styles.pickerColSm} showsVerticalScrollIndicator={false}>
-                {Array.from({ length: daysInTempMonth }, (_, i) => i + 1).map((d) => (
-                  <Pressable
-                    key={d}
-                    style={[styles.pickerItem, safeTempDay === d && styles.pickerItemSelected]}
-                    onPress={() => setTempDay(d)}
-                  >
-                    <Text style={[styles.pickerItemText, safeTempDay === d && styles.pickerItemTextSel]}>
-                      {d}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-              {/* Year */}
-              <ScrollView decelerationRate="normal" style={styles.pickerColSm} showsVerticalScrollIndicator={false}>
-                {years.map((y) => (
-                  <Pressable
-                    key={y}
-                    style={[styles.pickerItem, tempYear === y && styles.pickerItemSelected]}
-                    onPress={() => setTempYear(y)}
-                  >
-                    <Text style={[styles.pickerItemText, tempYear === y && styles.pickerItemTextSel]}>
-                      {y}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
+                    <TouchableOpacity
+                      onPress={() => stepMonth(1)}
+                      style={styles.calendarNavBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityLabel="next month"
+                    >
+                      <Ionicons name="chevron-forward" size={22} color={Colors.asphalt} />
+                    </TouchableOpacity>
+                  </>
+                );
+              })()}
             </View>
-            <TouchableOpacity style={styles.modalBtn} onPress={confirmDate}>
-              <Text style={styles.modalBtnText}>Done</Text>
-            </TouchableOpacity>
+
+            {/* Weekday header */}
+            <View style={styles.weekdayRow}>
+              {WEEKDAY_LABELS.map((label, i) => (
+                <Text key={i} style={styles.weekdayLabel}>{label}</Text>
+              ))}
+            </View>
+
+            {/* Grid */}
+            {buildMonthGrid(viewYear, viewMonth).map((row, ri) => (
+              <View key={ri} style={styles.calendarRow}>
+                {row.map((day, ci) => {
+                  if (day === null) {
+                    return <View key={ci} style={styles.calendarCell} />;
+                  }
+                  const isPast = isBeforeTodayLA(viewYear, viewMonth, day);
+                  const t = getTodayInLA();
+                  const isToday = viewYear === t.y && viewMonth === t.m && day === t.d;
+                  const isSelected =
+                    dateSelected && dateYear === viewYear && dateMonth === viewMonth && dateDay === day;
+                  return (
+                    <TouchableOpacity
+                      key={ci}
+                      style={[
+                        styles.calendarCell,
+                        isToday && !isSelected && styles.calendarCellToday,
+                        isSelected && styles.calendarCellSelected,
+                      ]}
+                      onPress={() => selectDate(day)}
+                      disabled={isPast}
+                      activeOpacity={0.75}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${MONTHS[viewMonth]} ${day}, ${viewYear}`}
+                      accessibilityState={{ disabled: isPast, selected: isSelected }}
+                    >
+                      <Text
+                        style={[
+                          styles.calendarCellText,
+                          isPast && styles.calendarCellTextDisabled,
+                          isSelected && styles.calendarCellTextSelected,
+                        ]}
+                      >
+                        {day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
           </Pressable>
         </Pressable>
       </Modal>
@@ -1284,6 +1792,70 @@ export default function PostScreen() {
             <TouchableOpacity style={styles.modalBtn} onPress={confirmTime}>
               <Text style={styles.modalBtnText}>Done</Text>
             </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── End Time Picker Modal ── */}
+      <Modal visible={showEndTimePicker} transparent animationType="slide" onRequestClose={() => setShowEndTimePicker(false)} statusBarTranslucent>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowEndTimePicker(false)}>
+          <Pressable
+            style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.modalTitle}>End time</Text>
+            <View style={styles.pickerRow}>
+              {/* Hour */}
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+                {HOURS.map((h) => (
+                  <Pressable
+                    key={h}
+                    style={[styles.pickerItem, tempEndHour === h && styles.pickerItemSelected]}
+                    onPress={() => setTempEndHour(h)}
+                  >
+                    <Text style={[styles.pickerItemText, tempEndHour === h && styles.pickerItemTextSel]}>
+                      {h}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {/* Minute */}
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+                {MINUTE_OPTIONS.map((m) => (
+                  <Pressable
+                    key={m}
+                    style={[styles.pickerItem, tempEndMinute === m && styles.pickerItemSelected]}
+                    onPress={() => setTempEndMinute(m)}
+                  >
+                    <Text style={[styles.pickerItemText, tempEndMinute === m && styles.pickerItemTextSel]}>
+                      :{m}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {/* AM/PM */}
+              <ScrollView decelerationRate="normal" style={styles.pickerCol} showsVerticalScrollIndicator={false}>
+                {PERIODS.map((p) => (
+                  <Pressable
+                    key={p}
+                    style={[styles.pickerItem, tempEndPeriod === p && styles.pickerItemSelected]}
+                    onPress={() => setTempEndPeriod(p)}
+                  >
+                    <Text style={[styles.pickerItemText, tempEndPeriod === p && styles.pickerItemTextSel]}>
+                      {p}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+            <TouchableOpacity style={styles.modalBtn} onPress={confirmEndTime}>
+              <Text style={styles.modalBtnText}>Done</Text>
+            </TouchableOpacity>
+            {endTimeSelected && (
+              <TouchableOpacity style={styles.modalClearBtn} onPress={clearEndTime}>
+                <Text style={styles.modalClearBtnText}>Clear end time</Text>
+              </TouchableOpacity>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -1523,6 +2095,111 @@ const styles = StyleSheet.create({
   stepperValueSub: { fontSize: FontSizes.caption, color: Colors.textLight, marginTop: -2 },
   stepperHint: { fontSize: FontSizes.caption, color: Colors.textLight, marginTop: 6 },
 
+  // Next Time! "People who want in" section. Gold per CLAUDE.md documented
+  // exception: warm/optional invite, not a primary CTA.
+  interestSection: {
+    marginTop: 28,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  interestHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  interestHeaderTextWrap: { flex: 1 },
+  interestSectionTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  interestSectionSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    marginTop: 2,
+  },
+  interestList: { marginTop: 12, gap: 12 },
+  interestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  interestAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  interestAvatarPlaceholder: {
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  interestAvatarInitial: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
+  interestRowText: { flex: 1, minWidth: 0 },
+  interestRowName: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  interestRowOrigin: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.textMedium,
+    marginTop: 2,
+  },
+  interestRowActions: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  interestInviteBtn: {
+    backgroundColor: Colors.goldAccent,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  interestInviteBtnActive: {
+    backgroundColor: Colors.quoteText,
+  },
+  interestInviteBtnText: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: FontSizes.caption,
+    color: Colors.quoteText,
+  },
+  interestInviteBtnTextActive: {
+    color: Colors.white,
+  },
+  interestSkipBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  interestSkipBtnText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.warmGray,
+  },
+  interestSkipBtnTextActive: {
+    color: Colors.asphalt,
+    fontFamily: Fonts.sansSemibold,
+  },
+  interestShowAllBtn: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  interestShowAllText: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
+
   stickyFooter: {
     paddingHorizontal: 20,
     paddingBottom: Platform.OS === 'ios' ? 8 : 16,
@@ -1576,6 +2253,106 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBtnText: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansBold, color: Colors.white },
+  modalClearBtn: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  modalClearBtnText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.textMedium },
+
+  calendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  calendarMonthLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.asphalt,
+  },
+  calendarNavBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  weekdayRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  weekdayLabel: {
+    flex: 1,
+    textAlign: 'center',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textLight,
+    letterSpacing: 0.5,
+  },
+  calendarRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  calendarCell: {
+    flex: 1,
+    aspectRatio: 1,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 2,
+    borderRadius: 12,
+  },
+  calendarCellToday: {
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+  },
+  calendarCellSelected: {
+    backgroundColor: Colors.terracotta,
+  },
+  calendarCellText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  calendarCellTextDisabled: {
+    color: Colors.textLight,
+    opacity: 0.4,
+  },
+  calendarCellTextSelected: {
+    color: Colors.white,
+    fontFamily: Fonts.sansMedium,
+  },
+
+  dropInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingBottom: 4,
+    marginTop: -8,
+  },
+  dropInHint: {
+    fontSize: FontSizes.bodySM,
+    fontFamily: Fonts.sans,
+    color: Colors.textLight,
+    marginLeft: 32,
+    marginBottom: 20,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.cardBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
+  },
+  dropInLabel: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans, color: Colors.asphalt },
 
   required: { color: Colors.errorRed, fontSize: FontSizes.bodyMD, fontFamily: Fonts.sans },
 

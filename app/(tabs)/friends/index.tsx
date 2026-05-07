@@ -25,6 +25,7 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
+import { AlbumsGrid } from '../../../components/albums/AlbumsGrid';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import ProfileButton from '../../../components/ProfileButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
@@ -104,6 +105,7 @@ export default function YourPeopleScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [userMenuTarget, setUserMenuTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'people' | 'albums'>('people');
 
   // Debounce search
   React.useEffect(() => {
@@ -119,6 +121,45 @@ export default function YourPeopleScreen() {
       return user?.id ?? null;
     },
   });
+
+  // Albums tab badge: count of ready albums the user hasn't opened since the
+  // first upload landed. Refetched when the screen regains focus so the dot
+  // clears after viewing.
+  const { data: unviewedAlbumCount = 0, refetch: refetchAlbumBadge } = useQuery({
+    queryKey: ['albumsTabBadge', userId],
+    queryFn: async () => {
+      if (!userId) return 0;
+      const { data: members } = await supabase
+        .from('event_members').select('event_id')
+        .eq('user_id', userId).eq('status', 'joined');
+      const eventIds = (members ?? []).map((m) => m.event_id);
+      if (eventIds.length === 0) return 0;
+      const { data: albums } = await supabase
+        .from('plan_albums')
+        .select('id, first_upload_at, status')
+        .in('event_id', eventIds)
+        .eq('status', 'ready');
+      const albumIds = (albums ?? []).map((a) => a.id);
+      if (albumIds.length === 0) return 0;
+      const { data: meta } = await supabase
+        .from('album_user_metadata')
+        .select('plan_album_id, last_viewed_at')
+        .in('plan_album_id', albumIds)
+        .eq('user_id', userId);
+      const lastByAlbum = new Map((meta ?? []).map((m) => [m.plan_album_id, m.last_viewed_at]));
+      let unread = 0;
+      for (const a of albums ?? []) {
+        const last = lastByAlbum.get(a.id) as string | null | undefined;
+        if (!last) { unread += 1; continue; }
+        if (a.first_upload_at && new Date(last) < new Date(a.first_upload_at)) unread += 1;
+      }
+      return unread;
+    },
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+
+  useFocusEffect(useCallback(() => { void refetchAlbumBadge(); }, [refetchAlbumBadge]));
 
   // Debounced handle availability check (500ms)
   React.useEffect(() => {
@@ -630,6 +671,33 @@ export default function YourPeopleScreen() {
         <ProfileButton />
       </View>
 
+      {/* Tabs */}
+      <View style={styles.albumsTabRow}>
+        <Pressable
+          onPress={() => setActiveTab('people')}
+          style={[styles.albumsTab, activeTab === 'people' && styles.albumsTabActive]}
+        >
+          <Text style={[styles.albumsTabText, activeTab === 'people' && styles.albumsTabTextActive]}>
+            Your People
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setActiveTab('albums')}
+          style={[styles.albumsTab, activeTab === 'albums' && styles.albumsTabActive]}
+        >
+          <View style={styles.albumsTabLabelWrap}>
+            <Text style={[styles.albumsTabText, activeTab === 'albums' && styles.albumsTabTextActive]}>
+              Albums
+            </Text>
+            {unviewedAlbumCount > 0 && <View style={styles.albumsTabDot} />}
+          </View>
+        </Pressable>
+      </View>
+
+      {activeTab === 'albums' ? (
+        <AlbumsGrid userId={userId ?? ''} />
+      ) : (
+      <>
       {/* Search bar */}
       <View style={styles.searchWrap}>
         <Search size={18} color={Colors.textLight} style={styles.searchIcon} />
@@ -1169,6 +1237,8 @@ export default function YourPeopleScreen() {
         ]}
         onClose={() => setUserMenuTarget(null)}
       />
+      </>
+      )}
     </SafeAreaView>
   );
 }
@@ -1178,6 +1248,34 @@ export default function YourPeopleScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   centered: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const },
+  albumsTabRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  albumsTab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'transparent',
+  },
+  albumsTabActive: { borderBottomColor: Colors.terracotta },
+  albumsTabText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.tertiary,
+  },
+  albumsTabTextActive: {
+    color: Colors.asphalt,
+    fontFamily: Fonts.sansBold,
+  },
+  albumsTabLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  albumsTabDot: {
+    width: 7, height: 7, borderRadius: 3.5, backgroundColor: Colors.terracotta,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

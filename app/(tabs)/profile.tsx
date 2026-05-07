@@ -22,8 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { useQueryClient } from '@tanstack/react-query';
-import * as Notifications from 'expo-notifications';
-import { registerForPushNotifications } from '../../hooks/usePushNotifications';
+import { registerForPushNotifications, getPushPermissionStatus } from '../../hooks/usePushNotifications';
 import { supabase } from '../../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
@@ -33,6 +32,8 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { checkContent } from '../../lib/contentFilter';
+import { unauthedRoute } from '../../lib/authRouting';
+import { lastUnauthRedirectAt } from '../../lib/navState';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 import {
@@ -365,12 +366,18 @@ export default function ProfileScreen() {
         }
       }
 
+      // Navigate first so the now-empty profile screen can't re-render with
+      // stale/missing data while signOut + the auth listener race to redirect.
+      // Stamp the shared dedup timestamp synchronously BEFORE the replace so
+      // the listener's SIGNED_OUT handler skips its own router.replace and
+      // we don't see a double-navigation bounce.
+      lastUnauthRedirectAt.ts = Date.now();
+      router.replace(unauthedRoute() as never);
       try {
         await supabase.auth.signOut();
       } catch {
         // Session invalid after deletion; ignore
       }
-      router.replace('/login');
     } catch (err: any) {
       setDeleting(false);
       console.error('[delete_own_account] failed:', err);
@@ -384,7 +391,7 @@ export default function ProfileScreen() {
   // ── Settings rows (grouped: Notifications, Legal, Support, Account) ───────
 
   const handleEnablePushFromSettings = async () => {
-    const { status } = await Notifications.getPermissionsAsync();
+    const status = await getPushPermissionStatus();
     if (status === 'granted') {
       // Already granted — re-run register to refresh the token on the
       // current profile row in case it drifted.
@@ -437,6 +444,9 @@ export default function ProfileScreen() {
   ];
   const supportRows = [
     { icon: 'mail-outline', label: 'Contact Us', onPress: () => Linking.openURL('mailto:hello@washedup.app') },
+  ];
+  const interestRows = [
+    { icon: 'heart-outline', label: "Plans you're interested in", onPress: () => router.push('/settings/interests' as any) },
   ];
 
   // ── Loading ─────────────────────────────────────────────────────────────────
@@ -881,6 +891,14 @@ export default function ProfileScreen() {
         </View>
         <View style={styles.settingsGroup}>
           {notificationRows.map((row, i) => renderSettingsRow(row, i === notificationRows.length - 1))}
+        </View>
+
+        {/* Plans */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Plans</Text>
+        </View>
+        <View style={styles.settingsGroup}>
+          {interestRows.map((row, i) => renderSettingsRow(row, i === interestRows.length - 1))}
         </View>
 
         {/* Legal */}

@@ -1,14 +1,16 @@
-import { Tabs } from 'expo-router';
+import { Tabs, router } from 'expo-router';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { Image } from 'expo-image';
 import { supabase } from '../../lib/supabase';
 import { UNREAD_CHATS_KEY } from '../../constants/QueryKeys';
+import { authedDest } from '../../lib/authRouting';
+import { getAuthProfile } from '../../hooks/useProfile';
 
 function PostTabIcon() {
   return (
@@ -61,6 +63,7 @@ async function fetchUnreadChatCount(): Promise<number> {
 }
 
 export default function TabLayout() {
+  const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
   const isAndroid = Platform.OS === 'android';
@@ -77,6 +80,32 @@ export default function TabLayout() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Onboarding guard: bounces incomplete users out of tabs. The auth-state
+  // listener in app/_layout.tsx handles this on session changes, but stale
+  // navigation history can land an incomplete user here without an auth
+  // event firing (e.g., router.back() escaping the onboarding stack).
+  // Reads through the React Query cache (seeded by checkAuth) so the cold
+  // start doesn't fire two identical profile selects.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+      const profile = await getAuthProfile(queryClient, user.id);
+      if (cancelled) return;
+      const dest = authedDest({
+        onboarding_status: profile?.onboarding_status ?? null,
+        referral_source: profile?.referral_source ?? null,
+        phone_number: profile?.phone_number ?? null,
+      });
+      if (dest !== '/(tabs)/plans') {
+        console.log('[tabs_guard] bouncing to', dest);
+        router.replace(dest as never);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [queryClient]);
 
   const { data: unreadChats = 0 } = useQuery({
     queryKey: UNREAD_CHATS_KEY,

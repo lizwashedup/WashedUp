@@ -10,24 +10,44 @@ import {
 import {
   DMSans_400Regular,
   DMSans_500Medium,
+  DMSans_600SemiBold,
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans';
-import { Stack, useRouter } from 'expo-router';
+import {
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_700Bold,
+} from '@expo-google-fonts/plus-jakarta-sans';
+import { Stack, useRouter, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import * as Notifications from 'expo-notifications';
+import { OneSignal } from 'react-native-onesignal';
 import { useEffect, useRef, useState } from 'react';
 import { Linking, LogBox } from 'react-native';
 import 'react-native-reanimated';
 
-// Suppress push notification entitlement error on simulators
-LogBox.ignoreLogs(['getRegistrationInfoAsync']);
+// Silence dev-only redboxes that aren't real bugs:
+// 1. expo-notifications trying to read APNs registration from the keychain
+//    on simulators (no push entitlement). Harmless on real devices.
+// 2. device_tokens upsert failing because the table only exists in the
+//    OneSignal migration file, not yet applied to prod. Will be removed
+//    once the migration ships in §8 Step 8 of the OneSignal plan.
+LogBox.ignoreLogs([
+  'getRegistrationInfoAsync',
+  'Failed to upsert device_tokens',
+]);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
+import { authedDest, unauthedRoute } from '../lib/authRouting';
+import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
+import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt } from '../lib/navState';
+import { resetMigrationGateSnooze } from '../lib/migrationGateSnooze';
 import Colors from '../constants/Colors';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/uploadAlbumMedia';
+import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptModal';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
@@ -68,7 +88,10 @@ function RootLayout() {
     CormorantGaramond_400Regular_Italic,
     DMSans_400Regular,
     DMSans_500Medium,
+    DMSans_600SemiBold,
     DMSans_700Bold,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_700Bold,
     ...FontAwesome.font,
     ...Ionicons.font,
   });
@@ -90,44 +113,38 @@ function RootLayout() {
     return null;
   }
 
+  // PostHogProvider throws if apiKey is empty. When the env var is missing
+  // (fresh checkout, misconfigured env), disable the SDK client instead of
+  // crashing the app.
+  const posthogApiKey = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <RootLayoutNav onReady={() => {}} />
-        {showVideoSplash && (
-          <VideoSplash onFinish={() => setShowVideoSplash(false)} />
-        )}
-      </SafeAreaProvider>
-    </QueryClientProvider>
+    <PostHogProvider
+      apiKey={posthogApiKey || 'placeholder'}
+      options={{
+        host: 'https://us.i.posthog.com',
+        disabled: !posthogApiKey,
+      }}
+    >
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <RootLayoutNav onReady={() => {}} />
+          {showVideoSplash && (
+            <VideoSplash onFinish={() => setShowVideoSplash(false)} />
+          )}
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    </PostHogProvider>
   );
 }
 
 export default Sentry.wrap(RootLayout);
 
-function onboardingDest(
-  status: string | null | undefined,
-  referralSource: string | null | undefined,
-): string {
-  // Backstop: users mid-onboarding on an older client may have reached photo
-  // or vibes without going through the referral step (added April 8). Bounce
-  // them back to referral before letting them continue. 'complete' is
-  // intentionally excluded — don't interrupt active users for a data backfill.
-  if (!referralSource && (status === 'photo' || status === 'vibes')) {
-    return '/onboarding/referral';
-  }
-  switch (status) {
-    case 'complete': return '/(tabs)/plans';
-    case 'vibes': return '/onboarding/vibes';
-    case 'photo': return '/onboarding/photo';
-    case 'referral': return '/onboarding/referral';
-    case 'la_check': return '/onboarding/la-check';
-    case 'waitlisted': return '/onboarding/waitlisted';
-    default: return '/onboarding/basics';
-  }
-}
-
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
   const [authResolved, setAuthResolved] = useState(false);
   const [authedUserId, setAuthedUserId] = useState<string | null>(null);
   const [layoutAlert, setLayoutAlert] = useState<{ title: string; message: string } | null>(null);
@@ -136,6 +153,26 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const lastNavRef = useRef({ dest: '', ts: 0 });
   usePushNotifications(authedUserId);
   useSessionLogger(authedUserId);
+
+  // PostHog: identify on login, reset on logout. Hook returns null when the
+  // provider is in disabled mode (no key configured), so the optional chaining
+  // keeps this safe in misconfigured environments.
+  const posthog = usePostHog();
+  useEffect(() => {
+    if (!posthog) return;
+    if (authedUserId) {
+      posthog.identify(authedUserId);
+    } else {
+      posthog.reset();
+    }
+  }, [authedUserId, posthog]);
+
+  // Resume any in-flight album upload batches once on mount, and re-nudge on
+  // app foreground. Worker is idempotent — safe to call repeatedly.
+  useEffect(() => {
+    void resumeAllPendingAlbumBatches();
+    return registerAlbumUploadResume();
+  }, []);
 
   // ── Post-plan survey ────────────────────────────────────────────────────
   const [surveyPlan, setSurveyPlan] = useState<SurveyPlan | null>(null);
@@ -163,55 +200,28 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
     (async () => {
       try {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-        const { data: plans } = await supabase
-          .from('event_members')
-          .select('event_id, events!inner(id, title, image_url, status, start_time, is_featured)')
-          .eq('user_id', authedUserId)
-          .eq('status', 'joined')
-          .eq('events.status', 'completed')
-          .gte('events.start_time', sevenDaysAgo.toISOString())
-          .order('events(start_time)', { ascending: false })
-          .limit(5);
-
-        if (!plans || plans.length === 0) return;
-
-        const eventIds = plans.map((p: any) => p.event_id);
-        const { data: existing } = await supabase
-          .from('plan_feedback')
-          .select('event_id')
-          .eq('user_id', authedUserId)
-          .in('event_id', eventIds);
-
-        const feedbackSet = new Set((existing ?? []).map((r: any) => r.event_id));
-        const needsSurvey = plans.find((p: any) => !feedbackSet.has(p.event_id));
-        if (!needsSurvey) return;
-
-        const event = (needsSurvey as any).events;
-        setSurveyPlan({
-          id: event.id,
-          title: event.title,
-          image_url: event.image_url ?? null,
-          is_featured: event.is_featured ?? false,
-        });
-
-        const { data: memberData } = await supabase
-          .from('event_members')
-          .select('user_id, profiles_public!inner(id, first_name_display, profile_photo_url)')
-          .eq('event_id', event.id)
-          .eq('status', 'joined');
-
-        if (memberData) {
-          setSurveyMembers(
-            memberData.map((m: any) => ({
-              id: m.profiles_public.id,
-              first_name_display: m.profiles_public.first_name_display,
-              profile_photo_url: m.profiles_public.profile_photo_url,
-            }))
-          );
+        // Single round-trip RPC. Eligibility is enforced server-side with
+        // AT TIME ZONE 'America/Los_Angeles' so a plan that happened earlier
+        // today PT does NOT trigger the modal — only plans on a strictly
+        // earlier PT calendar day do. Returns null when nothing is eligible.
+        const { data, error } = await supabase.rpc('get_pending_post_plan_survey');
+        if (error) {
+          console.warn('[WashedUp] Survey RPC failed:', error.message);
+          return;
         }
+        if (!data) return;
+
+        const payload = data as {
+          plan: { id: string; title: string; image_url: string | null };
+          members: Array<{ id: string; first_name_display: string | null; profile_photo_url: string | null }>;
+        };
+
+        setSurveyPlan({
+          id: payload.plan.id,
+          title: payload.plan.title,
+          image_url: payload.plan.image_url ?? null,
+        });
+        setSurveyMembers(payload.members ?? []);
       } catch (e) { console.warn('[WashedUp] Survey check failed:', e); }
       finally { setSurveyCheckDone(true); }
     })();
@@ -273,19 +283,57 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   }, [authResolved, onReady]);
 
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as Record<string, any>;
+    // OneSignal click handler. Buffers cold-start taps until a listener
+    // attaches, so this catches both warm-foreground taps and taps that
+    // launched the app from terminated state.
+    const onClick = (event: any) => {
+      const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
       const type = data?.type as string | undefined;
 
-      if ((type === 'plan_invite' || type === 'waitlist_spot') && data?.eventId) {
-        router.push(`/plan/${data.eventId}` as any);
+      // Album notifications: prompt/reminder/no-uploads-nudge open the upload
+      // flow; ready/someone-uploaded/more-photos-added/hearts-batched open the
+      // album detail view.
+      if (type === 'album_upload_prompt' || type === 'album_upload_reminder' || type === 'album_creator_no_uploads_nudge') {
+        if (data?.eventId) router.push(`/album/upload/${data.eventId}` as any);
+      } else if (type === 'album_ready' || type === 'album_someone_uploaded' || type === 'album_more_photos_added' || type === 'album_hearts_batched') {
+        if (data?.eventId) router.push(`/album/${data.eventId}` as any);
+      } else if (
+        (type === 'plan_invite' ||
+          type === 'waitlist_spot' ||
+          type === 'duplicate_plan' ||
+          type === 'interest_signal' ||
+          type === 'interest_invite') &&
+        data?.eventId
+      ) {
+        // Tag the URL when the push is the creator-side "someone signaled
+        // interest" notification, so the plan detail can surface the
+        // "Would go next time" section explicitly. Receiver may currently
+        // no-op on the param; it's a marker for future scroll/analytics.
+        const focusParam = type === 'interest_signal' ? '?focus=interest' : '';
+        router.push(`/plan/${data.eventId}${focusParam}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
       } else if (data?.eventId) {
         router.push(`/(tabs)/chats/${data.eventId}` as any);
+      } else {
+        // Final fallback for notification types that carry neither eventId
+        // nor chatId (e.g. broadcast, future admin pings). Drop the user on
+        // the chats list rather than no-op'ing the tap.
+        router.push('/(tabs)/chats' as any);
       }
-    });
-    return () => sub.remove();
+    };
+
+    try {
+      OneSignal.Notifications.addEventListener('click', onClick);
+    } catch (err) {
+      if (__DEV__) console.warn('[PushNotifications] click listener attach failed:', err);
+    }
+
+    return () => {
+      try {
+        OneSignal.Notifications.removeEventListener('click', onClick);
+      } catch {}
+    };
   }, []);
 
   // Badge clearing moved to the specific surfaces where the user is
@@ -313,7 +361,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // Link was tapped but tokens are missing (expired link or fragment stripped)
         isRecoveryRef.current = false;
         setAuthResolved(true);
-        console.log('[auth_redirect] reason=recovery_link_invalid');
         router.replace('/login');
         setTimeout(() => {
           setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired or is invalid. Please request a new one from the login screen.' });
@@ -329,7 +376,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       } else {
         isRecoveryRef.current = false;
         setAuthResolved(true);
-        console.log('[auth_redirect] reason=recovery_setSession_failed');
         router.replace('/login');
         setTimeout(() => {
           setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired. Please request a new one from the login screen.' });
@@ -354,7 +400,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           supabase.auth.getSession(),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
         ]);
-        const sessionTimedOut = sessionResult === null;
 
         if (cancelled || isRecoveryRef.current) return;
 
@@ -363,52 +408,64 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           : null;
 
         if (!session?.user) {
-          console.log(`[auth_redirect] reason=${sessionTimedOut ? 'getSession_timeout' : 'no_session'}`);
-          lastNavRef.current = { dest: '/login', ts: Date.now() };
-          router.replace('/login');
+          const unauth = unauthedRoute();
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
           return;
         }
 
-        // Apple ban check on session restore — if the restored session
-        // belongs to a banned Apple sub, sign out silently and kick to login.
-        // This stops a banned user from persisting via an already-issued
-        // refresh token even after we've revoked them on the server side.
-        if (await isBannedAppleUser(session.user)) {
-          await supabase.auth.signOut();
-          if (cancelled || isRecoveryRef.current) return;
-          setAuthedUserId(null);
-          console.log('[auth_redirect] reason=banned_apple');
-          lastNavRef.current = { dest: '/login', ts: Date.now() };
-          router.replace('/login');
-          setTimeout(() => setAuthResolved(true), 80);
-          return;
-        }
-
-        // Retry profile fetch once on failure — avoids signing out on a network blip
-        let profileData: { onboarding_status: string | null; referral_source: string | null } | null = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const { data, error: e } = await supabase
-            .from('profiles')
-            .select('onboarding_status, referral_source')
-            .eq('id', session.user.id)
-            .single();
-          if (!e && data) { profileData = data as any; break; }
-          if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
-        }
+        // Apple ban check + profile fetch run in parallel — both are
+        // independent of each other and the ban check is a single RPC,
+        // so we save one network RTT vs sequential awaits. If the user
+        // is banned we still sign them out before honoring the profile.
+        const fetchProfileWithRetry = async () => {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const { data, error: e } = await supabase
+              .from('profiles')
+              .select('onboarding_status, referral_source, phone_number')
+              .eq('id', session.user.id)
+              .single();
+            if (!e && data) return data as any;
+            if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+          }
+          return null;
+        };
+        const [isBanned, profileData] = await Promise.all([
+          isBannedAppleUser(session.user),
+          fetchProfileWithRetry(),
+        ]);
 
         if (cancelled || isRecoveryRef.current) return;
 
-        if (!profileData) {
-          console.log('[auth_redirect] reason=profile_fetch_failed');
-          lastNavRef.current = { dest: '/login', ts: Date.now() };
-          router.replace('/login');
+        if (isBanned) {
+          await supabase.auth.signOut();
+          if (cancelled || isRecoveryRef.current) return;
+          setAuthedUserId(null);
+          const unauth = unauthedRoute();
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
           return;
         }
 
+        if (!profileData) {
+          const unauth = unauthedRoute();
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          router.replace(unauth as any);
+          setTimeout(() => setAuthResolved(true), 80);
+          return;
+        }
+
+        // Seed the React Query cache so the (tabs) onboarding guard can
+        // read the same profile without firing a duplicate Supabase select.
+        seedAuthProfile(queryClient, session.user.id, profileData);
         setAuthedUserId(session.user.id);
-        const dest = onboardingDest(profileData.onboarding_status, profileData.referral_source);
+        const dest = authedDest({
+          onboarding_status: profileData.onboarding_status,
+          referral_source: profileData.referral_source,
+          phone_number: profileData.phone_number,
+        });
         lastNavRef.current = { dest, ts: Date.now() };
         // Navigate first, then lift the overlay — prevents a 1-frame flash
         // where the splash is gone but the destination hasn't rendered yet.
@@ -416,8 +473,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setTimeout(() => setAuthResolved(true), 80);
       } catch {
         if (!cancelled) {
-          lastNavRef.current = { dest: '/login', ts: Date.now() };
-          router.replace('/login');
+          const unauth = unauthedRoute();
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
         }
       }
@@ -437,9 +495,23 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
       if (!session?.user) {
+        resetMigrationGateSnooze();
         setAuthedUserId(null);
-        lastNavRef.current = { dest: '/login', ts: Date.now() };
-        router.replace('/login');
+        const unauth = unauthedRoute();
+        // Skip the redirect if either (a) the pathname already matches
+        // the unauthed route, or (b) a caller (e.g. delete-account flow)
+        // synchronously stamped lastUnauthRedirectAt.ts before this
+        // listener could fire. (a) catches the steady state; (b) catches
+        // the race where pathnameRef hasn't been updated yet by its own
+        // useEffect — without (b) the listener fires a second
+        // router.replace and the user sees a brief bounce.
+        const externallyRedirected = Date.now() - lastUnauthRedirectAt.ts < 1500;
+        if (externallyRedirected || pathnameRef.current === unauth) {
+          lastNavRef.current = { dest: unauth, ts: Date.now() };
+          return;
+        }
+        lastNavRef.current = { dest: unauth, ts: Date.now() };
+        router.replace(unauth as any);
         return;
       }
 
@@ -450,19 +522,33 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (await isBannedAppleUser(session.user)) {
         await supabase.auth.signOut();
         setAuthedUserId(null);
-        lastNavRef.current = { dest: '/login', ts: Date.now() };
-        router.replace('/login');
+        const unauth = unauthedRoute();
+        lastNavRef.current = { dest: unauth, ts: Date.now() };
+        router.replace(unauth as any);
+        return;
+      }
+
+      // Verify-code is self-routing: it shows a 600ms success animation
+      // before navigating itself via the same authedDest helper. Skip the
+      // root-level redirect so we don't preempt that animation by yanking
+      // the user away the moment SIGNED_IN fires. Pathname-agnostic via
+      // a shared ref — survives deep-link entry to /verify-code.
+      if (verifyCodeSelfRoutingRef.current || pathnameRef.current === '/verify-code') {
+        setAuthedUserId(session.user.id);
+        setAuthResolved(true);
         return;
       }
 
       try {
-        const { data } = await supabase
-          .from('profiles')
-          .select('onboarding_status, referral_source')
-          .eq('id', session.user.id)
-          .single();
-
-        const dest = onboardingDest(data?.onboarding_status, data?.referral_source);
+        // Reuse the shared auth-profile cache (seeded by cold-start checkAuth)
+        // so SIGNED_IN doesn't fire a duplicate select within the 60s stale
+        // window. Falls back to a network fetch if the cache is empty/stale.
+        const data = await getAuthProfile(queryClient, session.user.id);
+        const dest = authedDest({
+          onboarding_status: data?.onboarding_status,
+          referral_source: data?.referral_source,
+          phone_number: data?.phone_number,
+        });
         const now = Date.now();
         if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {
           setAuthedUserId(session.user.id);
@@ -517,6 +603,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           visible={showReviewAsk && !surveyPlan}
           onClose={() => setShowReviewAsk(false)}
         />
+      )}
+      {authedUserId && !surveyPlan && !showReviewAsk && (
+        <AlbumUploadPromptModal userId={authedUserId} />
       )}
       {authedUserId && surveyCheckDone && !surveyPlan && !showReviewAsk && (
         <MarkEarnedModal userId={authedUserId} />

@@ -1,19 +1,15 @@
 /**
- * Builds the share content for a plan.
- * Returns separate message and url — iOS surfaces the url as a rich link
- * preview in the share sheet. Android's Share API silently drops the url
- * field, so we bake it into the message there.
+ * Builds the share content for a plan. The URL goes in both `message` and
+ * `url` so receiving apps that read only `message` (WhatsApp, iMessage) still
+ * get a clickable link, while apps that read `url` (Mail, AirDrop) still get
+ * a rich preview. URL is on its own line so messengers render it as a link.
  */
-import { Platform } from 'react-native';
-
 interface SharePlanInput {
   id: string;
   title: string;
   start_time: string;
   location_text?: string | null;
   slug?: string | null;
-  member_count: number;
-  max_invites: number | null;
 }
 
 export function buildPlanShareContent(plan: SharePlanInput): { message: string; url: string } {
@@ -40,18 +36,9 @@ export function buildPlanShareContent(plan: SharePlanInput): { message: string; 
     if (venue) parts.push(venue);
   }
 
-  const firstLine = parts.join(' \u00B7 ');
-
-  const totalCapacity = (plan.max_invites ?? 7) + 1;
-  const going = Math.max(1, plan.member_count);
-  const spotsLeft = Math.max(0, totalCapacity - going);
-  const availabilityText = spotsLeft === 0 ? 'Waitlist open' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`;
-
+  const firstLine = parts.join(' · ');
   const url = getPlanShareUrl(plan);
-
-  const baseMessage = `${firstLine}\n${availabilityText}`;
-  const message =
-    Platform.OS === 'android' ? `${baseMessage}\n${url}` : baseMessage;
+  const message = `${firstLine}\n${url}`;
 
   return { message, url };
 }

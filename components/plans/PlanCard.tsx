@@ -378,11 +378,23 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
       {/* E. Footer — spots + CTA */}
       <View style={styles.footer}>
         {!isBirthdayParty && (
-          <Text style={styles.spotsLabel}>
-            <Text style={styles.spotsNumber}>{going}</Text>
-            {isFeatured ? ' going' : ` of ${totalCapacity} spots`}
-            {!isFeatured && isFull && ' \u00B7 Full'}
-          </Text>
+          isFeatured ? (
+            <Text style={styles.spotsLabel}>
+              <Text style={styles.spotsNumber}>{going}</Text>
+              {' going'}
+            </Text>
+          ) : (
+            <Text style={styles.spotsLabel}>
+              {spotsLeft === 0 ? (
+                'Full'
+              ) : (
+                <>
+                  <Text style={styles.spotsNumber}>{spotsLeft}</Text>
+                  {` ${spotsLeft === 1 ? 'spot left' : 'spots left'}`}
+                </>
+              )}
+            </Text>
+          )
         )}
         <View style={styles.ctaSpacer} />
         {isPast ? (

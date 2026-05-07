@@ -3,10 +3,12 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess,
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    ImageBackground,
     Keyboard,
     KeyboardAvoidingView,
     Modal,
@@ -27,8 +29,11 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
 import { friendlyAppleError, friendlyGoogleError } from '../../lib/socialAuthErrors';
 import { supabase } from '../../lib/supabase';
+import { PHONE_AUTH_ENABLED } from '../../constants/FeatureFlags';
+import { postAuthTransitionRef } from '../../lib/navState';
+import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 
-const SOCIAL_PROOF = '1000+ people in LA already joined';
+const SOCIAL_PROOF = '1500+ people in LA already joined';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -57,6 +62,9 @@ export default function LoginScreen() {
     setSocialLoading('apple');
     try {
       await signInWithApple();
+      // Plans tab consumes this on mount and shows the WelcomeLoading
+      // transition over the skeleton — covers the login→tabs blink.
+      postAuthTransitionRef.active = true;
     } catch (e: any) {
       if (e?.code !== 'ERR_REQUEST_CANCELED') {
         setError(friendlyAppleError(e));
@@ -71,6 +79,7 @@ export default function LoginScreen() {
     setSocialLoading('google');
     try {
       await signInWithGoogle();
+      postAuthTransitionRef.active = true;
     } catch (e: any) {
       if (e?.code !== 'SIGN_IN_CANCELLED') {
         setError(friendlyGoogleError(e));
@@ -83,7 +92,7 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     setError(null);
     if (!email.trim() || !password) {
-      setError('Please enter your email and password.');
+      setError('enter your email and password.');
       return;
     }
     setLoading(true);
@@ -93,9 +102,10 @@ export default function LoginScreen() {
         password,
       });
       if (signInError) {
-        setError('Wrong email or password');
+        setError('wrong email or password');
         return;
       }
+      postAuthTransitionRef.active = true;
       // Root layout handles redirect via onAuthStateChange
     } finally {
       setLoading(false);
@@ -113,7 +123,7 @@ export default function LoginScreen() {
     setResetError(null);
     const emailTrimmed = resetEmail.trim();
     if (!emailTrimmed) {
-      setResetError('Please enter your email address.');
+      setResetError('enter your email address.');
       return;
     }
     setResetLoading(true);
@@ -124,14 +134,14 @@ export default function LoginScreen() {
       if (err) {
         const msg = err.message?.toLowerCase() ?? '';
         if (msg.includes('rate') || msg.includes('60 seconds')) {
-          setResetError('Please wait a minute before requesting another reset link.');
+          setResetError('wait a minute before requesting another reset link.');
         } else {
-          setResetError('Something went wrong. Please check your email and try again.');
+          setResetError('something went wrong. check your email and try again.');
         }
         return;
       }
       setResetModalVisible(false);
-      setAlertInfo({ title: 'Check your email', message: 'Check your email for a password reset link.' });
+      setAlertInfo({ title: 'check your email', message: 'we sent you a password reset link.' });
     } finally {
       setResetLoading(false);
     }
@@ -150,22 +160,52 @@ export default function LoginScreen() {
   const triggerHaptic = () => hapticLight();
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <StatusBar style="dark" />
-      <KeyboardAvoidingView
+    <ImageBackground
+      source={{ uri: WELCOME_HERO_URI }}
+      style={styles.bg}
+      blurRadius={14}
+      resizeMode="cover"
+    >
+      {/* Parchment overlay so the photo bleeds through at ~15% — keeps a
+          cohesive transition from the phone-entry hero without competing
+          with the form fields. */}
+      <View style={styles.bgOverlay} pointerEvents="none" />
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.container}>
+            {/* Back affordance — only when /login is reached via the
+                phone-entry escape hatch. Matches the chevron pattern used
+                on verify-code and onboarding so it feels native to the
+                rest of the app, in-flow rather than absolute so the
+                Keyboard.dismiss wrapper doesn't swallow the tap. */}
+            {PHONE_AUTH_ENABLED && (
+              <View style={styles.topNavRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLight();
+                    if (router.canGoBack()) router.back();
+                    else router.replace('/phone-entry');
+                  }}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  style={styles.backHit}
+                >
+                  <Ionicons name="chevron-back" size={24} color={Colors.asphalt} />
+                </TouchableOpacity>
+              </View>
+            )}
             {/* Top section ~40% */}
             <Animated.View
               entering={FadeIn.duration(400)}
               style={styles.topSection}
             >
               <Image source={require('../../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
-              <Text style={styles.tagline}>Find People to Go With.</Text>
+              <Text style={styles.tagline}>find people to go with.</Text>
               <Text style={styles.socialProof}>{SOCIAL_PROOF}</Text>
             </Animated.View>
 
@@ -174,7 +214,7 @@ export default function LoginScreen() {
               entering={FadeIn.duration(400).delay(100)}
               style={styles.formSection}
             >
-              <Text style={styles.formTitle}>Welcome back</Text>
+              <Text style={styles.formTitle}>welcome back</Text>
               <View style={styles.gap20} />
 
               <TextInput
@@ -182,7 +222,7 @@ export default function LoginScreen() {
                   styles.input,
                   emailFocused && styles.inputFocused,
                 ]}
-                placeholder="Email address"
+                placeholder="email address"
                 onFocus={() => setEmailFocused(true)}
                 onBlur={() => setEmailFocused(false)}
                 placeholderTextColor={Colors.textMedium}
@@ -205,7 +245,7 @@ export default function LoginScreen() {
                     styles.input,
                     passwordFocused && styles.inputFocused,
                   ]}
-                  placeholder="Password"
+                  placeholder="password"
                   onFocus={() => setPasswordFocused(true)}
                   onBlur={() => setPasswordFocused(false)}
                   placeholderTextColor={Colors.textMedium}
@@ -235,7 +275,7 @@ export default function LoginScreen() {
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={styles.forgotWrap}
               >
-                <Text style={styles.forgotText}>Forgot password?</Text>
+                <Text style={styles.forgotText}>forgot password?</Text>
               </TouchableOpacity>
               <View style={styles.gap20} />
 
@@ -249,7 +289,7 @@ export default function LoginScreen() {
                 {loading ? (
                   <ActivityIndicator color={Colors.white} />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Log In</Text>
+                  <Text style={styles.primaryButtonText}>log in</Text>
                 )}
               </TouchableOpacity>
 
@@ -299,20 +339,28 @@ export default function LoginScreen() {
                     {socialLoading === 'google' ? (
                       <ActivityIndicator color={Colors.asphalt} />
                     ) : (
-                      <Text style={styles.googleButtonText}>Continue with Google</Text>
+                      <Text style={styles.googleButtonText}>continue with google</Text>
                     )}
                   </TouchableOpacity>
                 </>
               )}
 
-              <View style={styles.gap16} />
-              <View style={styles.signupRow}>
-                <Text style={styles.signupPrompt}>Don&apos;t have an account? </Text>
-                <TouchableOpacity onPress={handleSignUpPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text style={styles.signupLink}>Sign up</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.gap8} />
+              {/* When phone auth is the primary entry, brand new users
+                  shouldn't reach email signup from here. Existing users
+                  arrived via the phone-entry escape hatch and only need
+                  to sign in. */}
+              {!PHONE_AUTH_ENABLED && (
+                <>
+                  <View style={styles.gap16} />
+                  <View style={styles.signupRow}>
+                    <Text style={styles.signupPrompt}>don&apos;t have an account? </Text>
+                    <TouchableOpacity onPress={handleSignUpPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={styles.signupLink}>sign up</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.gap8} />
+                </>
+              )}
             </Animated.View>
           </View>
         </TouchableWithoutFeedback>
@@ -328,11 +376,11 @@ export default function LoginScreen() {
       >
         <Pressable style={modalStyles.overlay} onPress={closeResetModal}>
           <Pressable style={modalStyles.content} onPress={(e) => e.stopPropagation()}>
-            <Text style={modalStyles.title}>Reset Password</Text>
-            <Text style={modalStyles.subtitle}>Enter your email to receive a reset link.</Text>
+            <Text style={modalStyles.title}>reset password</Text>
+            <Text style={modalStyles.subtitle}>enter your email to receive a reset link.</Text>
             <TextInput
               style={[styles.input, modalStyles.input]}
-              placeholder="Email address"
+              placeholder="email address"
               placeholderTextColor={Colors.textMedium}
               value={resetEmail}
               onChangeText={(t) => { setResetEmail(t); setResetError(null); }}
@@ -353,30 +401,42 @@ export default function LoginScreen() {
               {resetLoading ? (
                 <ActivityIndicator color={Colors.white} />
               ) : (
-                <Text style={styles.primaryButtonText}>Send Reset Link</Text>
+                <Text style={styles.primaryButtonText}>send reset link</Text>
               )}
             </TouchableOpacity>
             <TouchableOpacity onPress={closeResetModal} style={modalStyles.cancelButton}>
-              <Text style={modalStyles.cancelText}>Cancel</Text>
+              <Text style={modalStyles.cancelText}>cancel</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
-      <BrandedAlert
-        visible={!!alertInfo}
-        title={alertInfo?.title ?? ''}
-        message={alertInfo?.message}
-        buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
-      />
-    </SafeAreaView>
+        <BrandedAlert
+          visible={!!alertInfo}
+          title={alertInfo?.title ?? ''}
+          message={alertInfo?.message}
+          buttons={alertInfo?.buttons}
+          onClose={() => setAlertInfo(null)}
+        />
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
+  bg: {
     flex: 1,
     backgroundColor: Colors.parchment,
+  },
+  bgOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    // Cream at 75% so the blurred sunset bleeds through at ~25%. Tuned by
+    // eye on-device — 0.85 was nearly invisible, 0.75 keeps form text
+    // readable while letting the warm gradient breathe.
+    backgroundColor: 'rgba(248, 245, 240, 0.75)',
+  },
+  safe: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   keyboardView: {
     flex: 1,
@@ -385,6 +445,19 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     justifyContent: 'space-between',
+  },
+  topNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 4,
+    paddingHorizontal: 12,
+    minHeight: 36,
+  },
+  backHit: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   topSection: {
     justifyContent: 'center',

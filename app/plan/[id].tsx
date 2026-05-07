@@ -46,6 +46,7 @@ import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import { friendlyError } from '../../lib/friendlyError';
+import { isPlanPast } from '../../lib/planTime';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 // Lazy-load react-native-map-link so older production binaries (built before
 // this dep was added) don't crash when this screen's module is imported.
@@ -167,6 +168,8 @@ interface PlanDetail {
   target_age_min: number | null;
   target_age_max: number | null;
   end_time: string | null;
+  drop_in: boolean;
+  allow_duplicate: boolean;
   neighborhood: string | null;
   slug: string | null;
   status: string;
@@ -230,7 +233,7 @@ function buildCalendarUrl(title: string, startTime: string, endTime?: string | n
     text: title,
     dates: `${fmt(start)}/${fmt(end)}`,
     location: location || '',
-    details: 'washedup plan — washedup.app',
+    details: 'washedup plan, washedup.app',
   });
   return `https://calendar.google.com/calendar/event?${params.toString()}`;
 }
@@ -270,7 +273,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
   const { data, error } = await supabase
     .from('events')
     .select(`
-      id, title, description, host_message, start_time, end_time,
+      id, title, description, host_message, start_time, end_time, drop_in, allow_duplicate,
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
@@ -309,6 +312,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     host_message: row.host_message ?? null,
     start_time: row.start_time,
     end_time: row.end_time ?? null,
+    drop_in: row.drop_in ?? true,
+    allow_duplicate: row.allow_duplicate ?? true,
     location_text: row.location_text ?? null,
     location_lat: row.location_lat ?? null,
     location_lng: row.location_lng ?? null,
@@ -416,6 +421,7 @@ export default function PlanDetailScreen() {
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
+  const [showDuplicateSheet, setShowDuplicateSheet] = useState(false);
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
   const [manageModalVisible, setManageModalVisible] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -510,6 +516,37 @@ export default function PlanDetailScreen() {
     queryKey: ['events', 'members', id],
     queryFn: () => fetchMembers(id!),
     enabled: !!id,
+    staleTime: 60_000,
+  });
+
+  // Next Time! — has the current user already signaled interest in this plan?
+  const { data: myInterest = null } = useQuery({
+    queryKey: ['events', 'my-interest', id, currentUserId],
+    queryFn: async () => {
+      if (!currentUserId || !id) return null;
+      const { data } = await supabase
+        .from('event_interest_signals')
+        .select('id, status')
+        .eq('event_id', id)
+        .eq('interested_user_id', currentUserId)
+        .eq('status', 'active')
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!id && !!currentUserId,
+    staleTime: 60_000,
+  });
+
+  // Next Time! — creator-only: who's signaled they'd go next time on this plan?
+  const { data: creatorInterestList = [] } = useQuery({
+    queryKey: ['events', 'creator-interest', id, currentUserId],
+    queryFn: async () => {
+      if (!id) return [];
+      const { data, error } = await supabase.rpc('get_event_interest_signals', { p_event_id: id });
+      if (error) return [];
+      return data ?? [];
+    },
+    enabled: !!id && !!currentUserId && plan?.creator_user_id === currentUserId,
     staleTime: 60_000,
   });
 
@@ -617,6 +654,12 @@ export default function PlanDetailScreen() {
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
   const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
+  // Next Time! uses the end_time-aware "past" check so users can still
+  // signal interest on a plan that's already started but not yet ended.
+  const interestPlanEnded = plan ? isPlanPast(plan.start_time, plan.end_time) : true;
+  const canShowInterestButton =
+    !!plan && !!currentUserId && !isCreator && !isMember && !interestPlanEnded && myInterest === null;
+  const interestAlreadySent = !!myInterest;
   const isHappeningNow =
     !!plan &&
     new Date(plan.start_time) <= new Date() &&
@@ -769,6 +812,33 @@ export default function PlanDetailScreen() {
       setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
     },
   });
+
+  // ─── Next Time! interest signal ──────────────────────────────────────────
+
+  const interestMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentUserId || !id) throw new Error('Not authenticated');
+      const { error } = await supabase.rpc('send_interest_signal', { p_event_id: id });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      hapticSuccess();
+      queryClient.invalidateQueries({ queryKey: ['events', 'my-interest', id, currentUserId] });
+    },
+    onError: (error: any) => {
+      setBrandedAlert({
+        visible: true,
+        title: 'Oops',
+        message: friendlyError(error, "Couldn't send your interest. Try again."),
+      });
+    },
+  });
+
+  const handleSendInterest = () => {
+    if (interestMutation.isPending) return;
+    hapticLight();
+    interestMutation.mutate();
+  };
 
   const handleLeave = () => {
     setBrandedAlert({
@@ -1043,8 +1113,6 @@ export default function PlanDetailScreen() {
         start_time: plan.start_time,
         location_text: plan.location_text,
         slug: plan.slug,
-        member_count: plan.member_count,
-        max_invites: plan.max_invites,
       });
       await Share.share({ message: share.message, url: share.url });
     } catch {}
@@ -1116,7 +1184,7 @@ export default function PlanDetailScreen() {
     ].filter(Boolean);
   const isWomenOnly = plan.gender_rule === 'women_only';
 
-  const groupSizeLabel = isFeatured ? 'WashedUp Event' : totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
+  const groupSizeLabel = isFeatured ? (isBirthdayParty ? 'Birthday Party' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -1357,11 +1425,11 @@ export default function PlanDetailScreen() {
               <Users size={18} color={Colors.terracotta} strokeWidth={2} />
               <View style={styles.logisticsContent}>
                 <Text style={styles.logisticsMain}>
-                  {isFeatured
-                    ? (isCreator && isOfficialCreator
-                      ? `${displayMemberCount} of ${totalCapacity} spots filled`
-                      : `${displayMemberCount} going`)
-                    : `${displayMemberCount} of ${totalCapacity} spots filled`}
+                  {isFeatured && !(isCreator && isOfficialCreator)
+                    ? `${displayMemberCount} going`
+                    : spotsLeft === 0
+                      ? 'Full'
+                      : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
                 </Text>
                 <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
               </View>
@@ -1377,12 +1445,73 @@ export default function PlanDetailScreen() {
           ))}
         </View>
 
+        {/* F-2. Next Time! — interest signal button (non-creator, non-member, plan still upcoming) */}
+        {canShowInterestButton && (
+          <TouchableOpacity
+            style={styles.interestButton}
+            onPress={handleSendInterest}
+            activeOpacity={0.8}
+            disabled={interestMutation.isPending}
+          >
+            {interestMutation.isPending ? (
+              <ActivityIndicator size="small" color={Colors.quoteText} />
+            ) : (
+              <>
+                <Ionicons name="heart-outline" size={18} color={Colors.quoteText} />
+                <Text style={styles.interestButtonText}>
+                  {`Tell ${plan?.creator?.first_name_display ?? 'them'} I'd go next time`}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+        {interestAlreadySent && !isCreator && !isMember && (
+          <View style={styles.interestSent}>
+            <Ionicons name="checkmark-circle" size={18} color={Colors.quoteText} />
+            <Text style={styles.interestSentText}>
+              {plan?.creator?.first_name_display
+                ? `${plan.creator.first_name_display} knows you're interested`
+                : "They know you're interested"}
+            </Text>
+          </View>
+        )}
+
+        {/* F-3. Next Time! — creator-only "Would go next time" section */}
+        {isCreator && creatorInterestList.length > 0 && (
+          <View style={styles.creatorInterestBlock}>
+            <Text style={styles.creatorInterestTitle}>Would go next time</Text>
+            <View style={styles.memberAvatarRow}>
+              {creatorInterestList.map((row: any) => (
+                <View key={row.signal_id} style={styles.memberAvatarWrapper}>
+                  {row.interested_photo_url ? (
+                    <Image source={{ uri: row.interested_photo_url }} style={styles.memberAvatar} />
+                  ) : (
+                    <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
+                      <Text style={styles.memberAvatarInitial}>
+                        {row.interested_name?.[0]?.toUpperCase() ?? '?'}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={styles.memberAvatarName} numberOfLines={1}>
+                    {row.interested_name ?? 'Someone'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.creatorInterestSub}>
+              {creatorInterestList.length === 1
+                ? '1 person wants to go next time'
+                : `${creatorInterestList.length} people want to go next time`}
+            </Text>
+          </View>
+        )}
+
         {/* H. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && isEligible && !isFull && (
           <View style={styles.ctaBlock}>
             {!isFeatured && spotsLeft > 0 && spotsLeft <= 2 && (
               <Text style={styles.ctaInfo}>
-                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left — group closes soon
+                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left, group closes soon
               </Text>
             )}
             <Text style={styles.ctaSub}>A group chat opens the moment you join</Text>
@@ -1463,7 +1592,19 @@ export default function PlanDetailScreen() {
               styles.waitlistButton,
               isOnWaitlist && styles.waitlistButtonActive,
             ]}
-            onPress={handleJoinWaitlist}
+            onPress={() => {
+              if (isOnWaitlist) {
+                handleJoinWaitlist();
+              } else if (plan?.allow_duplicate === false) {
+                // Creator opted out of letting others duplicate this plan;
+                // skip the "post your own version" sheet and just queue the
+                // user on the waitlist.
+                handleJoinWaitlist();
+              } else {
+                hapticLight();
+                setShowDuplicateSheet(true);
+              }
+            }}
             disabled={waitlistLoading}
             activeOpacity={0.9}
           >
@@ -1598,6 +1739,90 @@ export default function PlanDetailScreen() {
               ) : (
                 <Text style={joinStyles.joinBtnText}>Join</Text>
               )}
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* "Don't want to wait?" bottom sheet — shown when user taps Join Waitlist
+          on a full plan (only when they're not already on waitlist / not waitlistNotified). */}
+      <Modal
+        visible={showDuplicateSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDuplicateSheet(false)}
+        statusBarTranslucent
+      >
+        <Pressable
+          style={duplicateSheetStyles.overlay}
+          onPress={() => setShowDuplicateSheet(false)}
+          accessibilityRole="button"
+          accessibilityLabel="close"
+        >
+          <Pressable style={duplicateSheetStyles.sheet} onPress={() => {}}>
+            <View style={duplicateSheetStyles.handle} />
+            <Text style={duplicateSheetStyles.title}>duplicate this plan</Text>
+            <Text style={duplicateSheetStyles.body}>
+              skip the wait. we'll let everyone on the waitlist know to join you!
+            </Text>
+            <TouchableOpacity
+              style={duplicateSheetStyles.primaryBtn}
+              onPress={() => {
+                hapticLight();
+                setShowDuplicateSheet(false);
+                // Let the modal start its slide-out before pushing the next
+                // screen — otherwise on Android with statusBarTranslucent
+                // there's a brief flash where the modal is mid-animation
+                // while the new screen pushes in.
+                setTimeout(() => {
+                  router.push({
+                    pathname: '/(tabs)/post',
+                    params: {
+                      prefillTitle: plan?.title ?? '',
+                      prefillDescription: plan?.description ?? '',
+                      prefillLocation: plan?.location_text ?? '',
+                      prefillLocationLat: plan?.location_lat != null ? String(plan.location_lat) : '',
+                      prefillLocationLng: plan?.location_lng != null ? String(plan.location_lng) : '',
+                      prefillNeighborhood: plan?.neighborhood ?? '',
+                      prefillCategory: plan?.primary_vibe ?? '',
+                      prefillImageUrl: plan?.image_url ?? '',
+                      prefillStartTime: plan?.start_time ?? '',
+                      // Date param expects YYYY-MM-DD; sending the full ISO
+                      // breaks the receiver's parser (silently no-ops).
+                      prefillEventDate: plan?.start_time?.slice(0, 10) ?? '',
+                      prefillEndTime: plan?.end_time ?? '',
+                      prefillDropIn: plan?.drop_in === false ? 'false' : 'true',
+                      prefillAllowDuplicate: plan?.allow_duplicate === false ? 'false' : 'true',
+                      prefillAgeRange: minMaxToAgeRanges(
+                        plan?.target_age_min ?? null,
+                        plan?.target_age_max ?? null,
+                      ).join(','),
+                      prefillGenderPref: plan?.gender_rule ?? 'mixed',
+                      prefillGroupSize: plan?.max_invites != null ? String(plan.max_invites) : '',
+                      prefillTicketsUrl: plan?.tickets_url ?? '',
+                      duplicatedFromEventId: id ?? '',
+                    },
+                  });
+                }, 150);
+              }}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="post a duplicate plan"
+            >
+              <Text style={duplicateSheetStyles.primaryBtnText}>post a duplicate plan</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={duplicateSheetStyles.secondaryBtn}
+              onPress={() => {
+                hapticLight();
+                setShowDuplicateSheet(false);
+                handleJoinWaitlist();
+              }}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="just join the waitlist"
+            >
+              <Text style={duplicateSheetStyles.secondaryBtnText}>just join the waitlist</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -1894,7 +2119,7 @@ export default function PlanDetailScreen() {
                   <View style={manageStyles.featuredRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={manageStyles.label}>Feature this Plan</Text>
-                      <Text style={manageStyles.hint}>Allows custom capacity (50–500)</Text>
+                      <Text style={manageStyles.hint}>Allows custom capacity (50 to 500)</Text>
                     </View>
                     <Switch
                       value={featuredToggle}
@@ -2456,6 +2681,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   memberAvatarOverflowText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  // Next Time! — gold-filled button. See CLAUDE.md "Documented exceptions":
+  // gold says "warm, optional," in deliberate contrast to terracotta's "do this now."
+  interestButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.goldAccent,
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  interestButtonText: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.quoteText,
+  },
+  interestSent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  interestSentText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.quoteText,
+  },
+  creatorInterestBlock: {
+    marginTop: 4,
+    marginBottom: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  creatorInterestTitle: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    marginBottom: 12,
+  },
+  creatorInterestSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    marginTop: 4,
+  },
   ctaBlock: {
     marginTop: 8,
   },
@@ -3109,5 +3384,69 @@ const manageStyles = StyleSheet.create({
     fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
     marginBottom: 8,
+  },
+});
+
+const duplicateSheetStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: Colors.overlayDark,
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: Colors.parchment,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 12,
+    paddingBottom: 32,
+    paddingHorizontal: 24,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.border,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  title: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    marginBottom: 8,
+  },
+  body: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  primaryBtn: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  primaryBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.white,
+  },
+  secondaryBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.terracotta,
   },
 });
