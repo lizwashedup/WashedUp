@@ -9,7 +9,7 @@ import {
   ActivityIndicator, Alert, Keyboard, Platform, Pressable, ScrollView, StyleSheet,
   Switch, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
@@ -25,6 +25,10 @@ const MAX_VIDEO_SEC = 60;
 // 4K@60 (~150 MB / 60s) and any reasonable H.264 recording. Streaming
 // upload via expo-file-system is the v1.1 fix that lifts this cap.
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+const VIDEO_LIMIT_LABEL =
+  MAX_VIDEO_SEC % 60 === 0
+    ? `${MAX_VIDEO_SEC / 60} min max`
+    : `${MAX_VIDEO_SEC} sec max`;
 
 type Attendee = {
   user_id: string;
@@ -81,24 +85,41 @@ function formatExtFromName(filename: string | null | undefined): string {
 }
 
 async function fetchEventAttendees(eventId: string, myUserId: string): Promise<Attendee[]> {
-  const { data, error } = await supabase
+  const { data: members, error: mErr } = await supabase
     .from('event_members')
-    .select('user_id, profiles:user_id(first_name_display, profile_photo_url)')
+    .select('user_id')
     .eq('event_id', eventId)
     .eq('status', 'joined');
-  if (error) throw error;
-  return (data ?? [])
-    .map((m: any) => ({
-      user_id: m.user_id,
-      first_name_display: m.profiles?.first_name_display ?? null,
-      profile_photo_url: m.profiles?.profile_photo_url ?? null,
-    }))
-    .filter((a) => a.user_id !== myUserId);
+  if (mErr) throw mErr;
+
+  const userIds = (members ?? []).map((m) => m.user_id).filter((uid) => uid !== myUserId);
+  if (userIds.length === 0) return [];
+
+  const { data: profs, error: pErr } = await supabase
+    .from('profiles')
+    .select('id, first_name_display, profile_photo_url')
+    .in('id', userIds);
+  if (pErr) throw pErr;
+
+  const profilesById = new Map(
+    (profs ?? []).map((p) => [p.id, {
+      first_name_display: p.first_name_display ?? null,
+      profile_photo_url: p.profile_photo_url ?? null,
+    }]),
+  );
+
+  return userIds.map((uid) => ({
+    user_id: uid,
+    first_name_display: profilesById.get(uid)?.first_name_display ?? null,
+    profile_photo_url: profilesById.get(uid)?.profile_photo_url ?? null,
+  }));
 }
 
 export default function AlbumUploadScreen() {
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const scrollRef = React.useRef<ScrollView>(null);
 
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [eventTitle, setEventTitle] = useState<string>('');
@@ -224,6 +245,10 @@ export default function AlbumUploadScreen() {
     setAssets((prev) => prev.filter((a) => a.uri !== uri));
   }, []);
 
+  const scrollToBottomOnFocus = useCallback(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
+  }, []);
+
   const toggleAttendee = useCallback((uid: string) => {
     setExcludedUserIds((prev) => {
       const next = new Set(prev);
@@ -283,7 +308,7 @@ export default function AlbumUploadScreen() {
         <View style={styles.headerBtn} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+      <ScrollView ref={scrollRef} contentContainerStyle={[styles.scroll, { paddingBottom: 120 + insets.bottom }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {/* Pitch */}
         <Text style={styles.pitch}>
           Everyone took photos. Now put them together. Upload yours and get everyone else's back.
@@ -296,6 +321,9 @@ export default function AlbumUploadScreen() {
             {assets.length === 0 ? 'Pick photos and videos' : 'Add more'}
           </Text>
         </TouchableOpacity>
+        <Text style={styles.limitsHint}>
+          Up to {PHOTO_CAP} photos and {VIDEO_CAP} videos ({VIDEO_LIMIT_LABEL})
+        </Text>
         {assets.length > 0 && (
           <Text style={styles.countText}>
             {photoCount} {photoCount === 1 ? 'photo' : 'photos'}, {videoCount} {videoCount === 1 ? 'video' : 'videos'} selected
@@ -409,6 +437,7 @@ export default function AlbumUploadScreen() {
                     autoCorrect={false}
                     placeholder=""
                     returnKeyType="done"
+                    onFocus={scrollToBottomOnFocus}
                     onSubmitEditing={Keyboard.dismiss}
                     inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                   />
@@ -427,6 +456,7 @@ export default function AlbumUploadScreen() {
                     autoCorrect={false}
                     placeholder=""
                     returnKeyType="done"
+                    onFocus={scrollToBottomOnFocus}
                     onSubmitEditing={Keyboard.dismiss}
                     inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                   />
@@ -444,6 +474,7 @@ export default function AlbumUploadScreen() {
                   multiline
                   numberOfLines={3}
                   placeholder=""
+                  onFocus={scrollToBottomOnFocus}
                   inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
               </View>
@@ -452,7 +483,7 @@ export default function AlbumUploadScreen() {
         </View>
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity
           style={[styles.uploadBtn, (assets.length === 0 || submitting) && styles.uploadBtnDisabled]}
           onPress={onUpload}
@@ -498,6 +529,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14, borderRadius: 12,
   },
   pickerBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  limitsHint: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
+    textAlign: 'center',
+    marginTop: 8,
+  },
   countText: {
     fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM,
     color: Colors.textMedium, marginTop: 8,

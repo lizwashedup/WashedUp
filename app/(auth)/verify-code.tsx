@@ -8,6 +8,7 @@ import {
   Easing,
   Platform,
   KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -47,7 +48,12 @@ export default function VerifyCodeScreen() {
   const [syncFailedAlert, setSyncFailedAlert] = useState(false);
 
   const otpRef = useRef<OtpInputHandle>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const successAnim = useRef(new Animated.Value(0)).current;
+
+  const scrollToBottomOnFocus = useCallback(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
+  }, []);
   // Track the post-verify hold timer so we can cancel on unmount and avoid
   // setState-on-unmounted warnings if the user backs out mid-animation.
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -338,6 +344,13 @@ export default function VerifyCodeScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.kav}
         >
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+          >
           <View style={styles.topRow}>
             <TouchableOpacity
               onPress={handleBack}
@@ -382,6 +395,7 @@ export default function VerifyCodeScreen() {
                 value={code}
                 onChangeText={handleCodeChange}
                 onComplete={handleVerify}
+                onFocus={scrollToBottomOnFocus}
                 state={otpState}
                 autoFocus
                 editable={otpState === 'idle' && !verifying}
@@ -412,6 +426,7 @@ export default function VerifyCodeScreen() {
           </View>
 
           <View style={styles.bottomSpacer} />
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
       <BrandedAlert
@@ -435,6 +450,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.cream },
   safe: { flex: 1 },
   kav: { flex: 1, paddingHorizontal: 28 },
+  scrollContent: { flexGrow: 1 },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',

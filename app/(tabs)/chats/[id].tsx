@@ -973,14 +973,17 @@ export default function ChatScreen() {
     Keyboard.dismiss();
 
     const doLocation = () => {
-      setAlertInfo({
-        title: 'Share your location?',
-        message: 'Your current location will be sent to the group.',
-        buttons: [
-          { text: 'Send Location', onPress: handleLocationSend },
-          { text: 'Cancel', style: 'cancel' as const },
-        ],
-      });
+      setAlertInfo(null);
+      setTimeout(() => {
+        setAlertInfo({
+          title: 'Share your location?',
+          message: 'Your current location will be sent to the group.',
+          buttons: [
+            { text: 'Send Location', onPress: handleLocationSend },
+            { text: 'Cancel', style: 'cancel' as const },
+          ],
+        });
+      }, 350);
     };
 
     if (Platform.OS === 'ios') {
@@ -1770,7 +1773,9 @@ const chatStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 48,
-    transform: [{ scaleY: -1 }],
+    transform: Platform.OS === 'android'
+      ? [{ scaleY: -1 }, { scaleX: -1 }]
+      : [{ scaleY: -1 }],
   },
   emptyEmoji: {
     fontSize: 40,

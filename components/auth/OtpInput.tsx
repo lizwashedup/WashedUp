@@ -23,6 +23,7 @@ type Props = {
   value: string;
   onChangeText: (code: string) => void;
   onComplete?: (code: string) => void;
+  onFocus?: () => void;
   state?: OtpState;
   autoFocus?: boolean;
   editable?: boolean;
@@ -40,6 +41,7 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
     value,
     onChangeText,
     onComplete,
+    onFocus,
     state = 'idle',
     autoFocus,
     editable = true,
@@ -130,6 +132,7 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
         ref={inputRef}
         value={value}
         onChangeText={handleChange}
+        onFocus={onFocus}
         keyboardType="number-pad"
         textContentType="oneTimeCode"
         autoComplete="sms-otp"

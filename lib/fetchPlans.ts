@@ -151,3 +151,61 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
       : null,
   }));
 }
+
+/**
+ * Plans the user has signalled interest in via the "I'd go next time" button.
+ * Fetched via the get_user_interest_signals RPC, then mapped through the same
+ * Plan shape as fetchPlans so they render with the standard PlanCard.
+ */
+export async function fetchInterestedPlans(): Promise<Plan[]> {
+  const { data: signals, error: sErr } = await supabase.rpc('get_user_interest_signals');
+  if (sErr) {
+    console.warn('[fetchInterestedPlans] RPC failed:', sErr.message);
+    return [];
+  }
+  const eventIds = (signals ?? []).map((r: any) => r.event_id).filter(Boolean) as string[];
+  if (eventIds.length === 0) return [];
+
+  // events query + member-count correction can run in parallel (both keyed on eventIds).
+  const [{ data: events, error: eErr }, realCounts] = await Promise.all([
+    supabase
+      .from('events')
+      .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, neighborhood, slug, gender_rule, max_invites, min_invites, member_count, status, host_message, is_featured, featured_type, cluster_root_id, creator_user_id')
+      .in('id', eventIds),
+    fetchRealMemberCounts(eventIds),
+  ]);
+
+  if (eErr || !events) {
+    console.warn('[fetchInterestedPlans] events fetch failed:', eErr?.message);
+    return [];
+  }
+
+  // Two-step creator lookup (avoid FK-embed flakiness seen on other screens).
+  const creatorIds = [...new Set((events as any[]).map((r) => r.creator_user_id).filter(Boolean))] as string[];
+  const profilesByCreator = new Map<string, { first_name_display: string | null; profile_photo_url: string | null }>();
+  if (creatorIds.length > 0) {
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, first_name_display, profile_photo_url')
+      .in('id', creatorIds);
+    (profs ?? []).forEach((p: any) => {
+      profilesByCreator.set(p.id, {
+        first_name_display: p.first_name_display ?? null,
+        profile_photo_url: p.profile_photo_url ?? null,
+      });
+    });
+  }
+
+  return (events as any[]).map((row) => {
+    const creatorId = row.creator_user_id;
+    const profile = creatorId ? profilesByCreator.get(creatorId) : null;
+    const plan = mapRowToPlan({
+      ...row,
+      creator_user_id: creatorId,
+      creator_name: profile?.first_name_display,
+      creator_photo: profile?.profile_photo_url,
+    });
+    plan.member_count = Math.max(1, realCounts[plan.id] ?? plan.member_count);
+    return plan;
+  }).sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
+}

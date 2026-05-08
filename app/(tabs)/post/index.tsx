@@ -611,6 +611,7 @@ export default function PostScreen() {
   const [postedSpotsLeft, setPostedSpotsLeft] = useState<number | undefined>();
   const [postedGenderLabel, setPostedGenderLabel] = useState<string | undefined>();
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const firstPlanPendingRef = useRef(false);
 
   // ─── Drafts ────────────────────────────────────────────────────────────────
   const [drafts, setDrafts] = useState<PlanDraft[]>([]);
@@ -923,7 +924,7 @@ export default function PostScreen() {
           .select('id', { count: 'exact', head: true })
           .eq('creator_user_id', user.id);
         if (count === 1) {
-          setFirstPlanCelebrationVisible(true);
+          firstPlanPendingRef.current = true;
           await AsyncStorage.setItem('hasSeenFirstPlanCelebration', '1');
         }
       }
@@ -1577,7 +1578,16 @@ export default function PostScreen() {
 
       <FirstPlanCelebration
         visible={firstPlanCelebrationVisible}
-        onDismiss={() => setFirstPlanCelebrationVisible(false)}
+        onDismiss={() => {
+          const planIdToNavigate = postedPlanId;
+          setFirstPlanCelebrationVisible(false);
+          setPostedPlanId(null);
+          setPostedPlanTitle('');
+          setTimeout(() => {
+            if (planIdToNavigate) router.push(`/plan/${planIdToNavigate}` as any);
+            else router.replace('/(tabs)/plans');
+          }, 350);
+        }}
       />
 
       <SharePlanModal
@@ -1585,15 +1595,20 @@ export default function PostScreen() {
         onClose={() => {
           const planIdToNavigate = postedPlanId;
           setShareModalVisible(false);
-          setPostedPlanId(null);
-          setPostedPlanTitle('');
-          setTimeout(() => {
-            if (planIdToNavigate) {
-              router.push(`/plan/${planIdToNavigate}` as any);
-            } else {
-              router.replace('/(tabs)/plans');
-            }
-          }, 350);
+          if (firstPlanPendingRef.current) {
+            firstPlanPendingRef.current = false;
+            setTimeout(() => setFirstPlanCelebrationVisible(true), 400);
+          } else {
+            setPostedPlanId(null);
+            setPostedPlanTitle('');
+            setTimeout(() => {
+              if (planIdToNavigate) {
+                router.push(`/plan/${planIdToNavigate}` as any);
+              } else {
+                router.replace('/(tabs)/plans');
+              }
+            }, 350);
+          }
         }}
         planTitle={postedPlanTitle}
         planId={postedPlanId || ''}

@@ -89,13 +89,27 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
   // 3. attendees
   const { data: members } = await supabase
     .from('event_members')
-    .select('user_id, profiles:user_id(first_name_display, profile_photo_url)')
+    .select('user_id')
     .eq('event_id', eventId)
     .eq('status', 'joined');
-  const attendees: Attendee[] = (members ?? []).map((m: any) => ({
-    user_id: m.user_id,
-    first_name_display: m.profiles?.first_name_display ?? null,
-    profile_photo_url: m.profiles?.profile_photo_url ?? null,
+  const userIds = (members ?? []).map((m) => m.user_id);
+  let profilesById = new Map<string, { first_name_display: string | null; profile_photo_url: string | null }>();
+  if (userIds.length > 0) {
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, first_name_display, profile_photo_url')
+      .in('id', userIds);
+    profilesById = new Map(
+      (profs ?? []).map((p) => [p.id, {
+        first_name_display: p.first_name_display ?? null,
+        profile_photo_url: p.profile_photo_url ?? null,
+      }]),
+    );
+  }
+  const attendees: Attendee[] = userIds.map((uid) => ({
+    user_id: uid,
+    first_name_display: profilesById.get(uid)?.first_name_display ?? null,
+    profile_photo_url: profilesById.get(uid)?.profile_photo_url ?? null,
   }));
   const nameByUserId = new Map(attendees.map((a) => [a.user_id, a.first_name_display]));
 

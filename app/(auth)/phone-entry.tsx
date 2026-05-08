@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Linking,
   Platform,
   KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -32,6 +33,11 @@ export default function PhoneEntryScreen() {
   const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+
+  const scrollToBottomOnFocus = useCallback(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
+  }, []);
 
   const tenDigits = phone.length === 10;
   const valid = isValidUSPhone(phone);
@@ -128,6 +134,13 @@ export default function PhoneEntryScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.kav}
         >
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+          >
           <View style={styles.topRow}>
             <Image
               source={require('../../assets/images/washedup-logo.png')}
@@ -146,6 +159,7 @@ export default function PhoneEntryScreen() {
               value={phone}
               onChangeText={handlePhoneChange}
               onSubmitEditing={handleContinue}
+              onFocus={scrollToBottomOnFocus}
               error={error ?? undefined}
               editable={!submitting}
             />
@@ -199,6 +213,7 @@ export default function PhoneEntryScreen() {
               </Text>
             </Text>
           </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </ImageBackground>
@@ -209,6 +224,7 @@ const styles = StyleSheet.create({
   bg: { flex: 1, backgroundColor: Colors.brandDeep },
   safe: { flex: 1 },
   kav: { flex: 1, paddingHorizontal: 28 },
+  scrollContent: { flexGrow: 1 },
   topRow: {
     paddingTop: 8,
     flexDirection: 'row',

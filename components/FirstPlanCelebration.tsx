@@ -22,7 +22,7 @@ export default function FirstPlanCelebration({ visible, onDismiss }: Props) {
         <View style={styles.card}>
           <Text style={styles.headline}>Your first plan is live</Text>
           <Text style={styles.subtext}>
-            That took courage. Now let's find your people.
+            Look at you go. Now let's fill it up.
           </Text>
           <TouchableOpacity style={styles.button} onPress={onDismiss} activeOpacity={0.8}>
             <Text style={styles.buttonText}>Got it</Text>

@@ -41,14 +41,48 @@ export function useChatList() {
 
       if (membershipsError || !memberships) return;
 
-      // Fetch real member counts from event_members to avoid the known drift
-      // in the events.member_count column (same approach as fetchRealMemberCounts in fetchPlans.ts)
       const allEventIds = memberships.map((m: any) => m.events?.id).filter(Boolean);
-      const { data: memberCountRows } = await supabase
-        .from('event_members')
-        .select('event_id')
-        .in('event_id', allEventIds)
-        .eq('status', 'joined');
+      if (allEventIds.length === 0) {
+        setChats([]);
+        return;
+      }
+
+      // Run all 5 queries in parallel against allEventIds. Member-count drift
+      // correction (events.member_count vs real joined rows) used to be a
+      // sequential pre-step before the batch; folding it in saves a round-trip.
+      // The memberRows2 query also pulls first_name_display so we get sender
+      // names alongside avatars without a separate sender-profiles lookup.
+      const [{ data: memberCountRows }, { data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = await Promise.all([
+        supabase
+          .from('event_members')
+          .select('event_id')
+          .in('event_id', allEventIds)
+          .eq('status', 'joined'),
+        supabase
+          .from('messages')
+          .select('event_id, content, created_at, image_url, user_id')
+          .in('event_id', allEventIds)
+          .order('created_at', { ascending: false })
+          .limit(allEventIds.length * 3),
+        supabase
+          .from('chat_reads')
+          .select('event_id, last_read_at')
+          .eq('user_id', user.id)
+          .in('event_id', allEventIds),
+        supabase
+          .from('messages')
+          .select('event_id, created_at')
+          .in('event_id', allEventIds)
+          .neq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(allEventIds.length * 20),
+        supabase
+          .from('event_members')
+          .select('event_id, user_id, profiles_public!inner(profile_photo_url, first_name_display)')
+          .in('event_id', allEventIds)
+          .eq('status', 'joined'),
+      ]);
+
       const realCounts: Record<string, number> = {};
       (memberCountRows ?? []).forEach((r: any) => {
         realCounts[r.event_id] = (realCounts[r.event_id] ?? 0) + 1;
@@ -64,35 +98,6 @@ export function useChatList() {
         return;
       }
 
-      const eventIds = eligible.map((m: any) => m.events.id);
-
-      // Run all 4 queries in parallel — they only need eventIds + user.id
-      const [{ data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = await Promise.all([
-        supabase
-          .from('messages')
-          .select('event_id, content, created_at, image_url, user_id')
-          .in('event_id', eventIds)
-          .order('created_at', { ascending: false })
-          .limit(eventIds.length * 3),
-        supabase
-          .from('chat_reads')
-          .select('event_id, last_read_at')
-          .eq('user_id', user.id)
-          .in('event_id', eventIds),
-        supabase
-          .from('messages')
-          .select('event_id, created_at')
-          .in('event_id', eventIds)
-          .neq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(eventIds.length * 20),
-        supabase
-          .from('event_members')
-          .select('event_id, user_id, profiles_public!inner(profile_photo_url)')
-          .in('event_id', eventIds)
-          .eq('status', 'joined'),
-      ]);
-
       const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; user_id: string }> = {};
       (allMessages ?? []).forEach((msg: any) => {
         if (!lastMsgMap[msg.event_id]) {
@@ -100,23 +105,16 @@ export function useChatList() {
         }
       });
 
-      // Fetch first names for last-message senders
-      const senderIds = [...new Set(Object.values(lastMsgMap).map(m => m.user_id).filter(Boolean))];
+      // Build sender-name + avatar maps from the single memberRows2 query.
       const senderNameMap: Record<string, string> = {};
-      if (senderIds.length > 0) {
-        const { data: senderProfiles } = await supabase
-          .from('profiles_public')
-          .select('id, first_name_display')
-          .in('id', senderIds);
-        (senderProfiles ?? []).forEach((p: any) => {
-          if (p.first_name_display) senderNameMap[p.id] = p.first_name_display;
-        });
-      }
-
-      // Build member avatar map: eventId -> array of avatar URLs (up to 4)
       const avatarMap: Record<string, string[]> = {};
       (memberRows2 ?? []).forEach((r: any) => {
-        const url = (r.profiles_public as any)?.profile_photo_url;
+        const profile = r.profiles_public as any;
+        const name = profile?.first_name_display;
+        if (name && r.user_id && !senderNameMap[r.user_id]) {
+          senderNameMap[r.user_id] = name;
+        }
+        const url = profile?.profile_photo_url;
         if (url && r.event_id) {
           if (!avatarMap[r.event_id]) avatarMap[r.event_id] = [];
           if (avatarMap[r.event_id].length < 4) avatarMap[r.event_id].push(url);

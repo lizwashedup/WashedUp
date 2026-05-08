@@ -74,6 +74,7 @@ Sentry.init({
 export { ErrorBoundary } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ duration: 300, fade: true });
 
 const queryClient = new QueryClient();
 
@@ -99,17 +100,21 @@ function RootLayout() {
   });
 
   const [showVideoSplash, setShowVideoSplash] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     if (error) throw error;
   }, [error]);
 
   useEffect(() => {
-    // Once fonts are loaded, hide the native splash so the video can play
-    if (loaded) {
+    // Hold the native splash until both fonts are loaded AND auth has resolved.
+    // On Android, expo-video may be unavailable and VideoSplash finishes
+    // immediately, so without this gate the (tabs) initial route paints
+    // before router.replace lands and the user sees a 1-frame login flash.
+    if (loaded && authReady) {
       SplashScreen.hideAsync();
     }
-  }, [loaded]);
+  }, [loaded, authReady]);
 
   if (!loaded) {
     return null;
@@ -130,7 +135,7 @@ function RootLayout() {
     >
       <QueryClientProvider client={queryClient}>
         <SafeAreaProvider>
-          <RootLayoutNav onReady={() => {}} />
+          <RootLayoutNav onReady={() => setAuthReady(true)} />
           {showVideoSplash && (
             <VideoSplash onFinish={() => setShowVideoSplash(false)} />
           )}

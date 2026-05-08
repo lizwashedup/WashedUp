@@ -10,7 +10,8 @@ import {
   Platform,
 } from 'react-native';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
-import { Share2 } from 'lucide-react-native';
+import { Share2, X } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
@@ -33,6 +34,7 @@ export function SharePlanModal({
   genderLabel,
   variant,
 }: SharePlanModalProps) {
+  const insets = useSafeAreaInsets();
   const shareUrl = slug ? `https://washedup.app/plans/${slug}` : planId ? `https://washedup.app/e/${planId}` : 'https://washedup.app';
 
   const shareText = `${planTitle}\n${shareUrl}`;
@@ -57,9 +59,21 @@ export function SharePlanModal({
       <View style={styles.container}>
         <ScrollView
           decelerationRate="normal"
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            Platform.OS === 'android' && { paddingTop: insets.top + 16 },
+          ]}
           showsVerticalScrollIndicator={false}
         >
+          <TouchableOpacity
+            onPress={onClose}
+            style={styles.closeBtn}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel="Close share screen"
+          >
+            <X size={22} color={Colors.warmGray} strokeWidth={2} />
+          </TouchableOpacity>
           <View style={styles.iconCircle}>
             <Share2 size={28} color={Colors.terracotta} strokeWidth={2} />
           </View>
@@ -101,6 +115,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 32,
     paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+  },
+  closeBtn: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
   },
   iconCircle: {
     width: 56,

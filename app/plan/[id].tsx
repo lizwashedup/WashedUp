@@ -1763,7 +1763,7 @@ export default function PlanDetailScreen() {
           accessibilityRole="button"
           accessibilityLabel="close"
         >
-          <Pressable style={duplicateSheetStyles.sheet} onPress={() => {}}>
+          <Pressable style={[duplicateSheetStyles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 20 }]} onPress={() => {}}>
             <View style={duplicateSheetStyles.handle} />
             <Text style={duplicateSheetStyles.title}>duplicate this plan</Text>
             <Text style={duplicateSheetStyles.body}>

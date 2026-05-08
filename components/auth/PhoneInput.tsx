@@ -9,6 +9,7 @@ type Props = {
   value: string;
   onChangeText: (digits10: string) => void;
   onSubmitEditing?: () => void;
+  onFocus?: () => void;
   error?: string | null;
   autoFocus?: boolean;
   editable?: boolean;
@@ -20,7 +21,7 @@ export type PhoneInputHandle = {
 };
 
 export const PhoneInput = forwardRef<PhoneInputHandle, Props>(function PhoneInput(
-  { value, onChangeText, onSubmitEditing, error, autoFocus, editable = true },
+  { value, onChangeText, onSubmitEditing, onFocus, error, autoFocus, editable = true },
   ref,
 ) {
   const inputRef = useRef<TextInput>(null);
@@ -55,6 +56,7 @@ export const PhoneInput = forwardRef<PhoneInputHandle, Props>(function PhoneInpu
           value={display}
           onChangeText={handleChange}
           onSubmitEditing={onSubmitEditing}
+          onFocus={onFocus}
           placeholder="(213) 000 0000"
           placeholderTextColor={Colors.text3}
           keyboardType="phone-pad"

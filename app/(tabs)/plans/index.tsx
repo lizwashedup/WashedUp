@@ -38,7 +38,7 @@ import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Catego
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
-import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
+import { fetchPlans, fetchInterestedPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { supabase } from '../../../lib/supabase';
 import { friendlyError } from '../../../lib/friendlyError';
 import { postAuthTransitionRef } from '../../../lib/navState';
@@ -970,14 +970,22 @@ export default function PlansScreen() {
     [allPlans, wishlistedSet],
   );
 
+  const { data: interestedPlans = [] } = useQuery<Plan[]>({
+    queryKey: ['plans.myInterested', userId],
+    queryFn: () => fetchInterestedPlans(),
+    enabled: !!userId,
+    staleTime: 60_000,
+  });
+
   const myPlansSections = useMemo(() => {
     const s: { title: string; data: Plan[] }[] = [];
     if (myPlansUpcoming.length > 0) s.push({ title: 'Upcoming', data: myPlansUpcoming });
     if (savedPlans.length > 0) s.push({ title: 'Saved', data: savedPlans });
+    if (interestedPlans.length > 0) s.push({ title: 'Interested', data: interestedPlans });
     if (waitlistedPlans.length > 0) s.push({ title: 'Waitlisted', data: waitlistExpanded ? waitlistedPlans : [] });
     if (myPlansPast.length > 0) s.push({ title: 'Past', data: pastExpanded ? myPlansPast : [] });
     return s;
-  }, [myPlansUpcoming, myPlansPast, pastExpanded, waitlistedPlans, waitlistExpanded, savedPlans]);
+  }, [myPlansUpcoming, myPlansPast, pastExpanded, waitlistedPlans, waitlistExpanded, savedPlans, interestedPlans]);
 
   const displayPlans = useMemo(() => {
     // Featured plans render in their own carousel section above the

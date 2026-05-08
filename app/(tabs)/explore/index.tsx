@@ -39,7 +39,6 @@ export default function ScenePage() {
   const [suggestion, setSuggestion] = useState('');
   const [submitState, setSubmitState] = useState<'idle' | 'success'>('idle');
   const [onWaitlist, setOnWaitlist] = useState(false);
-  const [waitlistCount, setWaitlistCount] = useState(0);
   const [userCount, setUserCount] = useState(0);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [inputFocused, setInputFocused] = useState(false);
@@ -56,18 +55,16 @@ export default function ScenePage() {
     });
   }, []);
 
-  // Check waitlist status + counts
+  // Check waitlist status + user count
   useEffect(() => {
     if (!userId) return;
     (async () => {
       try {
-        const [{ data: wl }, { count: wlCount }, { count: profileCount }] = await Promise.all([
+        const [{ data: wl }, { count: profileCount }] = await Promise.all([
           supabase.from('scene_waitlist').select('id').eq('user_id', userId).maybeSingle(),
-          supabase.from('scene_waitlist').select('id', { count: 'exact', head: true }),
           supabase.from('profiles').select('id', { count: 'exact', head: true }),
         ]);
         if (wl) setOnWaitlist(true);
-        setWaitlistCount(wlCount ?? 0);
         setUserCount(profileCount ?? 0);
       } catch {}
     })();
@@ -97,7 +94,6 @@ export default function ScenePage() {
     if (!userId || onWaitlist) return;
     hapticSuccess();
     setOnWaitlist(true);
-    setWaitlistCount((c) => c + 1);
     Animated.sequence([
       Animated.spring(notifyScale, { toValue: 1.05, useNativeDriver: true, speed: 50 }),
       Animated.spring(notifyScale, { toValue: 1, useNativeDriver: true, speed: 50 }),
@@ -231,7 +227,7 @@ export default function ScenePage() {
         {/* Social proof footer */}
         {userCount > 0 && (
           <Text style={styles.footerText}>
-            {userCount.toLocaleString()} people getting offline together
+            {userCount.toLocaleString()} {userCount === 1 ? 'person' : 'people'} getting offline together
           </Text>
         )}
 
@@ -252,11 +248,6 @@ export default function ScenePage() {
               {onWaitlist ? "You're on the list \u2713" : 'Notify me when Scene drops'}
             </Text>
           </TouchableOpacity>
-          {onWaitlist && waitlistCount > 1 && (
-            <Text style={styles.waitlistCount}>
-              {waitlistCount.toLocaleString()} others waiting
-            </Text>
-          )}
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
@@ -349,13 +340,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.terracotta,
   },
-  waitlistCount: {
-    fontSize: 12,
-    color: Colors.secondary,
-    opacity: 0.7,
-    marginTop: 4,
-  },
-
   // ── Card ──
   card: {
     backgroundColor: '#FFFFFF',
