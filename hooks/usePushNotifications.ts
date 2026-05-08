@@ -4,27 +4,40 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
 
-// Initialize OneSignal once at module load. Safe to call multiple times — the
-// SDK guards against double-init internally — but doing it at module level
-// means the click handler buffer is active before any component mounts, so
-// cold-start notification taps are captured.
-const ONESIGNAL_APP_ID =
-  Constants.expoConfig?.extra?.oneSignalAppId ??
-  process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID ??
-  '';
+// Singleton ready promise. Resolves true once OneSignal.initialize has been
+// called and the native bridge has had a tick to settle. Resolves false if
+// the app id is missing or initialize threw. All OneSignal access in this
+// module (and the click listener in app/_layout.tsx) gates on this promise
+// so we never call into the native SDK before initWithContext has run on
+// Android.
+let readyPromise: Promise<boolean> | null = null;
 
-let initialized = false;
-function ensureInitialized() {
-  if (initialized || !ONESIGNAL_APP_ID) return;
-  try {
-    OneSignal.initialize(ONESIGNAL_APP_ID);
-    initialized = true;
-  } catch (err) {
-    if (__DEV__) console.warn('[PushNotifications] OneSignal.initialize failed:', err);
+export function initOneSignal(): Promise<boolean> {
+  if (readyPromise) return readyPromise;
+  const appId =
+    Constants.expoConfig?.extra?.oneSignalAppId ??
+    process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID ??
+    '';
+  if (!appId) {
+    readyPromise = Promise.resolve(false);
+    return readyPromise;
   }
+  readyPromise = new Promise<boolean>((resolve) => {
+    try {
+      OneSignal.initialize(appId);
+      // Yield to the native bridge before any caller touches the SDK.
+      setTimeout(() => resolve(true), 0);
+    } catch (err) {
+      if (__DEV__) console.warn('[PushNotifications] OneSignal.initialize failed:', err);
+      resolve(false);
+    }
+  });
+  return readyPromise;
 }
 
-ensureInitialized();
+export function ensureOneSignalReady(): Promise<boolean> {
+  return readyPromise ?? initOneSignal();
+}
 
 function devicePlatform(): 'ios' | 'android' | 'web' | null {
   if (Platform.OS === 'ios') return 'ios';
@@ -60,45 +73,47 @@ async function upsertDeviceToken(userId: string, playerId: string) {
 export function usePushNotifications(userId?: string | null) {
   useEffect(() => {
     if (!userId) return;
-    ensureInitialized();
 
-    // Alias this device to the authenticated user. external_id is what the
-    // server passes to OneSignal in include_aliases.external_id when sending.
-    // OneSignal handles fanout to every device the user has registered.
-    try {
-      OneSignal.login(userId);
-    } catch (err) {
-      if (__DEV__) console.warn('[PushNotifications] OneSignal.login failed:', err);
-    }
+    let cancelled = false;
+    let attached: ((event: any) => void) | null = null;
 
-    // If a subscription already exists at mount (returning user, permission
-    // granted previously), capture it. Subsequent changes are caught by the
-    // observer below.
-    OneSignal.User.pushSubscription
-      .getIdAsync()
-      .then((id) => {
-        if (id) upsertDeviceToken(userId, id);
-      })
-      .catch(() => {});
-
-    // Observe subscription changes — fires when user grants permission, when
-    // the subscription id changes, or when opt-in state flips.
     const onSubscriptionChange = (event: any) => {
       const id = event?.current?.id;
       const optedIn = event?.current?.optedIn;
       if (id && optedIn) upsertDeviceToken(userId, id);
     };
 
-    try {
-      OneSignal.User.pushSubscription.addEventListener('change', onSubscriptionChange);
-    } catch (err) {
-      if (__DEV__) console.warn('[PushNotifications] addEventListener failed:', err);
-    }
+    ensureOneSignalReady().then((ready) => {
+      if (cancelled || !ready) return;
+
+      try {
+        OneSignal.login(userId);
+      } catch (err) {
+        if (__DEV__) console.warn('[PushNotifications] OneSignal.login failed:', err);
+      }
+
+      OneSignal.User.pushSubscription
+        .getIdAsync()
+        .then((id) => {
+          if (!cancelled && id) upsertDeviceToken(userId, id);
+        })
+        .catch(() => {});
+
+      try {
+        OneSignal.User.pushSubscription.addEventListener('change', onSubscriptionChange);
+        attached = onSubscriptionChange;
+      } catch (err) {
+        if (__DEV__) console.warn('[PushNotifications] addEventListener failed:', err);
+      }
+    });
 
     return () => {
-      try {
-        OneSignal.User.pushSubscription.removeEventListener('change', onSubscriptionChange);
-      } catch {}
+      cancelled = true;
+      if (attached) {
+        try {
+          OneSignal.User.pushSubscription.removeEventListener('change', attached);
+        } catch {}
+      }
     };
   }, [userId]);
 
@@ -111,7 +126,7 @@ export function usePushNotifications(userId?: string | null) {
 export type PushPermissionStatus = 'granted' | 'denied' | 'undetermined';
 
 export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
-  ensureInitialized();
+  if (!(await ensureOneSignalReady())) return 'undetermined';
   try {
     const native = await OneSignal.Notifications.permissionNative();
     if (
@@ -134,7 +149,7 @@ export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
 export async function registerForPushNotifications(
   options: { prompt?: boolean; userId?: string | null } = {},
 ): Promise<string | null> {
-  ensureInitialized();
+  if (!(await ensureOneSignalReady())) return null;
 
   try {
     const hasPermission = OneSignal.Notifications.hasPermission();

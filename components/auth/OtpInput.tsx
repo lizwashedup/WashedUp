@@ -14,6 +14,7 @@ import {
 import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
 import { stripDigits } from '../../lib/phoneFormat';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 
 type OtpState = 'idle' | 'success' | 'error';
 
@@ -137,6 +138,7 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
         maxLength={length}
         caretHidden
         style={styles.hiddenInput}
+        inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
       />
     </Pressable>
   );

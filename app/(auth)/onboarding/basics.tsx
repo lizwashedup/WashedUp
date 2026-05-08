@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -263,6 +264,7 @@ export default function OnboardingBasicsScreen() {
           <ScrollView
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             contentContainerStyle={styles.scrollContent}
           >
             <View style={styles.gap20} />
@@ -286,6 +288,7 @@ export default function OnboardingBasicsScreen() {
                   autoCapitalize="words"
                   textContentType="givenName"
                   returnKeyType="next"
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
               </View>
               <View style={styles.nameCol}>
@@ -299,6 +302,7 @@ export default function OnboardingBasicsScreen() {
                   autoCapitalize="words"
                   textContentType="familyName"
                   returnKeyType="next"
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
               </View>
             </View>
@@ -319,6 +323,7 @@ export default function OnboardingBasicsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="next"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <View style={styles.gap16} />
 

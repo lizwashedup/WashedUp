@@ -45,9 +45,11 @@ import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
 import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt } from '../lib/navState';
 import { resetMigrationGateSnooze } from '../lib/migrationGateSnooze';
 import Colors from '../constants/Colors';
-import { usePushNotifications } from '../hooks/usePushNotifications';
+import { usePushNotifications, initOneSignal } from '../hooks/usePushNotifications';
 import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/uploadAlbumMedia';
 import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptModal';
+import { KeyboardDoneBar } from '../components/keyboard/KeyboardDoneBar';
+import { logError } from '../lib/logger';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
@@ -222,7 +224,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           image_url: payload.plan.image_url ?? null,
         });
         setSurveyMembers(payload.members ?? []);
-      } catch (e) { console.warn('[WashedUp] Survey check failed:', e); }
+      } catch (e) { logError(e, 'layout.surveyCheck'); }
       finally { setSurveyCheckDone(true); }
     })();
   }, [authedUserId, authResolved]);
@@ -271,7 +273,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         if (hasThumbsUp || hasNoFeedback) {
           setShowReviewAsk(true);
         }
-      } catch (e) { console.warn('[WashedUp] Review check failed:', e); }
+      } catch (e) { logError(e, 'layout.reviewCheck'); }
     })();
   }, [authedUserId, surveyCheckDone, surveyPlan]);
 
@@ -323,16 +325,26 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
     };
 
-    try {
-      OneSignal.Notifications.addEventListener('click', onClick);
-    } catch (err) {
-      if (__DEV__) console.warn('[PushNotifications] click listener attach failed:', err);
-    }
+    let cancelled = false;
+    let attached: ((event: any) => void) | null = null;
+
+    initOneSignal().then((ready) => {
+      if (cancelled || !ready) return;
+      try {
+        OneSignal.Notifications.addEventListener('click', onClick);
+        attached = onClick;
+      } catch (err) {
+        if (__DEV__) console.warn('[PushNotifications] click listener attach failed:', err);
+      }
+    });
 
     return () => {
-      try {
-        OneSignal.Notifications.removeEventListener('click', onClick);
-      } catch {}
+      cancelled = true;
+      if (attached) {
+        try {
+          OneSignal.Notifications.removeEventListener('click', attached);
+        } catch {}
+      }
     };
   }, []);
 
@@ -383,7 +395,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
     };
 
-    Linking.getInitialURL().then((url) => { if (url) parseSessionFromUrl(url); });
+    Linking.getInitialURL()
+      .then((url) => { if (url) parseSessionFromUrl(url); })
+      .catch((e) => logError(e, 'layout.getInitialURL'));
     const sub = Linking.addEventListener('url', ({ url }) => { if (url) parseSessionFromUrl(url); });
     return () => sub.remove();
   }, []);
@@ -607,6 +621,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       {authedUserId && !surveyPlan && !showReviewAsk && (
         <AlbumUploadPromptModal userId={authedUserId} />
       )}
+      <KeyboardDoneBar />
       {authedUserId && surveyCheckDone && !surveyPlan && !showReviewAsk && (
         <MarkEarnedModal userId={authedUserId} />
       )}

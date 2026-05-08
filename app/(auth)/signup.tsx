@@ -22,6 +22,7 @@ import {
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
@@ -269,6 +270,7 @@ export default function SignupScreen() {
                   returnKeyType="next"
                   onSubmitEditing={() => lastNameInputRef.current?.focus()}
                   editable={!loading}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
                 <TextInput
                   ref={lastNameInputRef}
@@ -287,6 +289,7 @@ export default function SignupScreen() {
                   returnKeyType="next"
                   onSubmitEditing={() => emailInputRef.current?.focus()}
                   editable={!loading}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
               </View>
               <View style={styles.gap12} />
@@ -310,6 +313,7 @@ export default function SignupScreen() {
                 returnKeyType="next"
                 onSubmitEditing={() => passwordInputRef.current?.focus()}
                 editable={!loading}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
               <View style={styles.gap12} />
 
@@ -330,6 +334,7 @@ export default function SignupScreen() {
                   returnKeyType="done"
                   onSubmitEditing={handleSignUp}
                   editable={!loading}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
                 <TouchableOpacity
                   hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}

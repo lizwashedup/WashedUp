@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
 import { AlbumsGrid } from '../../../components/albums/AlbumsGrid';
 import MiniProfileCard from '../../../components/MiniProfileCard';
@@ -709,6 +710,9 @@ export default function YourPeopleScreen() {
           onChangeText={setSearchQuery}
           autoCapitalize="none"
           autoCorrect={false}
+          returnKeyType="done"
+          onSubmitEditing={Keyboard.dismiss}
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -733,6 +737,7 @@ export default function YourPeopleScreen() {
               data={searchResults}
               keyExtractor={(item) => item.id}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
               contentContainerStyle={styles.searchListContent}
               renderItem={({ item }) => {
                 const isFriend = friendIds.has(item.id);
@@ -777,7 +782,7 @@ export default function YourPeopleScreen() {
           )}
         </View>
       ) : (
-        <ScrollView decelerationRate="normal" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 32 }} keyboardDismissMode="on-drag">
+        <ScrollView decelerationRate="normal" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 32 }} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
           {/* Pending invite cards */}
           {visibleInvites.length > 0 && (
             <View style={styles.inviteCardsSection}>
@@ -874,6 +879,9 @@ export default function YourPeopleScreen() {
                     autoCapitalize="none"
                     autoCorrect={false}
                     maxLength={20}
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                    inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                   />
                 </View>
                 {checkingHandle ? (

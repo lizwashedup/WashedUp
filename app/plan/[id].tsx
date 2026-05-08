@@ -35,6 +35,7 @@ import {
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
@@ -1236,6 +1237,8 @@ export default function PlanDetailScreen() {
         decelerationRate="normal"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         {/* Hero image — hide entirely if no URL or if the URL fails to load
             (some legacy plans store a webpage URL instead of an image asset). */}
@@ -1714,6 +1717,7 @@ export default function PlanDetailScreen() {
               onChangeText={setJoinMessage}
               multiline
               maxLength={200}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <Text style={joinStyles.hint}>This will be posted to the group chat when you join</Text>
 
@@ -1921,6 +1925,9 @@ export default function PlanDetailScreen() {
                 maxLength={80}
                 placeholder="Plan title"
                 placeholderTextColor={Colors.textLight}
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
 
               {/* Date & time */}
@@ -1956,6 +1963,7 @@ export default function PlanDetailScreen() {
                 maxLength={500}
                 placeholder="What's the plan? Dress code, what to expect..."
                 placeholderTextColor={Colors.textLight}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
 
               {/* Creator note */}
@@ -1968,6 +1976,7 @@ export default function PlanDetailScreen() {
                 maxLength={150}
                 placeholder="A personal note to people joining"
                 placeholderTextColor={Colors.textLight}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
               <Text style={manageStyles.hint}>Min 10 characters · Max 150</Text>
 
@@ -2016,6 +2025,9 @@ export default function PlanDetailScreen() {
                 placeholderTextColor={Colors.textLight}
                 autoCapitalize="none"
                 keyboardType="url"
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
 
               {/* Category */}

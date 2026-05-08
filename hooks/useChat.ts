@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { checkContent } from '../lib/contentFilter';
+import { logError } from '../lib/logger';
 import { useQueryClient } from '@tanstack/react-query';
 import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
 
@@ -269,7 +270,7 @@ export function useChat(eventId: string) {
     }
 
     } catch (err) {
-      console.warn('[WashedUp] Reaction toggle failed, rolling back:', err);
+      logError(err, 'useChat.toggleReaction');
       setMessages(prev => prev.map(m =>
         m.id === messageId ? { ...m, reactions: snapshot } : m,
       ));
@@ -292,6 +293,7 @@ export function useChat(eventId: string) {
       .eq('user_id', userId);
 
     if (error) {
+      logError(error, 'useChat.deleteMessage');
       setMessages(previousMessages);
       Alert.alert('Could not delete', 'Something went wrong. Please try again.');
     }
@@ -347,6 +349,7 @@ export function useChat(eventId: string) {
     const { data: inserted, error } = await supabase.from('messages').insert(insertData).select('id, created_at').single();
 
     if (error) {
+      logError(error, 'useChat.sendMessage');
       setMessages(prev => prev.filter(m => m.id !== optimisticId));
       Alert.alert("Couldn't send message", "Your message failed to send. Please try again.");
     } else if (inserted) {
@@ -387,6 +390,7 @@ export function useChat(eventId: string) {
     }).select('id, created_at').single();
 
     if (error) {
+      logError(error, 'useChat.sendLocation');
       setMessages(prev => prev.filter(m => m.id !== optimisticId));
       Alert.alert("Couldn't send location", "Your location failed to send. Please try again.");
     } else if (inserted) {
@@ -412,6 +416,7 @@ export function useChat(eventId: string) {
       .eq('user_id', userId);
 
     if (error) {
+      logError(error, 'useChat.editMessage');
       fetchMessages(true);
       Alert.alert('Could not edit', 'Something went wrong. Please try again.');
     }

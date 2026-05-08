@@ -1,8 +1,9 @@
 /**
- * Builds the share content for a plan. The URL goes in both `message` and
- * `url` so receiving apps that read only `message` (WhatsApp, iMessage) still
- * get a clickable link, while apps that read `url` (Mail, AirDrop) still get
- * a rich preview. URL is on its own line so messengers render it as a link.
+ * Builds the share content for a plan. `message` is the human-readable label
+ * (title + date + venue), `url` is the deep-linkable URL. The caller passes
+ * both to React Native's Share.share — keeping the URL out of `message` avoids
+ * the URL being rendered twice on iOS apps that concatenate both fields
+ * (e.g. WhatsApp shows message+url back-to-back).
  */
 interface SharePlanInput {
   id: string;
@@ -36,9 +37,8 @@ export function buildPlanShareContent(plan: SharePlanInput): { message: string; 
     if (venue) parts.push(venue);
   }
 
-  const firstLine = parts.join(' · ');
+  const message = parts.join(' · ');
   const url = getPlanShareUrl(plan);
-  const message = `${firstLine}\n${url}`;
 
   return { message, url };
 }

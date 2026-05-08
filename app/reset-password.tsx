@@ -22,6 +22,7 @@ import { supabase } from '../lib/supabase';
 import { friendlyError } from '../lib/friendlyError';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../components/keyboard/KeyboardDoneBar';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -103,6 +104,7 @@ export default function ResetPasswordScreen() {
                 returnKeyType="next"
                 onSubmitEditing={() => confirmInputRef.current?.focus()}
                 editable={!loading}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
               <TouchableOpacity
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -133,6 +135,7 @@ export default function ResetPasswordScreen() {
                 returnKeyType="done"
                 onSubmitEditing={handleSubmit}
                 editable={!loading}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
               <TouchableOpacity
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}

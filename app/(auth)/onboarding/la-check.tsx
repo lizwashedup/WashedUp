@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import { router } from 'expo-router';
 import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
@@ -181,6 +182,7 @@ export default function OnboardingLACheckScreen() {
                     editable={!loading}
                     returnKeyType="done"
                     onSubmitEditing={Keyboard.dismiss}
+                    inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                   />
 
                   <TouchableOpacity

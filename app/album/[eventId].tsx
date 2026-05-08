@@ -4,10 +4,11 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActionSheetIOS, ActivityIndicator, Alert, Dimensions, FlatList, Modal,
+  ActionSheetIOS, ActivityIndicator, Alert, Dimensions, FlatList, Keyboard, Modal,
   Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput,
   TouchableOpacity, View,
 } from 'react-native';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { captureRef } from 'react-native-view-shot';
 import { BrandedShareCanvas } from '../../components/albums/BrandedShareCanvas';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
+import { logError } from '../../lib/logger';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const GRID_COLS = 2;
@@ -110,13 +112,22 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
     uploads = await Promise.all(
       (rawUploads ?? []).map(async (u) => {
         const path = u.display_url || u.media_url;
-        const { data: signedData } = await supabase.storage
-          .from('album-media')
-          .createSignedUrl(path, SIGNED_URL_TTL);
+        let signedUrl: string | null = null;
+        try {
+          const { data: signedData, error } = await supabase.storage
+            .from('album-media')
+            .createSignedUrl(path, SIGNED_URL_TTL);
+          if (error) throw error;
+          signedUrl = signedData?.signedUrl ?? null;
+        } catch (err) {
+          // One bad signed URL shouldn't take down the whole album. Log and
+          // keep going — that asset just renders without an image.
+          logError(err, 'album.createSignedUrl');
+        }
         return {
           ...u,
           uploader_name: nameByUserId.get(u.user_id) ?? null,
-          signed_display_url: signedData?.signedUrl ?? null,
+          signed_display_url: signedUrl,
         } as any;
       }),
     );
@@ -442,7 +453,7 @@ export default function AlbumDetailScreen() {
 
   return (
     <View style={styles.root}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {/* Hero */}
         <View style={styles.hero}>
           {coverUri ? (
@@ -509,6 +520,9 @@ export default function AlbumDetailScreen() {
               placeholder={album.event_title}
               placeholderTextColor={Colors.warmGray}
               maxLength={80}
+              returnKeyType="done"
+              onSubmitEditing={Keyboard.dismiss}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <Ionicons name="pencil-outline" size={16} color={Colors.warmGray} />
           </View>
@@ -521,6 +535,7 @@ export default function AlbumDetailScreen() {
               placeholderTextColor={Colors.warmGray}
               multiline
               maxLength={500}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
           </View>
         </View>

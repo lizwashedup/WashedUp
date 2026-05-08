@@ -6,12 +6,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet,
+  ActivityIndicator, Alert, Keyboard, Platform, Pressable, ScrollView, StyleSheet,
   Switch, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import { supabase } from '../../../lib/supabase';
 import { enqueueAlbumUploadBatch, AlbumUploadInput } from '../../../lib/uploadAlbumMedia';
 
@@ -39,6 +40,39 @@ type SelectedAsset = {
   fileSizeBytes?: number;
   videoDurationSec?: number;
 };
+
+type RejectionCounts = {
+  tooLong: number;
+  tooBig: number;
+  unreadable: number;
+  capDropped: number;
+  transcodeFailed: number;
+};
+
+function rejectionMessage(r: RejectionCounts): string {
+  if (r.transcodeFailed > 0 && r.tooLong + r.tooBig + r.unreadable + r.capDropped === 0) {
+    // iOS interrupts the AVFoundation re-encode when the app gets backgrounded
+    // mid-pick or the system is busy. Recovery is to retry.
+    return "Couldn't process that video. Please try picking it again.";
+  }
+  const parts: string[] = [];
+  if (r.tooLong > 0) {
+    parts.push(`${r.tooLong} ${r.tooLong === 1 ? 'video was' : 'videos were'} longer than ${MAX_VIDEO_SEC} seconds`);
+  }
+  if (r.tooBig > 0) {
+    parts.push(`${r.tooBig} ${r.tooBig === 1 ? 'video was' : 'videos were'} over ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB`);
+  }
+  if (r.unreadable > 0) {
+    parts.push(`${r.unreadable} ${r.unreadable === 1 ? "video's length couldn't be read" : "videos' lengths couldn't be read"}`);
+  }
+  if (r.capDropped > 0) {
+    parts.push(`${r.capDropped} extra over the ${PHOTO_CAP}-photo, ${VIDEO_CAP}-video limit`);
+  }
+  if (r.transcodeFailed > 0) {
+    parts.push(`${r.transcodeFailed} ${r.transcodeFailed === 1 ? 'video' : 'videos'} couldn't be processed`);
+  }
+  return `Skipped ${parts.join(', ')}. Try a shorter or smaller clip.`;
+}
 
 function formatExtFromName(filename: string | null | undefined): string {
   if (!filename) return '';
@@ -76,6 +110,7 @@ export default function AlbumUploadScreen() {
   const [tiktok, setTiktok] = useState('');
   const [testimonial, setTestimonial] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [rejection, setRejection] = useState<RejectionCounts | null>(null);
 
   // Resolve user + event title.
   React.useEffect(() => {
@@ -108,6 +143,8 @@ export default function AlbumUploadScreen() {
       Alert.alert('Photos access needed', 'WashedUp needs access to your photos to add them to the album.');
       return;
     }
+    setRejection(null);
+    const rej: RejectionCounts = { tooLong: 0, tooBig: 0, unreadable: 0, capDropped: 0, transcodeFailed: 0 };
 
     // videoExportPreset is iOS-only (silently ignored on Android). Wrapping it
     // in a Platform check makes the divergence intentional: iOS forces H.264
@@ -115,16 +152,26 @@ export default function AlbumUploadScreen() {
     // clients; Android takes the device's native export (typically H.264 MP4
     // already on modern cameras). Server-side ffmpeg transcode for non-MP4
     // edge cases is deferred to v1.1.
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
-      allowsMultipleSelection: true,
-      selectionLimit: PHOTO_CAP + VIDEO_CAP,
-      quality: 1,
-      videoMaxDuration: MAX_VIDEO_SEC,
-      ...(Platform.OS === 'ios'
-        ? { videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality }
-        : {}),
-    });
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        allowsMultipleSelection: true,
+        selectionLimit: PHOTO_CAP + VIDEO_CAP,
+        quality: 1,
+        videoMaxDuration: MAX_VIDEO_SEC,
+        ...(Platform.OS === 'ios'
+          ? { videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality }
+          : {}),
+      });
+    } catch (err) {
+      // iOS AVFoundation throws "Operation Interrupted" when the re-encode is
+      // cut short (app backgrounded mid-pick, system load, etc). Surface it as
+      // an inline note rather than letting it propagate to onunhandledrejection.
+      if (__DEV__) console.warn('[AlbumUpload] picker failed:', err);
+      setRejection({ tooLong: 0, tooBig: 0, unreadable: 0, capDropped: 0, transcodeFailed: 1 });
+      return;
+    }
     if (result.canceled || !result.assets) return;
 
     const newAssets: SelectedAsset[] = [];
@@ -132,23 +179,17 @@ export default function AlbumUploadScreen() {
       const isVideo = a.type === 'video';
       const ext = formatExtFromName(a.fileName) || (isVideo ? 'mp4' : 'jpg');
       if (isVideo && (a.duration ?? 0) > MAX_VIDEO_SEC * 1000) {
-        Alert.alert('Video too long', 'Videos must be 60 seconds or less. Trim this video or choose another.');
+        rej.tooLong += 1;
         continue;
       }
       if (isVideo && (a.fileSize ?? 0) > MAX_VIDEO_BYTES) {
-        Alert.alert(
-          'Video too large',
-          'This video is over 200 MB and might crash the upload. Try a shorter clip or a lower-resolution recording.',
-        );
+        rej.tooBig += 1;
         continue;
       }
       if (isVideo && !a.duration) {
         // Defense against malformed video metadata that would slip past the
         // 60-second cap on the server (the duration column allows NULL).
-        Alert.alert(
-          'Couldn’t read this video',
-          'We couldn’t read the length of this video. Try a different one.',
-        );
+        rej.unreadable += 1;
         continue;
       }
       newAssets.push({
@@ -161,25 +202,23 @@ export default function AlbumUploadScreen() {
       });
     }
 
-    // Enforce caps after adding.
-    setAssets((prev) => {
-      const merged = [...prev, ...newAssets];
-      const photos: SelectedAsset[] = [];
-      const videos: SelectedAsset[] = [];
-      for (const item of merged) {
-        if (item.contentType === 'photo' && photos.length < PHOTO_CAP) photos.push(item);
-        else if (item.contentType === 'video' && videos.length < VIDEO_CAP) videos.push(item);
-      }
-      const dropped = merged.length - (photos.length + videos.length);
-      if (dropped > 0) {
-        Alert.alert(
-          'Cap reached',
-          `You can upload up to ${PHOTO_CAP} photos and ${VIDEO_CAP} videos.`,
-        );
-      }
-      return [...photos, ...videos];
-    });
-  }, []);
+    // Enforce caps after adding. Compute the merged set against the current
+    // closure value of `assets` so we can read the dropped count before the
+    // next render — using setAssets's updater would defer that to the commit
+    // phase, after we've already called setRejection.
+    const merged = [...assets, ...newAssets];
+    const photos: SelectedAsset[] = [];
+    const videos: SelectedAsset[] = [];
+    for (const item of merged) {
+      if (item.contentType === 'photo' && photos.length < PHOTO_CAP) photos.push(item);
+      else if (item.contentType === 'video' && videos.length < VIDEO_CAP) videos.push(item);
+    }
+    rej.capDropped = merged.length - (photos.length + videos.length);
+    setAssets([...photos, ...videos]);
+
+    const total = rej.tooLong + rej.tooBig + rej.unreadable + rej.capDropped;
+    setRejection(total > 0 ? rej : null);
+  }, [assets]);
 
   const removeAsset = useCallback((uri: string) => {
     setAssets((prev) => prev.filter((a) => a.uri !== uri));
@@ -244,7 +283,7 @@ export default function AlbumUploadScreen() {
         <View style={styles.headerBtn} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {/* Pitch */}
         <Text style={styles.pitch}>
           Everyone took photos. Now put them together. Upload yours and get everyone else's back.
@@ -261,6 +300,12 @@ export default function AlbumUploadScreen() {
           <Text style={styles.countText}>
             {photoCount} {photoCount === 1 ? 'photo' : 'photos'}, {videoCount} {videoCount === 1 ? 'video' : 'videos'} selected
           </Text>
+        )}
+        {rejection && (
+          <View style={styles.rejectionRow}>
+            <Ionicons name="information-circle-outline" size={16} color={Colors.gold} />
+            <Text style={styles.rejectionText}>{rejectionMessage(rejection)}</Text>
+          </View>
         )}
         {assets.length > 0 && (
           <View style={styles.preview}>
@@ -363,6 +408,9 @@ export default function AlbumUploadScreen() {
                     autoCapitalize="none"
                     autoCorrect={false}
                     placeholder=""
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                    inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                   />
                 </View>
               </View>
@@ -378,6 +426,9 @@ export default function AlbumUploadScreen() {
                     autoCapitalize="none"
                     autoCorrect={false}
                     placeholder=""
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                    inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                   />
                 </View>
               </View>
@@ -393,6 +444,7 @@ export default function AlbumUploadScreen() {
                   multiline
                   numberOfLines={3}
                   placeholder=""
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
               </View>
             </View>
@@ -449,6 +501,20 @@ const styles = StyleSheet.create({
   countText: {
     fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM,
     color: Colors.textMedium, marginTop: 8,
+  },
+  rejectionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  rejectionText: {
+    flex: 1,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
+    lineHeight: 18,
   },
   preview: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
   previewTile: { width: 84, height: 84, borderRadius: 8, overflow: 'hidden', backgroundColor: Colors.inputBg },

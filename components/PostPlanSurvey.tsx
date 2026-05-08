@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { KEYBOARD_DONE_ACCESSORY_ID } from './keyboard/KeyboardDoneBar';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '../constants/Colors';
@@ -331,6 +332,7 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
               multiline
               maxLength={500}
               textAlignVertical="top"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <TouchableOpacity style={styles.primaryButton} onPress={handleDone} activeOpacity={0.85} disabled={submitting}>
               <Text style={styles.primaryButtonText}>Done</Text>

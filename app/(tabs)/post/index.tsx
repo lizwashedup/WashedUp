@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import {
   View,
   Text,
@@ -1083,6 +1084,7 @@ export default function PostScreen() {
               onChangeText={setTitle}
               maxLength={80}
               returnKeyType="next"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
           </View>
 
@@ -1261,6 +1263,8 @@ export default function PostScreen() {
                 maxLength={40}
                 autoCorrect={false}
                 returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
             )}
           </View>
@@ -1280,6 +1284,7 @@ export default function PostScreen() {
               returnKeyType="next"
               autoCapitalize="none"
               keyboardType="url"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
           </View>
 
@@ -1364,6 +1369,7 @@ export default function PostScreen() {
               multiline
               numberOfLines={4}
               textAlignVertical="top"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
           </View>
 
@@ -1382,6 +1388,7 @@ export default function PostScreen() {
               multiline
               numberOfLines={2}
               textAlignVertical="top"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <Text style={styles.stepperHint}>Min {MSG_MIN} characters · Max {MSG_LIMIT}</Text>
           </View>

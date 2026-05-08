@@ -10,6 +10,7 @@ import {
   Keyboard,
   ScrollView,
 } from 'react-native';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -143,6 +144,7 @@ export default function ScenePage() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         {/* Hero: photo with gradient fade */}
         <View style={styles.hero}>
@@ -188,6 +190,7 @@ export default function ScenePage() {
                 maxLength={200}
                 returnKeyType="done"
                 onSubmitEditing={handleSubmit}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
             </Animated.View>
             {!suggestion && !inputFocused && (

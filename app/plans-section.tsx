@@ -12,6 +12,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
+import { logError } from '../lib/logger';
 import { fetchPlans, Plan } from '../lib/fetchPlans';
 import { PlanCard } from '../components/plans/PlanCard';
 import { ReportModal } from '../components/modals/ReportModal';
@@ -49,7 +50,9 @@ export default function PlansSectionScreen() {
   const [reportTarget, setReportTarget] = React.useState<{ userId: string; userName: string; eventId: string } | null>(null);
   const { blockUser } = useBlock();
   React.useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+    supabase.auth.getUser()
+      .then(({ data }) => setUserId(data.user?.id ?? null))
+      .catch((e) => logError(e, 'plansSection.getUser'));
   }, []);
 
   // Read from the same cache as the feed — no extra network request

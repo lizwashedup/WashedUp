@@ -14,6 +14,7 @@ import {
   UIManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { hapticLight } from '../../../lib/haptics';
@@ -160,6 +161,7 @@ export default function OnboardingReferralScreen() {
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.gap20} />
@@ -200,6 +202,7 @@ export default function OnboardingReferralScreen() {
                   editable={!loading}
                   returnKeyType="done"
                   onSubmitEditing={Keyboard.dismiss}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
               </View>
             )}

@@ -26,6 +26,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 
 interface SceneEvent {
   id: string;
@@ -285,6 +286,8 @@ export default function AdminEventsScreen() {
           decelerationRate="normal"
           style={styles.list}
           contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
           {liveEvents.length > 0 && (
@@ -320,6 +323,7 @@ export default function AdminEventsScreen() {
               value={broadcastTitle}
               onChangeText={setBroadcastTitle}
               maxLength={100}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <TextInput
               style={[styles.broadcastInput, { minHeight: 60 }]}
@@ -329,6 +333,7 @@ export default function AdminEventsScreen() {
               onChangeText={setBroadcastBody}
               multiline
               maxLength={300}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <TouchableOpacity
               style={[styles.broadcastBtn, (!broadcastTitle.trim() || sendingBroadcast) && { opacity: 0.5 }]}
@@ -491,6 +496,7 @@ function FormField({ label, value, onChange, multiline = false, placeholder, aut
         placeholderTextColor={Colors.textLight}
         multiline={multiline}
         autoCapitalize={autoCapitalize}
+        inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
       />
     </View>
   );

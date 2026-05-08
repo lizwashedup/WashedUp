@@ -147,7 +147,6 @@ export default function PhoneEntryScreen() {
               onChangeText={handlePhoneChange}
               onSubmitEditing={handleContinue}
               error={error ?? undefined}
-              autoFocus
               editable={!submitting}
             />
 

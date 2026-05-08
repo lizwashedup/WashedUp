@@ -21,6 +21,8 @@ import { friendlyError } from '../../lib/friendlyError';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
+import { Keyboard } from 'react-native';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 
 interface AdminUser {
   id: string;
@@ -135,6 +137,9 @@ export default function AdminUsersScreen() {
           onChangeText={setSearch}
           autoCorrect={false}
           autoCapitalize="none"
+          returnKeyType="done"
+          onSubmitEditing={Keyboard.dismiss}
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
         />
       </View>
 
@@ -148,6 +153,7 @@ export default function AdminUsersScreen() {
           style={styles.list}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
           <Text style={styles.countLabel}>

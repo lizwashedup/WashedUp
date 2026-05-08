@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -235,6 +236,7 @@ export default function LoginScreen() {
                 returnKeyType="next"
                 onSubmitEditing={() => passwordInputRef.current?.focus()}
                 editable={!loading}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
               <View style={styles.gap12} />
 
@@ -255,6 +257,7 @@ export default function LoginScreen() {
                   returnKeyType="done"
                   onSubmitEditing={handleLogin}
                   editable={!loading}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
                 <TouchableOpacity
                   hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -389,6 +392,9 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               editable={!resetLoading}
+              returnKeyType="done"
+              onSubmitEditing={Keyboard.dismiss}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             {resetError ? <Text style={modalStyles.errorText}>{resetError}</Text> : null}
             <TouchableOpacity

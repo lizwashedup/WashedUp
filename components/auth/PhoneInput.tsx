@@ -3,6 +3,7 @@ import { View, Text, TextInput, StyleSheet } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
 import { formatDisplay, stripDigits } from '../../lib/phoneFormat';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 
 type Props = {
   value: string;
@@ -64,6 +65,7 @@ export const PhoneInput = forwardRef<PhoneInputHandle, Props>(function PhoneInpu
           maxLength={14}
           returnKeyType="done"
           selectionColor={Colors.brand}
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
         />
       </View>
       {hasError ? (

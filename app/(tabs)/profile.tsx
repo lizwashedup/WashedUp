@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -27,6 +28,7 @@ import { supabase } from '../../lib/supabase';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { friendlyError } from '../../lib/friendlyError';
+import { logError } from '../../lib/logger';
 import { PROFILE_PHOTO_KEY } from '../../constants/QueryKeys';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
@@ -156,7 +158,7 @@ export default function ProfileScreen() {
           fun_fact: (data as any).fun_fact ?? null,
         });
       }
-    } catch {}
+    } catch (e) { logError(e, 'profile.fetchProfile'); }
     setLoading(false);
   };
 
@@ -437,13 +439,15 @@ export default function ProfileScreen() {
   const notificationRows = [
     { icon: 'notifications-outline', label: 'Enable notifications', onPress: handleEnablePushFromSettings },
   ];
+  const openExternal = (url: string, ctx: string) =>
+    Linking.openURL(url).catch((e) => logError(e, ctx));
   const legalRows = [
-    { icon: 'shield-outline', label: 'Privacy Policy', onPress: () => Linking.openURL('https://washedup.app/privacy') },
-    { icon: 'document-text-outline', label: 'Terms of Service', onPress: () => Linking.openURL('https://washedup.app/terms') },
-    { icon: 'people-outline', label: 'Community Guidelines', onPress: () => Linking.openURL('https://washedup.app/guidelines') },
+    { icon: 'shield-outline', label: 'Privacy Policy', onPress: () => openExternal('https://washedup.app/privacy', 'profile.openPrivacy') },
+    { icon: 'document-text-outline', label: 'Terms of Service', onPress: () => openExternal('https://washedup.app/terms', 'profile.openTerms') },
+    { icon: 'people-outline', label: 'Community Guidelines', onPress: () => openExternal('https://washedup.app/guidelines', 'profile.openGuidelines') },
   ];
   const supportRows = [
-    { icon: 'mail-outline', label: 'Contact Us', onPress: () => Linking.openURL('mailto:hello@washedup.app') },
+    { icon: 'mail-outline', label: 'Contact Us', onPress: () => openExternal('mailto:hello@washedup.app', 'profile.openMailto') },
   ];
   const interestRows = [
     { icon: 'heart-outline', label: "Plans you're interested in", onPress: () => router.push('/settings/interests' as any) },
@@ -538,6 +542,9 @@ export default function ProfileScreen() {
                 placeholderTextColor={Colors.textLight}
                 autoCapitalize="characters"
                 autoCorrect={false}
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
               <TouchableOpacity
                 style={[
@@ -628,6 +635,7 @@ export default function ProfileScreen() {
               maxLength={30}
               autoCorrect={false}
               returnKeyType="next"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
           </View>
 
@@ -645,6 +653,7 @@ export default function ProfileScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="next"
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
             </View>
             {checkingHandle ? (
@@ -669,6 +678,7 @@ export default function ProfileScreen() {
               multiline
               textAlignVertical="top"
               returnKeyType="default"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <Text style={styles.editCharCount}>{editFunFact.length}/120</Text>
             <Text style={styles.editHelp}>This shows on your profile and when people tap your picture</Text>
@@ -698,6 +708,8 @@ export default function ProfileScreen() {
                 maxLength={40}
                 autoCorrect={false}
                 returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
             )}
             <Text style={styles.editHelp}>Where you're based (shown on your mini profile)</Text>

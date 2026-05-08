@@ -88,7 +88,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         // always agree.
         const { data } = await supabase
           .from('app_notifications')
-          .select('id, type, title, body, event_id, status, expires_at, created_at')
+          .select('id, type, title, body, event_id, actor_user_id, status, expires_at, created_at')
           .eq('user_id', userId)
           .eq('status', 'unread')
           .neq('type', 'plan_invite')
@@ -99,40 +99,27 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
 
         if (!data || data.length === 0) return [];
 
-        // Try to extract sender name from title (e.g. "Hello joined your plan!" → "Hello")
-        // and look up their profile photo. interest_signal/interest_invite both
-        // start with the relevant person's first name in their title.
-        const nameMatches = data
-          .filter((n: any) =>
-            n.type === 'member_joined' ||
-            n.type === 'invite_accepted' ||
-            n.type === 'interest_signal' ||
-            n.type === 'interest_invite'
-          )
-          .map((n: any) => {
-            const match = n.title?.match(/^(\S+)\s/);
-            return match?.[1] ?? null;
-          })
-          .filter(Boolean);
-
+        // Resolve avatars by structured actor_user_id (set by the relevant
+        // notification triggers). Old rows pre-migration carry NULL and fall
+        // through to the Bell fallback in the renderer.
+        const actorIds = Array.from(
+          new Set((data as any[]).map((n) => n.actor_user_id).filter(Boolean))
+        );
         let photoMap: Record<string, string> = {};
-        if (nameMatches.length > 0) {
+        if (actorIds.length > 0) {
           const { data: profiles } = await supabase
             .from('profiles_public')
-            .select('first_name_display, profile_photo_url')
-            .in('first_name_display', nameMatches);
+            .select('id, profile_photo_url')
+            .in('id', actorIds);
           (profiles ?? []).forEach((p: any) => {
-            if (p.profile_photo_url && p.first_name_display) {
-              photoMap[p.first_name_display] = p.profile_photo_url;
-            }
+            if (p.id && p.profile_photo_url) photoMap[p.id] = p.profile_photo_url;
           });
         }
 
-        return data.map((n: any) => {
-          const match = n.title?.match(/^(\S+)\s/);
-          const senderName = match?.[1] ?? null;
-          return { ...n, sender_photo: senderName ? (photoMap[senderName] ?? null) : null };
-        });
+        return (data as any[]).map((n) => ({
+          ...n,
+          sender_photo: n.actor_user_id ? (photoMap[n.actor_user_id] ?? null) : null,
+        }));
       } catch { return []; }
     },
     enabled: !!userId && visible,

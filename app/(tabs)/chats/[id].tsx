@@ -18,6 +18,7 @@ import {
   AppState,
   LayoutChangeEvent,
 } from 'react-native';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import * as Notifications from 'expo-notifications'; // setBadgeCountAsync only — local-only API, no server call. OneSignal SDK doesn't expose direct badge clear; revisit during cleanup.
 import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1402,6 +1403,7 @@ export default function ChatScreen() {
               autoCorrect={true}
               spellCheck={true}
               autoCapitalize="sentences"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               // Disable autofill so the Android IME's suggestion / spell-check
               // strip isn't suppressed on multiline inputs (Samsung & Gboard
               // both hide suggestions when autofill is active on a multiline).

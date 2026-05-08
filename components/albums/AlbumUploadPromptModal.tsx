@@ -113,7 +113,7 @@ export function AlbumUploadPromptModal({ userId }: { userId: string | null }) {
         <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title} numberOfLines={2}>{prompt.title}</Text>
           <Text style={styles.body}>
-            Everyone took photos. Now put them together. Upload yours and get everyone else's back. The more people share, the better the album.
+            Share your photos, get everyone else's.
           </Text>
           <TouchableOpacity style={styles.primaryBtn} onPress={handleUpload} activeOpacity={0.9}>
             <Text style={styles.primaryBtnText}>Upload photos + videos</Text>
@@ -146,15 +146,24 @@ const styles = StyleSheet.create({
     color: Colors.textMedium,
   },
   primaryBtn: {
-    backgroundColor: Colors.terracotta, paddingVertical: 14, borderRadius: 12,
-    alignItems: 'center', justifyContent: 'center', marginTop: 6,
-    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3, shadowRadius: 8,
+    backgroundColor: Colors.terracotta,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+    shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
   },
   primaryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   secondaryBtn: {
-    paddingVertical: 12, borderRadius: 12, alignItems: 'center',
-    borderWidth: 1.5, borderColor: Colors.terracotta,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  secondaryBtnText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  secondaryBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.warmGray },
 });
