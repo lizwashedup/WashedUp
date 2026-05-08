@@ -147,7 +147,7 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
   );
 });
 
-const CELL_W = 50;
+const CELL_W = 44;
 const CELL_H = 60;
 const CELL_RADIUS = 10;
 
@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 10,
+    gap: 6,
   },
   cell: {
     width: CELL_W,

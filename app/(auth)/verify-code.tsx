@@ -499,8 +499,8 @@ const styles = StyleSheet.create({
   cellsCard: {
     backgroundColor: Colors.cream,
     borderRadius: 16,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
     shadowColor: Colors.brandDeep,
     shadowOffset: { width: 0, height: 24 },
     shadowOpacity: 0.28,
