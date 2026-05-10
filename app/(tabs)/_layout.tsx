@@ -97,7 +97,7 @@ export default function TabLayout() {
       const dest = authedDest({
         onboarding_status: profile?.onboarding_status ?? null,
         referral_source: profile?.referral_source ?? null,
-        phone_number: profile?.phone_number ?? null,
+        auth_phone: user.phone ?? null,
       });
       if (dest !== '/(tabs)/plans') {
         console.log('[tabs_guard] bouncing to', dest);

@@ -442,7 +442,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           for (let attempt = 0; attempt < 2; attempt++) {
             const { data, error: e } = await supabase
               .from('profiles')
-              .select('onboarding_status, referral_source, phone_number')
+              .select('onboarding_status, referral_source')
               .eq('id', session.user.id)
               .single();
             if (!e && data) return data as any;
@@ -483,7 +483,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         const dest = authedDest({
           onboarding_status: profileData.onboarding_status,
           referral_source: profileData.referral_source,
-          phone_number: profileData.phone_number,
+          auth_phone: session.user.phone ?? null,
         });
         lastNavRef.current = { dest, ts: Date.now() };
         // Navigate first, then lift the overlay — prevents a 1-frame flash
@@ -566,7 +566,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         const dest = authedDest({
           onboarding_status: data?.onboarding_status,
           referral_source: data?.referral_source,
-          phone_number: data?.phone_number,
+          auth_phone: session.user.phone ?? null,
         });
         const now = Date.now();
         if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {

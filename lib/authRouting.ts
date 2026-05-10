@@ -47,21 +47,29 @@ export function onboardingDest(
 
 /**
  * Top-level destination for a freshly-authed user. Layers the migration
- * gate on top of onboardingDest: a user who has completed onboarding
- * but doesn't yet have a phone number on their profile gets routed to
- * /migration-gate (when phone auth is enabled and they haven't snoozed
- * this session).
+ * gate on top of onboardingDest: a completed user whose auth account has
+ * no verified phone yet gets routed to /migration-gate (when phone auth
+ * is enabled and they haven't snoozed this session).
+ *
+ * `auth_phone` MUST be auth.users.phone (i.e. session.user.phone), not
+ * profiles.phone_number. Supabase only writes auth.users.phone after a
+ * successful verifyOtp, so it's the one column that means "this person
+ * has a verified phone." profiles.phone_number is a denormalization —
+ * legacy email/Apple users may have a non-null string there from old
+ * signup forms, and brand-new phone signups land with phone_verified=false
+ * because handle_new_user doesn't set it. Reading from auth.users.phone
+ * avoids both traps.
  */
 export function authedDest(args: {
   onboarding_status: string | null | undefined;
   referral_source: string | null | undefined;
-  phone_number: string | null | undefined;
+  auth_phone: string | null | undefined;
 }): string {
-  const { onboarding_status, referral_source, phone_number } = args;
+  const { onboarding_status, referral_source, auth_phone } = args;
   if (
     PHONE_AUTH_ENABLED &&
     onboarding_status === 'complete' &&
-    !phone_number &&
+    !auth_phone &&
     !isMigrationGateSnoozed()
   ) {
     return '/migration-gate';
