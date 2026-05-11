@@ -145,7 +145,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
       {isPrideFlagCard && (
         <Image
           source={require('../../assets/images/pride-flag.png')}
-          style={[StyleSheet.absoluteFillObject as any, { opacity: 0.7 }]}
+          style={[StyleSheet.absoluteFillObject as any, { opacity: 0.5 }]}
           contentFit="cover"
           pointerEvents="none"
         />
