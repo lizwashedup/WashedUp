@@ -125,6 +125,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
   const creatorNote = plan.host_message ? `\u201C${plan.host_message}\u201D` : null;
   const attendees = plan.attendees ?? [];
   const isBirthdayParty = plan.featured_type === 'birthday_party';
+  const isPrideFlagCard = plan.slug === 'washedup-weho-pride-2026';
 
   return (
     <TouchableOpacity
@@ -136,10 +137,19 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
         styles.card,
         solo && styles.cardSolo,
         isBirthdayParty && { borderColor: Colors.birthdayPink },
+        isPrideFlagCard && { backgroundColor: 'transparent' },
       ]}
       accessibilityLabel={`${plan.title} ${isBirthdayParty ? 'Birthday Party' : 'WashedUp Event'}`}
       accessibilityRole="button"
     >
+      {isPrideFlagCard && (
+        <Image
+          source={require('../../assets/images/pride-flag.png')}
+          style={[StyleSheet.absoluteFillObject as any, { opacity: 0.7 }]}
+          contentFit="cover"
+          pointerEvents="none"
+        />
+      )}
       {/* Top row: pill on left, share + heart icons in the top-right corner */}
       <View style={styles.topRow}>
         <View
@@ -302,6 +312,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.goldenAmber,
     padding: 16,
     width: 300,
+    overflow: 'hidden',
   },
   cardSolo: {
     width: '100%' as any,
