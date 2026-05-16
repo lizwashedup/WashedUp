@@ -191,7 +191,7 @@ export default function TabLayout() {
         name="friends/index"
         options={{
           title: 'Your People',
-          tabBarLabel: 'People',
+          tabBarLabel: 'Yours',
           tabBarIcon: ({ color }) => (
             <View>
               <Ionicons name="people-outline" size={24} color={color} />

@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, FlatList, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
@@ -67,11 +67,19 @@ type AlbumRow = {
   prompt_sent_at: string | null;
   created_at: string;
   event_title: string;
+  custom_name: string | null;   // caller's personal album name, if set
   event_start_time: string;
   cover_signed_url: string | null;
 };
 
 const SIGNED_URL_TTL_SEC = 3600;
+
+// Fixed card width so a lone album reads as an intentional card, not a
+// full-width stretched polaroid. Mirrors the in-album tile math: screen
+// minus gridContent padding (12 each side) and PolaroidCard margin (8 each
+// side, both columns), split across 2 columns.
+const SCREEN_W = Dimensions.get('window').width;
+const CARD_W = Math.floor((SCREEN_W - 24 - 32) / 2);
 
 async function fetchAlbumsForUser(userId: string): Promise<AlbumRow[]> {
   // Step 1: events the user is currently joined to.
@@ -84,46 +92,69 @@ async function fetchAlbumsForUser(userId: string): Promise<AlbumRow[]> {
   const eventIds = (memberRows ?? []).map((r) => r.event_id);
   if (eventIds.length === 0) return [];
 
-  // Step 2: plan_albums for those events. RLS double-checks membership.
+  // Step 2: plan_albums for those events (skip archived). RLS double-checks
+  // membership.
   const { data: albums, error: aErr } = await supabase
     .from('plan_albums')
     .select('id, event_id, status, first_upload_at, prompt_sent_at, created_at')
     .in('event_id', eventIds)
+    .is('archived_at', null)
     .order('created_at', { ascending: false });
   if (aErr) throw aErr;
   if (!albums || albums.length === 0) return [];
 
-  // Step 3: hydrate event title + start_time for each album.
+  // Step 3: hydrate event title + start_time + cover-image fallback.
   const { data: events, error: eErr } = await supabase
     .from('events')
-    .select('id, title, start_time')
+    .select('id, title, start_time, image_url')
     .in('id', albums.map((a) => a.event_id));
   if (eErr) throw eErr;
   const eventById = new Map((events ?? []).map((e) => [e.id, e]));
 
-  // Step 4: for ready albums, find a single cover upload (first by created_at)
-  // visible to this viewer. RLS filters automatically.
+  // Step 3b: caller's per-album personalisation (custom name + chosen cover).
+  const albumIds = albums.map((a) => a.id);
+  const { data: metaRows } = await supabase
+    .from('album_user_metadata')
+    .select('plan_album_id, custom_name, cover_upload_id')
+    .eq('user_id', userId)
+    .in('plan_album_id', albumIds);
+  const customNameByAlbum = new Map<string, string | null>();
+  const chosenCoverByAlbum = new Map<string, string>();
+  for (const m of metaRows ?? []) {
+    customNameByAlbum.set(m.plan_album_id, m.custom_name ?? null);
+    if (m.cover_upload_id) chosenCoverByAlbum.set(m.plan_album_id, m.cover_upload_id);
+  }
+
+  // Step 4: for ready albums pick a cover storage path. Resolution order:
+  // caller's chosen photo -> first photo by created_at. (events.image_url is
+  // applied later as a final fallback; it is a plain URL, not a signed path.)
   const readyAlbumIds = albums.filter((a) => a.status === 'ready').map((a) => a.id);
   const coverByAlbumId = new Map<string, string>();
   if (readyAlbumIds.length > 0) {
     const { data: covers } = await supabase
       .from('album_uploads')
-      .select('plan_album_id, display_url, media_url, created_at')
+      .select('id, plan_album_id, display_url, media_url, created_at')
       .in('plan_album_id', readyAlbumIds)
       .is('deleted_at', null)
       .eq('content_type', 'photo')
       .order('created_at', { ascending: true });
-    // De-dupe to first upload per album.
+    const firstByAlbum = new Map<string, string>();
     for (const c of covers ?? []) {
-      if (!coverByAlbumId.has(c.plan_album_id)) {
-        const path = c.display_url || c.media_url;
-        if (path) coverByAlbumId.set(c.plan_album_id, path);
+      const path = c.display_url || c.media_url;
+      if (!path) continue;
+      if (!firstByAlbum.has(c.plan_album_id)) firstByAlbum.set(c.plan_album_id, path);
+      // If this upload is the caller's chosen cover, it wins.
+      if (chosenCoverByAlbum.get(c.plan_album_id) === c.id) {
+        coverByAlbumId.set(c.plan_album_id, path);
       }
+    }
+    for (const [albumId, path] of firstByAlbum) {
+      if (!coverByAlbumId.has(albumId)) coverByAlbumId.set(albumId, path);
     }
   }
 
   // Step 5: sign cover URLs in one batched call per album. Best-effort —
-  // if signing fails the card just shows the developing/placeholder state.
+  // if signing fails the card falls back to the plan image / placeholder.
   const signedByAlbum = new Map<string, string | null>();
   await Promise.all(
     Array.from(coverByAlbumId.entries()).map(async ([albumId, path]) => {
@@ -140,8 +171,9 @@ async function fetchAlbumsForUser(userId: string): Promise<AlbumRow[]> {
       ...a,
       status: a.status as PolaroidStatus,
       event_title: ev?.title ?? 'Plan',
+      custom_name: customNameByAlbum.get(a.id) ?? null,
       event_start_time: ev?.start_time ?? a.created_at,
-      cover_signed_url: signedByAlbum.get(a.id) ?? null,
+      cover_signed_url: signedByAlbum.get(a.id) ?? ev?.image_url ?? null,
     };
   });
 }
@@ -187,6 +219,29 @@ export function AlbumsGrid({ userId }: Props) {
   const handleAlbumPress = useCallback((eventId: string) => {
     router.push(`/album/${eventId}` as any);
   }, [router]);
+
+  // Manual archive: only offered for albums that still have zero photos.
+  const handleArchive = useCallback((eventId: string, title: string) => {
+    Alert.alert(
+      'Archive this album?',
+      `No one added photos to ${title}. Archiving hides it from your albums.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Archive',
+          style: 'destructive',
+          onPress: async () => {
+            const { error: archiveErr } = await supabase.rpc('archive_empty_album', { p_event_id: eventId });
+            if (archiveErr) {
+              Alert.alert('Could not archive', 'Please try again.');
+              return;
+            }
+            void refetch();
+          },
+        },
+      ],
+    );
+  }, [refetch]);
 
   if (isLoading) {
     return (
@@ -238,24 +293,46 @@ export function AlbumsGrid({ userId }: Props) {
           <Ionicons name="chevron-forward" size={16} color={Colors.terracotta} />
         </Pressable>
       )}
-      <FlatList
-        data={albums}
-        keyExtractor={(a) => a.id}
-        numColumns={2}
-        contentContainerStyle={styles.gridContent}
-        columnWrapperStyle={styles.gridRow}
-        renderItem={({ item, index }) => (
+      {albums.length === 1 ? (
+        <ScrollView contentContainerStyle={styles.singleContent}>
           <PolaroidCard
-            index={index}
-            title={item.event_title}
-            dateText={formatDate(item.event_start_time)}
-            coverUri={item.cover_signed_url}
-            status={item.status}
-            readyInLabel={item.status === 'developing' ? readyInLabel(item.first_upload_at) : undefined}
-            onPress={() => handleAlbumPress(item.event_id)}
+            index={0}
+            cardWidth={CARD_W}
+            title={albums[0].custom_name ?? albums[0].event_title}
+            dateText={formatDate(albums[0].event_start_time)}
+            coverUri={albums[0].cover_signed_url}
+            status={albums[0].status}
+            readyInLabel={albums[0].status === 'developing' ? readyInLabel(albums[0].first_upload_at) : undefined}
+            onPress={() => handleAlbumPress(albums[0].event_id)}
+            onLongPress={albums[0].first_upload_at == null
+              ? () => handleArchive(albums[0].event_id, albums[0].custom_name ?? albums[0].event_title)
+              : undefined}
           />
-        )}
-      />
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={albums}
+          keyExtractor={(a) => a.id}
+          numColumns={2}
+          contentContainerStyle={styles.gridContent}
+          columnWrapperStyle={styles.gridRow}
+          renderItem={({ item, index }) => (
+            <PolaroidCard
+              index={index}
+              cardWidth={CARD_W}
+              title={item.custom_name ?? item.event_title}
+              dateText={formatDate(item.event_start_time)}
+              coverUri={item.cover_signed_url}
+              status={item.status}
+              readyInLabel={item.status === 'developing' ? readyInLabel(item.first_upload_at) : undefined}
+              onPress={() => handleAlbumPress(item.event_id)}
+              onLongPress={item.first_upload_at == null
+                ? () => handleArchive(item.event_id, item.custom_name ?? item.event_title)
+                : undefined}
+            />
+          )}
+        />
+      )}
     </View>
   );
 }
@@ -289,6 +366,9 @@ const styles = StyleSheet.create({
   },
   gridContent: {
     paddingHorizontal: 12, paddingVertical: 8, paddingBottom: 60,
+  },
+  singleContent: {
+    alignItems: 'center', paddingTop: 24, paddingBottom: 60, paddingHorizontal: 12,
   },
   gridRow: { justifyContent: 'space-between' },
   dismissedBanner: {

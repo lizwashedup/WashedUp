@@ -12,6 +12,7 @@ export type PolaroidStatus = 'collecting' | 'developing' | 'ready';
 
 export type PolaroidCardProps = {
   index: number;                  // grid position; drives tilt
+  cardWidth: number;              // fixed card width so a lone card isn't stretched
   title: string;
   dateText: string;               // "Sat, May 3"
   attendeeSummary?: string;       // "with Haley, Ash +2"
@@ -19,6 +20,7 @@ export type PolaroidCardProps = {
   status: PolaroidStatus;
   readyInLabel?: string;          // "Ready in 6h" — used when developing
   onPress: () => void;
+  onLongPress?: () => void;       // e.g. archive an empty album
 };
 
 function pickTilt(index: number): number {
@@ -26,15 +28,18 @@ function pickTilt(index: number): number {
 }
 
 export const PolaroidCard = React.memo<PolaroidCardProps>(({
-  index, title, dateText, attendeeSummary, coverUri, status, readyInLabel, onPress,
+  index, cardWidth, title, dateText, attendeeSummary, coverUri, status, readyInLabel, onPress, onLongPress,
 }) => {
   const rotateDeg = useMemo(() => `${pickTilt(index)}deg`, [index]);
 
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={300}
       style={({ pressed }) => [
         styles.outer,
+        { width: cardWidth },
         { transform: [{ rotate: rotateDeg }] },
         pressed && styles.pressed,
       ]}
@@ -69,7 +74,6 @@ PolaroidCard.displayName = 'PolaroidCard';
 
 const styles = StyleSheet.create({
   outer: {
-    flex: 1,
     margin: 8,
   },
   pressed: {

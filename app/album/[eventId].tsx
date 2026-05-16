@@ -65,6 +65,7 @@ type AlbumPayload = {
     custom_name: string | null;
     memory_note: string | null;
     notifications_muted: boolean;
+    cover_upload_id: string | null;
   } | null;
 };
 
@@ -163,7 +164,7 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
   if (albumRow) {
     const { data: meta } = await supabase
       .from('album_user_metadata')
-      .select('custom_name, memory_note, notifications_muted')
+      .select('custom_name, memory_note, notifications_muted, cover_upload_id')
       .eq('plan_album_id', albumRow.id)
       .eq('user_id', user.id)
       .maybeSingle();
@@ -218,6 +219,8 @@ export default function AlbumDetailScreen() {
   const [savedName, setSavedName] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
+  // Caller's chosen cover photo (personal, persisted in album_user_metadata).
+  const [savedCover, setSavedCover] = useState<string | null>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['album', eventId],
@@ -245,7 +248,8 @@ export default function AlbumDetailScreen() {
     setSavedName(nm);
     setSavedNote(nt);
     setMuted(!!data?.myMetadata?.notifications_muted);
-  }, [data?.myMetadata?.custom_name, data?.myMetadata?.memory_note, data?.myMetadata?.notifications_muted]);
+    setSavedCover(data?.myMetadata?.cover_upload_id ?? null);
+  }, [data?.myMetadata?.custom_name, data?.myMetadata?.memory_note, data?.myMetadata?.notifications_muted, data?.myMetadata?.cover_upload_id]);
 
   // Debounced save: any draft change persists 600ms after the last keystroke.
   useEffect(() => {
@@ -260,14 +264,17 @@ export default function AlbumDetailScreen() {
         p_custom_name: nameDraft ?? '',
         p_memory_note: noteDraft ?? '',
         p_notifications_muted: muted,
+        p_cover_upload_id: savedCover,
       });
       if (!error) {
         setSavedName(nameDraft);
         setSavedNote(noteDraft);
+      } else {
+        Alert.alert('Could not save', 'Your album changes did not save. Please try again.');
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [nameDraft, noteDraft, savedName, savedNote, data?.album?.id, muted]);
+  }, [nameDraft, noteDraft, savedName, savedNote, data?.album?.id, muted, savedCover]);
 
   const toggleMute = useCallback(async () => {
     if (!data?.album?.id) return;
@@ -278,12 +285,13 @@ export default function AlbumDetailScreen() {
       p_custom_name: savedName ?? '',
       p_memory_note: savedNote ?? '',
       p_notifications_muted: next,
+      p_cover_upload_id: savedCover,
     });
     if (error) {
       setMuted(!next);
       Alert.alert('Could not update notifications', 'Please try again.');
     }
-  }, [data?.album?.id, muted, savedName, savedNote]);
+  }, [data?.album?.id, muted, savedName, savedNote, savedCover]);
 
   const handleShareViewedPhoto = useCallback(async () => {
     if (sharing) return;
@@ -389,7 +397,30 @@ export default function AlbumDetailScreen() {
     void refetch();
   }, [refetch]);
 
-  const showTileActions = useCallback((uploadId: string, isOwn: boolean) => {
+  // Personal cover: tap toggles this photo as the caller's album cover.
+  // Persisted alongside the rest of album_user_metadata so name/note/mute
+  // are preserved (the RPC upserts every column).
+  const setAsCover = useCallback(async (uploadId: string) => {
+    if (!data?.album?.id) return;
+    const next = savedCover === uploadId ? null : uploadId;
+    const prev = savedCover;
+    setSavedCover(next);
+    const { error } = await supabase.rpc('set_album_user_metadata', {
+      p_plan_album_id: data.album.id,
+      p_custom_name: savedName ?? '',
+      p_memory_note: savedNote ?? '',
+      p_notifications_muted: muted,
+      p_cover_upload_id: next,
+    });
+    if (error) {
+      setSavedCover(prev);
+      Alert.alert('Could not update cover', 'Please try again.');
+      return;
+    }
+    void refetch();
+  }, [data?.album?.id, savedCover, savedName, savedNote, muted, refetch]);
+
+  const showTileActions = useCallback((uploadId: string, isOwn: boolean, isPhoto: boolean) => {
     // Spec includes a "Save to phone" option here. Deferred to 1.0.4 — needs
     // expo-media-library (native module). Once installed, add a third option
     // that fetches the original signed URL and writes it to the photo album
@@ -397,41 +428,54 @@ export default function AlbumDetailScreen() {
     const hearted = isHearted(uploadId);
     const heartLabel = hearted ? 'Unheart' : 'Heart';
     const ownActionLabel = isOwn ? 'Delete' : 'Hide from my view';
-    const options = [heartLabel, ownActionLabel, 'Cancel'];
-    const cancelIndex = 2;
-    const destructiveIndex = 1;
 
-    const onPick = (idx: number) => {
-      if (idx === 0) void toggleHeart(uploadId);
-      else if (idx === 1) {
-        if (isOwn) {
-          Alert.alert(
-            'Delete this for everyone?',
-            'It will disappear from everyone\'s album immediately.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Delete', style: 'destructive', onPress: () => void deleteOwnUpload(uploadId) },
-            ],
-          );
-        } else {
-          void hideFromView(uploadId);
-        }
+    const runOwnAction = () => {
+      if (isOwn) {
+        Alert.alert(
+          'Delete this for everyone?',
+          'It will disappear from everyone\'s album immediately.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: () => void deleteOwnUpload(uploadId) },
+          ],
+        );
+      } else {
+        void hideFromView(uploadId);
       }
     };
 
+    // Build the action list dynamically: a cover toggle is only offered for
+    // photos (videos can't be a cover).
+    const actions: { label: string; destructive?: boolean; run: () => void }[] = [
+      { label: heartLabel, run: () => void toggleHeart(uploadId) },
+    ];
+    if (isPhoto) {
+      actions.push({
+        label: savedCover === uploadId ? 'Remove as album cover' : 'Set as album cover',
+        run: () => void setAsCover(uploadId),
+      });
+    }
+    actions.push({ label: ownActionLabel, destructive: true, run: runOwnAction });
+
     if (Platform.OS === 'ios') {
+      const options = [...actions.map((a) => a.label), 'Cancel'];
+      const cancelIndex = options.length - 1;
+      const destructiveIndex = actions.findIndex((a) => a.destructive);
       ActionSheetIOS.showActionSheetWithOptions(
         { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
-        onPick,
+        (idx) => { if (idx < actions.length) actions[idx].run(); },
       );
     } else {
       Alert.alert('Photo options', undefined, [
-        { text: heartLabel, onPress: () => onPick(0) },
-        { text: ownActionLabel, style: 'destructive', onPress: () => onPick(1) },
-        { text: 'Cancel', style: 'cancel' },
+        ...actions.map((a) => ({
+          text: a.label,
+          style: (a.destructive ? 'destructive' : 'default') as 'destructive' | 'default',
+          onPress: a.run,
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
       ]);
     }
-  }, [isHearted, toggleHeart, hideFromView, deleteOwnUpload]);
+  }, [isHearted, toggleHeart, hideFromView, deleteOwnUpload, savedCover, setAsCover]);
 
   const attendeeSummary = useMemo(() => {
     if (!data?.attendees) return '';
@@ -576,7 +620,7 @@ export default function AlbumDetailScreen() {
                     key={u.id}
                     style={styles.tile}
                     onPress={() => setViewerIndex(idx)}
-                    onLongPress={() => showTileActions(u.id, isOwn)}
+                    onLongPress={() => showTileActions(u.id, isOwn, u.content_type === 'photo')}
                     delayLongPress={250}
                   >
                     {u.signed_display_url ? (

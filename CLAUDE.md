@@ -38,9 +38,10 @@ Key typography values:
 
 ## Navigation
 
-Tab bar order: Plans | Scene | Post | Chats | Your People
+Tab bar order: Plans | Scene | Post | Chats | Yours
 
-Profile is NOT a tab. It is accessed from within the Your People screen.
+The "Yours" tab's screen title is still "Your People". Profile is NOT a tab. It
+is accessed from within the Yours screen.
 
 ## Design System Rules
 

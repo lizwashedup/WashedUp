@@ -79,7 +79,7 @@ export function useChat(eventId: string) {
         setCurrentUserId(user.id);
         currentUserIdRef.current = user.id;
       }
-    });
+    }).catch((err) => logError(err, 'useChat.getUser'));
   }, []);
 
   // Keep messagesRef in sync for stable callbacks
@@ -160,7 +160,7 @@ export function useChat(eventId: string) {
       if (user) {
         const msgIds = (data ?? []).map((m: any) => m.id);
         const [{ data: profile }, , , { data: reactionsData }] = await Promise.all([
-          supabase.from('profiles').select('blocked_users').eq('id', user.id).single(),
+          supabase.from('profiles').select('blocked_users').eq('id', user.id).maybeSingle(),
           supabase.from('chat_reads').upsert(
             { event_id: eventId, user_id: user.id, last_read_at: new Date().toISOString() },
             { onConflict: 'event_id,user_id' },
