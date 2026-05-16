@@ -13,6 +13,14 @@ import { supabase } from '../lib/supabase';
 let readyPromise: Promise<boolean> | null = null;
 
 export function initOneSignal(): Promise<boolean> {
+  // Master web guard: OneSignal's RN SDK is native-only. Resolving false here
+  // means every path that funnels through ensureOneSignalReady() (the hook,
+  // registerForPushNotifications, getPushPermissionStatus, the chat banner,
+  // profile settings) becomes a guaranteed no-op on web with zero SDK calls.
+  if (Platform.OS === 'web') {
+    readyPromise = Promise.resolve(false);
+    return readyPromise;
+  }
   if (readyPromise) return readyPromise;
   const appId =
     Constants.expoConfig?.extra?.oneSignalAppId ??
@@ -48,7 +56,7 @@ function devicePlatform(): 'ios' | 'android' | 'web' | null {
 
 async function upsertDeviceToken(userId: string, playerId: string) {
   const platform = devicePlatform();
-  if (!platform) return;
+  if (!platform || platform === 'web') return;
 
   const { error } = await supabase.from('device_tokens').upsert(
     {
@@ -73,6 +81,7 @@ async function upsertDeviceToken(userId: string, playerId: string) {
 export function usePushNotifications(userId?: string | null) {
   useEffect(() => {
     if (!userId) return;
+    if (Platform.OS === 'web') return;
 
     let cancelled = false;
     let attached: ((event: any) => void) | null = null;
@@ -166,8 +175,16 @@ export async function registerForPushNotifications(
   }
 
   try {
-    const playerId = await OneSignal.User.pushSubscription.getIdAsync();
+    // The subscription id can lag a freshly-granted permission by a tick.
+    // One short retry closes that race; the passive change listener in
+    // usePushNotifications is the further backstop.
+    let playerId = await OneSignal.User.pushSubscription.getIdAsync();
+    if (!playerId) {
+      await new Promise((r) => setTimeout(r, 1500));
+      playerId = await OneSignal.User.pushSubscription.getIdAsync();
+    }
     if (!playerId) return null;
+    if (__DEV__) console.log('[PushNotifications] OneSignal player id:', playerId);
 
     const targetUserId = options.userId ?? null;
     if (targetUserId) {

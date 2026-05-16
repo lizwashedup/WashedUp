@@ -23,7 +23,6 @@ import ProgressHead from '../../../components/onboarding/ProgressHead';
 import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
-import { registerForPushNotifications } from '../../../hooks/usePushNotifications';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { invalidateAuthProfile } from '../../../hooks/useProfile';
 import { supabase } from '../../../lib/supabase';
@@ -170,10 +169,9 @@ export default function OnboardingPhotoScreen() {
       // otherwise the cache seeded at login still says 'photo'/'la_check'
       // and the guard bounces the user out of /(tabs)/plans.
       invalidateAuthProfile(queryClient, user.id);
-      // Push permission prompt — kept here intentionally so users see it
-      // after engagement, not at cold-start. Best-effort; swallowed errors
-      // shouldn't block the navigation to plans.
-      await registerForPushNotifications({ prompt: true }).catch(() => {});
+      // Push permission is no longer cold-fired here. The root pre-permission
+      // primer (app/_layout.tsx) shows a context screen first, and covers
+      // existing users / reinstalls / new-device installs, not just this step.
       router.replace('/(tabs)/plans');
     } catch (e: unknown) {
       setAlertInfo({

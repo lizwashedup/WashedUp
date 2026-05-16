@@ -21,7 +21,7 @@ import { Stack, useRouter, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { OneSignal } from 'react-native-onesignal';
 import { useEffect, useRef, useState } from 'react';
-import { Linking, LogBox } from 'react-native';
+import { Linking, LogBox, Platform } from 'react-native';
 import 'react-native-reanimated';
 
 // Silence dev-only redboxes that aren't real bugs:
@@ -45,7 +45,13 @@ import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
 import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt } from '../lib/navState';
 import { resetMigrationGateSnooze } from '../lib/migrationGateSnooze';
 import Colors from '../constants/Colors';
-import { usePushNotifications, initOneSignal } from '../hooks/usePushNotifications';
+import {
+  usePushNotifications,
+  initOneSignal,
+  ensureOneSignalReady,
+  getPushPermissionStatus,
+  registerForPushNotifications,
+} from '../hooks/usePushNotifications';
 import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/uploadAlbumMedia';
 import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptModal';
 import { KeyboardDoneBar } from '../components/keyboard/KeyboardDoneBar';
@@ -60,6 +66,7 @@ import AppStoreReviewAsk, {
   REVIEW_ASK_MAX,
 } from '../components/AppStoreReviewAsk';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
+import PushPrimerModal from '../components/PushPrimerModal';
 import VideoSplash from '../components/VideoSplash';
 import { BrandedAlert } from '../components/BrandedAlert';
 import * as Sentry from '@sentry/react-native';
@@ -147,6 +154,12 @@ function RootLayout() {
 
 export default Sentry.wrap(RootLayout);
 
+// Pre-permission primer snooze. "Not now" snoozes for 7 days, then the primer
+// can re-ask; a granted permission permanently short-circuits it. Distinct
+// from the chat banner's `push_banner_dismissed_at`.
+const PUSH_PRIMER_SNOOZE_KEY = 'push_primer_snoozed_at';
+const PUSH_PRIMER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -187,6 +200,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const surveyCheckedRef = useRef(false);
   const [surveyCheckDone, setSurveyCheckDone] = useState(false);
   const prevUserIdRef = useRef<string | null>(null);
+  const [showPushPrimer, setShowPushPrimer] = useState(false);
+  const pushPrimerCheckedRef = useRef(false);
 
   // Reset survey/review state when user changes (sign out + sign in as different user)
   useEffect(() => {
@@ -196,6 +211,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setSurveyCheckDone(false);
         setSurveyPlan(null);
         setShowReviewAsk(false);
+        pushPrimerCheckedRef.current = false;
+        setShowPushPrimer(false);
       }
       prevUserIdRef.current = authedUserId;
     }
@@ -281,6 +298,32 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       } catch (e) { logError(e, 'layout.reviewCheck'); }
     })();
   }, [authedUserId, surveyCheckDone, surveyPlan]);
+
+  // Pre-permission primer gate. Native only. Fires once per cold launch
+  // (ref resets only on user change) while the user is authed, auth is
+  // resolved, push permission is still undetermined, and the 7-day snooze
+  // is not active. Never cold-fires the OS prompt: the modal CTA does.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!authedUserId || !authResolved) return;
+    if (pushPrimerCheckedRef.current) return;
+    pushPrimerCheckedRef.current = true;
+    (async () => {
+      try {
+        const snoozedAt = await AsyncStorage.getItem(PUSH_PRIMER_SNOOZE_KEY);
+        if (snoozedAt && Date.now() - Number(snoozedAt) < PUSH_PRIMER_COOLDOWN_MS) return;
+        if (!(await ensureOneSignalReady())) return;
+        const status = await getPushPermissionStatus();
+        // Only show when the OS prompt has never been answered. 'granted'
+        // means we already have (or will silently get) a token; 'denied'
+        // is a hard iOS denial the primer cannot reverse (Settings owns it).
+        if (status !== 'undetermined') return;
+        setShowPushPrimer(true);
+      } catch (e) {
+        logError(e, 'layout.pushPrimerCheck');
+      }
+    })();
+  }, [authedUserId, authResolved]);
 
   useEffect(() => {
     if (authResolved && !splashHiddenRef.current) {
@@ -629,6 +672,27 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       <KeyboardDoneBar />
       {authedUserId && surveyCheckDone && !surveyPlan && !showReviewAsk && (
         <MarkEarnedModal userId={authedUserId} />
+      )}
+      {showPushPrimer && authedUserId && !surveyPlan && !showReviewAsk && (
+        <PushPrimerModal
+          visible={showPushPrimer}
+          onEnable={async () => {
+            setShowPushPrimer(false);
+            // Only root caller of the system prompt; always passes the real
+            // userId so the device_tokens upsert runs on grant.
+            await registerForPushNotifications({
+              prompt: true,
+              userId: authedUserId,
+            }).catch(() => {});
+          }}
+          onDismiss={() => {
+            setShowPushPrimer(false);
+            AsyncStorage.setItem(
+              PUSH_PRIMER_SNOOZE_KEY,
+              String(Date.now()),
+            ).catch(() => {});
+          }}
+        />
       )}
       {layoutAlert && (
         <BrandedAlert
