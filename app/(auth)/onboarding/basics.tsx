@@ -118,6 +118,41 @@ export default function OnboardingBasicsScreen() {
     return () => { cancelled = true; };
   }, []);
 
+  // Meta/Samsung in-app browsers inject `setContactAutofillValuesFromBridge`
+  // to autofill contact fields. Against react-native-web inputs its element
+  // lookup can return undefined and it throws "Cannot read properties of
+  // undefined (reading 'value')", which otherwise crashes onboarding. We
+  // can't edit the injected bridge, so swallow only that specific error at
+  // the window boundary (web only).
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const BRIDGE = 'setContactAutofillValuesFromBridge';
+    const matches = (s: unknown) =>
+      typeof s === 'string' && s.includes(BRIDGE);
+    const onError = (e: ErrorEvent) => {
+      if (
+        matches(e?.message) ||
+        matches(e?.filename) ||
+        matches((e?.error as { stack?: string } | undefined)?.stack)
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation?.();
+      }
+    };
+    const onRejection = (e: PromiseRejectionEvent) => {
+      const r = e?.reason as { message?: string; stack?: string } | undefined;
+      if (matches(r?.message) || matches(r?.stack) || matches(String(r ?? ''))) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('error', onError, true);
+    window.addEventListener('unhandledrejection', onRejection, true);
+    return () => {
+      window.removeEventListener('error', onError, true);
+      window.removeEventListener('unhandledrejection', onRejection, true);
+    };
+  }, []);
+
   const namesValid = firstName.trim().length > 0 && lastName.trim().length > 0;
   const canContinue = !!birthday && !!gender && !dateError && namesValid;
 
@@ -282,11 +317,12 @@ export default function OnboardingBasicsScreen() {
                 <TextInput
                   style={styles.input}
                   value={firstName}
-                  onChangeText={setFirstName}
+                  onChangeText={(t) => setFirstName(t ?? '')}
                   placeholder="first name"
                   placeholderTextColor={Colors.text3}
                   autoCapitalize="words"
                   textContentType="givenName"
+                  autoComplete="given-name"
                   returnKeyType="next"
                   inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
@@ -296,11 +332,12 @@ export default function OnboardingBasicsScreen() {
                 <TextInput
                   style={styles.input}
                   value={lastName}
-                  onChangeText={setLastName}
+                  onChangeText={(t) => setLastName(t ?? '')}
                   placeholder="last name"
                   placeholderTextColor={Colors.text3}
                   autoCapitalize="words"
                   textContentType="familyName"
+                  autoComplete="family-name"
                   returnKeyType="next"
                   inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
@@ -314,7 +351,7 @@ export default function OnboardingBasicsScreen() {
             <TextInput
               style={styles.input}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(t) => setEmail(t ?? '')}
               placeholder="you@example.com"
               placeholderTextColor={Colors.text3}
               keyboardType="email-address"
