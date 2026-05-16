@@ -9,7 +9,6 @@
  */
 
 import { PHONE_AUTH_ENABLED } from '../constants/FeatureFlags';
-import { isMigrationGateSnoozed } from './migrationGateSnooze';
 
 /** Route to send unauthenticated users. Toggles with the feature flag. */
 export function unauthedRoute(): string {
@@ -46,10 +45,13 @@ export function onboardingDest(
 }
 
 /**
- * Top-level destination for a freshly-authed user. Layers the migration
- * gate on top of onboardingDest: a completed user whose auth account has
- * no verified phone yet gets routed to /migration-gate (when phone auth
- * is enabled and they haven't snoozed this session).
+ * Top-level destination for a freshly-authed user. Layers a hard phone
+ * gate on top of onboardingDest: ANY authed user without a verified
+ * phone is routed to /migration-gate (when phone auth is enabled),
+ * regardless of onboarding status or account age. There is no skip and
+ * no snooze — a phone is mandatory to use the app. New users sign up
+ * phone-first so they already have one; this targets the legacy
+ * email/Apple/invited population that has none.
  *
  * `auth_phone` MUST be auth.users.phone (i.e. session.user.phone), not
  * profiles.phone_number. Supabase only writes auth.users.phone after a
@@ -66,12 +68,7 @@ export function authedDest(args: {
   auth_phone: string | null | undefined;
 }): string {
   const { onboarding_status, referral_source, auth_phone } = args;
-  if (
-    PHONE_AUTH_ENABLED &&
-    onboarding_status === 'complete' &&
-    !auth_phone &&
-    !isMigrationGateSnoozed()
-  ) {
+  if (PHONE_AUTH_ENABLED && !auth_phone) {
     return '/migration-gate';
   }
   return onboardingDest(onboarding_status, referral_source);

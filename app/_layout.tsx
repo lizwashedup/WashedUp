@@ -43,7 +43,6 @@ import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
 import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
 import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt } from '../lib/navState';
-import { resetMigrationGateSnooze } from '../lib/migrationGateSnooze';
 import Colors from '../constants/Colors';
 import {
   usePushNotifications,
@@ -557,7 +556,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
       if (!session?.user) {
-        resetMigrationGateSnooze();
         setAuthedUserId(null);
         const unauth = unauthedRoute();
         // Skip the redirect if either (a) the pathname already matches

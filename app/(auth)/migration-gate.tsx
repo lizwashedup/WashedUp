@@ -15,26 +15,18 @@ import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
-import { PHONE_MIGRATION_MANDATORY_AFTER } from '../../constants/FeatureFlags';
 import { supabase } from '../../lib/supabase';
 import { hapticLight, hapticError } from '../../lib/haptics';
 import { formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
-import { snoozeMigrationGate } from '../../lib/migrationGateSnooze';
 import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 import PhoneInput from '../../components/auth/PhoneInput';
 import { useSubmitGuard } from '../../hooks/useSubmitGuard';
-
-function isMandatoryToday(): boolean {
-  const today = new Date().toISOString().slice(0, 10);
-  return today >= PHONE_MIGRATION_MANDATORY_AFTER;
-}
 
 export default function MigrationGateScreen() {
   const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const mandatory = isMandatoryToday();
   const canSubmit = isValidUSPhone(phone) && !submitting;
   const submit = useSubmitGuard();
 
@@ -74,12 +66,6 @@ export default function MigrationGateScreen() {
       submit.release();
       setSubmitting(false);
     }
-  };
-
-  const handleSkip = () => {
-    if (mandatory) return;
-    snoozeMigrationGate();
-    router.replace('/(tabs)/plans');
   };
 
   return (
@@ -180,16 +166,6 @@ export default function MigrationGateScreen() {
             </Text>
           </TouchableOpacity>
 
-          {mandatory ? null : (
-            <TouchableOpacity
-              style={styles.skipButton}
-              onPress={handleSkip}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={styles.skipText}>i’ll do this later</Text>
-            </TouchableOpacity>
-          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -360,14 +336,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   ctaTextDisabled: { color: Colors.surface },
-
-  skipButton: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  skipText: {
-    fontFamily: Fonts.sans,
-    fontSize: 13,
-    color: Colors.text3,
-  },
 });
