@@ -20,12 +20,3 @@
  * tested + Twilio/Supabase phone provider verified live.
  */
 export const PHONE_AUTH_ENABLED = true;
-
-/**
- * Hard cutoff for the migration gate's "i'll do this later" option.
- * Before this date the gate is dismissable; on/after this date the skip
- * button is hidden and adding a phone becomes mandatory to enter the app.
- *
- * Compared as ISO date strings against (new Date()).toISOString().slice(0, 10).
- */
-export const PHONE_MIGRATION_MANDATORY_AFTER = '2026-06-01';

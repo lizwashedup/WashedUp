@@ -211,13 +211,13 @@ export default function VerifyCodeScreen() {
           }
         }
 
-        // Decide destination after a brief celebratory hold.
+        // Decide destination after a brief celebratory hold. Migration and
+        // signup both resolve via onboardingDest: a 'complete' user lands on
+        // /(tabs)/plans, an onboarding-incomplete user (rare: legacy email
+        // account gated mid-onboarding) resumes at the correct step instead
+        // of flashing tabs then being bounced back by the tabs guard.
         holdTimerRef.current = setTimeout(async () => {
           holdTimerRef.current = null;
-          if (mode === 'migration') {
-            router.replace('/(tabs)/plans');
-            return;
-          }
           if (!verifiedUser) {
             router.replace('/onboarding/basics');
             return;
