@@ -11,7 +11,10 @@ import { ArrowLeft, MapPin, Calendar, Users, ChevronDown } from 'lucide-react-na
 // (functional but unstyled). Proper labeled-pill replacement comes in 1.0.4.
 import { hapticLight, hapticSelection } from '../../lib/haptics';
 import * as Location from 'expo-location';
-import { MapView, Marker } from '../MapView.native';
+// Extensionless import so Metro resolves MapView.web.tsx on web and
+// MapView.native.tsx on native. Hardcoding .native pulls native-only
+// react-native-maps into the web bundle and breaks the entire web build.
+import { MapView, Marker } from '../MapView';
 import { MAP_STYLE } from '../../constants/MapStyle';
 import { CATEGORY_OPTIONS } from '../../constants/Categories';
 import { WHEN_OPTIONS } from '../../constants/WhenFilter';
