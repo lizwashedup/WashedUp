@@ -7,6 +7,7 @@ import {
   Pressable,
   Animated,
   Easing,
+  Platform,
   type StyleProp,
   type ViewStyle,
   type TextStyle,
@@ -51,12 +52,32 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
   const inputRef = useRef<TextInput>(null);
   const shake = useRef(new Animated.Value(0)).current;
 
+  // On web, react-native-web maps autoComplete="sms-otp" to the HTML
+  // autocomplete="one-time-code" input. Chrome throws
+  // "NotAllowedError: Input showPicker() requires a user gesture" if such an
+  // input is .focus()ed without user activation (autofocus, rAF, effects).
+  // So on web we only ever focus from a real tap (the Pressable below);
+  // native keeps autofocus + SMS autofill, which depend on programmatic focus.
+  const allowProgrammaticFocus = Platform.OS !== 'web';
+  const safeFocus = () => {
+    try {
+      inputRef.current?.focus();
+    } catch {
+      // Chrome's one-time-code picker can still throw on some web paths;
+      // never let a focus attempt crash the OTP screen.
+    }
+  };
+
   useImperativeHandle(ref, () => ({
-    focus: () => inputRef.current?.focus(),
+    focus: () => {
+      if (allowProgrammaticFocus) safeFocus();
+    },
     blur: () => inputRef.current?.blur(),
     clear: () => {
       onChangeText('');
-      requestAnimationFrame(() => inputRef.current?.focus());
+      if (allowProgrammaticFocus) {
+        requestAnimationFrame(safeFocus);
+      }
     },
   }));
 
@@ -84,7 +105,9 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
     if (digits.length === length && onComplete) onComplete(digits);
   };
 
-  const focus = () => inputRef.current?.focus();
+  // Invoked only by the Pressable's onPress below — a real user gesture, so
+  // safe on web (this is the web focus path now that autofocus is disabled).
+  const focus = () => safeFocus();
 
   const cells = Array.from({ length }, (_, i) => {
     const ch = value[i] ?? '';
@@ -136,7 +159,7 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
         keyboardType="number-pad"
         textContentType="oneTimeCode"
         autoComplete="sms-otp"
-        autoFocus={autoFocus}
+        autoFocus={allowProgrammaticFocus ? autoFocus : false}
         editable={editable}
         maxLength={length}
         caretHidden

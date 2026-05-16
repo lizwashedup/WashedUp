@@ -99,6 +99,7 @@ export default function MigrationGateScreen() {
           style={styles.kav}
         >
         <ScrollView
+          style={styles.scrollView}
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -205,7 +206,13 @@ const styles = StyleSheet.create({
   },
   safe: { flex: 1, backgroundColor: 'transparent' },
   kav: { flex: 1 },
+  // react-native-web only makes a ScrollView scrollable when the scroll
+  // viewport itself is bounded (flex:1); without this the tall content
+  // overflows and the "i'll do this later" button below the fold is
+  // unreachable on short mobile-web viewports. No-op on native.
+  scrollView: { flex: 1 },
   scroll: {
+    flexGrow: 1,
     paddingHorizontal: 28,
     paddingTop: 8,
     paddingBottom: 32,
