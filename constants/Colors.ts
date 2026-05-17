@@ -125,6 +125,19 @@ const brand = {
   surfaceTranslucent: 'rgba(255,255,255,0.96)', // surface @ 96% — input bg over hero imagery
   whiteSoft: 'rgba(255,255,255,0.86)',          // white @ 86% — animated subline text on success-state bg (verify-code)
   goldBadgeSoft: 'rgba(197,165,90,0.18)',       // gold @ 18% — success badge background (verify-code)
+
+  // ── Yours page rebuild ───────────────────────────────────────────────────
+  // Activity-ring family. terracotta is the primary; the 75/50 mid states
+  // are SIM-EYEBALL #1 (terracotta opacity vs goldenAmber — confirm on
+  // device that mid rings read as "ring", not "alert").
+  ringFull: '#B5522E',                          // terracotta — last 2 weeks
+  ringHigh: 'rgba(181,82,46,0.70)',             // terracotta @ 70% — last month
+  ringMid: 'rgba(181,82,46,0.40)',              // terracotta @ 40% — last 2 months
+  ringLow: '#C5C0B8',                           // iconMuted — 2-4 months ago
+  ringGhost: 'rgba(160,147,133,0.40)',          // tertiary @ 40% — invited, dashed
+  yoursGhostBg: '#E8DCC8',                       // Cream/Muted — ghost avatar fill
+  yoursShimmer: '#E8DDD0',                        // shimmer / ghost placeholder block
+  yoursOverlay85: 'rgba(248,245,240,0.85)',      // parchment @ 85% — fresh-start overlay
 } as const;
 
 // ── Interest category accent colors (phone auth onboarding) ───────────────
