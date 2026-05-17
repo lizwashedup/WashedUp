@@ -12,6 +12,8 @@ import { UNREAD_CHATS_KEY } from '../../constants/QueryKeys';
 import { authedDest } from '../../lib/authRouting';
 import { getAuthProfile } from '../../hooks/useProfile';
 import { withTimeout } from '../../lib/withTimeout';
+import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
+import HeartHandsIcon from '../../components/yours/icons/HeartHandsIcon';
 
 function PostTabIcon() {
   return (
@@ -212,7 +214,11 @@ export default function TabLayout() {
           tabBarLabel: 'Yours',
           tabBarIcon: ({ color }) => (
             <View>
-              <Ionicons name="people-outline" size={24} color={color} />
+              {YOURS_PAGE_ENABLED ? (
+                <HeartHandsIcon size={24} color={color} />
+              ) : (
+                <Ionicons name="people-outline" size={24} color={color} />
+              )}
               {hasPendingInvites && <View style={styles.inviteDot} />}
             </View>
           ),

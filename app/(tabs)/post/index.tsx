@@ -27,6 +27,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { ImagePlus, X, FileText, Trash2 } from 'lucide-react-native';
 import FirstPlanCelebration from '../../../components/FirstPlanCelebration';
 import { SharePlanModal } from '../../../components/modals/SharePlanModal';
+import { YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
+import PingAfterPlanModal from '../../../components/yours/ping/PingAfterPlanModal';
 import ProfileButton from '../../../components/ProfileButton';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
@@ -607,6 +609,8 @@ export default function PostScreen() {
   // Submit
   const [loading, setLoading] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [pingPlanId, setPingPlanId] = useState<string | null>(null);
+  const pendingNavRef = useRef<(() => void) | null>(null);
   const [firstPlanCelebrationVisible, setFirstPlanCelebrationVisible] = useState(false);
   const [postedPlanId, setPostedPlanId] = useState<string | null>(null);
   const [postedPlanTitle, setPostedPlanTitle] = useState('');
@@ -1627,15 +1631,24 @@ export default function PostScreen() {
             firstPlanPendingRef.current = false;
             setTimeout(() => setFirstPlanCelebrationVisible(true), 400);
           } else {
-            setPostedPlanId(null);
-            setPostedPlanTitle('');
-            setTimeout(() => {
-              if (planIdToNavigate) {
-                router.push(`/plan/${planIdToNavigate}` as any);
-              } else {
-                router.replace('/(tabs)/plans');
-              }
-            }, 350);
+            const runNav = () => {
+              setPostedPlanId(null);
+              setPostedPlanTitle('');
+              setTimeout(() => {
+                if (planIdToNavigate) {
+                  router.push(`/plan/${planIdToNavigate}` as any);
+                } else {
+                  router.replace('/(tabs)/plans');
+                }
+              }, 350);
+            };
+            if (YOURS_PAGE_ENABLED && planIdToNavigate) {
+              // Ping moment before navigating on (spec: after create).
+              pendingNavRef.current = runNav;
+              setPingPlanId(planIdToNavigate);
+            } else {
+              runNav();
+            }
           }
         }}
         planTitle={postedPlanTitle}
@@ -1644,6 +1657,18 @@ export default function PostScreen() {
         genderLabel={postedGenderLabel}
         variant="posted"
       />
+
+      {YOURS_PAGE_ENABLED && (
+        <PingAfterPlanModal
+          planId={pingPlanId}
+          onDone={() => {
+            const nav = pendingNavRef.current;
+            pendingNavRef.current = null;
+            setPingPlanId(null);
+            nav?.();
+          }}
+        />
+      )}
 
       {/* ── Neighborhood Picker Modal ── */}
       <Modal

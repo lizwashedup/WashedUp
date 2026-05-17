@@ -19,6 +19,8 @@ import { Fonts, FontSizes, LineHeights } from '../constants/Typography';
 import { hapticLight, hapticMedium } from '../lib/haptics';
 import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
+import SurveyV2 from './yours/survey/SurveyV2';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -95,7 +97,16 @@ type Step =
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export default function PostPlanSurvey({ visible, plan, members, userId, onComplete }: Props) {
+export default function PostPlanSurvey(props: Props) {
+  // Flag switch. The constant is module-level (stable across renders), so
+  // hook order below is never affected. SurveyV2 reuses the same DB writes.
+  if (YOURS_PAGE_ENABLED) {
+    return <SurveyV2 {...props} />;
+  }
+  return <LegacyPostPlanSurvey {...props} />;
+}
+
+function LegacyPostPlanSurvey({ visible, plan, members, userId, onComplete }: Props) {
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>('attended');
   const [selectedNoShows, setSelectedNoShows] = useState<Set<string>>(new Set());

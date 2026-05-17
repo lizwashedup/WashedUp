@@ -40,6 +40,8 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
+import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
+import PingAfterPlanModal from '../../components/yours/ping/PingAfterPlanModal';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_MAX_CAPACITY, FEATURED_DEFAULT_CAPACITY } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -466,6 +468,8 @@ export default function PlanDetailScreen() {
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [shareAfterJoinVisible, setShareAfterJoinVisible] = useState(false);
+  const [pingPlanId, setPingPlanId] = useState<string | null>(null);
+  const pendingNavRef = React.useRef<(() => void) | null>(null);
   const [isOnWaitlist, setIsOnWaitlist] = useState(false);
   const [waitlistLoading, setWaitlistLoading] = useState(false);
   const [brandedAlert, setBrandedAlert] = useState<{
@@ -1990,15 +1994,24 @@ export default function PlanDetailScreen() {
         visible={shareAfterJoinVisible}
         onClose={() => {
           setShareAfterJoinVisible(false);
-          if (plan?.tickets_url) {
-            // Show the ticket prompt first; navigate to chat only after
-            // the user dismisses it. Previously we navigated immediately
-            // and fired the ticket modal 600ms later, which caused a
-            // visible flash of "get your tickets" over the chat screen
-            // transition on Android.
-            setTicketModalVisible(true);
+          const runRest = () => {
+            if (plan?.tickets_url) {
+              // Show the ticket prompt first; navigate to chat only after
+              // the user dismisses it. Previously we navigated immediately
+              // and fired the ticket modal 600ms later, which caused a
+              // visible flash of "get your tickets" over the chat screen
+              // transition on Android.
+              setTicketModalVisible(true);
+            } else {
+              router.push(`/(tabs)/chats/${id}` as any);
+            }
+          };
+          if (YOURS_PAGE_ENABLED) {
+            // Ping moment before chat / ticket prompt (spec: after join).
+            pendingNavRef.current = runRest;
+            setPingPlanId(id as string);
           } else {
-            router.push(`/(tabs)/chats/${id}` as any);
+            runRest();
           }
         }}
         planTitle={plan?.title || ''}
@@ -2006,6 +2019,18 @@ export default function PlanDetailScreen() {
         slug={plan?.slug}
         variant="joined"
       />
+
+      {YOURS_PAGE_ENABLED && (
+        <PingAfterPlanModal
+          planId={pingPlanId}
+          onDone={() => {
+            const nav = pendingNavRef.current;
+            pendingNavRef.current = null;
+            setPingPlanId(null);
+            nav?.();
+          }}
+        />
+      )}
 
       {/* Ticket Prompt Modal — shown after joining a ticketed event */}
       <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => { setTicketModalVisible(false); router.push(`/(tabs)/chats/${id}` as any); }} statusBarTranslucent>
