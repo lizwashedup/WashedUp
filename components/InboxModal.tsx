@@ -28,6 +28,18 @@ import {
 } from '../lib/waitlistExceptions';
 import { BrandedAlert, BrandedAlertButton } from './BrandedAlert';
 
+/**
+ * Yours-system notification types that carry no event_id and resolve on
+ * the Yours page (single inbox routes you there; the request banner +
+ * swipe stack are waiting). people_ping carries an event_id and keeps
+ * falling through to the existing plan-detail routing.
+ */
+const YOURS_NOTIF_TYPES = new Set([
+  'people_request',
+  'people_request_accepted',
+  'referral_joined',
+]);
+
 interface InboxModalProps {
   visible: boolean;
   onClose: () => void;
@@ -155,6 +167,14 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       // when the user actually joins on the plan detail page
       refetchNotifs();
       queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+      if (action === 'acted' && notifType && YOURS_NOTIF_TYPES.has(notifType)) {
+        // Single inbox: a people request / acceptance / referral-joined
+        // notification routes to the Yours page, where the request banner
+        // and swipe stack are waiting for action. No event_id involved.
+        onClose();
+        router.push('/(tabs)/friends' as any);
+        return;
+      }
       if (action === 'acted' && eventId) {
         onClose();
         if (notifType === 'member_joined' || notifType === 'invite_accepted') {
@@ -353,14 +373,15 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
               {appNotifications.map((notif: any) => {
                 const isWaitlist = notif.type === 'waitlist_spot';
                 const isExceptionInvite = notif.type === 'exception_invite';
-                const hasAction = (
+                const goesToYours = YOURS_NOTIF_TYPES.has(notif.type);
+                const hasAction = goesToYours || ((
                   notif.type === 'waitlist_spot' ||
                   notif.type === 'member_joined' ||
                   notif.type === 'invite_accepted' ||
                   notif.type === 'waitlist_request' ||
                   notif.type === 'exception_slot_refunded' ||
                   notif.type === 'exception_invite'
-                ) && notif.event_id;
+                ) && notif.event_id);
                 const timeLeft = notif.expires_at
                   ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
                   : null;

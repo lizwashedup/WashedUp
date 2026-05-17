@@ -387,6 +387,17 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // no-op on the param; it's a marker for future scroll/analytics.
         const focusParam = type === 'interest_signal' ? '?focus=interest' : '';
         router.push(`/plan/${data.eventId}${focusParam}` as any);
+      } else if (
+        type === 'people_request' ||
+        type === 'people_request_accepted' ||
+        type === 'referral_joined'
+      ) {
+        // Yours system: the request banner + swipe stack live on the
+        // Yours page. Single inbox routes people notifications there.
+        router.push('/(tabs)/friends' as any);
+      } else if (type === 'people_ping' && data?.eventId) {
+        // A ping IS the plan — open the plan detail, not the chat.
+        router.push(`/plan/${data.eventId}` as any);
       } else if (data?.chatId) {
         router.push(`/(tabs)/chats/${data.chatId}` as any);
       } else if (data?.eventId) {

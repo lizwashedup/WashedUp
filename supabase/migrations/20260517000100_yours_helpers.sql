@@ -93,7 +93,10 @@ $$;
 CREATE OR REPLACE FUNCTION public.yours_ring_bucket(p_ts timestamptz)
   RETURNS text
   LANGUAGE sql
-  IMMUTABLE
+  -- STABLE, not IMMUTABLE: this reads now(), so its result depends on
+  -- transaction time. IMMUTABLE would let the planner cache a value and
+  -- compute stale ring buckets across long-lived plans/prepared stmts.
+  STABLE
 AS $$
   SELECT CASE
     WHEN p_ts IS NULL THEN 'none'

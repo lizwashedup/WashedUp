@@ -13,6 +13,7 @@ export default function PopulatedView({
   people,
   requestCount,
   lightUpIds,
+  onAdd,
   onOpenRequests,
   onPressPerson,
   onLongPressPerson,
@@ -23,6 +24,7 @@ export default function PopulatedView({
   people: YoursGridPerson[];
   requestCount: number;
   lightUpIds: Set<string>;
+  onAdd: () => void;
   onOpenRequests: () => void;
   onPressPerson: (p: YoursGridPerson) => void;
   onLongPressPerson: (p: YoursGridPerson) => void;
@@ -39,6 +41,7 @@ export default function PopulatedView({
     <AvatarGrid
       people={people}
       lightUpIds={lightUpIds}
+      onAdd={onAdd}
       header={
         <RequestBanner count={requestCount} onPress={onOpenRequests} />
       }

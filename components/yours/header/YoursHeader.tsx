@@ -1,46 +1,25 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { Bell, Plus } from 'lucide-react-native';
+import { Bell } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import ProfileButton from '../../ProfileButton';
-import { COPY, YOURS_HEADER_ACTION } from '../state/constants';
-import { hapticSelection } from '../../../lib/haptics';
+import { COPY } from '../state/constants';
 
 /**
- * Sticky header: italic "yours" wordmark, "+" (opens the paths sheet),
- * bell (passive notifications), profile avatar.
+ * Sticky header: italic "yours" wordmark, bell (passive notifications),
+ * profile avatar.
  *
- * SIM-EYEBALL #4b: the "+" sits left of the bell. Style is governed by
- * YOURS_HEADER_ACTION ('outline' leans away from the solid 48pt
- * bottom-nav "+"). Resolve on device.
+ * The add-people entry point is intentionally NOT here. Per spec it lives
+ * in-page as the first cell of the people grid (see AddGridCell), so the
+ * header stays clean: wordmark, bell, profile only.
  */
-export default function YoursHeader({ onAdd }: { onAdd: () => void }) {
-  const outline = YOURS_HEADER_ACTION === 'outline';
+export default function YoursHeader() {
   return (
     <View style={styles.row}>
       <Text style={styles.wordmark}>{COPY.wordmark}</Text>
       <View style={styles.actions}>
-        <Pressable
-          onPress={() => {
-            hapticSelection();
-            onAdd();
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="Add people"
-          hitSlop={10}
-          style={[
-            styles.plus,
-            outline ? styles.plusOutline : styles.plusFill,
-          ]}
-        >
-          <Plus
-            size={18}
-            color={outline ? Colors.terracotta : Colors.white}
-            strokeWidth={2.5}
-          />
-        </Pressable>
         <Pressable
           onPress={() => router.push('/(tabs)/profile' as never)}
           accessibilityRole="button"
@@ -71,14 +50,5 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
   },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  plus: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  plusFill: { backgroundColor: Colors.terracotta },
-  plusOutline: { borderWidth: 1.5, borderColor: Colors.terracotta },
   bell: { padding: 2 },
 });

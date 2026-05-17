@@ -108,6 +108,8 @@ export const COPY = {
   pathInviteTitle: 'Text someone a link',
   pathInviteSub: 'They show up here when they join',
   pathSearchTitle: 'Find someone on WashedUp',
+  pathQRTitle: 'Show your code',
+  pathQRSub: 'Let someone scan to add you',
 
   backlogPlansTogether: (n: number) =>
     n === 1 ? '1 plan together' : `${n} plans together`,

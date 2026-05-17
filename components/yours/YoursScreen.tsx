@@ -74,7 +74,7 @@ export default function YoursScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <YoursHeader onAdd={() => setPathsOpen(true)} />
+      <YoursHeader />
       {state === 'populated' && (
         <YoursTabs active={tab} onChange={setTab} />
       )}
@@ -92,6 +92,7 @@ export default function YoursScreen() {
           people={people}
           requestCount={requests.length}
           lightUpIds={lightUpIds}
+          onAdd={() => setPathsOpen(true)}
           onOpenRequests={() => setRequestsOpen(true)}
           onPressPerson={(p: YoursGridPerson) => setProfileTarget(p.user_id)}
           onLongPressPerson={(p: YoursGridPerson) =>
