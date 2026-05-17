@@ -99,7 +99,13 @@ export default function TabLayout() {
         referral_source: profile?.referral_source ?? null,
         auth_phone: user.phone ?? null,
       });
-      if (dest !== '/(tabs)/plans') {
+      // Phone-gate enforcement belongs to app launch (checkAuth) and a
+      // genuine fresh login (root listener), NOT a tab-mount guard that
+      // re-runs whenever (tabs) remounts (foreground, freezeOnBlur thaw,
+      // nav reset). Bouncing to /migration-gate here was throwing
+      // actively-using, already-past-the-gate users back mid-session.
+      // This guard only exists to catch onboarding escapes.
+      if (dest !== '/(tabs)/plans' && dest !== '/migration-gate') {
         console.log('[tabs_guard] bouncing to', dest);
         router.replace(dest as never);
       }

@@ -42,7 +42,7 @@ import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
 import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
-import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt } from '../lib/navState';
+import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt, authedUserIdRef } from '../lib/navState';
 import Colors from '../constants/Colors';
 import {
   usePushNotifications,
@@ -476,6 +476,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           return;
         }
 
+        // Claim the auth identity now, before the awaited fetches below.
+        // supabase-js can fire a racing SIGNED_IN during cold start; the
+        // root listener's identity guard reads this ref to recognize that
+        // re-emit as "already in app" instead of treating it as a fresh
+        // login and double-routing. Cleared again if the user turns out
+        // banned / profile-less below.
+        authedUserIdRef.current = session.user.id;
+
         // Apple ban check + profile fetch run in parallel — both are
         // independent of each other and the ban check is a single RPC,
         // so we save one network RTT vs sequential awaits. If the user
@@ -502,6 +510,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         if (isBanned) {
           await supabase.auth.signOut();
           if (cancelled || isRecoveryRef.current) return;
+          authedUserIdRef.current = null;
           setAuthedUserId(null);
           const unauth = unauthedRoute();
           lastNavRef.current = { dest: unauth, ts: Date.now() };
@@ -511,6 +520,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         }
 
         if (!profileData) {
+          authedUserIdRef.current = null;
           const unauth = unauthedRoute();
           lastNavRef.current = { dest: unauth, ts: Date.now() };
           router.replace(unauth as any);
@@ -522,10 +532,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // read the same profile without firing a duplicate Supabase select.
         seedAuthProfile(queryClient, session.user.id, profileData);
         setAuthedUserId(session.user.id);
+        // session.user.phone comes from the persisted JWT, which can
+        // predate a phone set on another device/session. Only when it's
+        // empty do we pay one extra RTT for the authoritative server
+        // value before deciding to gate — mirrors the (tabs) onboarding
+        // guard, and keeps the common already-has-phone path RTT-free.
+        let authPhone: string | null = session.user.phone ?? null;
+        if (!authPhone) {
+          const { data: { user: fresh } } = await supabase.auth.getUser();
+          if (cancelled || isRecoveryRef.current) return;
+          authPhone = fresh?.phone ?? null;
+        }
         const dest = authedDest({
           onboarding_status: profileData.onboarding_status,
           referral_source: profileData.referral_source,
-          auth_phone: session.user.phone ?? null,
+          auth_phone: authPhone,
         });
         lastNavRef.current = { dest, ts: Date.now() };
         // Navigate first, then lift the overlay — prevents a 1-frame flash
@@ -556,6 +577,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
       if (!session?.user) {
+        authedUserIdRef.current = null;
         setAuthedUserId(null);
         const unauth = unauthedRoute();
         // Skip the redirect if either (a) the pathname already matches
@@ -581,6 +603,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       // run. Also catches any reauthentication flow that bypasses socialAuth.
       if (await isBannedAppleUser(session.user)) {
         await supabase.auth.signOut();
+        authedUserIdRef.current = null;
         setAuthedUserId(null);
         const unauth = unauthedRoute();
         lastNavRef.current = { dest: unauth, ts: Date.now() };
@@ -594,6 +617,20 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       // the user away the moment SIGNED_IN fires. Pathname-agnostic via
       // a shared ref — survives deep-link entry to /verify-code.
       if (verifyCodeSelfRoutingRef.current || pathnameRef.current === '/verify-code') {
+        // verify-code owns routing to plans here; claim the identity so
+        // the post-verify SIGNED_IN re-emits are recognized as re-emits
+        // and don't bounce the user back through authedDest.
+        authedUserIdRef.current = session.user.id;
+        setAuthedUserId(session.user.id);
+        setAuthResolved(true);
+        return;
+      }
+
+      // Re-emitted SIGNED_IN for the user already in the app (foreground /
+      // session recovery), NOT a deliberate login. Do not re-run the phone
+      // gate / re-route mid-session. The 5s lastNavRef dedup below is too
+      // short to catch a refire minutes into a session.
+      if (authedUserIdRef.current === session.user.id) {
         setAuthedUserId(session.user.id);
         setAuthResolved(true);
         return;
@@ -610,6 +647,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           auth_phone: session.user.phone ?? null,
         });
         const now = Date.now();
+        // Genuine fresh login committed — claim the identity so any
+        // SIGNED_IN re-emit later this session is treated as a re-emit.
+        authedUserIdRef.current = session.user.id;
         if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {
           setAuthedUserId(session.user.id);
           setAuthResolved(true);
@@ -621,6 +661,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setTimeout(() => setAuthResolved(true), 80);
       } catch {
         // Profile fetch failed — navigate to plans as fallback so user isn't stuck
+        authedUserIdRef.current = session.user.id;
         setAuthedUserId(session.user.id);
         lastNavRef.current = { dest: '/(tabs)/plans', ts: Date.now() };
         router.replace('/(tabs)/plans' as any);

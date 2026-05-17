@@ -39,6 +39,19 @@ export const lastUnauthRedirectAt = { ts: 0 };
 export const postAuthTransitionRef = { active: false };
 
 /**
+ * User id the root auth listener has already routed into the app this
+ * runtime. supabase-js (RN, autoRefreshToken + AsyncStorage) re-emits
+ * SIGNED_IN on app foreground / session recovery, not only on deliberate
+ * logins. Without this, every re-emit re-runs authedDest() and can bounce
+ * an actively-using user back to /migration-gate or yank them to
+ * /(tabs)/plans mid-session. Set when checkAuth() or a genuine fresh
+ * SIGNED_IN routes a user in; cleared on SIGNED_OUT. State
+ * (setAuthedUserId) is async and can't be read synchronously inside the
+ * listener, hence a ref.
+ */
+export const authedUserIdRef: { current: string | null } = { current: null };
+
+/**
  * Session-scoped OTP throttle, shared between `phone-entry.tsx` (initial
  * send) and `verify-code.tsx` (resend). Without a shared store, a user
  * could send via phone-entry, resend via verify-code (which wouldn't
