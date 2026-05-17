@@ -221,6 +221,11 @@ export default function AlbumDetailScreen() {
   const [muted, setMuted] = useState(false);
   // Caller's chosen cover photo (personal, persisted in album_user_metadata).
   const [savedCover, setSavedCover] = useState<string | null>(null);
+  // Album-name editing is explicit (pencil to enter, checkmark to commit) so
+  // it cannot be edited accidentally and never autosaves mid-typing.
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [savingName, setSavingName] = useState(false);
+  const nameInputRef = useRef<TextInput>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['album', eventId],
@@ -251,30 +256,30 @@ export default function AlbumDetailScreen() {
     setSavedCover(data?.myMetadata?.cover_upload_id ?? null);
   }, [data?.myMetadata?.custom_name, data?.myMetadata?.memory_note, data?.myMetadata?.notifications_muted, data?.myMetadata?.cover_upload_id]);
 
-  // Debounced save: any draft change persists 600ms after the last keystroke.
+  // Debounced save for the memory NOTE only. The album name is intentionally
+  // excluded here: it persists explicitly via commitName (pencil -> checkmark),
+  // so typing in the name field never autosaves. p_custom_name keeps the
+  // already-committed savedName so a note save never clobbers the name.
   useEffect(() => {
     if (!data?.album?.id) return;
-    const sameName = (nameDraft ?? '') === (savedName ?? '');
-    const sameNote = (noteDraft ?? '') === (savedNote ?? '');
-    if (sameName && sameNote) return;
+    if ((noteDraft ?? '') === (savedNote ?? '')) return;
 
     const t = setTimeout(async () => {
       const { error } = await supabase.rpc('set_album_user_metadata', {
         p_plan_album_id: data.album!.id,
-        p_custom_name: nameDraft ?? '',
+        p_custom_name: savedName ?? '',
         p_memory_note: noteDraft ?? '',
         p_notifications_muted: muted,
         p_cover_upload_id: savedCover,
       });
       if (!error) {
-        setSavedName(nameDraft);
         setSavedNote(noteDraft);
       } else {
-        Alert.alert('Could not save', 'Your album changes did not save. Please try again.');
+        Alert.alert('Could not save', 'Your note did not save. Please try again.');
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [nameDraft, noteDraft, savedName, savedNote, data?.album?.id, muted, savedCover]);
+  }, [noteDraft, savedNote, savedName, data?.album?.id, muted, savedCover]);
 
   const toggleMute = useCallback(async () => {
     if (!data?.album?.id) return;
@@ -292,6 +297,48 @@ export default function AlbumDetailScreen() {
       Alert.alert('Could not update notifications', 'Please try again.');
     }
   }, [data?.album?.id, muted, savedName, savedNote, savedCover]);
+
+  // Enter name-edit mode. Idempotent: rapid taps while already editing are
+  // no-ops, so the pencil cannot thrash. Seeds the draft from the committed
+  // name and focuses the field on the next frame.
+  const startEditName = useCallback(() => {
+    if (isEditingName) return;
+    setNameDraft(savedName ?? '');
+    setIsEditingName(true);
+    requestAnimationFrame(() => nameInputRef.current?.focus());
+  }, [isEditingName, savedName]);
+
+  // Commit the edited name. Mirrors toggleMute/setAsCover: sends all five
+  // params so a rename never clobbers note/mute/cover. No-op (just exits edit
+  // mode) when nothing changed. Clearing the name reverts to the plan title.
+  const commitName = useCallback(async () => {
+    if (savingName) return;
+    const next = (nameDraft ?? '').trim();
+    if (!data?.album?.id || next === (savedName ?? '')) {
+      setIsEditingName(false);
+      Keyboard.dismiss();
+      return;
+    }
+    setSavingName(true);
+    try {
+      const { error } = await supabase.rpc('set_album_user_metadata', {
+        p_plan_album_id: data.album.id,
+        p_custom_name: next,
+        p_memory_note: savedNote ?? '',
+        p_notifications_muted: muted,
+        p_cover_upload_id: savedCover,
+      });
+      if (error) {
+        Alert.alert('Could not save', 'Your album name did not save. Please try again.');
+        return;
+      }
+      setSavedName(next || null);
+      setIsEditingName(false);
+      Keyboard.dismiss();
+    } finally {
+      setSavingName(false);
+    }
+  }, [savingName, nameDraft, data?.album?.id, savedName, savedNote, muted, savedCover]);
 
   const handleShareViewedPhoto = useCallback(async () => {
     if (sharing) return;
@@ -580,18 +627,44 @@ export default function AlbumDetailScreen() {
         {/* Personal name + memory note (per-user; others see their own) */}
         <View style={styles.personalSection}>
           <View style={styles.nameRow}>
-            <TextInput
-              style={styles.nameInput}
-              value={nameDraft ?? album.event_title}
-              onChangeText={(v) => setNameDraft(v)}
-              placeholder={album.event_title}
-              placeholderTextColor={Colors.warmGray}
-              maxLength={80}
-              returnKeyType="done"
-              onSubmitEditing={Keyboard.dismiss}
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            />
-            <Ionicons name="pencil-outline" size={16} color={Colors.warmGray} />
+            {isEditingName ? (
+              <>
+                <TextInput
+                  ref={nameInputRef}
+                  style={styles.nameInput}
+                  value={nameDraft ?? ''}
+                  onChangeText={(v) => setNameDraft(v)}
+                  placeholder={album.event_title}
+                  placeholderTextColor={Colors.warmGray}
+                  maxLength={80}
+                  returnKeyType="done"
+                  onSubmitEditing={commitName}
+                  blurOnSubmit
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+                <Pressable
+                  onPress={commitName}
+                  disabled={savingName}
+                  hitSlop={10}
+                  accessibilityLabel="Save album name"
+                >
+                  <Ionicons name="checkmark" size={20} color={Colors.terracotta} />
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text numberOfLines={2} style={styles.nameDisplay}>
+                  {savedName ?? album.event_title}
+                </Text>
+                <Pressable
+                  onPress={startEditName}
+                  hitSlop={10}
+                  accessibilityLabel="Rename album"
+                >
+                  <Ionicons name="pencil-outline" size={18} color={Colors.warmGray} />
+                </Pressable>
+              </>
+            )}
           </View>
           <View style={styles.noteWrap}>
             <TextInput
@@ -785,6 +858,10 @@ const styles = StyleSheet.create({
   personalSection: { paddingHorizontal: GRID_PADDING, paddingTop: 16, gap: 10 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   nameInput: {
+    flex: 1, fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD,
+    color: Colors.asphalt, paddingVertical: 4,
+  },
+  nameDisplay: {
     flex: 1, fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD,
     color: Colors.asphalt, paddingVertical: 4,
   },

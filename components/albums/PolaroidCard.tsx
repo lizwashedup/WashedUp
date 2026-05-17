@@ -5,8 +5,9 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
-// Tilt rotation cycles through these values by index so the grid feels analog.
-const TILTS = [-2, 1.5, 1, -1.5];
+// Tilt rotation cycles through these values by index so the grid reads like
+// real polaroids casually placed down. Slight and alternating (cute, not loud).
+const TILTS = [-2.5, 2, -2, 2.5];
 
 export type PolaroidStatus = 'collecting' | 'developing' | 'ready';
 
@@ -74,27 +75,27 @@ PolaroidCard.displayName = 'PolaroidCard';
 
 const styles = StyleSheet.create({
   outer: {
-    margin: 8,
+    marginBottom: 16,
   },
   pressed: {
     opacity: 0.9,
   },
   frame: {
     backgroundColor: Colors.white,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 12,
+    borderRadius: 3,
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 26,
     shadowColor: Colors.shadowBlack,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 5,
   },
   photo: {
     aspectRatio: 1,
     backgroundColor: Colors.inputBg,
-    borderRadius: 4,
+    borderRadius: 2,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -116,12 +117,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   caption: {
-    paddingTop: 8,
+    paddingTop: 12,
     paddingHorizontal: 4,
     gap: 2,
   },
   title: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: Fonts.displayBold,
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
   },

@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
-import { ActivityIndicator, Alert, Dimensions, FlatList, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
@@ -73,13 +73,6 @@ type AlbumRow = {
 };
 
 const SIGNED_URL_TTL_SEC = 3600;
-
-// Fixed card width so a lone album reads as an intentional card, not a
-// full-width stretched polaroid. Mirrors the in-album tile math: screen
-// minus gridContent padding (12 each side) and PolaroidCard margin (8 each
-// side, both columns), split across 2 columns.
-const SCREEN_W = Dimensions.get('window').width;
-const CARD_W = Math.floor((SCREEN_W - 24 - 32) / 2);
 
 async function fetchAlbumsForUser(userId: string): Promise<AlbumRow[]> {
   // Step 1: events the user is currently joined to.
@@ -195,6 +188,11 @@ type Props = { userId: string };
 
 export function AlbumsGrid({ userId }: Props) {
   const router = useRouter();
+  // Reactive width: read per-render via the hook (not a module-level
+  // Dimensions constant, which can resolve to 0 at bundle load and collapse
+  // the card width). ~2/5 of screen so a lone album sits top-left with room.
+  const { width } = useWindowDimensions();
+  const cardW = Math.round(width * 0.42);
 
   const { data: albums, isLoading, error, refetch, isStale: albumsStale } = useQuery({
     queryKey: ['albumsGrid', userId],
@@ -297,46 +295,31 @@ export function AlbumsGrid({ userId }: Props) {
           <Ionicons name="chevron-forward" size={16} color={Colors.terracotta} />
         </Pressable>
       )}
-      {albums.length === 1 ? (
-        <ScrollView contentContainerStyle={styles.singleContent}>
+      {/* Always a 2-column grid, even with one album: a lone card sits in the
+          left column with the right column empty, signalling there is room for
+          more albums (rather than centering and looking like a broken state). */}
+      <FlatList
+        data={albums}
+        keyExtractor={(a) => a.id}
+        numColumns={2}
+        contentContainerStyle={styles.gridContent}
+        columnWrapperStyle={styles.gridRow}
+        renderItem={({ item, index }) => (
           <PolaroidCard
-            index={0}
-            cardWidth={CARD_W}
-            title={albums[0].custom_name ?? albums[0].event_title}
-            dateText={formatDate(albums[0].event_start_time)}
-            coverUri={albums[0].cover_signed_url}
-            status={albums[0].status}
-            readyInLabel={albums[0].status === 'developing' ? readyInLabel(albums[0].first_upload_at) : undefined}
-            onPress={() => handleAlbumPress(albums[0].event_id)}
-            onLongPress={albums[0].first_upload_at == null
-              ? () => handleArchive(albums[0].event_id, albums[0].custom_name ?? albums[0].event_title)
+            index={index}
+            cardWidth={cardW}
+            title={item.custom_name ?? item.event_title}
+            dateText={formatDate(item.event_start_time)}
+            coverUri={item.cover_signed_url}
+            status={item.status}
+            readyInLabel={item.status === 'developing' ? readyInLabel(item.first_upload_at) : undefined}
+            onPress={() => handleAlbumPress(item.event_id)}
+            onLongPress={item.first_upload_at == null
+              ? () => handleArchive(item.event_id, item.custom_name ?? item.event_title)
               : undefined}
           />
-        </ScrollView>
-      ) : (
-        <FlatList
-          data={albums}
-          keyExtractor={(a) => a.id}
-          numColumns={2}
-          contentContainerStyle={styles.gridContent}
-          columnWrapperStyle={styles.gridRow}
-          renderItem={({ item, index }) => (
-            <PolaroidCard
-              index={index}
-              cardWidth={CARD_W}
-              title={item.custom_name ?? item.event_title}
-              dateText={formatDate(item.event_start_time)}
-              coverUri={item.cover_signed_url}
-              status={item.status}
-              readyInLabel={item.status === 'developing' ? readyInLabel(item.first_upload_at) : undefined}
-              onPress={() => handleAlbumPress(item.event_id)}
-              onLongPress={item.first_upload_at == null
-                ? () => handleArchive(item.event_id, item.custom_name ?? item.event_title)
-                : undefined}
-            />
-          )}
-        />
-      )}
+        )}
+      />
     </View>
   );
 }
@@ -369,12 +352,9 @@ const styles = StyleSheet.create({
     color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD,
   },
   gridContent: {
-    paddingHorizontal: 12, paddingVertical: 8, paddingBottom: 60,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 60,
   },
-  singleContent: {
-    alignItems: 'center', paddingTop: 24, paddingBottom: 60, paddingHorizontal: 12,
-  },
-  gridRow: { justifyContent: 'space-between' },
+  gridRow: { gap: 12 },
   dismissedBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     marginHorizontal: 16, marginTop: 8,
