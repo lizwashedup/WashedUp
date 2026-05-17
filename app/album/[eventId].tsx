@@ -507,6 +507,15 @@ export default function AlbumDetailScreen() {
   }
 
   const { album, uploads, attendees, myUserId } = data;
+  // The grid and the full-screen viewer must index the SAME list. The grid
+  // hides optimistically-removed uploads; if the viewer kept indexing the
+  // raw `uploads`, tapping a thumbnail after a hidden one opened the wrong
+  // photo (and the counter/nav/share canvas were off too). Derive the
+  // visible list once and use it everywhere `viewerIndex` is dereferenced.
+  // Cheap per-render filter (album sizes are small; the grid filtered
+  // inline every render already) — kept as a plain const because the early
+  // returns above forbid adding a hook here.
+  const visibleUploads = uploads.filter((u) => !optimisticHiddenIds.has(u.id));
   const isReady = album.status === 'ready';
 
   return (
@@ -599,7 +608,7 @@ export default function AlbumDetailScreen() {
         </View>
 
         {/* Photo grid */}
-        {uploads.length === 0 ? (
+        {visibleUploads.length === 0 ? (
           <View style={styles.emptyGrid}>
             <Text style={styles.emptyGridTitle}>
               {isReady ? 'Be the first to add some photos.' : "Your photos are developing…"}
@@ -610,8 +619,7 @@ export default function AlbumDetailScreen() {
           </View>
         ) : (
           <View style={styles.grid}>
-            {uploads
-              .filter((u) => !optimisticHiddenIds.has(u.id))
+            {visibleUploads
               .map((u, idx) => {
                 const hearted = isHearted(u.id);
                 const isOwn = u.user_id === myUserId;
@@ -673,16 +681,16 @@ export default function AlbumDetailScreen() {
         onRequestClose={() => setViewerIndex(null)}
       >
         <View style={styles.viewerRoot}>
-          {viewerIndex !== null && uploads[viewerIndex] && (
+          {viewerIndex !== null && visibleUploads[viewerIndex] && (
             <>
-              {uploads[viewerIndex].content_type === 'video' ? (
+              {visibleUploads[viewerIndex].content_type === 'video' ? (
                 <View style={styles.viewerVideoFallback}>
                   <Ionicons name="videocam-outline" size={48} color={Colors.white} />
                   <Text style={styles.viewerVideoText}>Video playback coming soon</Text>
                 </View>
               ) : (
                 <Image
-                  source={{ uri: uploads[viewerIndex].signed_display_url ?? '' }}
+                  source={{ uri: visibleUploads[viewerIndex].signed_display_url ?? '' }}
                   style={styles.viewerImage}
                   contentFit="contain"
                 />
@@ -695,8 +703,8 @@ export default function AlbumDetailScreen() {
               <SafeAreaView edges={['bottom']} style={styles.viewerFooter}>
                 <View style={styles.viewerCreditRow}>
                   <Text style={styles.viewerCredit}>
-                    {uploads[viewerIndex].uploader_name
-                      ? `by ${uploads[viewerIndex].uploader_name}${uploads[viewerIndex].user_id === myUserId ? ' (you)' : ''}`
+                    {visibleUploads[viewerIndex].uploader_name
+                      ? `by ${visibleUploads[viewerIndex].uploader_name}${visibleUploads[viewerIndex].user_id === myUserId ? ' (you)' : ''}`
                       : ''}
                   </Text>
                   <Pressable
@@ -722,12 +730,12 @@ export default function AlbumDetailScreen() {
                     <Ionicons name="chevron-back" size={24} color={Colors.white} />
                   </Pressable>
                   <Text style={styles.viewerCount}>
-                    {viewerIndex + 1} / {uploads.length}
+                    {viewerIndex + 1} / {visibleUploads.length}
                   </Text>
                   <Pressable
-                    onPress={() => setViewerIndex((i) => (i === null || i >= uploads.length - 1 ? i : i + 1))}
-                    disabled={viewerIndex >= uploads.length - 1}
-                    style={[styles.viewerNavBtn, viewerIndex >= uploads.length - 1 && styles.viewerNavBtnDisabled]}
+                    onPress={() => setViewerIndex((i) => (i === null || i >= visibleUploads.length - 1 ? i : i + 1))}
+                    disabled={viewerIndex >= visibleUploads.length - 1}
+                    style={[styles.viewerNavBtn, viewerIndex >= visibleUploads.length - 1 && styles.viewerNavBtnDisabled]}
                     hitSlop={8}
                   >
                     <Ionicons name="chevron-forward" size={24} color={Colors.white} />
@@ -742,7 +750,7 @@ export default function AlbumDetailScreen() {
       {/* Off-screen branded share canvas — captured on share button press. */}
       <BrandedShareCanvas
         ref={shareCanvasRef}
-        photoUri={viewerIndex != null ? (uploads[viewerIndex]?.signed_display_url ?? null) : null}
+        photoUri={viewerIndex != null ? (visibleUploads[viewerIndex]?.signed_display_url ?? null) : null}
         title={album.event_title}
         dateText={formatDate(album.event_start_time)}
       />

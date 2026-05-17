@@ -712,10 +712,19 @@ export default function ChatScreen() {
       const setActive = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user || cancelled) return;
-        await supabase
+        const { error } = await supabase
           .from('profiles')
           .update({ active_chat_event_id: id })
           .eq('id', user.id);
+        // Only treat ourselves as "active" if the server actually recorded
+        // it. If this silently failed and we still flipped markedActive,
+        // clearActive's early-return guard would later skip the reset and
+        // strand active_chat_event_id pointing at this chat — suppressing
+        // push for it long after the user left (missed messages).
+        if (error) {
+          if (__DEV__) console.warn('[chat] setActive failed:', error.message);
+          return;
+        }
         markedActive = true;
       };
 
@@ -723,10 +732,16 @@ export default function ChatScreen() {
         if (!markedActive) return;
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
-        await supabase
+        const { error } = await supabase
           .from('profiles')
           .update({ active_chat_event_id: null })
           .eq('id', user.id);
+        // Keep markedActive=true on failure so the next blur/unmount/
+        // background retries the clear instead of leaving suppression on.
+        if (error) {
+          if (__DEV__) console.warn('[chat] clearActive failed:', error.message);
+          return;
+        }
         markedActive = false;
       };
 
