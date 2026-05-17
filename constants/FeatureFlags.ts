@@ -20,3 +20,22 @@
  * tested + Twilio/Supabase phone provider verified live.
  */
 export const PHONE_AUTH_ENABLED = true;
+
+/**
+ * Yours page rebuild.
+ *
+ * When false (current prod default): the Yours tab renders the existing
+ * "Your People" screen unchanged, backed by the friends / pinned_people
+ * system. Tab icon, post-plan survey, and post-create/join flows are all
+ * the current shipped behavior.
+ *
+ * When true: the Yours tab renders the rebuilt experience (mutual people
+ * requests, activity-ring grid, ghost-avatar referrals, redesigned survey,
+ * ping flow) backed by people_connections / people_pings / referral_invites.
+ *
+ * DO NOT flip to true in a committed file until the new system is fully
+ * tested in sim AND the backing migrations (supabase/migrations/20260517*)
+ * have been reviewed and applied to prod, including the gated archive of
+ * the legacy friends / pinned_people data.
+ */
+export const YOURS_PAGE_ENABLED = false;
