@@ -117,16 +117,20 @@ export default function TabLayout() {
     queryKey: UNREAD_CHATS_KEY,
     queryFn: fetchUnreadChatCount,
     enabled: !!userId,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    // Tab-bar badge poll runs for the whole session. Slowed from 30s to
+    // 60s to cut steady background DB/network load (incident 2026-05-18);
+    // opening Chats still invalidates this key for an immediate update.
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 
   const { data: hasPendingInvites = false } = useQuery({
     queryKey: ['pending-invites-badge'],
     queryFn: fetchHasPendingInvites,
     enabled: !!userId,
-    staleTime: 30_000,
-    refetchInterval: 60_000,
+    // Low-churn signal; slowed 60s -> 120s to reduce background load.
+    staleTime: 60_000,
+    refetchInterval: 120_000,
   });
 
   return (

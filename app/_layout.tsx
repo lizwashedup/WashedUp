@@ -36,7 +36,7 @@ LogBox.ignoreLogs([
 ]);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
@@ -55,6 +55,7 @@ import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/
 import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptModal';
 import { KeyboardDoneBar } from '../components/keyboard/KeyboardDoneBar';
 import { logError } from '../lib/logger';
+import { queryClient } from '../lib/queryClient';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
@@ -81,8 +82,6 @@ export { ErrorBoundary } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ duration: 300, fade: true });
-
-const queryClient = new QueryClient();
 
 export const unstable_settings = {
   // Start with (tabs) so we never flash login before auth check completes

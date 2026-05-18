@@ -4,6 +4,7 @@ import * as Crypto from 'expo-crypto';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from './supabase';
+import { queryClient } from './queryClient';
 
 // Album upload orchestrator. Handles a multi-file upload batch:
 //   1. Each file is added to the AsyncStorage queue with status 'pending'.
@@ -354,6 +355,15 @@ async function callStartBatchRpc(batch: Batch): Promise<void> {
     p_testimonial: batch.options.testimonial ?? null,
   });
   if (error) throw error;
+
+  // The album upload path had NO React Query cache invalidation; the
+  // unconditional focus-refetch in AlbumsGrid (removed in the 2026-05-18
+  // perf fix) was the only thing refreshing the grid after an upload.
+  // Invalidate explicitly so the grid + album detail reflect the new
+  // upload without waiting for staleTime. Runs in a detached worker, but
+  // queryClient is the app-wide singleton so this is safe post-unmount.
+  queryClient.invalidateQueries({ queryKey: ['albumsGrid', batch.userId] });
+  queryClient.invalidateQueries({ queryKey: ['album', batch.eventId] });
 }
 
 export async function clearAlbumBatch(batchId: string): Promise<void> {

@@ -691,9 +691,18 @@ export default function ChatScreen() {
     return () => sub.remove();
   }, [showPushBanner, currentUserId]);
 
+  // Throttle the focus-driven message refetch. New messages already
+  // arrive live via realtime; this is a safety-net resync, so once per
+  // 15s on focus is enough. Firing it on every focus contributed to the
+  // 2026-05-18 "chat is slow" reports.
+  const lastChatFocusFetchRef = useRef(0);
   useFocusEffect(
     useCallback(() => {
-      refetch(true);
+      const nowTs = Date.now();
+      if (nowTs - lastChatFocusFetchRef.current > 15_000) {
+        lastChatFocusFetchRef.current = nowTs;
+        refetch(true);
+      }
       Notifications.setBadgeCountAsync(0).catch(() => {});
     }, [refetch]),
   );

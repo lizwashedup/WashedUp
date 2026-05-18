@@ -133,10 +133,19 @@ export default function ChatsScreen() {
   const [pastExpanded, setPastExpanded] = React.useState(false);
 
   const queryClient = useQueryClient();
+  // Throttle the focus-driven chat-list refetch. It runs ~5 parallel
+  // Supabase queries; firing it on *every* tab focus (the prior behavior)
+  // was a primary contributor to the 2026-05-18 "chat is slow" reports.
+  // Still refreshes when you open Chats, just not on rapid tab-switching.
+  const lastChatsFocusFetchRef = React.useRef(0);
 
   useFocusEffect(
     React.useCallback(() => {
-      refetch();
+      const nowTs = Date.now();
+      if (nowTs - lastChatsFocusFetchRef.current > 30_000) {
+        lastChatsFocusFetchRef.current = nowTs;
+        refetch();
+      }
       // Opening the Chats tab means the user is looking at their messages.
       // Clear the app icon badge AND mark all new_message notifications as
       // read in the DB so the tab badge (driven by the unread count query)

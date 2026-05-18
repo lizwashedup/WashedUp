@@ -19,6 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import * as Location from 'expo-location';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -196,6 +197,7 @@ async function saveDrafts(drafts: PlanDraft[]): Promise<void> {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PostScreen() {
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const sheetBottomPad =
     Platform.OS === 'ios' ? 40 : Math.max(insets.bottom, 16) + 16;
@@ -907,6 +909,14 @@ export default function PostScreen() {
       }
 
       hapticSuccess();
+      // The Plans feed / "my plans" queries no longer force-refetch on
+      // mount (perf fix, incident 2026-05-18), so a freshly-posted plan
+      // would otherwise be absent from the cached feed for up to
+      // staleTime. Invalidate here — at creation, before the share modal
+      // is dismissed — so both are refetched when the user lands back on
+      // Plans. Same keys/style as join/leave in app/plan/[id].tsx.
+      queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
       setPostedPlanId(insertedEvent?.id ?? null);
       setPostedPlanTitle(title.trim());
       setPostedSpotsLeft(groupSize);

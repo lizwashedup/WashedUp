@@ -88,9 +88,17 @@ export default function ProfileScreen() {
     fetchProfile();
   }, []);
 
+  // Throttle the focus refetch so rapid tab in/out doesn't re-query the
+  // profile every time; still refreshes when you revisit after ~20s (e.g.
+  // after editing). Part of the 2026-05-18 background-load reduction.
+  const lastProfileFocusFetchRef = React.useRef(0);
   useFocusEffect(
     React.useCallback(() => {
-      fetchProfile();
+      const nowTs = Date.now();
+      if (nowTs - lastProfileFocusFetchRef.current > 20_000) {
+        lastProfileFocusFetchRef.current = nowTs;
+        fetchProfile();
+      }
     }, [])
   );
 

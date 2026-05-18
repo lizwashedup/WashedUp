@@ -90,8 +90,11 @@ export default function ProfileButton() {
   const { data: inboxCount = 0 } = useQuery({
     queryKey: INBOX_COUNT_KEY,
     queryFn: fetchInboxCount,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    // ProfileButton is mounted on nearly every screen, so this poll runs
+    // continuously for the whole session. Slowed 30s -> 60s to cut steady
+    // background load (incident 2026-05-18).
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 
   const { data: userId } = useQuery({
@@ -109,7 +112,13 @@ export default function ProfileButton() {
     }, [refetch])
   );
 
+  // Staggered safety-net retries so the avatar appears even if the photo
+  // URL lags right after login/onboarding. Only needed while the photo is
+  // still missing — once it's loaded, skip the extra fetches entirely
+  // (this component mounts on almost every screen, so the unconditional
+  // triple-fetch was steady wasted load — incident 2026-05-18).
   React.useEffect(() => {
+    if (photoUrl) return;
     const t1 = setTimeout(() => refetch(), 800);
     const t2 = setTimeout(() => refetch(), 2500);
     const t3 = setTimeout(() => refetch(), 6000);
@@ -118,7 +127,7 @@ export default function ProfileButton() {
       clearTimeout(t2);
       clearTimeout(t3);
     };
-  }, [refetch]);
+  }, [refetch, photoUrl]);
 
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
