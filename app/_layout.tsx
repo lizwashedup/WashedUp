@@ -56,6 +56,7 @@ import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptMo
 import { KeyboardDoneBar } from '../components/keyboard/KeyboardDoneBar';
 import { logError } from '../lib/logger';
 import { queryClient } from '../lib/queryClient';
+import { withTimeout } from '../lib/withTimeout';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
@@ -457,15 +458,28 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   useEffect(() => {
     let cancelled = false;
 
+    // Hard watchdog: no matter what any auth/network call below does
+    // (hang on a stale/expired refresh token, slow/offline network), the
+    // full-screen auth overlay must never stay up forever. If auth hasn't
+    // resolved in 10s, lift the gate anyway — the onAuthStateChange
+    // listener and the (tabs) guard correct routing once calls resolve.
+    // 10s > the summed bounded timeouts below, so healthy-but-slow
+    // networks still get correct routing and this only trips on a true
+    // pathological hang (incident 2026-05-18, thread 3).
+    const authWatchdog = setTimeout(() => {
+      if (!cancelled) setAuthResolved(true);
+    }, 10000);
+
     async function checkAuth() {
       try {
         // If a password recovery deep link is being handled, don't interfere
         if (isRecoveryRef.current) return;
 
-        const sessionResult = await Promise.race([
+        const sessionResult = await withTimeout(
           supabase.auth.getSession(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
-        ]);
+          6000,
+          { data: { session: null } } as any,
+        );
 
         if (cancelled || isRecoveryRef.current) return;
 
@@ -495,25 +509,32 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // is banned we still sign them out before honoring the profile.
         const fetchProfileWithRetry = async () => {
           for (let attempt = 0; attempt < 2; attempt++) {
-            const { data, error: e } = await supabase
-              .from('profiles')
-              .select('onboarding_status, referral_source')
-              .eq('id', session.user.id)
-              .single();
+            const { data, error: e } = await withTimeout(
+              supabase
+                .from('profiles')
+                .select('onboarding_status, referral_source')
+                .eq('id', session.user.id)
+                .single(),
+              4000,
+              { data: null, error: { message: 'timeout' } } as any,
+            );
             if (!e && data) return data as any;
             if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
           }
           return null;
         };
         const [isBanned, profileData] = await Promise.all([
-          isBannedAppleUser(session.user),
+          // Fail-open on timeout: a flaky network must not freeze or log
+          // out legit returning users. Bans stay enforced server-side
+          // (check_banned_at_signup trigger + admin_ban_user RPC).
+          withTimeout(isBannedAppleUser(session.user), 4000, false),
           fetchProfileWithRetry(),
         ]);
 
         if (cancelled || isRecoveryRef.current) return;
 
         if (isBanned) {
-          await supabase.auth.signOut();
+          await withTimeout(supabase.auth.signOut(), 3000, undefined as any);
           if (cancelled || isRecoveryRef.current) return;
           authedUserIdRef.current = null;
           setAuthedUserId(null);
@@ -544,7 +565,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // guard, and keeps the common already-has-phone path RTT-free.
         let authPhone: string | null = session.user.phone ?? null;
         if (!authPhone) {
-          const { data: { user: fresh } } = await supabase.auth.getUser();
+          // On timeout, keep the JWT's phone (null) and proceed — worst
+          // case the user hits the phone gate they can complete, never a
+          // frozen overlay.
+          const { data: { user: fresh } } = await withTimeout(
+            supabase.auth.getUser(),
+            3000,
+            { data: { user: null } } as any,
+          );
           if (cancelled || isRecoveryRef.current) return;
           authPhone = fresh?.phone ?? null;
         }
@@ -606,8 +634,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       // against the tiny window where SIGNED_IN fires after a fresh Apple
       // sign-in but before signInWithApple's own ban check has a chance to
       // run. Also catches any reauthentication flow that bypasses socialAuth.
-      if (await isBannedAppleUser(session.user)) {
-        await supabase.auth.signOut();
+      if (await withTimeout(isBannedAppleUser(session.user), 4000, false)) {
+        await withTimeout(supabase.auth.signOut(), 3000, undefined as any);
         authedUserIdRef.current = null;
         setAuthedUserId(null);
         const unauth = unauthedRoute();
@@ -645,7 +673,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // Reuse the shared auth-profile cache (seeded by cold-start checkAuth)
         // so SIGNED_IN doesn't fire a duplicate select within the 60s stale
         // window. Falls back to a network fetch if the cache is empty/stale.
-        const data = await getAuthProfile(queryClient, session.user.id);
+        const data = await withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null);
         const dest = authedDest({
           onboarding_status: data?.onboarding_status,
           referral_source: data?.referral_source,
@@ -676,6 +704,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
     return () => {
       cancelled = true;
+      clearTimeout(authWatchdog);
       subscription.unsubscribe();
     };
   }, []);

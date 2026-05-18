@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase';
 import { UNREAD_CHATS_KEY } from '../../constants/QueryKeys';
 import { authedDest } from '../../lib/authRouting';
 import { getAuthProfile } from '../../hooks/useProfile';
+import { withTimeout } from '../../lib/withTimeout';
 
 function PostTabIcon() {
   return (
@@ -90,10 +91,17 @@ export default function TabLayout() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      // Bounded so a stale/expired token or slow network can't hang the
+      // tab mount. On timeout we simply don't run this secondary guard —
+      // root checkAuth / the auth listener own primary routing.
+      const { data: { user } } = await withTimeout(
+        supabase.auth.getUser(),
+        4000,
+        { data: { user: null } } as any,
+      );
       if (!user || cancelled) return;
-      const profile = await getAuthProfile(queryClient, user.id);
-      if (cancelled) return;
+      const profile = await withTimeout(getAuthProfile(queryClient, user.id), 4000, null);
+      if (!profile || cancelled) return;
       const dest = authedDest({
         onboarding_status: profile?.onboarding_status ?? null,
         referral_source: profile?.referral_source ?? null,
