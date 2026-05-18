@@ -196,25 +196,29 @@ type Props = { userId: string };
 export function AlbumsGrid({ userId }: Props) {
   const router = useRouter();
 
-  const { data: albums, isLoading, error, refetch } = useQuery({
+  const { data: albums, isLoading, error, refetch, isStale: albumsStale } = useQuery({
     queryKey: ['albumsGrid', userId],
     queryFn: () => fetchAlbumsForUser(userId),
     enabled: !!userId,
     staleTime: 60_000,
   });
 
-  const { data: dismissedPrompt, refetch: refetchPrompt } = useQuery({
+  const { data: dismissedPrompt, refetch: refetchPrompt, isStale: promptStale } = useQuery({
     queryKey: ['albumsGrid.dismissedPrompt', userId],
     queryFn: () => fetchDismissedPrompt(userId),
     enabled: !!userId,
     staleTime: 60_000,
   });
 
-  // Refresh when the user switches back to this tab after uploading.
+  // Refresh when the user switches back to this tab after uploading — but
+  // only if the data is actually stale. Unconditionally refetching both
+  // queries on every focus bypassed staleTime and churned the grid on
+  // every quick tab switch (2026-05-18 app-wide slowness incident). The
+  // upload path invalidates these keys, so a real upload still refreshes.
   useFocusEffect(useCallback(() => {
-    void refetch();
-    void refetchPrompt();
-  }, [refetch, refetchPrompt]));
+    if (albumsStale) void refetch();
+    if (promptStale) void refetchPrompt();
+  }, [albumsStale, promptStale, refetch, refetchPrompt]));
 
   const handleAlbumPress = useCallback((eventId: string) => {
     router.push(`/album/${eventId}` as any);

@@ -644,7 +644,14 @@ export default function PlansScreen() {
     staleTime: 60_000,
     retry: 2,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
-    refetchOnMount: 'always',
+    // NOTE: do NOT add refetchOnMount:'always' here. The Plans screen
+    // remounts on every tab switch / app foreground; forcing a network
+    // refetch each time returned fresh array refs that recreated the
+    // SectionList render callbacks, full-re-rendering the feed on every
+    // focus. On heavy accounts this pegged the JS thread (frozen app);
+    // for everyone else it was the app-wide slowness (incident
+    // 2026-05-18). staleTime:60_000 already keeps the feed fresh while
+    // serving the cached (referentially-stable) array on remount.
   });
 
   // Safety net: if the initial feed returns very few results (common for brand-new
@@ -873,7 +880,11 @@ export default function PlansScreen() {
     },
     enabled: !!userId,
     staleTime: 10_000,
-    refetchOnMount: 'always',
+    // NOTE: no refetchOnMount:'always' — see the feed query above. This
+    // is an expensive multi-step fetch (joined+created events, dedup,
+    // profiles, member counts); forcing it on every remount was a major
+    // contributor to the 2026-05-18 freeze/slowness incident. staleTime
+    // still refreshes it shortly after it goes stale.
   });
 
   const { data: waitlistedPlans = [] } = useQuery<Plan[]>({
