@@ -59,6 +59,8 @@ import { queryClient } from '../lib/queryClient';
 import { withTimeout } from '../lib/withTimeout';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
+import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
 import AppStoreReviewAsk, {
   REVIEW_ASK_COUNT_KEY,
@@ -480,10 +482,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
     };
 
+    // washedup.app/r/<code> (QR / referral) is disjoint from the
+    // auth/callback recovery URLs handled above; handle it additively so
+    // it never interferes with recovery or the phone gate.
     Linking.getInitialURL()
-      .then((url) => { if (url) parseSessionFromUrl(url); })
+      .then((url) => {
+        if (!url) return;
+        parseSessionFromUrl(url);
+        if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
+      })
       .catch((e) => logError(e, 'layout.getInitialURL'));
-    const sub = Linking.addEventListener('url', ({ url }) => { if (url) parseSessionFromUrl(url); });
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      if (!url) return;
+      parseSessionFromUrl(url);
+      if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
+    });
     return () => sub.remove();
   }, []);
 
@@ -640,6 +653,13 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
       if (event === 'SIGNED_IN' && isRecoveryRef.current) return;
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
+
+      // Best-effort: consume a referral code captured while signed out
+      // (QR/link scanned before auth). Fire-and-forget; fully self-
+      // contained and error-swallowed so it cannot affect routing below.
+      if (YOURS_PAGE_ENABLED && event === 'SIGNED_IN') {
+        consumePendingReferral();
+      }
 
       if (!session?.user) {
         authedUserIdRef.current = null;

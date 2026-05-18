@@ -22,8 +22,6 @@ export type SearchConnectionState =
 
 export type ProfileCardKind = 'full' | 'minimal';
 
-export type ReferralStatus = 'pending' | 'signed_up' | 'added_to_people';
-
 /** get_yours_grid row. */
 export interface YoursGridPerson {
   user_id: string;

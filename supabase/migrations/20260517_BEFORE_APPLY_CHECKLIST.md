@@ -32,13 +32,15 @@ Already verified 2026-05-16 (re-confirm if time has passed):
 3. `20260517000200_yours_read_rpcs.sql`
 4. `20260517000300_yours_mutation_rpcs.sql`
 5. `20260517000400_yours_push_triggers.sql`
+6. `20260517000600_resolve_referral_code.sql` (QR same-app-scan resolve;
+   depends only on `profiles.referral_code` from migration 000)
 
-Migrations 1-5 are additive and safe to ship **ahead of** flipping the
+Migrations 1-5 + 6 are additive and safe to ship **ahead of** flipping the
 flag (no existing behavior depends on them).
 
 ## Gated (DO NOT apply until flip)
 
-6. `20260517000500_GATED_archive_friends_pinned_people.sql` — destructive
+7. `20260517000500_GATED_archive_friends_pinned_people.sql` — destructive
    (renames `friends`/`pinned_people` to `*_archived_20260517`). Has a
    leading guard DO-block that RAISEs on accidental apply. Apply **only**
    when flipping `YOURS_PAGE_ENABLED=true` in a shipped build, after

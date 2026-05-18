@@ -72,7 +72,8 @@
           "autoVerify": true,
           "data": [
             { "scheme": "https", "host": "washedup.app", "pathPrefix": "/e/" },
-            { "scheme": "https", "host": "washedup.app", "pathPrefix": "/plans/" }
+            { "scheme": "https", "host": "washedup.app", "pathPrefix": "/plans/" },
+            { "scheme": "https", "host": "washedup.app", "pathPrefix": "/r/" }
           ],
           "category": ["BROWSABLE", "DEFAULT"]
         }

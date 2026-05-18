@@ -5,7 +5,6 @@
  * (people requests surface there as action items).
  */
 export const yoursKeys = {
-  all: ['yours'] as const,
   grid: (userId: string) => ['yours', 'grid', userId] as const,
   backlog: (userId: string) => ['yours', 'backlog', userId] as const,
   search: (userId: string, q: string) =>
