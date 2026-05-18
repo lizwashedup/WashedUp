@@ -18,6 +18,7 @@ import Colors from '../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../constants/Typography';
 import { hapticLight, hapticMedium } from '../lib/haptics';
 import { supabase } from '../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -41,6 +42,45 @@ interface Props {
   members: SurveyMember[];
   userId: string;
   onComplete: () => void;
+}
+
+// ─── Local suppression ──────────────────────────────────────────────────────
+// The server RPC (get_pending_post_plan_survey) only stops re-prompting once
+// a plan_feedback row exists. If that insert ever fails, the user is offline,
+// or they skip, the survey would otherwise re-block them on every cold start
+// (incident 2026-05-18 — a fully locked-out, restart-proof state). This
+// on-device list guarantees that once a user has dealt with a survey it can
+// never re-block them, independent of the network. Mirrors the
+// AlbumUploadPromptModal `albumUploadPrompt.dismissedV1` pattern.
+export const POST_PLAN_SURVEY_HANDLED_KEY = 'postPlanSurvey.handledV1';
+
+export async function isPostPlanSurveyHandled(eventId: string): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(POST_PLAN_SURVEY_HANDLED_KEY);
+    if (!raw) return false;
+    const ids = JSON.parse(raw) as unknown;
+    return Array.isArray(ids) && ids.includes(eventId);
+  } catch {
+    return false;
+  }
+}
+
+async function markPostPlanSurveyHandled(eventId: string): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(POST_PLAN_SURVEY_HANDLED_KEY);
+    let ids: string[] = [];
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed)) ids = parsed as string[];
+      } catch { ids = []; }
+    }
+    if (!ids.includes(eventId)) ids.push(eventId);
+    if (ids.length > 100) ids = ids.slice(-100); // cap unbounded growth
+    await AsyncStorage.setItem(POST_PLAN_SURVEY_HANDLED_KEY, JSON.stringify(ids));
+  } catch {
+    /* best-effort; a successful plan_feedback insert also suppresses */
+  }
 }
 
 // ─── Step types ─────────────────────────────────────────────────────────────
@@ -93,9 +133,12 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
   }, [plan.id, userId]);
 
   const finish = useCallback(() => {
+    // Suppress locally BEFORE unmounting, regardless of whether the
+    // plan_feedback insert succeeded. Fire-and-forget: never block UI.
+    void markPostPlanSurveyHandled(plan.id);
     reset();
     onComplete();
-  }, [reset, onComplete]);
+  }, [reset, onComplete, plan.id]);
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
@@ -167,13 +210,16 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
     finish();
   }, [submitting, comment, insertFeedback, finish]);
 
-  const handleDismiss = useCallback(async () => {
-    if (submitting) return;
-    setSubmitting(true);
+  // Escape hatch available on every step. Deliberately NOT gated by
+  // `submitting` and never awaits the network, so a slow/failed insert,
+  // an offline device, or a broken step can never trap the user. The
+  // best-effort insert + finish()'s local suppression both run; finish()
+  // alone guarantees the survey is gone for good on this device.
+  const handleSkip = useCallback(() => {
     hapticLight();
-    await insertFeedback(true, null, null);
+    void insertFeedback(true, null, 'skipped');
     finish();
-  }, [submitting, insertFeedback, finish]);
+  }, [insertFeedback, finish]);
 
   // ── Render helpers ──────────────────────────────────────────────────────
 
@@ -345,9 +391,20 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
   // ── Full-screen modal for steps 1 & no_message ──────────────────────────
   if (isFullScreen) {
     return (
-      <Modal visible={visible} animationType="none" transparent={false} onRequestClose={handleDismiss} statusBarTranslucent>
+      <Modal visible={visible} animationType="none" transparent={false} onRequestClose={handleSkip} statusBarTranslucent>
         <View style={styles.container}>
           {renderModalContent()}
+          {/* Always-available escape, even on this full-screen step, so a
+              broken or uncompletable survey can never permanently trap the
+              user (incident 2026-05-18). Never disabled. */}
+          <TouchableOpacity
+            style={[styles.skipButton, { top: insets.top + 12 }]}
+            onPress={handleSkip}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.skipButtonText}>Not now</Text>
+          </TouchableOpacity>
         </View>
       </Modal>
     );
@@ -355,15 +412,14 @@ export default function PostPlanSurvey({ visible, plan, members, userId, onCompl
 
   // ── Centered card modal for steps 2+ ────────────────────────────────────
   return (
-    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={handleDismiss}>
+    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={handleSkip}>
       <View style={styles.backdrop}>
         <View style={[styles.card, { maxHeight: '70%' }]}>
           <TouchableOpacity
             style={styles.dismissButton}
-            onPress={handleDismiss}
+            onPress={handleSkip}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             activeOpacity={0.7}
-            disabled={submitting}
           >
             <Ionicons name="close" size={18} color={Colors.secondary} />
           </TouchableOpacity>
@@ -433,6 +489,20 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accentSubtle,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  skipButton: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: Colors.accentSubtle,
+  },
+  skipButtonText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.secondary,
   },
 
   // ── Content ──

@@ -58,7 +58,7 @@ import { logError } from '../lib/logger';
 import { queryClient } from '../lib/queryClient';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
+import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
 import AppStoreReviewAsk, {
   REVIEW_ASK_COUNT_KEY,
   REVIEW_ASK_COMPLETED_KEY,
@@ -237,6 +237,12 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           plan: { id: string; title: string; image_url: string | null };
           members: Array<{ id: string; first_name_display: string | null; profile_photo_url: string | null }>;
         };
+
+        // On-device suppression backstop. The RPC only stops returning a
+        // plan once a plan_feedback row exists; if that insert ever failed
+        // or the user skipped offline, this guarantees the survey can never
+        // re-block them on a later cold start (incident 2026-05-18).
+        if (await isPostPlanSurveyHandled(payload.plan.id)) return;
 
         setSurveyPlan({
           id: payload.plan.id,
