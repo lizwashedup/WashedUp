@@ -101,8 +101,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   photoImage: {
-    width: '100%',
-    height: '100%',
+    // Absolute-fill (not width/height:100%) so the image's intrinsic size
+    // can't drive the parent box: the photo's aspectRatio:1 fully governs
+    // the square, and the cover is clipped by the parent's overflow:hidden.
+    ...StyleSheet.absoluteFillObject,
   },
   developingOverlay: {
     alignItems: 'center',
