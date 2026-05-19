@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { View, TextInput, StyleSheet, ActivityIndicator, Text, Alert } from 'react-native';
+import {
+  View,
+  TextInput,
+  StyleSheet,
+  ActivityIndicator,
+  Text,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { AtSign } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -48,7 +57,10 @@ export default function HandleLookupView({
   };
 
   return (
-    <View style={styles.wrap}>
+    <KeyboardAvoidingView
+      style={styles.wrap}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <View style={styles.inputBox}>
         <AtSign size={18} color={Colors.tertiary} />
         <TextInput
@@ -59,6 +71,8 @@ export default function HandleLookupView({
           autoCapitalize="none"
           autoCorrect={false}
           autoFocus
+          returnKeyType="search"
+          accessibilityLabel="Find someone by their exact handle"
           style={styles.input}
         />
         {isFetching && <ActivityIndicator color={Colors.tertiary} />}
@@ -84,7 +98,7 @@ export default function HandleLookupView({
       <Text style={styles.hint}>
         You can only add people you already know. Type a handle exactly.
       </Text>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

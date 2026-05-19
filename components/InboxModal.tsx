@@ -268,7 +268,19 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
+    <Modal
+      visible
+      transparent
+      // fade (not slide): with a transparent modal, "slide" animates the dark
+      // scrim up *with* the sheet, so until it settles the screen behind
+      // (e.g. the Yours Albums grid) shows through undimmed and looks like a
+      // broken half-overlap. fade brings the full-screen scrim in at once so
+      // the sheet always sits on a cleanly covered screen.
+      animationType="fade"
+      presentationStyle="overFullScreen"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
       <Pressable style={s.overlay} onPress={onClose}>
         <Pressable
           style={[
