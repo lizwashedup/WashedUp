@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '../../lib/haptics';
 import { buildPlanShareContent } from '../../lib/sharePlan';
+import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -1765,7 +1766,7 @@ export default function PlanDetailScreen() {
         >
           <Pressable style={[duplicateSheetStyles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 20 }]} onPress={() => {}}>
             <View style={duplicateSheetStyles.handle} />
-            <Text style={duplicateSheetStyles.title}>duplicate this plan</Text>
+            <Text style={duplicateSheetStyles.title}>Post your own</Text>
             <Text style={duplicateSheetStyles.body}>
               skip the wait. we'll let everyone on the waitlist know to join you!
             </Text>
@@ -1781,39 +1782,15 @@ export default function PlanDetailScreen() {
                 setTimeout(() => {
                   router.push({
                     pathname: '/(tabs)/post',
-                    params: {
-                      prefillTitle: plan?.title ?? '',
-                      prefillDescription: plan?.description ?? '',
-                      prefillLocation: plan?.location_text ?? '',
-                      prefillLocationLat: plan?.location_lat != null ? String(plan.location_lat) : '',
-                      prefillLocationLng: plan?.location_lng != null ? String(plan.location_lng) : '',
-                      prefillNeighborhood: plan?.neighborhood ?? '',
-                      prefillCategory: plan?.primary_vibe ?? '',
-                      prefillImageUrl: plan?.image_url ?? '',
-                      prefillStartTime: plan?.start_time ?? '',
-                      // Date param expects YYYY-MM-DD; sending the full ISO
-                      // breaks the receiver's parser (silently no-ops).
-                      prefillEventDate: plan?.start_time?.slice(0, 10) ?? '',
-                      prefillEndTime: plan?.end_time ?? '',
-                      prefillDropIn: plan?.drop_in === false ? 'false' : 'true',
-                      prefillAllowDuplicate: plan?.allow_duplicate === false ? 'false' : 'true',
-                      prefillAgeRange: minMaxToAgeRanges(
-                        plan?.target_age_min ?? null,
-                        plan?.target_age_max ?? null,
-                      ).join(','),
-                      prefillGenderPref: plan?.gender_rule ?? 'mixed',
-                      prefillGroupSize: plan?.max_invites != null ? String(plan.max_invites) : '',
-                      prefillTicketsUrl: plan?.tickets_url ?? '',
-                      duplicatedFromEventId: id ?? '',
-                    },
+                    params: buildDuplicatePostParams(plan, id),
                   });
                 }, 150);
               }}
               activeOpacity={0.85}
               accessibilityRole="button"
-              accessibilityLabel="post a duplicate plan"
+              accessibilityLabel="Post your own"
             >
-              <Text style={duplicateSheetStyles.primaryBtnText}>post a duplicate plan</Text>
+              <Text style={duplicateSheetStyles.primaryBtnText}>Post your own</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={duplicateSheetStyles.secondaryBtn}

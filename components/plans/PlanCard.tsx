@@ -16,6 +16,8 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight, hapticMedium } from '../../lib/haptics';
 import { buildPlanShareContent } from '../../lib/sharePlan';
+import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
+import { supabase } from '../../lib/supabase';
 import MarkIcon from '../marks/MarkIcons';
 import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
 import Animated, {
@@ -46,6 +48,7 @@ interface PlanCardProps {
     member_count: number;
     is_featured?: boolean;
     featured_type?: 'washedup_event' | 'birthday_party' | null;
+    allow_duplicate?: boolean;
     creator: {
       id?: string;
       first_name_display: string;
@@ -144,6 +147,37 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     }
     router.push(`/plan/${plan.id}`);
   }, [plan.id, plan.creator?.profile_photo_url, router]);
+
+  // "Post your own" — same destination + pre-fill as the duplicate sheet's
+  // primary button in app/plan/[id].tsx. The feed Plan is slim, so fetch the
+  // full event row by id first to guarantee an identical pre-fill, then push
+  // to the post screen via the shared param builder.
+  const [duplicating, setDuplicating] = useState(false);
+  const handlePostYourOwn = useCallback(
+    async (e?: any) => {
+      e?.stopPropagation?.();
+      if (duplicating) return;
+      hapticLight();
+      setDuplicating(true);
+      try {
+        const { data, error } = await supabase
+          .from('events')
+          .select(
+            'id, title, description, start_time, end_time, drop_in, allow_duplicate, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, target_age_min, target_age_max, tickets_url, neighborhood',
+          )
+          .eq('id', plan.id)
+          .single();
+        if (error || !data) return;
+        router.push({
+          pathname: '/(tabs)/post',
+          params: buildDuplicatePostParams(data as any, plan.id),
+        });
+      } finally {
+        setDuplicating(false);
+      }
+    },
+    [duplicating, plan.id, router],
+  );
 
   // Creator always counts as 1 — member_count should never display as 0
   const isFeatured = plan.is_featured ?? false;
@@ -397,6 +431,18 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
           )
         )}
         <View style={styles.ctaSpacer} />
+        {!isPast && isFull && plan.allow_duplicate === true && (
+          <Pressable
+            style={styles.postYourOwnBtn}
+            onPress={handlePostYourOwn}
+            disabled={duplicating}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Post your own"
+          >
+            <Text style={styles.postYourOwnBtnText}>Post your own</Text>
+          </Pressable>
+        )}
         {isPast ? (
           <View style={styles.completedBadge}>
             <Ionicons name="checkmark-circle-outline" size={14} color={Colors.secondary} />
@@ -675,6 +721,18 @@ const styles = StyleSheet.create({
     borderColor: Colors.terracotta,
   },
   ctaButtonOutlineText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
+  // Ghost button — intentionally lighter than the outline Waitlist button
+  // (no background, no border) so it reads as the secondary option.
+  postYourOwnBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  postYourOwnBtnText: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,

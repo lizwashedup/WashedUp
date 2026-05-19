@@ -235,6 +235,7 @@ interface PlanCardPlan {
   member_count: number;
   is_featured?: boolean;
   featured_type?: 'washedup_event' | 'birthday_party' | null;
+  allow_duplicate?: boolean;
   creator: {
     id: string;
     first_name_display: string;
@@ -272,6 +273,7 @@ function toPlanCardPlan(plan: Plan): PlanCardPlan {
     member_count: plan.member_count ?? 0,
     is_featured: plan.is_featured ?? false,
     featured_type: plan.featured_type ?? null,
+    allow_duplicate: plan.allow_duplicate ?? true,
     creator: {
       id: plan.creator?.id ?? '',
       first_name_display: plan.creator?.first_name_display ?? 'Creator',

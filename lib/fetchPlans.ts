@@ -45,6 +45,7 @@ export interface Plan {
   is_featured: boolean;
   featured_type: 'washedup_event' | 'birthday_party' | null;
   cluster_root_id: string | null;
+  allow_duplicate: boolean;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -74,6 +75,7 @@ function mapRowToPlan(item: any): Plan {
     is_featured: item.is_featured ?? false,
     featured_type: (item.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
     cluster_root_id: item.cluster_root_id ?? null,
+    allow_duplicate: item.allow_duplicate ?? true,
     creator: (item.creator_user_id ?? item.host_id)
       ? {
           id: item.creator_user_id ?? item.host_id,
@@ -102,9 +104,10 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
   // Extract creator IDs before parallel fetch
   const creatorIds = [...new Set(plans.map((p) => p.creator?.id).filter(Boolean))] as string[];
 
-  // Fetch real member counts, creator plan counts, and featured_type in parallel.
-  // featured_type lives on events but the get_filtered_feed RPC doesn't return
-  // it, so we fetch it via a separate query keyed by event id.
+  // Fetch real member counts, creator plan counts, and featured_type +
+  // allow_duplicate in parallel. featured_type and allow_duplicate live on
+  // events but the get_filtered_feed RPC doesn't return them, so we fetch
+  // them via a separate query keyed by event id.
   const [realCounts, creatorEventsResult, featuredTypeResult] = await Promise.all([
     fetchRealMemberCounts(plans.map((p) => p.id)),
     creatorIds.length > 0
@@ -112,18 +115,24 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
       : Promise.resolve({ data: [] as { creator_user_id: string }[], error: null }),
     supabase
       .from('events')
-      .select('id, featured_type')
+      .select('id, featured_type, allow_duplicate')
       .in('id', plans.map((p) => p.id)),
   ]);
 
-  // Apply featured_type to plans (only meaningful when is_featured is true).
+  // Apply featured_type (only meaningful when is_featured is true) and
+  // allow_duplicate to plans.
   if (!featuredTypeResult.error) {
     const featuredTypeById: Record<string, 'washedup_event' | 'birthday_party' | null> = {};
-    (featuredTypeResult.data ?? []).forEach((row: { id: string; featured_type: string | null }) => {
-      featuredTypeById[row.id] = (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null;
-    });
+    const allowDuplicateById: Record<string, boolean> = {};
+    (featuredTypeResult.data ?? []).forEach(
+      (row: { id: string; featured_type: string | null; allow_duplicate: boolean | null }) => {
+        featuredTypeById[row.id] = (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null;
+        allowDuplicateById[row.id] = row.allow_duplicate ?? true;
+      },
+    );
     plans.forEach((p) => {
       p.featured_type = featuredTypeById[p.id] ?? null;
+      if (p.id in allowDuplicateById) p.allow_duplicate = allowDuplicateById[p.id];
     });
   }
 
@@ -170,7 +179,7 @@ export async function fetchInterestedPlans(): Promise<Plan[]> {
   const [{ data: events, error: eErr }, realCounts] = await Promise.all([
     supabase
       .from('events')
-      .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, neighborhood, slug, gender_rule, max_invites, min_invites, member_count, status, host_message, is_featured, featured_type, cluster_root_id, creator_user_id')
+      .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, neighborhood, slug, gender_rule, max_invites, min_invites, member_count, status, host_message, is_featured, featured_type, cluster_root_id, allow_duplicate, creator_user_id')
       .in('id', eventIds),
     fetchRealMemberCounts(eventIds),
   ]);
