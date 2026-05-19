@@ -125,7 +125,7 @@ export default function AlbumUploadScreen() {
   const [eventTitle, setEventTitle] = useState<string>('');
   const [assets, setAssets] = useState<SelectedAsset[]>([]);
   const [excludedUserIds, setExcludedUserIds] = useState<Set<string>>(new Set());
-  const [marketingConsent, setMarketingConsent] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(true);
   const [tagMe, setTagMe] = useState(true);
   const [instagram, setInstagram] = useState('');
   const [tiktok, setTiktok] = useState('');
@@ -180,7 +180,11 @@ export default function AlbumUploadScreen() {
         allowsMultipleSelection: true,
         selectionLimit: PHOTO_CAP + VIDEO_CAP,
         quality: 1,
-        videoMaxDuration: MAX_VIDEO_SEC,
+        // No videoMaxDuration here on purpose: setting it forces iOS into the
+        // legacy single-select video picker, so users could only add one video
+        // at a time. The MAX_VIDEO_SEC cap is enforced post-pick instead (the
+        // tooLong / tooBig / unreadable rejections below), which keeps videos
+        // multi-selectable via PHPicker.
         ...(Platform.OS === 'ios'
           ? { videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality }
           : {}),
@@ -485,9 +489,9 @@ export default function AlbumUploadScreen() {
 
       <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity
-          style={[styles.uploadBtn, (assets.length === 0 || submitting) && styles.uploadBtnDisabled]}
-          onPress={onUpload}
-          disabled={assets.length === 0 || submitting}
+          style={[styles.uploadBtn, submitting && styles.uploadBtnDisabled]}
+          onPress={assets.length === 0 ? pickAssets : onUpload}
+          disabled={submitting}
           activeOpacity={0.9}
         >
           {submitting ? (
