@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { yoursKeys } from '../lib/yours/keys';
+import { assertRpcShape, BACKLOG_KEYS } from '../lib/yours/shapeGuard';
 import type { BacklogPerson } from '../lib/yours/types';
 
 /** People you've completed a plan with, not yet connected. */
@@ -13,7 +14,7 @@ export function usePlanHistoryBacklog(userId: string | null | undefined) {
         p_user_id: userId,
       });
       if (error) throw error;
-      return (data ?? []) as BacklogPerson[];
+      return assertRpcShape<BacklogPerson>(data, BACKLOG_KEYS, 'get_plan_history_backlog');
     },
   });
 }

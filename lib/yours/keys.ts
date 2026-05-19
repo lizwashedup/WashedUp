@@ -7,8 +7,8 @@
 export const yoursKeys = {
   grid: (userId: string) => ['yours', 'grid', userId] as const,
   backlog: (userId: string) => ['yours', 'backlog', userId] as const,
-  search: (userId: string, q: string) =>
-    ['yours', 'search', userId, q] as const,
+  handleLookup: (userId: string, q: string) =>
+    ['yours', 'handle-lookup', userId, q] as const,
   requests: (userId: string) => ['yours', 'requests', userId] as const,
   profileCard: (userId: string, targetId: string) =>
     ['yours', 'profile-card', userId, targetId] as const,

@@ -24,7 +24,7 @@ export const ANIM = {
   ghostRingDrawMs: 600,
   avatarSelectMs: 200,
   pingConfirmMs: 400,
-  shimmerCycleMs: 1200,
+  shimmerCycleMs: 2000,
   cardFlyMs: 450,
   cardSnapBackMs: 300,
 } as const;
@@ -107,7 +107,7 @@ export const COPY = {
   pathPlansTitle: "People you've already done stuff with",
   pathInviteTitle: 'Text someone a link',
   pathInviteSub: 'They show up here when they join',
-  pathSearchTitle: 'Find someone on WashedUp',
+  pathSearchTitle: 'Find by handle',
   pathQRTitle: 'Show your code',
   pathQRSub: 'Let someone scan to add you',
 

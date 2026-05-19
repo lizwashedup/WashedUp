@@ -8,20 +8,20 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { X, ChevronRight, Search, QrCode } from 'lucide-react-native';
+import { X, ChevronRight, AtSign, QrCode } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import BottomSheet from '../primitives/BottomSheet';
 import PlanHistoryBacklog from './PlanHistoryBacklog';
-import PeopleSearchView from './PeopleSearchView';
+import HandleLookupView from './HandleLookupView';
 import QRShareView from './QRShareView';
 import { COPY } from '../state/constants';
 import { useReferral } from '../../../hooks/useReferral';
 import { openInviteComposer } from '../../../lib/yours/invite';
 
-type Mode = 'menu' | 'plans' | 'search' | 'qr';
+type Mode = 'menu' | 'plans' | 'handle' | 'qr';
 
-/** The add entry point: four doorways, then full-screen list/search/QR. */
+/** The add entry point: four doorways, then full-screen list/handle/QR. */
 export default function PathsSheet({
   visible,
   onClose,
@@ -74,7 +74,7 @@ export default function PathsSheet({
             ) : mode === 'qr' ? (
               <QRShareView userId={userId} />
             ) : (
-              <PeopleSearchView
+              <HandleLookupView
                 userId={userId}
                 onPressPerson={onPressPerson}
               />
@@ -106,9 +106,9 @@ export default function PathsSheet({
           <ChevronRight size={18} color={Colors.tertiary} />
         </Pressable>
 
-        <Pressable style={styles.card} onPress={() => setMode('search')}>
+        <Pressable style={styles.card} onPress={() => setMode('handle')}>
           <Text style={styles.cardTitle}>{COPY.pathSearchTitle}</Text>
-          <Search size={18} color={Colors.terracotta} />
+          <AtSign size={18} color={Colors.terracotta} />
         </Pressable>
 
         <Pressable style={styles.card} onPress={() => setMode('qr')}>

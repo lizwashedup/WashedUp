@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { yoursKeys } from '../lib/yours/keys';
+import { assertRpcShape, YOURS_GRID_KEYS } from '../lib/yours/shapeGuard';
 import type { YoursGridPerson } from '../lib/yours/types';
 
 /** Accepted people, with activity ring, milestone, upcoming-plan pill. */
@@ -13,7 +14,7 @@ export function useYoursGrid(userId: string | null | undefined) {
         p_user_id: userId,
       });
       if (error) throw error;
-      return (data ?? []) as YoursGridPerson[];
+      return assertRpcShape<YoursGridPerson>(data, YOURS_GRID_KEYS, 'get_yours_grid');
     },
   });
 }

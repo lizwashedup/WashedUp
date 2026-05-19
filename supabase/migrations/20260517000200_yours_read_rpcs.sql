@@ -5,8 +5,10 @@
 --   * Legacy get_people_with_plan_history(p_user_id) is friends-scoped and
 --     left untouched so the legacy people-tab keeps working until the flag
 --     flips. These RPCs are fresh and people_connections-scoped.
---   * search_users_by_handle is exact-handle-only; search_people below is a
---     fresh fuzzy name/handle search, not a wrapper.
+--   * search_users_by_handle is exact-handle-only; search_people below is
+--     ALSO exact-@handle-only (no name search / no fuzzy / at most one row) —
+--     WashedUp never surfaces strangers. Kept as a separate fresh RPC, not a
+--     wrapper.
 --   * Albums: plan_albums(id,event_id,status,archived_at) +
 --     album_uploads(plan_album_id,user_id,thumbnail_url,display_url,
 --     media_url,deleted_at,created_at). Adventures = shared completed
@@ -191,12 +193,16 @@ CREATE OR REPLACE FUNCTION public.search_people(p_user_id uuid, p_query text)
   SET search_path = public, pg_temp
 AS $$
 DECLARE
-  q text := '%' || trim(p_query) || '%';
+  -- Exact @handle lookup ONLY. WashedUp never surfaces strangers: no name
+  -- search, no fuzzy/ILIKE, no directory, at most one row. You can only find
+  -- someone whose exact handle you already know. Function name + signature
+  -- kept stable (CLAUDE.md); p_query carries the typed handle.
+  v_handle text := lower(ltrim(trim(p_query), '@'));
 BEGIN
   IF auth.uid() IS NULL OR auth.uid() <> p_user_id THEN
     RAISE EXCEPTION 'unauthorized';
   END IF;
-  IF length(trim(p_query)) < 2 THEN
+  IF length(v_handle) = 0 THEN
     RETURN;
   END IF;
 
@@ -222,7 +228,7 @@ BEGIN
   FROM public.profiles pr
   WHERE pr.id <> p_user_id
     AND pr.onboarding_status = 'complete'
-    AND (pr.first_name_display ILIKE q OR pr.handle ILIKE q)
+    AND lower(pr.handle) = v_handle
     AND NOT public.yours_is_blocked_between(p_user_id, pr.id)
     AND NOT EXISTS (
       SELECT 1 FROM public.people_connections pc
@@ -230,8 +236,7 @@ BEGIN
         AND pc.recipient_user_id = pr.id
         AND pc.status = 'declined'
     )
-  ORDER BY cnt DESC, pr.first_name_display ASC
-  LIMIT 50;
+  LIMIT 1;
 END;
 $$;
 
@@ -274,9 +279,10 @@ BEGIN
     ev.title,
     CASE pc.context
       WHEN 'plan_history' THEN
-        'You were both at ' || COALESCE(ev.title, 'a plan')
+        'You were both on ' || COALESCE(ev.title, 'a plan')
       WHEN 'referral_invite' THEN
         COALESCE(pr.first_name_display, 'They') || ' invited you to WashedUp'
+      WHEN 'handle_lookup' THEN 'Found you on WashedUp'
       ELSE 'Found you on WashedUp'
     END AS context_line,
     pc.requested_at

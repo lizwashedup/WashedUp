@@ -8,7 +8,7 @@
 
 export type RingBucket = 'full' | '75' | '50' | '25' | 'none';
 
-export type ConnectionContext = 'plan_history' | 'search' | 'referral_invite';
+export type ConnectionContext = 'plan_history' | 'handle_lookup' | 'referral_invite';
 
 /** State of a person row inside the plan-history backlog list. */
 export type BacklogState = 'none' | 'requested';

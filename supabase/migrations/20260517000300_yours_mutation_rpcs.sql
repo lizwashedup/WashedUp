@@ -33,7 +33,7 @@ BEGIN
   IF p_recipient IS NULL OR p_recipient = v_me THEN
     RAISE EXCEPTION 'invalid_recipient';
   END IF;
-  IF p_context NOT IN ('plan_history','search','referral_invite') THEN
+  IF p_context NOT IN ('plan_history','handle_lookup','referral_invite') THEN
     RAISE EXCEPTION 'invalid_context';
   END IF;
   IF public.yours_is_blocked_between(v_me, p_recipient) THEN
@@ -147,7 +147,7 @@ BEGIN
     (requester_user_id, recipient_user_id, status, context,
      requested_at, responded_at, can_re_request)
   VALUES
-    (p_other, v_me, 'removed', 'search', now(), now(), false)
+    (p_other, v_me, 'removed', 'handle_lookup', now(), now(), false)
   ON CONFLICT (requester_user_id, recipient_user_id) DO UPDATE
     SET status = 'removed', responded_at = now(), can_re_request = false;
 

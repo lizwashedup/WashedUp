@@ -126,7 +126,7 @@ export default function ProfileCardSheet({
                 try {
                   await sendRequest.mutateAsync({
                     recipientId: card.user_id,
-                    context: 'search',
+                    context: 'handle_lookup',
                   });
                   onClose();
                 } catch (e) {

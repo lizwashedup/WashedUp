@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS public.people_connections (
   CONSTRAINT people_connections_status_check
     CHECK (status IN ('pending','accepted','declined','removed')),
   CONSTRAINT people_connections_context_check
-    CHECK (context IN ('plan_history','search','referral_invite')),
+    CHECK (context IN ('plan_history','handle_lookup','referral_invite')),
   CONSTRAINT people_connections_not_self
     CHECK (requester_user_id <> recipient_user_id),
   CONSTRAINT people_connections_pair_key

@@ -1,14 +1,6 @@
 import React, { useState } from 'react';
-import {
-  View,
-  TextInput,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  Text,
-  Alert,
-} from 'react-native';
-import { Search } from 'lucide-react-native';
+import { View, TextInput, StyleSheet, ActivityIndicator, Text, Alert } from 'react-native';
+import { AtSign } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import PersonRow from './PersonRow';
@@ -19,8 +11,12 @@ import {
 } from '../../../hooks/usePeopleConnectionMutations';
 import type { SearchPerson } from '../../../lib/yours/types';
 
-/** Search all WashedUp users by name or handle. */
-export default function PeopleSearchView({
+/**
+ * Exact @handle lookup. WashedUp never surfaces strangers: you type someone's
+ * exact handle and it either resolves to that one person or to nothing. No
+ * list, no fuzzy matching, no suggestions, no "did you mean", no directory.
+ */
+export default function HandleLookupView({
   userId,
   onPressPerson,
 }: {
@@ -32,12 +28,14 @@ export default function PeopleSearchView({
   const { sendRequest } = usePeopleConnectionMutations(userId);
   const [pending, setPending] = useState<Set<string>>(new Set());
 
+  const match: SearchPerson | undefined = data?.[0];
+
   const add = async (p: SearchPerson) => {
     setPending((s) => new Set(s).add(p.user_id));
     try {
       await sendRequest.mutateAsync({
         recipientId: p.user_id,
-        context: 'search',
+        context: 'handle_lookup',
       });
     } catch (e) {
       Alert.alert('', friendlyConnectionError(e));
@@ -51,52 +49,48 @@ export default function PeopleSearchView({
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.searchBox}>
-        <Search size={18} color={Colors.tertiary} />
+      <View style={styles.inputBox}>
+        <AtSign size={18} color={Colors.tertiary} />
         <TextInput
           value={q}
           onChangeText={setQ}
-          placeholder="Search by name or @handle"
+          placeholder="Enter an exact handle"
           placeholderTextColor={Colors.tertiary}
           autoCapitalize="none"
+          autoCorrect={false}
           autoFocus
           style={styles.input}
         />
         {isFetching && <ActivityIndicator color={Colors.tertiary} />}
       </View>
-      <FlatList
-        data={data ?? []}
-        keyExtractor={(p) => p.user_id}
-        keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) => (
-          <PersonRow
-            name={item.first_name_display}
-            photoUrl={item.profile_photo_url}
-            sharedCount={item.shared_count}
-            state={
-              pending.has(item.user_id)
-                ? 'requested'
-                : item.connection_state === 'incoming'
-                  ? 'none'
-                  : item.connection_state
-            }
-            onAdd={() => add(item)}
-            onPressPerson={() => onPressPerson(item.user_id)}
-          />
-        )}
-        ListEmptyComponent={
-          q.trim().length >= 2 && !isFetching ? (
-            <Text style={styles.empty}>No one by that name.</Text>
-          ) : null
-        }
-      />
+
+      {match ? (
+        <PersonRow
+          name={match.first_name_display}
+          photoUrl={match.profile_photo_url}
+          sharedCount={match.shared_count}
+          state={
+            pending.has(match.user_id)
+              ? 'requested'
+              : match.connection_state === 'incoming'
+                ? 'none'
+                : match.connection_state
+          }
+          onAdd={() => add(match)}
+          onPressPerson={() => onPressPerson(match.user_id)}
+        />
+      ) : null}
+
+      <Text style={styles.hint}>
+        You can only add people you already know. Type a handle exactly.
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  searchBox: {
+  inputBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -112,11 +106,11 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
   },
-  empty: {
+  hint: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.secondary,
-    textAlign: 'center',
-    marginTop: 32,
+    fontSize: FontSizes.bodySM,
+    color: Colors.tertiary,
+    marginTop: 16,
+    paddingHorizontal: 4,
   },
 });
