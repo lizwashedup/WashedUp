@@ -84,6 +84,52 @@ function formatExtFromName(filename: string | null | undefined): string {
   return m ? m[1].toLowerCase() : '';
 }
 
+// Android's gallery picker frequently hands expo-image-picker a video with
+// `duration: null` (content-provider/OEM dependent). Without this we'd reject
+// every such (valid) clip as "unreadable". Probe the real duration with
+// expo-video. expo-video is lazy-required + fully guarded because the native
+// module can be absent on some Android builds (see VideoSplash) — if it's
+// unavailable or the probe fails, we return null and the caller falls back to
+// the existing unreadable-reject (no regression, never a crash).
+function probeVideoDurationMs(uri: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    let player: { duration: number; release?: () => void } | null = null;
+    let settled = false;
+    let sub: { remove: () => void } | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (ms: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try { sub?.remove(); } catch {}
+      try { player?.release?.(); } catch {}
+      resolve(ms);
+    };
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const ev = require('expo-video');
+      if (!ev?.createVideoPlayer) return finish(null);
+      player = ev.createVideoPlayer(uri);
+      const readDur = () => {
+        const d = player?.duration;
+        return typeof d === 'number' && d > 0 ? Math.round(d * 1000) : null;
+      };
+      sub = player && (player as any).addListener
+        ? (player as any).addListener('statusChange', ({ status }: { status: string }) => {
+            if (status === 'readyToPlay') finish(readDur());
+            else if (status === 'error') finish(null);
+          })
+        : null;
+      // Safety net: resolve with whatever duration is known after 5s.
+      timer = setTimeout(() => finish(readDur()), 5000);
+    } catch {
+      finish(null);
+    }
+  });
+}
+
 async function fetchEventAttendees(eventId: string, myUserId: string): Promise<Attendee[]> {
   const { data: members, error: mErr } = await supabase
     .from('event_members')
@@ -203,27 +249,44 @@ export default function AlbumUploadScreen() {
     for (const a of result.assets) {
       const isVideo = a.type === 'video';
       const ext = formatExtFromName(a.fileName) || (isVideo ? 'mp4' : 'jpg');
-      if (isVideo && (a.duration ?? 0) > MAX_VIDEO_SEC * 1000) {
-        rej.tooLong += 1;
-        continue;
-      }
-      if (isVideo && (a.fileSize ?? 0) > MAX_VIDEO_BYTES) {
-        rej.tooBig += 1;
-        continue;
-      }
-      if (isVideo && !a.duration) {
-        // Defense against malformed video metadata that would slip past the
-        // 60-second cap on the server (the duration column allows NULL).
-        rej.unreadable += 1;
+      if (isVideo) {
+        // duration may be null on Android; probe with expo-video before
+        // giving up so we don't reject valid clips. The 60s cap is still
+        // enforced once we have a number, and a still-null duration is kept
+        // as "unreadable" (the server requires a non-null video duration).
+        let durationMs = a.duration ?? null;
+        if (durationMs == null) {
+          durationMs = await probeVideoDurationMs(a.uri);
+        }
+        if (durationMs == null) {
+          rej.unreadable += 1;
+          continue;
+        }
+        if (durationMs > MAX_VIDEO_SEC * 1000) {
+          rej.tooLong += 1;
+          continue;
+        }
+        if ((a.fileSize ?? 0) > MAX_VIDEO_BYTES) {
+          rej.tooBig += 1;
+          continue;
+        }
+        newAssets.push({
+          uri: a.uri,
+          fileName: a.fileName ?? `upload.${ext}`,
+          contentType: 'video',
+          mediaFormat: ext,
+          fileSizeBytes: a.fileSize,
+          videoDurationSec: Math.round(durationMs / 1000),
+        });
         continue;
       }
       newAssets.push({
         uri: a.uri,
         fileName: a.fileName ?? `upload.${ext}`,
-        contentType: isVideo ? 'video' : 'photo',
+        contentType: 'photo',
         mediaFormat: ext,
         fileSizeBytes: a.fileSize,
-        videoDurationSec: isVideo && a.duration ? Math.round(a.duration / 1000) : undefined,
+        videoDurationSec: undefined,
       });
     }
 
