@@ -760,12 +760,30 @@ export default function PostScreen() {
   // ─── Submit ───────────────────────────────────────────────────────────────────
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (loading || imageLoading) return;
 
     // Read location from ref at tap time — this is always current regardless of state sync issues
     const effectiveLocation = locationRaw.trim() || location.trim() || placesRef.current?.getAddressText()?.trim() || '';
-    if (!effectiveLocation) {
-      setAlertInfo({ title: 'Add a location', message: 'Please add a location for your plan.' });
+
+    // Surface every missing required field at once so the user can see
+    // exactly what's left before the plan can be posted.
+    const missing: string[] = [];
+    if (title.trim().length === 0) missing.push('Title');
+    if (!dateSelected) missing.push('Date');
+    if (!timeSelected) missing.push('Time');
+    if (category === null) missing.push('Category');
+    if (effectiveLocation.length === 0) missing.push('Location');
+    if (description.trim().length === 0) missing.push('Plan description');
+    if (creatorMessage.trim().length < MSG_MIN) {
+      missing.push(`Your message (at least ${MSG_MIN} characters)`);
+    } else if (creatorMessage.trim().length > MSG_LIMIT) {
+      missing.push(`Your message (max ${MSG_LIMIT} characters)`);
+    }
+    if (missing.length > 0) {
+      setAlertInfo({
+        title: 'Almost there',
+        message: `Please complete these before posting:\n\n• ${missing.join('\n• ')}`,
+      });
       return;
     }
     const fieldsToCheck = [title, description, creatorMessage, effectiveLocation].filter(Boolean).join(' ');
@@ -1566,7 +1584,7 @@ export default function PostScreen() {
           <TouchableOpacity
             style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
             onPress={handleSubmit}
-            disabled={!canSubmit}
+            disabled={loading || imageLoading}
             activeOpacity={0.9}
           >
             {loading
