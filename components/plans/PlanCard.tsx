@@ -450,7 +450,12 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
           </View>
         ) : (
           <AnimatedPressable
-            style={[isFull && !isMember ? styles.ctaButtonOutline : styles.ctaButton, buttonAnimatedStyle]}
+            style={[
+              isFull && !isMember
+                ? (plan.allow_duplicate === true ? styles.waitlistQuietBtn : styles.ctaButtonOutline)
+                : styles.ctaButton,
+              buttonAnimatedStyle,
+            ]}
             onPress={() => {
               hapticLight();
               handlePress();
@@ -458,7 +463,13 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             onPressIn={handleButtonPressIn}
             onPressOut={handleButtonPressOut}
           >
-            <Text style={isFull && !isMember ? styles.ctaButtonOutlineText : styles.ctaButtonText}>
+            <Text
+              style={
+                isFull && !isMember
+                  ? (plan.allow_duplicate === true ? styles.waitlistQuietText : styles.ctaButtonOutlineText)
+                  : styles.ctaButtonText
+              }
+            >
               {isFull && !isMember ? "Waitlist \u2192" : "Let's Go \u2192"}
             </Text>
           </AnimatedPressable>
@@ -725,17 +736,36 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
   },
-  // Ghost button — intentionally lighter than the outline Waitlist button
-  // (no background, no border) so it reads as the secondary option.
+  // Primary filled action on full+duplicatable cards — "Post your own" is
+  // the behavior we want to encourage, so it's the loudest element here.
   postYourOwnBtn: {
-    paddingHorizontal: 12,
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 20,
     paddingVertical: 8,
+    borderRadius: 12,
     marginRight: 8,
+    shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 4,
   },
   postYourOwnBtnText: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodySM,
-    color: Colors.terracotta,
+    color: Colors.white,
+  },
+  // Quiet text link — when "Post your own" is present it's the loud action,
+  // so "Waitlist" steps back to a low-emphasis link (no bg, no border).
+  waitlistQuietBtn: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  waitlistQuietText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
   },
   completedBadge: {
     flexDirection: 'row',
