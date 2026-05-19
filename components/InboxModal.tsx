@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Bell, Clock, Send } from 'lucide-react-native';
 import * as Notifications from 'expo-notifications';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -20,7 +20,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { supabase } from '../lib/supabase';
-import { INBOX_COUNT_KEY } from '../constants/QueryKeys';
+import { INBOX_COUNT_KEY, WAITLIST_MANAGER_KEY } from '../constants/QueryKeys';
+import {
+  acceptWaitlistException,
+  declineWaitlistException,
+  waitlistAlertMessage,
+} from '../lib/waitlistExceptions';
 import { BrandedAlert, BrandedAlertButton } from './BrandedAlert';
 
 interface InboxModalProps {
@@ -34,6 +39,10 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
+  // Guards against a rapid double-tap firing the exception accept/decline RPC
+  // twice (the 2nd call would error not_on_waitlist / no_active_invite and
+  // surface a spurious branded alert). Keyed by notification id.
+  const exceptionInFlightRef = useRef<Set<string>>(new Set());
 
   // Clear the home-screen badge whenever the inbox is opened. The act of
   // viewing the inbox is the user's "I've seen these" signal — even if they
@@ -150,6 +159,12 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         onClose();
         if (notifType === 'member_joined' || notifType === 'invite_accepted') {
           router.push(`/(tabs)/chats/${eventId}` as any);
+        } else if (notifType === 'waitlist_request' || notifType === 'exception_slot_refunded') {
+          // The manager query has a 30s staleTime; force it fresh so the
+          // creator doesn't land on a stale counter/list after tapping a
+          // "someone wants in" / "slot opened back up" notification.
+          queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(eventId) });
+          router.push(`/waitlist/${eventId}` as any);
         } else {
           router.push(`/plan/${eventId}`);
         }
@@ -178,6 +193,57 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       setAlertInfo({ title: 'Something went wrong', message: 'Please try again.' });
     }
   }, [userId, appNotifications.length, refetchNotifs, queryClient]);
+
+  // exception_invite inline Accept. Mirrors the waitlist_spot Claim flow:
+  // act on the RPC, mark the notification consumed, then route to the chat
+  // (the accept trigger adds the user as a member).
+  const handleAcceptException = useCallback(async (notifId: string, eventId?: string) => {
+    if (!eventId) return;
+    if (exceptionInFlightRef.current.has(notifId)) return;
+    exceptionInFlightRef.current.add(notifId);
+    hapticLight();
+    try {
+      await acceptWaitlistException(eventId);
+      await supabase.from('app_notifications').update({ status: 'acted' }).eq('id', notifId);
+      refetchNotifs();
+      queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+      queryClient.invalidateQueries({ queryKey: ['events', 'members', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['events', 'detail', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
+      queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(eventId) });
+      onClose();
+      router.push(`/(tabs)/chats/${eventId}` as any);
+    } catch (e) {
+      setAlertInfo({
+        title: 'Hmm',
+        message: waitlistAlertMessage(e, "We couldn't add you to the plan. Try again."),
+      });
+    } finally {
+      exceptionInFlightRef.current.delete(notifId);
+    }
+  }, [refetchNotifs, queryClient, router, onClose]);
+
+  const handleDeclineException = useCallback(async (notifId: string, eventId?: string) => {
+    if (!eventId) return;
+    if (exceptionInFlightRef.current.has(notifId)) return;
+    exceptionInFlightRef.current.add(notifId);
+    hapticLight();
+    try {
+      await declineWaitlistException(eventId);
+      await supabase.from('app_notifications').update({ status: 'read' }).eq('id', notifId);
+      refetchNotifs();
+      queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+      queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(eventId) });
+    } catch (e) {
+      setAlertInfo({
+        title: 'Hmm',
+        message: waitlistAlertMessage(e),
+      });
+    } finally {
+      exceptionInFlightRef.current.delete(notifId);
+    }
+  }, [refetchNotifs, queryClient]);
 
   if (!visible) return null;
 
@@ -286,7 +352,15 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
 
               {appNotifications.map((notif: any) => {
                 const isWaitlist = notif.type === 'waitlist_spot';
-                const hasAction = (notif.type === 'waitlist_spot' || notif.type === 'member_joined' || notif.type === 'invite_accepted') && notif.event_id;
+                const isExceptionInvite = notif.type === 'exception_invite';
+                const hasAction = (
+                  notif.type === 'waitlist_spot' ||
+                  notif.type === 'member_joined' ||
+                  notif.type === 'invite_accepted' ||
+                  notif.type === 'waitlist_request' ||
+                  notif.type === 'exception_slot_refunded' ||
+                  notif.type === 'exception_invite'
+                ) && notif.event_id;
                 const timeLeft = notif.expires_at
                   ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
                   : null;
@@ -295,7 +369,15 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                     key={`notif-${notif.id}`}
                     style={s.notifRow}
                     activeOpacity={0.7}
-                    onPress={() => hasAction ? handleNotifAction(notif.id, 'acted', notif.event_id, notif.type) : handleNotifAction(notif.id, 'read')}
+                    onPress={() => {
+                      // exception_invite is decided only via its inline
+                      // Accept/Decline buttons; a stray row tap must not
+                      // consume it.
+                      if (isExceptionInvite) return;
+                      return hasAction
+                        ? handleNotifAction(notif.id, 'acted', notif.event_id, notif.type)
+                        : handleNotifAction(notif.id, 'read');
+                    }}
                   >
                     {notif.sender_photo ? (
                       <Image source={{ uri: notif.sender_photo }} style={s.avatar} contentFit="cover" />
@@ -320,8 +402,18 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                           </TouchableOpacity>
                         </View>
                       )}
+                      {isExceptionInvite && (
+                        <View style={s.waitlistActions}>
+                          <TouchableOpacity style={s.claimBtn} onPress={() => handleAcceptException(notif.id, notif.event_id)} activeOpacity={0.7}>
+                            <Text style={s.claimText}>Join the plan</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={s.cantGoBtn} onPress={() => handleDeclineException(notif.id, notif.event_id)} activeOpacity={0.7}>
+                            <Text style={s.cantGoText}>Not this time</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
-                    {!isWaitlist && (
+                    {!isWaitlist && !isExceptionInvite && (
                       <TouchableOpacity
                         onPress={() => handleNotifAction(notif.id, 'read')}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

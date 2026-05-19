@@ -258,6 +258,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
   // ── App Store review ask ────────────────────────────────────────────────
   const [showReviewAsk, setShowReviewAsk] = useState(false);
+  // Resolves true once the review eligibility check finishes (shown or not),
+  // so the push primer can wait for the decision instead of racing it.
+  const [reviewCheckDone, setReviewCheckDone] = useState(false);
+  const reviewAskShownRef = useRef(false);
 
   useEffect(() => {
     if (!authedUserId || !surveyCheckDone || surveyPlan) return;
@@ -298,9 +302,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         const hasNoFeedback = rows.length === 0;
 
         if (hasThumbsUp || hasNoFeedback) {
+          reviewAskShownRef.current = true;
           setShowReviewAsk(true);
         }
       } catch (e) { logError(e, 'layout.reviewCheck'); }
+      finally { setReviewCheckDone(true); }
     })();
   }, [authedUserId, surveyCheckDone, surveyPlan]);
 
@@ -311,8 +317,15 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   useEffect(() => {
     if (Platform.OS === 'web') return;
     if (!authedUserId || !authResolved) return;
+    // Wait for the App Store review decision before evaluating, so the primer
+    // never flashes on screen a beat ahead of a review ask that takes
+    // precedence (the review check is network-bound and resolves later).
+    if (!reviewCheckDone) return;
     if (pushPrimerCheckedRef.current) return;
     pushPrimerCheckedRef.current = true;
+    // If the review ask was shown this launch, defer the primer to the next
+    // cold launch rather than stacking it the instant the review closes.
+    if (reviewAskShownRef.current) return;
     (async () => {
       try {
         const snoozedAt = await AsyncStorage.getItem(PUSH_PRIMER_SNOOZE_KEY);
@@ -328,7 +341,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         logError(e, 'layout.pushPrimerCheck');
       }
     })();
-  }, [authedUserId, authResolved]);
+  }, [authedUserId, authResolved, reviewCheckDone]);
 
   useEffect(() => {
     if (authResolved && !splashHiddenRef.current) {
@@ -353,11 +366,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       } else if (type === 'album_ready' || type === 'album_someone_uploaded' || type === 'album_more_photos_added' || type === 'album_hearts_batched') {
         if (data?.eventId) router.push(`/album/${data.eventId}` as any);
       } else if (
+        (type === 'waitlist_request' || type === 'exception_slot_refunded') &&
+        data?.eventId
+      ) {
+        // Creator-side waitlist-exception pushes open the manager screen
+        // (creator-only server-side; non-creators get the auth screen there).
+        router.push(`/waitlist/${data.eventId}` as any);
+      } else if (
         (type === 'plan_invite' ||
           type === 'waitlist_spot' ||
           type === 'duplicate_plan' ||
           type === 'interest_signal' ||
-          type === 'interest_invite') &&
+          type === 'interest_invite' ||
+          type === 'exception_invite') &&
         data?.eventId
       ) {
         // Tag the URL when the push is the creator-side "someone signaled
@@ -716,6 +737,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="reset-password" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="plan/[id]" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="waitlist/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="admin/events" options={{ headerShown: false }} />
       </Stack>

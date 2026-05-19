@@ -5,7 +5,7 @@ import { buildPlanShareContent } from '../../lib/sharePlan';
 import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
     ArrowLeft,
     Calendar,
@@ -48,6 +48,13 @@ import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import { friendlyError } from '../../lib/friendlyError';
+import {
+  acceptWaitlistException,
+  declineWaitlistException,
+  fetchWaitlistManager,
+  waitlistAlertMessage,
+} from '../../lib/waitlistExceptions';
+import { WAITLIST_MANAGER_KEY } from '../../constants/QueryKeys';
 import { isPlanPast } from '../../lib/planTime';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 // Lazy-load react-native-map-link so older production binaries (built before
@@ -608,14 +615,20 @@ export default function PlanDetailScreen() {
     return () => { cancelled = true; };
   }, [currentUserId, id]);
 
-  // Waitlist check
+  // Waitlist check. Re-runs on every screen focus (not just mount) so the
+  // exception-invite banner appears live if the creator grants while the
+  // waitlister is on this screen, and clears on return after an external
+  // accept/decline (e.g. acted on from the InboxModal). The !isMember guard
+  // on the banner stays as defense in depth for the in-focus race window.
   const [waitlistNotified, setWaitlistNotified] = useState(false);
-  useEffect(() => {
+  const [exceptionStatus, setExceptionStatus] = useState<string | null>(null);
+  const [exceptionExpiresAt, setExceptionExpiresAt] = useState<string | null>(null);
+  const refreshWaitlistState = useCallback(() => {
     if (!currentUserId || !id) return;
     let cancelled = false;
     supabase
       .from('event_waitlist')
-      .select('id, notified')
+      .select('id, notified, exception_status, exception_expires_at')
       .eq('event_id', id)
       .eq('user_id', currentUserId)
       .maybeSingle()
@@ -623,10 +636,13 @@ export default function PlanDetailScreen() {
         if (!cancelled) {
           setIsOnWaitlist(!!data);
           setWaitlistNotified(data?.notified === true);
+          setExceptionStatus((data?.exception_status as string | null) ?? null);
+          setExceptionExpiresAt((data?.exception_expires_at as string | null) ?? null);
         }
       });
     return () => { cancelled = true; };
   }, [currentUserId, id]);
+  useFocusEffect(refreshWaitlistState);
 
   // Pending invite check
   const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
@@ -646,6 +662,111 @@ export default function PlanDetailScreen() {
 
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
+
+  // Creator-only "Waitlist (N)" count. Shares WAITLIST_MANAGER_KEY with the
+  // manager route so opening it is instant and the count refreshes when the
+  // manager invalidates.
+  const { data: waitlistManager } = useQuery({
+    queryKey: WAITLIST_MANAGER_KEY(id ?? ''),
+    queryFn: () => fetchWaitlistManager(id as string),
+    enabled: !!id && !!plan && isCreator,
+    staleTime: 30_000,
+  });
+  const waitingCount =
+    waitlistManager?.rows.filter((r) => r.kind === 'waitlist').length ?? 0;
+
+  // Waitlister exception-invite banner state.
+  const inviteExpired = exceptionExpiresAt
+    ? new Date(exceptionExpiresAt).getTime() <= Date.now()
+    : false;
+  // !isMember guard: exceptionStatus is local state set by an effect keyed on
+  // [currentUserId, id] and does NOT re-run on query invalidation. If the user
+  // accepts via the InboxModal (different screen) and returns here, members
+  // refetches (isMember -> true) but exceptionStatus stays 'invited'. Without
+  // this guard a stale "you're off the waitlist" banner would render over a
+  // joined member and erroring on tap (not_on_waitlist).
+  const hasActiveException =
+    !isCreator && !isMember && exceptionStatus === 'invited' && !inviteExpired;
+  const hasLapsedException =
+    !isCreator && !isMember && exceptionStatus === 'invited' && inviteExpired;
+  const exceptionHoursLeft = exceptionExpiresAt
+    ? Math.max(
+        0,
+        Math.round((new Date(exceptionExpiresAt).getTime() - Date.now()) / 3600000),
+      )
+    : null;
+
+  const acceptExceptionMutation = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('Not found');
+      await acceptWaitlistException(id);
+      // Clear the matching inbox notification so it doesn't linger as a
+      // tappable "Join the plan" entry that would error (not_on_waitlist)
+      // after the join. Best-effort: a failure here must not fail the accept.
+      if (currentUserId) {
+        try {
+          await supabase
+            .from('app_notifications')
+            .update({ status: 'acted' })
+            .eq('type', 'exception_invite')
+            .eq('event_id', id)
+            .eq('user_id', currentUserId);
+        } catch {}
+      }
+    },
+    onSuccess: () => {
+      hapticSuccess();
+      setIsOnWaitlist(false);
+      setExceptionStatus(null);
+      queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
+      queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
+      queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
+      queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(id ?? '') });
+      queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
+      router.replace(`/(tabs)/chats/${id}` as any);
+    },
+    onError: (error: any) => {
+      setBrandedAlert({
+        visible: true,
+        title: 'Hmm',
+        message: waitlistAlertMessage(error, "We couldn't add you to the plan. Try again."),
+      });
+    },
+  });
+
+  const declineExceptionMutation = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('Not found');
+      await declineWaitlistException(id);
+      // Mirror the accept path: clear the lingering inbox notification.
+      if (currentUserId) {
+        try {
+          await supabase
+            .from('app_notifications')
+            .update({ status: 'read' })
+            .eq('type', 'exception_invite')
+            .eq('event_id', id)
+            .eq('user_id', currentUserId);
+        } catch {}
+      }
+    },
+    onSuccess: () => {
+      hapticLight();
+      setExceptionStatus('declined');
+      queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(id ?? '') });
+      queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
+    },
+    onError: (error: any) => {
+      setBrandedAlert({
+        visible: true,
+        title: 'Hmm',
+        message: waitlistAlertMessage(error),
+      });
+    },
+  });
+
   const isFeatured = plan?.is_featured ?? false;
   const isBirthdayParty = isFeatured && plan?.featured_type === 'birthday_party';
   // Use actual member count when available — member_count can be out of sync
@@ -1554,6 +1675,15 @@ export default function PlanDetailScreen() {
               </TouchableOpacity>
             </View>
             <TouchableOpacity
+              style={styles.waitlistManageButton}
+              onPress={() => router.push(`/waitlist/${plan.id}` as any)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.waitlistManageButtonText}>
+                {waitingCount > 0 ? `Waitlist (${waitingCount})` : 'Waitlist'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.creatorCancelLink}
               onPress={handleCancelPlan}
               activeOpacity={0.7}
@@ -1574,6 +1704,53 @@ export default function PlanDetailScreen() {
               >
                 <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
                 <Text style={styles.openChatText}>Open Chat</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : hasActiveException ? (
+          <View>
+            <Text style={styles.exceptionBannerTitle}>You're off the waitlist!</Text>
+            <Text style={styles.exceptionBannerBody}>
+              The creator saved you a spot. Want in?
+            </Text>
+            {exceptionHoursLeft !== null && exceptionHoursLeft > 0 && (
+              <Text style={styles.exceptionBannerExpiry}>
+                {exceptionHoursLeft}h left to respond
+              </Text>
+            )}
+            <View style={styles.exceptionBannerActions}>
+              <TouchableOpacity
+                style={styles.exceptionAcceptBtn}
+                activeOpacity={0.85}
+                disabled={acceptExceptionMutation.isPending || declineExceptionMutation.isPending}
+                onPress={() => acceptExceptionMutation.mutate()}
+              >
+                <Text style={styles.exceptionAcceptText}>Join the plan</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.exceptionDeclineBtn}
+                activeOpacity={0.7}
+                disabled={acceptExceptionMutation.isPending || declineExceptionMutation.isPending}
+                onPress={() => declineExceptionMutation.mutate()}
+              >
+                <Text style={styles.exceptionDeclineText}>Not this time</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : hasLapsedException ? (
+          <View>
+            <Text style={styles.exceptionBannerTitle}>This invite expired</Text>
+            <Text style={styles.exceptionBannerBody}>
+              Your spot wasn't claimed in time. You're still on the waitlist if
+              another spot opens up.
+            </Text>
+            <View style={styles.exceptionBannerActions}>
+              <TouchableOpacity
+                style={styles.exceptionDeclineBtn}
+                activeOpacity={0.7}
+                onPress={() => setExceptionStatus('expired')}
+              >
+                <Text style={styles.exceptionDeclineText}>Got it</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2887,6 +3064,64 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.cancelRed,
     textDecorationLine: 'underline',
+  },
+  waitlistManageButton: {
+    marginTop: 10,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    backgroundColor: Colors.cardBg,
+  },
+  waitlistManageButtonText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
+  },
+  exceptionBannerTitle: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displaySM,
+    color: Colors.darkWarm,
+  },
+  exceptionBannerBody: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.secondary,
+    marginTop: 4,
+    lineHeight: 20,
+  },
+  exceptionBannerExpiry: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+    marginTop: 6,
+  },
+  exceptionBannerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    gap: 10,
+  },
+  exceptionAcceptBtn: {
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 999,
+  },
+  exceptionAcceptText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.white,
+  },
+  exceptionDeclineBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  exceptionDeclineText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.tertiary,
   },
 });
 
