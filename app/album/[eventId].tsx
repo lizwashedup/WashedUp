@@ -17,6 +17,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
 import { logError } from '../../lib/logger';
+import { withTimeout } from '../../lib/withTimeout';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const GRID_COLS = 2;
@@ -24,6 +25,20 @@ const GRID_GAP = 4;
 const GRID_PADDING = 12;
 const TILE_SIZE = (SCREEN_W - GRID_PADDING * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
 const SIGNED_URL_TTL = 3600;
+// Per-upload timeout for storage signed-URL generation. supabase-js has no
+// default fetch timeout; on a slow request a single hung call would stall the
+// whole Promise.all and leave the screen in an infinite-spinner state. 8s is
+// well above the p99 for createSignedUrl on healthy storage and short enough
+// that a hung asset just renders as a placeholder instead of blocking the album.
+const SIGNED_URL_TIMEOUT_MS = 8000;
+// Supabase returns a discriminated union with a nominal StorageError class on
+// the error branch. A plain object literal cannot satisfy that nominal type,
+// so the fallback is cast at the withTimeout call site. The runtime contract
+// (data: null, error: { message }) is still honored by the catch path.
+const SIGNED_URL_TIMEOUT_FALLBACK = {
+  data: null,
+  error: { name: 'TimeoutError', message: 'createSignedUrl timed out' },
+};
 
 type AlbumUpload = {
   id: string;
@@ -129,14 +144,16 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
         const path = u.display_url || u.media_url;
         let signedUrl: string | null = null;
         try {
-          const { data: signedData, error } = await supabase.storage
-            .from('album-media')
-            .createSignedUrl(path, SIGNED_URL_TTL);
-          if (error) throw error;
-          signedUrl = signedData?.signedUrl ?? null;
+          const res = await withTimeout(
+            supabase.storage.from('album-media').createSignedUrl(path, SIGNED_URL_TTL),
+            SIGNED_URL_TIMEOUT_MS,
+            SIGNED_URL_TIMEOUT_FALLBACK as any,
+          );
+          if (res.error) throw res.error;
+          signedUrl = res.data?.signedUrl ?? null;
         } catch (err) {
-          // One bad signed URL shouldn't take down the whole album. Log and
-          // keep going — that asset just renders without an image.
+          // One bad/slow signed URL must not take down the whole album. Log
+          // and keep going so the asset just renders as a placeholder.
           logError(err, 'album.createSignedUrl');
         }
         return {
@@ -222,7 +239,7 @@ export default function AlbumDetailScreen() {
   // Caller's chosen cover photo (personal, persisted in album_user_metadata).
   const [savedCover, setSavedCover] = useState<string | null>(null);
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['album', eventId],
     queryFn: () => fetchAlbumByEvent(String(eventId)),
     enabled: !!eventId,
@@ -486,6 +503,23 @@ export default function AlbumDetailScreen() {
     if (names.length <= 3) return names.join(', ');
     return `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
   }, [data]);
+
+  // Fail-loud branch: when the fetch errors (or finishes with no data after
+  // retries), give the user an escape instead of an infinite spinner.
+  if (isError || (!isLoading && !data)) {
+    return (
+      <SafeAreaView style={styles.loadingWrap}>
+        <Text style={styles.errorTitle}>Couldn't load this album</Text>
+        <Text style={styles.errorBody}>Check your connection and try again.</Text>
+        <Pressable onPress={() => void refetch()} style={styles.retryBtn} hitSlop={8}>
+          <Text style={styles.retryBtnText}>Try again</Text>
+        </Pressable>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backTextBtn}>
+          <Text style={styles.backText}>Go back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   if (isLoading || !data) {
     return (
@@ -764,6 +798,10 @@ const styles = StyleSheet.create({
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray },
   backTextBtn: { padding: 12 },
   backText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  errorTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, textAlign: 'center' },
+  errorBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, textAlign: 'center', paddingHorizontal: 32 },
+  retryBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 999, marginTop: 4 },
+  retryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   scroll: { paddingBottom: 80 },
   hero: { width: '100%', height: 320, backgroundColor: Colors.inputBg },
   heroImage: { width: '100%', height: '100%' },
