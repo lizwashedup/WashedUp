@@ -95,7 +95,15 @@ function VideoSplashImpl({ onFinish }: Props) {
   }));
 
   return (
-    <Animated.View style={[styles.container, animatedStyle]}>
+    // pointerEvents="none" prevents the outer overlay from absorbing touches
+    // if the unmount chain (Reanimated done callback -> runOnJS(onFinish) ->
+    // parent setShowVideoSplash(false)) stalls. With opacity at 0 and pointer
+    // events disabled, the underlying Stack remains tappable instead of being
+    // silently blocked by the still-mounted splash. Tap-to-skip is sacrificed:
+    // playToEnd + statusChange listeners and the 6s safety timeout are
+    // sufficient exits and removing user-driven dismiss eliminates the
+    // touch-sink failure mode seen on iPhone SE 3rd gen (2026-05-20).
+    <Animated.View style={[styles.container, animatedStyle]} pointerEvents="none">
       <Pressable style={styles.pressable} onPress={fadeAndFinish}>
         <VideoView
           player={player}
