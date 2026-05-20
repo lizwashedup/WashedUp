@@ -18,8 +18,10 @@
 //     persisted so a future settings-page sync can pick it up.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { fetchWithTimeout } from '../_shared/fetchWithTimeout.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
+const EXTERNAL_FETCH_TIMEOUT_MS = 10_000;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
@@ -82,7 +84,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const resendRes = await fetch(
+    const resendRes = await fetchWithTimeout(
       `https://api.resend.com/audiences/${AUDIENCE_ID}/contacts`,
       {
         method: 'POST',
@@ -96,8 +98,20 @@ Deno.serve(async (req) => {
           last_name: profile.last_name ?? '',
           unsubscribed: false,
         }),
+        timeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
       },
     );
+
+    if (!resendRes) {
+      console.error('[add-to-resend-audience] Resend timeout or network error');
+      // Fire-and-forget contract preserved: 200 to the client so onboarding
+      // doesn't block on marketing fanout. The marketing_opt_in column is the
+      // source of truth; a future sync can pick this up.
+      return new Response(
+        JSON.stringify({ ok: false, error: 'timeout' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
 
     if (!resendRes.ok) {
       const errText = await resendRes.text();
