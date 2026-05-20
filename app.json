@@ -111,6 +111,12 @@
         }
       ],
       [
+        "./plugins/withOneSignalAndroidInit",
+        {
+          "appId": "fc98cc7c-b325-4a45-b3d2-19527c280fca"
+        }
+      ],
+      [
         "@sentry/react-native/expo",
         {
           "organization": "washedup",
