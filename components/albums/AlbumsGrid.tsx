@@ -6,6 +6,7 @@ import React, { useCallback } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { ALBUM } from '../../constants/YoursDesign';
 import { supabase } from '../../lib/supabase';
 import { PolaroidCard, PolaroidStatus } from './PolaroidCard';
 import { PolaroidEmptyIcon } from './PolaroidEmptyIcon';
@@ -192,7 +193,12 @@ export function AlbumsGrid({ userId }: Props) {
   // Dimensions constant, which can resolve to 0 at bundle load and collapse
   // the card width). ~2/5 of screen so a lone album sits top-left with room.
   const { width } = useWindowDimensions();
-  const cardW = Math.round(width * 0.42);
+  // Defensive: useWindowDimensions can briefly return 0 during the very
+  // first mount in some navigators. A 0-width card collapses to "auto" in
+  // RN and lets the photo's intrinsic size drive the layout — that's how a
+  // single album rendered nearly full-screen instead of at ~42%. Clamp to a
+  // sane minimum (140) so the polaroid never stretches.
+  const cardW = Math.max(ALBUM.minCardWidth, Math.round(width * ALBUM.cardWidthRatio));
 
   const { data: albums, isLoading, error, refetch, isStale: albumsStale } = useQuery({
     queryKey: ['albumsGrid', userId],
@@ -354,7 +360,7 @@ const styles = StyleSheet.create({
   gridContent: {
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 60,
   },
-  gridRow: { gap: 12 },
+  gridRow: { gap: ALBUM.gridGap, justifyContent: 'center', alignItems: 'flex-start' },
   dismissedBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     marginHorizontal: 16, marginTop: 8,

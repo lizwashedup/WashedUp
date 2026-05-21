@@ -14,45 +14,58 @@ import InviteCard from '../nearby/InviteCard';
 import { COPY } from '../state/constants';
 import { useNearbyPlans } from '../../../hooks/useNearbyPlans';
 
-/** Brand-new user. Not a dead end: copy + nearby plans + invite. */
+/**
+ * Brand-new user. Not a dead end. Per spec the shimmer is a SINGLE 9-circle
+ * 3x3 grid behind everything (not two stacked grids), with welcome copy +
+ * nearby plans + invite card laid out over the top. The shimmer wrapper is
+ * pointerEvents="none" so it can never eat touches on the content above.
+ */
 export default function NewUserEmptyView({ onInvite }: { onInvite: () => void }) {
   const { data: nearby, isLoading } = useNearbyPlans(true);
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.ghostTop}>
-        <ShimmerGrid count={3} />
-      </View>
-      <Text style={styles.title}>{COPY.emptyTitle}</Text>
-      <Text style={styles.sub}>{COPY.emptySub}</Text>
-      <View style={styles.ghostMid}>
-        <ShimmerGrid count={6} />
+    <View style={styles.wrap}>
+      {/* Background: single 9-circle 3x3 ghost grid. Touch-transparent. */}
+      <View style={styles.shimmer} pointerEvents="none">
+        <ShimmerGrid count={9} />
       </View>
 
-      <Text style={styles.section}>{COPY.nearbyHeader}</Text>
-      {isLoading ? (
-        <ActivityIndicator color={Colors.terracotta} />
-      ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.cards}
-        >
-          {(nearby ?? []).map((p) => (
-            <NearbyPlanCard key={p.id} plan={p} />
-          ))}
-        </ScrollView>
-      )}
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>{COPY.emptyTitle}</Text>
+        <Text style={styles.sub}>{COPY.emptySub}</Text>
 
-      <InviteCard onPress={onInvite} />
-    </ScrollView>
+        <Text style={styles.section}>{COPY.nearbyHeader}</Text>
+        {isLoading ? (
+          <ActivityIndicator color={Colors.terracotta} />
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.cards}
+            keyboardShouldPersistTaps="handled"
+          >
+            {(nearby ?? []).map((p) => (
+              <NearbyPlanCard key={p.id} plan={p} />
+            ))}
+          </ScrollView>
+        )}
+
+        <InviteCard onPress={onInvite} />
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { paddingVertical: 16 },
-  ghostTop: { opacity: 0.6 },
-  ghostMid: { opacity: 0.5, marginVertical: 8 },
+  wrap: { flex: 1 },
+  shimmer: {
+    position: 'absolute',
+    top: 24,
+    left: 0,
+    right: 0,
+    opacity: 0.55,
+  },
+  content: { paddingTop: 32, paddingBottom: 32 },
   title: {
     fontFamily: Fonts.displayItalic,
     fontSize: FontSizes.displayMD,
@@ -76,7 +89,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     textTransform: 'uppercase',
     paddingHorizontal: 16,
-    marginTop: 16,
+    marginTop: 32,
     marginBottom: 12,
   },
   cards: { paddingHorizontal: 16 },

@@ -4,25 +4,54 @@
  * Only mounted when YOURS_PAGE_ENABLED is true.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
+import { Fonts, FontSizes } from '../../constants/Typography';
 import { useAuthUserId } from './state/useAuthUserId';
 import { useYoursGrid } from '../../hooks/useYoursGrid';
 import { useIncomingRequests } from '../../hooks/useIncomingRequests';
 import { usePlanHistoryBacklog } from '../../hooks/usePlanHistoryBacklog';
 import { useReferral } from '../../hooks/useReferral';
 import { openInviteComposer } from '../../lib/yours/invite';
+import { hapticSelection } from '../../lib/haptics';
+import { AlbumsGrid } from '../albums/AlbumsGrid';
 import YoursHeader from './header/YoursHeader';
 import YoursTabs, { type YoursTab } from './header/YoursTabs';
 import PopulatedView from './screens/PopulatedView';
 import FreshStartView from './screens/FreshStartView';
 import NewUserEmptyView from './screens/NewUserEmptyView';
+import RequestBanner from './requests/RequestBanner';
 import PathsSheet from './paths/PathsSheet';
 import ProfileCardSheet from './profile/ProfileCardSheet';
 import RequestStack from './requests/RequestStack';
 import type { YoursGridPerson } from '../../lib/yours/types';
+
+/**
+ * Small "+ add" pill shown below the tabs when the populated grid (which
+ * has its own in-grid AddGridCell) isn't visible. Per spec the add action
+ * is always reachable whether you have 0 people or 50; in populated state
+ * the grid cell handles it, otherwise this pill does.
+ */
+function AddPill({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={() => {
+        hapticSelection();
+        onPress();
+      }}
+      style={styles.addPill}
+      accessibilityRole="button"
+      accessibilityLabel="Add people"
+      hitSlop={10}
+    >
+      <Plus size={16} color={Colors.terracotta} strokeWidth={2.5} />
+      <Text style={styles.addPillText}>add</Text>
+    </Pressable>
+  );
+}
 
 export default function YoursScreen() {
   const { data: userId, isLoading: userLoading } = useAuthUserId();
@@ -72,48 +101,80 @@ export default function YoursScreen() {
     return 'empty';
   }, [userLoading, gridLoading, people.length, backlog.length]);
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <YoursHeader />
-      {state === 'populated' && (
-        <YoursTabs active={tab} onChange={setTab} />
-      )}
-
-      {state === 'loading' && (
-        <View style={styles.center}>
-          <ActivityIndicator color={Colors.terracotta} />
-        </View>
-      )}
-
-      {state === 'populated' && (
+  // The "Your People" body for the active state. Albums tab and loading
+  // are handled outside this function so the tabs stay visible.
+  const renderPeopleBody = () => {
+    if (state === 'populated') {
+      return (
         <PopulatedView
           userId={uid}
-          activeTab={tab}
+          activeTab="people"
           people={people}
           requestCount={requests.length}
           lightUpIds={lightUpIds}
           onAdd={() => setPathsOpen(true)}
           onOpenRequests={() => setRequestsOpen(true)}
           onPressPerson={(p: YoursGridPerson) => setProfileTarget(p.user_id)}
-          onLongPressPerson={(p: YoursGridPerson) =>
-            setProfileTarget(p.user_id)
-          }
+          onLongPressPerson={(p: YoursGridPerson) => setProfileTarget(p.user_id)}
           onPressPill={(p: YoursGridPerson) =>
             p.upcoming_event_id &&
             router.push(`/plan/${p.upcoming_event_id}` as never)
           }
         />
-      )}
-
-      {state === 'fresh' && (
+      );
+    }
+    if (state === 'fresh') {
+      return (
         <FreshStartView
           backlogCount={backlog.length}
           onOpenBacklog={() => setPathsOpen(true)}
           onInvite={invite}
         />
-      )}
+      );
+    }
+    return <NewUserEmptyView onInvite={invite} />;
+  };
 
-      {state === 'empty' && <NewUserEmptyView onInvite={invite} />}
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <YoursHeader />
+
+      {state === 'loading' ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={Colors.terracotta} />
+        </View>
+      ) : (
+        <>
+          {/* Tabs always render once we know the state — per spec, Your
+              People + Albums are always visible. */}
+          <View style={styles.tabRow}>
+            <View style={{ flex: 1 }}>
+              <YoursTabs active={tab} onChange={setTab} />
+            </View>
+            {/* Persistent + add pill. In populated state the AvatarGrid's
+                in-grid AddGridCell handles add, so the pill hides to avoid
+                a duplicate affordance. */}
+            {tab === 'people' && state !== 'populated' && (
+              <AddPill onPress={() => setPathsOpen(true)} />
+            )}
+          </View>
+
+          {tab === 'people' && state !== 'populated' && requests.length > 0 && (
+            <RequestBanner
+              count={requests.length}
+              onPress={() => setRequestsOpen(true)}
+            />
+          )}
+
+          {tab === 'people' ? (
+            renderPeopleBody()
+          ) : (
+            <View style={styles.fill}>
+              <AlbumsGrid userId={uid} />
+            </View>
+          )}
+        </>
+      )}
 
       {!!uid && (
         <PathsSheet
@@ -152,4 +213,26 @@ export default function YoursScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  fill: { flex: 1 },
+  tabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 16,
+  },
+  addPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    minHeight: 32,
+  },
+  addPillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
 });

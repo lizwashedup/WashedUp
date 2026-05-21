@@ -41,7 +41,7 @@ ALTER TABLE public.app_notifications
 
 -- ---------------------------------------------------------------------------
 -- people_connections -> request / accepted notifications.
---   people_request           = ACTION item (envelope) -> Yours request stack
+--   people_request           = bell notification      -> Yours request stack
 --   people_request_accepted  = bell notification      -> their profile card
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.notify_people_connection()

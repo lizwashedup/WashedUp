@@ -39,13 +39,20 @@ Already verified 2026-05-16 (re-confirm if time has passed):
    **NOT transactional**: uses `CREATE INDEX CONCURRENTLY`, so apply it
    outside a transaction block (don't wrap; the IF NOT EXISTS keeps it
    idempotent). No self-test by design.
+8. `20260517000800_clear_request_notif_on_action.sql` — closes the
+   "phantom unread badge" gap after the dual-bell consolidation: when a
+   people_connections row leaves 'pending' (recipient swiped accept /
+   decline on the Yours page), the matching 'people_request'
+   app_notifications row is marked 'acted' inside the same txn, so the
+   single bell badge clears automatically without the user having to open
+   the bell.
 
-Migrations 1-6 + 7 are additive and safe to ship **ahead of** flipping the
-flag (no existing behavior depends on them).
+Migrations 1-6 + 7 + 8 are additive and safe to ship **ahead of** flipping
+the flag (no existing behavior depends on them).
 
 ## Gated (DO NOT apply until flip)
 
-8. `20260517000500_GATED_archive_friends_pinned_people.sql` — destructive
+9. `20260517000500_GATED_archive_friends_pinned_people.sql` — destructive
    (renames `friends`/`pinned_people` to `*_archived_20260517`). Has a
    leading guard DO-block that RAISEs on accidental apply. Apply **only**
    when flipping `YOURS_PAGE_ENABLED=true` in a shipped build, after

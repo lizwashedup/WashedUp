@@ -4,6 +4,7 @@ import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { ALBUM } from '../../constants/YoursDesign';
 
 // Tilt rotation cycles through these values by index so the grid reads like
 // real polaroids casually placed down. Slight and alternating (cute, not loud).
@@ -34,48 +35,56 @@ export const PolaroidCard = React.memo<PolaroidCardProps>(({
   const rotateDeg = useMemo(() => `${pickTilt(index)}deg`, [index]);
 
   return (
-    <Pressable
-      onPress={onPress}
-      onLongPress={onLongPress}
-      delayLongPress={300}
-      style={({ pressed }) => [
-        styles.outer,
-        { width: cardWidth },
-        { transform: [{ rotate: rotateDeg }] },
-        pressed && styles.pressed,
-      ]}
-    >
-      <View style={styles.frame}>
-        <View style={styles.photo}>
-          {coverUri && status === 'ready' ? (
-            <Image source={{ uri: coverUri }} style={styles.photoImage} contentFit="cover" />
-          ) : (
-            <View style={styles.developingOverlay}>
-              <Ionicons name="hourglass-outline" size={28} color={Colors.terracotta} />
-              {readyInLabel ? (
-                <Text style={styles.readyLabel}>{readyInLabel}</Text>
-              ) : (
-                <Text style={styles.readyLabel}>Collecting photos</Text>
-              )}
-            </View>
-          )}
+    <View style={[styles.cell, { width: cardWidth }]}>
+      <Pressable
+        onPress={onPress}
+        onLongPress={onLongPress}
+        delayLongPress={300}
+        style={({ pressed }) => [
+          styles.outer,
+          { transform: [{ rotate: rotateDeg }] },
+          pressed && styles.pressed,
+        ]}
+      >
+        <View style={styles.frame}>
+          <View style={styles.photo}>
+            {coverUri && status === 'ready' ? (
+              <Image source={{ uri: coverUri }} style={styles.photoImage} contentFit="cover" />
+            ) : (
+              <View style={styles.developingOverlay}>
+                <Ionicons name="hourglass-outline" size={28} color={Colors.terracotta} />
+                {readyInLabel ? (
+                  <Text style={styles.readyLabel}>{readyInLabel}</Text>
+                ) : (
+                  <Text style={styles.readyLabel}>Collecting photos</Text>
+                )}
+              </View>
+            )}
+          </View>
+          <View style={styles.caption}>
+            <Text numberOfLines={1} style={styles.title}>{title}</Text>
+            <Text numberOfLines={1} style={styles.meta}>
+              {dateText}{attendeeSummary ? ` · ${attendeeSummary}` : ''}
+            </Text>
+          </View>
         </View>
-        <View style={styles.caption}>
-          <Text numberOfLines={1} style={styles.title}>{title}</Text>
-          <Text numberOfLines={1} style={styles.meta}>
-            {dateText}{attendeeSummary ? ` · ${attendeeSummary}` : ''}
-          </Text>
-        </View>
-      </View>
-    </Pressable>
+      </Pressable>
+    </View>
   );
 });
 
 PolaroidCard.displayName = 'PolaroidCard';
 
 const styles = StyleSheet.create({
-  outer: {
+  cell: {
+    // The width sits on a plain View wrapper, not on the Pressable. With
+    // width on the Pressable, Yoga was shrinking each card to the intrinsic
+    // width of its caption text (so cards with longer titles came out wider).
+    // A plain View's width is honored reliably in FlatList rows.
     marginBottom: 16,
+  },
+  outer: {
+    width: '100%',
   },
   pressed: {
     opacity: 0.9,
@@ -93,7 +102,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   photo: {
-    aspectRatio: 1,
+    aspectRatio: ALBUM.photoAspectRatio,
     backgroundColor: Colors.inputBg,
     borderRadius: 2,
     overflow: 'hidden',

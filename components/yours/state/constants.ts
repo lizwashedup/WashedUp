@@ -98,16 +98,19 @@ export const COPY = {
   freshCardInviteSub: 'Invite them to WashedUp',
 
   emptyTitle: 'This is where your people live.',
-  emptySub: 'They show up after your first plan. Go do something, then come back.',
+  emptySub: 'Do a plan, then decide who stays.',
   nearbyHeader: "What's happening near you",
-  inviteCardTitle: 'Know someone who should be here?',
-  inviteCardSub: 'Send them a link',
+  inviteCardTitle: 'Know someone who would be into this?',
+  inviteCardSub: 'Invite them to WashedUp',
 
   // SIM-EYEBALL #3: + sheet path labels
   pathPlansTitle: "People you've already done stuff with",
+  pathPlansCount: (n: number) =>
+    n === 1 ? '1 person' : `${n} people`,
   pathInviteTitle: 'Text someone a link',
   pathInviteSub: 'They show up here when they join',
   pathSearchTitle: 'Find by handle',
+  handleLookupEmpty: 'No match for that handle. Double-check the spelling.',
   pathQRTitle: 'Show your code',
   pathQRSub: 'Let someone scan to add you',
 

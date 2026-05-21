@@ -19,6 +19,7 @@ import {
   friendlyConnectionError,
 } from '../../../hooks/usePeopleConnectionMutations';
 import type { SearchPerson } from '../../../lib/yours/types';
+import { COPY } from '../state/constants';
 
 /**
  * Exact @handle lookup. WashedUp never surfaces strangers: you type someone's
@@ -96,7 +97,9 @@ export default function HandleLookupView({
       ) : null}
 
       <Text style={styles.hint}>
-        You can only add people you already know. Type a handle exactly.
+        {!isFetching && data?.length === 0
+          ? COPY.handleLookupEmpty
+          : 'You can only add people you already know. Type a handle exactly.'}
       </Text>
     </KeyboardAvoidingView>
   );

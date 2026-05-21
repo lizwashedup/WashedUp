@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, ChevronRight, AtSign, QrCode } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import { SPACING, ICON } from '../../../constants/YoursDesign';
 import BottomSheet from '../primitives/BottomSheet';
 import PlanHistoryBacklog from './PlanHistoryBacklog';
 import HandleLookupView from './HandleLookupView';
@@ -92,10 +93,18 @@ export default function PathsSheet({
           style={[styles.card, styles.cardPrimary]}
           onPress={() => setMode('plans')}
         >
-          <Text style={styles.cardTitle}>{COPY.pathPlansTitle}</Text>
-          <Text style={styles.count}>
-            {backlogCount} people <ChevronRight size={16} color={Colors.terracotta} />
-          </Text>
+          <View>
+            <Text style={styles.cardTitle}>{COPY.pathPlansTitle}</Text>
+            <View style={styles.countRow}>
+              <Text style={styles.countText}>
+                {COPY.pathPlansCount(backlogCount)}
+              </Text>
+              <ChevronRight
+                size={ICON.chevronInline}
+                color={Colors.secondary}
+              />
+            </View>
+          </View>
         </Pressable>
 
         <Pressable style={styles.card} onPress={invite}>
@@ -145,10 +154,16 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     marginTop: 2,
   },
-  count: {
-    fontFamily: Fonts.displayItalic,
-    fontSize: FontSizes.displayMD,
-    color: Colors.terracotta,
+  countRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.inlineIconGap,
+    marginTop: SPACING.nameToSubtext,
+  },
+  countText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
   },
   full: { flex: 1, backgroundColor: Colors.parchment },
   close: { alignSelf: 'flex-end', padding: 16 },

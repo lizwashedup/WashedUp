@@ -1,34 +1,27 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { Bell } from 'lucide-react-native';
-import { router } from 'expo-router';
+import { View, Text, StyleSheet } from 'react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import ProfileButton from '../../ProfileButton';
 import { COPY } from '../state/constants';
 
 /**
- * Sticky header: italic "yours" wordmark, bell (passive notifications),
- * profile avatar.
+ * Sticky header: italic "yours" wordmark + profile avatar (which is also the
+ * single app bell / inbox trigger).
  *
- * The add-people entry point is intentionally NOT here. Per spec it lives
- * in-page as the first cell of the people grid (see AddGridCell), so the
- * header stays clean: wordmark, bell, profile only.
+ * There is intentionally NO separate Yours bell here. The single app inbox
+ * (rendered by ProfileButton -> InboxModal) is the one inbox; people-request,
+ * people-accepted, referral-joined notifications route to this page from
+ * there. Keeping a second bell would split the inbox into a dual-bell system.
+ *
+ * The add-people entry point is also NOT here. Per spec it lives in-page as
+ * the first cell of the people grid (see AddGridCell).
  */
 export default function YoursHeader() {
   return (
     <View style={styles.row}>
       <Text style={styles.wordmark}>{COPY.wordmark}</Text>
       <View style={styles.actions}>
-        <Pressable
-          onPress={() => router.push('/(tabs)/profile' as never)}
-          accessibilityRole="button"
-          accessibilityLabel="Notifications"
-          hitSlop={10}
-          style={styles.bell}
-        >
-          <Bell size={22} color={Colors.tertiary} strokeWidth={2} />
-        </Pressable>
         <ProfileButton />
       </View>
     </View>
@@ -50,5 +43,4 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
   },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  bell: { padding: 2 },
 });

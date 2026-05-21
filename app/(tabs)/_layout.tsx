@@ -13,7 +13,7 @@ import { authedDest } from '../../lib/authRouting';
 import { getAuthProfile } from '../../hooks/useProfile';
 import { withTimeout } from '../../lib/withTimeout';
 import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
-import HeartHandsIcon from '../../components/yours/icons/HeartHandsIcon';
+import SunriseIcon from '../../components/yours/icons/SunriseIcon';
 
 function PostTabIcon() {
   return (
@@ -212,10 +212,16 @@ export default function TabLayout() {
         options={{
           title: 'Your People',
           tabBarLabel: 'Yours',
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ color, focused }) => (
             <View>
               {YOURS_PAGE_ENABLED ? (
-                <HeartHandsIcon size={24} color={color} />
+                // Sunrise gets its own color scheme (terracotta active /
+                // iconMuted inactive) per spec, overriding the default tab
+                // tints — this is the "home" tab and reads as warmer.
+                <SunriseIcon
+                  size={26}
+                  color={focused ? Colors.terracotta : Colors.iconMuted}
+                />
               ) : (
                 <Ionicons name="people-outline" size={24} color={color} />
               )}

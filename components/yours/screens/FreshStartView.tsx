@@ -20,8 +20,8 @@ export default function FreshStartView({
 }) {
   return (
     <View style={styles.wrap}>
-      <View style={styles.shimmer}>
-        <ShimmerGrid />
+      <View style={styles.shimmer} pointerEvents="none">
+        <ShimmerGrid count={9} />
       </View>
       <View style={styles.overlay}>
         <Text style={styles.title}>{COPY.freshTitle}</Text>
