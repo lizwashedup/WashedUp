@@ -163,8 +163,17 @@ function WelcomeLoading({
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
-      ]).start(({ finished }) => {
-        if (finished) onExit();
+      ]).start(() => {
+        // Call onExit unconditionally. Animated.timing's callback receives
+        // finished:false when the animation is interrupted (competing
+        // animation, layout recalc, focus event, JS-thread pressure on
+        // slower silicon). The old `if (finished)` guard meant any
+        // interruption left the overlay permanently mounted, which on
+        // iPhone SE 3rd gen / A15 traps the user behind a full-screen
+        // absoluteFillObject View that absorbs every touch to the feed
+        // below. We don't care WHY the animation ended — the overlay
+        // needs to come down either way.
+        onExit();
       });
     }, wait);
     return () => clearTimeout(t);
@@ -1620,7 +1629,13 @@ export default function PlansScreen() {
       {showWelcomeOverlay && (
         <View
           style={styles.welcomeOverlay}
-          pointerEvents="auto"
+          // Defense in depth on top of the onExit fix above: once data is
+          // ready the overlay is on its way out, so don't capture touches
+          // even during the 420ms exit animation. The inner WelcomeLoading
+          // View already does the same dance, but pointerEvents doesn't
+          // propagate UP from child to parent, so the wrapper has to opt
+          // out independently.
+          pointerEvents={dataReady ? 'none' : 'auto'}
         >
           <WelcomeLoading
             done={dataReady}
