@@ -58,16 +58,30 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === 'delete_and_ban') {
-      // Delete all user data in safe order
-      await supabaseAdmin.from('messages').delete().eq('user_id', targetUserId);
-      await supabaseAdmin.from('event_members').delete().eq('user_id', targetUserId);
-      await supabaseAdmin.from('chat_reads').delete().eq('user_id', targetUserId);
-      await supabaseAdmin.from('friends').delete().or(`user_id.eq.${targetUserId},friend_id.eq.${targetUserId}`);
-      await supabaseAdmin.from('reports').delete().or(`reporter_user_id.eq.${targetUserId},reported_user_id.eq.${targetUserId}`);
-      await supabaseAdmin.from('events').delete().eq('creator_user_id', targetUserId);
-      await supabaseAdmin.from('profiles').delete().eq('id', targetUserId);
+      // Delete all user data atomically via the SECURITY DEFINER RPC
+      // (migration 20260520000000_admin_cascade_delete_user_rpc.sql). The
+      // RPC wraps the 7 deletes in a single transaction so a mid-flight
+      // failure rolls back instead of leaving data half-deleted. Function
+      // is REVOKE'd from PUBLIC/anon/authenticated and only callable by
+      // service_role, which is the credential supabaseAdmin uses here.
+      const { error: deleteError } = await supabaseAdmin.rpc(
+        'admin_cascade_delete_user',
+        { p_user_id: targetUserId },
+      );
+      if (deleteError) {
+        console.error('admin_cascade_delete_user error:', deleteError);
+        return new Response(
+          JSON.stringify({ error: deleteError.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        );
+      }
 
-      // Ban the auth record — keeps email "taken" so they can't re-register
+      // Ban the auth record after the cascade succeeds. Auth schema
+      // operations cannot live inside the public.* transaction so this
+      // call stays separate. If it fails after the cascade succeeded the
+      // data is gone but the auth user is unbanned; the caller sees the
+      // error and can retry (updateUser is idempotent on an already-banned
+      // account).
       const { error: banError } = await supabaseAdmin.auth.admin.updateUser(targetUserId, {
         ban_duration: '876000h', // ~100 years
       });
