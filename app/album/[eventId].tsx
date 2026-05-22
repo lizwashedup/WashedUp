@@ -430,6 +430,18 @@ export default function AlbumDetailScreen() {
     return uploads[0]?.signed_display_url ?? null;
   }, [data, savedCover]);
 
+  // Stable cache key for the cover (storage identity, not the rotating signed
+  // URL) so expo-image serves the cached image when the signature refreshes.
+  const coverCacheKey = useMemo(() => {
+    const uploads = data?.uploads ?? [];
+    if (savedCover) {
+      const chosen = uploads.find((u) => u.id === savedCover);
+      if (chosen?.signed_display_url) return `${chosen.id}:full`;
+    }
+    const first = uploads[0];
+    return first?.signed_display_url ? `${first.id}:full` : undefined;
+  }, [data, savedCover]);
+
   // ── Action handlers (heart / hide / delete) ────────────────────────────────
   const isHearted = useCallback((uploadId: string): boolean => {
     if (uploadId in optimisticHearted) return optimisticHearted[uploadId];
@@ -633,7 +645,7 @@ export default function AlbumDetailScreen() {
       {/* Hero */}
         <View style={styles.hero}>
           {coverUri ? (
-            <Image source={{ uri: coverUri }} style={styles.heroImage} contentFit="cover" transition={200} />
+            <Image source={{ uri: coverUri, cacheKey: coverCacheKey }} style={styles.heroImage} contentFit="cover" transition={200} />
           ) : (
             <View style={[styles.heroImage, styles.heroPlaceholder]}>
               <Ionicons name="images-outline" size={36} color={Colors.terracotta} />
@@ -791,7 +803,7 @@ export default function AlbumDetailScreen() {
         >
           {u.signed_thumb_url ? (
             <Image
-              source={{ uri: reSignedUrls[`${u.id}:thumb`] ?? u.signed_thumb_url ?? undefined }}
+              source={{ uri: reSignedUrls[`${u.id}:thumb`] ?? u.signed_thumb_url ?? undefined, cacheKey: `${u.id}:thumb` }}
               onError={() => void reSignImage(u.id, u.display_url || u.media_url, true)}
               style={styles.tileImage}
               contentFit="cover"
@@ -870,8 +882,8 @@ export default function AlbumDetailScreen() {
                 </View>
               ) : (
                 <Image
-                  source={{ uri: reSignedUrls[`${visibleUploads[viewerIndex].id}:full`] ?? visibleUploads[viewerIndex].signed_display_url ?? '' }}
-                  placeholder={{ uri: visibleUploads[viewerIndex].signed_thumb_url ?? '' }}
+                  source={{ uri: reSignedUrls[`${visibleUploads[viewerIndex].id}:full`] ?? visibleUploads[viewerIndex].signed_display_url ?? '', cacheKey: `${visibleUploads[viewerIndex].id}:full` }}
+                  placeholder={{ uri: visibleUploads[viewerIndex].signed_thumb_url ?? '', cacheKey: `${visibleUploads[viewerIndex].id}:thumb` }}
                   onError={() => { const vu = visibleUploads[viewerIndex!]; if (vu) void reSignImage(vu.id, vu.display_url || vu.media_url, false); }}
                   style={styles.viewerImage}
                   contentFit="contain"

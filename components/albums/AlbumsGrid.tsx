@@ -73,7 +73,7 @@ type AlbumRow = {
   cover_signed_url: string | null;
 };
 
-const SIGNED_URL_TTL_SEC = 3600;
+const SIGNED_URL_TTL_SEC = 7200; // 2h, matches the album detail screen
 
 async function fetchAlbumsForUser(userId: string): Promise<AlbumRow[]> {
   // Step 1: events the user is currently joined to.
