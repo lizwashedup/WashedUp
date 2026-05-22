@@ -177,14 +177,6 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-function readyInLabel(firstUploadAt: string | null): string | undefined {
-  if (!firstUploadAt) return 'Collecting photos';
-  const ms = new Date(firstUploadAt).getTime() + 24 * 60 * 60 * 1000 - Date.now();
-  if (ms <= 0) return 'Ready now';
-  const hours = Math.ceil(ms / (60 * 60 * 1000));
-  return hours <= 1 ? 'Ready in 1h' : `Ready in ${hours}h`;
-}
-
 type Props = { userId: string };
 
 export function AlbumsGrid({ userId }: Props) {
@@ -287,7 +279,7 @@ export function AlbumsGrid({ userId }: Props) {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={styles.screen}>
       {dismissedPrompt && (
         <Pressable
           onPress={() => router.push(`/album/upload/${dismissedPrompt.event_id}` as any)}
@@ -317,8 +309,6 @@ export function AlbumsGrid({ userId }: Props) {
             title={item.custom_name ?? item.event_title}
             dateText={formatDate(item.event_start_time)}
             coverUri={item.cover_signed_url}
-            status={item.status}
-            readyInLabel={item.status === 'developing' ? readyInLabel(item.first_upload_at) : undefined}
             onPress={() => handleAlbumPress(item.event_id)}
             onLongPress={item.first_upload_at == null
               ? () => handleArchive(item.event_id, item.custom_name ?? item.event_title)
@@ -331,6 +321,7 @@ export function AlbumsGrid({ userId }: Props) {
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
   errorText: {
     fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray,

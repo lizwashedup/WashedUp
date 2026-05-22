@@ -11,6 +11,7 @@ import {
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { captureRef } from 'react-native-view-shot';
 import { BrandedShareCanvas } from '../../components/albums/BrandedShareCanvas';
+import { COPY } from '../../components/yours/state/constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
@@ -46,7 +47,7 @@ type AlbumPayload = {
   album: {
     id: string;
     event_id: string;
-    status: 'collecting' | 'developing' | 'ready';
+    status: 'collecting' | 'ready';
     first_upload_at: string | null;
     event_title: string;
     event_start_time: string;
@@ -193,14 +194,6 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-function readyInLabel(firstUploadAt: string | null): string {
-  if (!firstUploadAt) return 'Collecting photos';
-  const ms = new Date(firstUploadAt).getTime() + 24 * 60 * 60 * 1000 - Date.now();
-  if (ms <= 0) return 'Ready';
-  const hours = Math.ceil(ms / (60 * 60 * 1000));
-  return hours <= 1 ? 'Ready in 1h' : `Ready in ${hours}h`;
-}
-
 export default function AlbumDetailScreen() {
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
   const router = useRouter();
@@ -227,7 +220,7 @@ export default function AlbumDetailScreen() {
   const [savingName, setSavingName] = useState(false);
   const nameInputRef = useRef<TextInput>(null);
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['album', eventId],
     queryFn: () => fetchAlbumByEvent(String(eventId)),
     enabled: !!eventId,
@@ -387,8 +380,13 @@ export default function AlbumDetailScreen() {
   }, [muted, toggleMute]);
 
   const coverUri = useMemo(() => {
-    return data?.uploads?.[0]?.signed_display_url ?? null;
-  }, [data]);
+    const uploads = data?.uploads ?? [];
+    if (savedCover) {
+      const chosen = uploads.find((u) => u.id === savedCover);
+      if (chosen?.signed_display_url) return chosen.signed_display_url;
+    }
+    return uploads[0]?.signed_display_url ?? null;
+  }, [data, savedCover]);
 
   // ── Action handlers (heart / hide / delete) ────────────────────────────────
   const isHearted = useCallback((uploadId: string): boolean => {
@@ -534,10 +532,25 @@ export default function AlbumDetailScreen() {
     return `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
   }, [data]);
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.loadingWrap}>
         <ActivityIndicator color={Colors.terracotta} />
+      </SafeAreaView>
+    );
+  }
+
+  // Catches three failure modes that all otherwise wedge the screen on a
+  // forever-spinner: cold-start push deep-link with no eventId param, a
+  // thrown error inside fetchAlbumByEvent, or any other path where data
+  // never materialized. Friendly bail-out instead of infinite loading.
+  if (!eventId || isError || !data) {
+    return (
+      <SafeAreaView style={styles.loadingWrap}>
+        <Text style={styles.emptyText}>{COPY.albumOpenFailed}</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backTextBtn}>
+          <Text style={styles.backText}>Go back</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -563,7 +576,6 @@ export default function AlbumDetailScreen() {
   // inline every render already) — kept as a plain const because the early
   // returns above forbid adding a hook here.
   const visibleUploads = uploads.filter((u) => !optimisticHiddenIds.has(u.id));
-  const isReady = album.status === 'ready';
 
   return (
     <View style={styles.root}>
@@ -574,8 +586,8 @@ export default function AlbumDetailScreen() {
             <Image source={{ uri: coverUri }} style={styles.heroImage} contentFit="cover" />
           ) : (
             <View style={[styles.heroImage, styles.heroPlaceholder]}>
-              <Ionicons name="hourglass-outline" size={36} color={Colors.terracotta} />
-              <Text style={styles.heroPlaceholderText}>{readyInLabel(album.first_upload_at)}</Text>
+              <Ionicons name="images-outline" size={36} color={Colors.terracotta} />
+              <Text style={styles.heroPlaceholderText}>{COPY.albumCollecting}</Text>
             </View>
           )}
           <LinearGradient
@@ -683,12 +695,8 @@ export default function AlbumDetailScreen() {
         {/* Photo grid */}
         {visibleUploads.length === 0 ? (
           <View style={styles.emptyGrid}>
-            <Text style={styles.emptyGridTitle}>
-              {isReady ? 'Be the first to add some photos.' : "Your photos are developing…"}
-            </Text>
-            <Text style={styles.emptyGridSubtitle}>
-              {isReady ? 'You were there, show us what happened.' : readyInLabel(album.first_upload_at)}
-            </Text>
+            <Text style={styles.emptyGridTitle}>Be the first to add some photos.</Text>
+            <Text style={styles.emptyGridSubtitle}>You were there, show us what happened.</Text>
           </View>
         ) : (
           <View style={styles.grid}>

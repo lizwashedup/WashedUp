@@ -5,12 +5,16 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { ALBUM } from '../../constants/YoursDesign';
+import { COPY } from '../yours/state/constants';
 
 // Tilt rotation cycles through these values by index so the grid reads like
 // real polaroids casually placed down. Slight and alternating (cute, not loud).
 const TILTS = [-2.5, 2, -2, 2.5];
 
-export type PolaroidStatus = 'collecting' | 'developing' | 'ready';
+// Album status still exists in the DB (collecting until the first upload, then
+// ready). The card itself no longer branches on it: a cover means there are
+// uploads, no cover means we are still collecting.
+export type PolaroidStatus = 'collecting' | 'ready';
 
 export type PolaroidCardProps = {
   index: number;                  // grid position; drives tilt
@@ -18,9 +22,7 @@ export type PolaroidCardProps = {
   title: string;
   dateText: string;               // "Sat, May 3"
   attendeeSummary?: string;       // "with Haley, Ash +2"
-  coverUri?: string | null;       // signed display URL or null
-  status: PolaroidStatus;
-  readyInLabel?: string;          // "Ready in 6h" — used when developing
+  coverUri?: string | null;       // signed display URL, or null when the album has no uploads yet
   onPress: () => void;
   onLongPress?: () => void;       // e.g. archive an empty album
 };
@@ -30,7 +32,7 @@ function pickTilt(index: number): number {
 }
 
 export const PolaroidCard = React.memo<PolaroidCardProps>(({
-  index, cardWidth, title, dateText, attendeeSummary, coverUri, status, readyInLabel, onPress, onLongPress,
+  index, cardWidth, title, dateText, attendeeSummary, coverUri, onPress, onLongPress,
 }) => {
   const rotateDeg = useMemo(() => `${pickTilt(index)}deg`, [index]);
 
@@ -48,16 +50,12 @@ export const PolaroidCard = React.memo<PolaroidCardProps>(({
       >
         <View style={styles.frame}>
           <View style={styles.photo}>
-            {coverUri && status === 'ready' ? (
+            {coverUri ? (
               <Image source={{ uri: coverUri }} style={styles.photoImage} contentFit="cover" />
             ) : (
-              <View style={styles.developingOverlay}>
-                <Ionicons name="hourglass-outline" size={28} color={Colors.terracotta} />
-                {readyInLabel ? (
-                  <Text style={styles.readyLabel}>{readyInLabel}</Text>
-                ) : (
-                  <Text style={styles.readyLabel}>Collecting photos</Text>
-                )}
+              <View style={styles.placeholderOverlay}>
+                <Ionicons name="images-outline" size={ALBUM.placeholderIconSize} color={Colors.terracotta} />
+                <Text style={styles.placeholderLabel}>{COPY.albumCollecting}</Text>
               </View>
             )}
           </View>
@@ -115,13 +113,13 @@ const styles = StyleSheet.create({
     // the square, and the cover is clipped by the parent's overflow:hidden.
     ...StyleSheet.absoluteFillObject,
   },
-  developingOverlay: {
+  placeholderOverlay: {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     paddingHorizontal: 8,
   },
-  readyLabel: {
+  placeholderLabel: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,

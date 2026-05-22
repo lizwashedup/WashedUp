@@ -94,14 +94,14 @@ export const COPY = {
   freshTitle2: "It's better now.",
   freshSub: "Here are the people you've already done stuff with. Add the ones you want to keep.",
   freshCardPlansLabel: 'people from your plans',
-  freshCardInviteTitle: 'Know someone who would be into this?',
-  freshCardInviteSub: 'Invite them to WashedUp',
+  freshCardInviteTitle: 'know someone who wants to get out more?',
+  freshCardInviteSub: 'invite them to washedup',
 
   emptyTitle: 'This is where your people live.',
   emptySub: 'Do a plan, then decide who stays.',
   nearbyHeader: "What's happening near you",
-  inviteCardTitle: 'Know someone who would be into this?',
-  inviteCardSub: 'Invite them to WashedUp',
+  inviteCardTitle: 'know someone who wants to get out more?',
+  inviteCardSub: 'invite them to washedup',
 
   // SIM-EYEBALL #3: + sheet path labels
   pathPlansTitle: "People you've already done stuff with",
@@ -144,4 +144,7 @@ export const COPY = {
   surveyAddPrompt: 'You did something together. They might be your people.',
   surveyAddButton: 'Add them',
   surveySkip: 'Skip',
+
+  albumOpenFailed: "This album didn't open. Try again in a moment.",
+  albumCollecting: 'Collecting photos',
 } as const;

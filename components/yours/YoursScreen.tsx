@@ -10,6 +10,7 @@ import { router } from 'expo-router';
 import { Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { SPACING } from '../../constants/YoursDesign';
 import { useAuthUserId } from './state/useAuthUserId';
 import { useYoursGrid } from '../../hooks/useYoursGrid';
 import { useIncomingRequests } from '../../hooks/useIncomingRequests';
@@ -229,6 +230,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     minHeight: 32,
+    marginTop: SPACING.addPillOffsetTop,
   },
   addPillText: {
     fontFamily: Fonts.sansBold,

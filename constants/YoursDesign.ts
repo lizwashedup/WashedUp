@@ -45,6 +45,7 @@ export const SPACING = {
   avatarToName: 6,
   nameToSubtext: 2,
   inlineIconGap: 4,         // Gap between an inline icon and adjacent text
+  addPillOffsetTop: 12,     // Drops the + add pill below the tabs baseline so future menu items have room above it
 } as const;
 
 // ── Lucide icon sizes ─────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ export const ALBUM = {
   minCardWidth: 140,        // Floor for the cardWidth clamp on narrow screens
   cardWidthRatio: 0.42,     // Of screen width; leaves room for gutters
   gridGap: 12,              // Horizontal gap between the two columns
+  placeholderIconSize: 28,  // Icon in the "no uploads yet" card placeholder
 } as const;
 
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
