@@ -26,7 +26,7 @@ const GRID_COLS = 2;
 const GRID_GAP = 4;
 const GRID_PADDING = 12;
 const TILE_SIZE = (SCREEN_W - GRID_PADDING * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
-const SIGNED_URL_TTL = 3600;
+const SIGNED_URL_TTL = 7200; // 2h, so long viewing sessions don't hit expired URLs
 // Supabase image-transform preset for grid tiles, applied at signing time on
 // the private album-media bucket. Originals are 3 to 5 MB; this 400px cover
 // thumbnail is roughly 30 KB, the core Phase 2 perf win. The full-screen
@@ -242,6 +242,24 @@ export default function AlbumDetailScreen() {
   // it cannot be edited accidentally and never autosaves mid-typing.
   const [isEditingName, setIsEditingName] = useState(false);
   const [savingName, setSavingName] = useState(false);
+
+  // Signed URLs expire (2h). If one goes stale mid-session an image fails to
+  // load; re-sign that single path once and swap it in. Keyed by id:thumb|full
+  // so a tile and its full-res viewer image refresh independently. The ref
+  // guards against a re-sign loop if the asset is genuinely broken.
+  const [reSignedUrls, setReSignedUrls] = useState<Record<string, string>>({});
+  const reSignAttempted = useRef<Set<string>>(new Set());
+  const reSignImage = useCallback(async (uploadId: string, path: string, isThumb: boolean) => {
+    const key = `${uploadId}:${isThumb ? 'thumb' : 'full'}`;
+    if (!path || reSignAttempted.current.has(key)) return;
+    reSignAttempted.current.add(key);
+    const { data, error } = await supabase.storage
+      .from('album-media')
+      .createSignedUrl(path, SIGNED_URL_TTL, isThumb ? { transform: THUMB_TRANSFORM } : undefined);
+    if (!error && data?.signedUrl) {
+      setReSignedUrls((m) => ({ ...m, [key]: data.signedUrl }));
+    }
+  }, []);
   const nameInputRef = useRef<TextInput>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -615,7 +633,7 @@ export default function AlbumDetailScreen() {
       {/* Hero */}
         <View style={styles.hero}>
           {coverUri ? (
-            <Image source={{ uri: coverUri }} style={styles.heroImage} contentFit="cover" />
+            <Image source={{ uri: coverUri }} style={styles.heroImage} contentFit="cover" transition={200} />
           ) : (
             <View style={[styles.heroImage, styles.heroPlaceholder]}>
               <Ionicons name="images-outline" size={36} color={Colors.terracotta} />
@@ -772,7 +790,13 @@ export default function AlbumDetailScreen() {
           delayLongPress={250}
         >
           {u.signed_thumb_url ? (
-            <Image source={{ uri: u.signed_thumb_url }} style={styles.tileImage} contentFit="cover" />
+            <Image
+              source={{ uri: reSignedUrls[`${u.id}:thumb`] ?? u.signed_thumb_url ?? undefined }}
+              onError={() => void reSignImage(u.id, u.display_url || u.media_url, true)}
+              style={styles.tileImage}
+              contentFit="cover"
+              transition={200}
+            />
           ) : (
             <View style={[styles.tileImage, styles.tilePlaceholder]} />
           )}
@@ -846,9 +870,12 @@ export default function AlbumDetailScreen() {
                 </View>
               ) : (
                 <Image
-                  source={{ uri: visibleUploads[viewerIndex].signed_display_url ?? '' }}
+                  source={{ uri: reSignedUrls[`${visibleUploads[viewerIndex].id}:full`] ?? visibleUploads[viewerIndex].signed_display_url ?? '' }}
+                  placeholder={{ uri: visibleUploads[viewerIndex].signed_thumb_url ?? '' }}
+                  onError={() => { const vu = visibleUploads[viewerIndex!]; if (vu) void reSignImage(vu.id, vu.display_url || vu.media_url, false); }}
                   style={styles.viewerImage}
                   contentFit="contain"
+                  transition={200}
                 />
               )}
               <SafeAreaView edges={['top']} style={styles.viewerHeader}>
