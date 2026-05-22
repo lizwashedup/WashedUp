@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS, ActivityIndicator, Alert, Dimensions, FlatList, Keyboard, Modal,
-  Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput,
+  Platform, Pressable, Share, StyleSheet, Text, TextInput,
   TouchableOpacity, View,
 } from 'react-native';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { ALBUM } from '../../constants/YoursDesign';
+import { FlashList } from '@shopify/flash-list';
 import { supabase } from '../../lib/supabase';
 import { logError } from '../../lib/logger';
 
@@ -26,6 +27,11 @@ const GRID_GAP = 4;
 const GRID_PADDING = 12;
 const TILE_SIZE = (SCREEN_W - GRID_PADDING * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
 const SIGNED_URL_TTL = 3600;
+// Supabase image-transform preset for grid tiles, applied at signing time on
+// the private album-media bucket. Originals are 3 to 5 MB; this 400px cover
+// thumbnail is roughly 30 KB, the core Phase 2 perf win. The full-screen
+// viewer keeps the untransformed signed_display_url.
+const THUMB_TRANSFORM = { width: 400, height: 400, resize: 'cover' as const, quality: 70 };
 
 type AlbumUpload = {
   id: string;
@@ -57,6 +63,7 @@ type AlbumPayload = {
   uploads: Array<AlbumUpload & {
     uploader_name: string | null;
     signed_display_url: string | null;
+    signed_thumb_url: string | null;
   }>;
   attendees: Attendee[];
   myUserId: string;
@@ -117,7 +124,7 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
   const nameByUserId = new Map(attendees.map((a) => [a.user_id, a.first_name_display]));
 
   // 4. uploads (RLS filters by visibility)
-  let uploads: Array<AlbumUpload & { uploader_name: string | null; signed_display_url: string | null }> = [];
+  let uploads: Array<AlbumUpload & { uploader_name: string | null; signed_display_url: string | null; signed_thumb_url: string | null }> = [];
   if (albumRow) {
     const { data: rawUploads } = await supabase
       .from('album_uploads')
@@ -130,6 +137,7 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
       (rawUploads ?? []).map(async (u) => {
         const path = u.display_url || u.media_url;
         let signedUrl: string | null = null;
+        let thumbUrl: string | null = null;
         try {
           const { data: signedData, error } = await supabase.storage
             .from('album-media')
@@ -141,10 +149,25 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
           // keep going — that asset just renders without an image.
           logError(err, 'album.createSignedUrl');
         }
+        // Photos get a small transformed thumbnail for the grid tile (the perf
+        // win). Videos reuse the full signed URL; video frame extraction is a
+        // Phase 4 concern. Any failure falls back to the full URL.
+        if (u.content_type === 'photo') {
+          try {
+            const { data: thumbData, error: thumbErr } = await supabase.storage
+              .from('album-media')
+              .createSignedUrl(path, SIGNED_URL_TTL, { transform: THUMB_TRANSFORM });
+            if (thumbErr) throw thumbErr;
+            thumbUrl = thumbData?.signedUrl ?? null;
+          } catch (err) {
+            logError(err, 'album.createSignedUrl.thumb');
+          }
+        }
         return {
           ...u,
           uploader_name: nameByUserId.get(u.user_id) ?? null,
           signed_display_url: signedUrl,
+          signed_thumb_url: thumbUrl ?? signedUrl,
         } as any;
       }),
     );
@@ -583,10 +606,13 @@ export default function AlbumDetailScreen() {
     (u) => u.user_id === myUserId && u.content_type === 'photo',
   ).length;
 
-  return (
-    <View style={styles.root}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-        {/* Hero */}
+  // The whole screen is one virtualized FlashList: the hero/attendee/personal
+  // sections ride as the header (passed as an ELEMENT so the name/note inputs
+  // keep focus across re-renders), photo tiles are the list data, the add
+  // button is the footer. The full-screen viewer Modal stays outside.
+  const albumHeader = (
+    <View>
+      {/* Hero */}
         <View style={styles.hero}>
           {coverUri ? (
             <Image source={{ uri: coverUri }} style={styles.heroImage} contentFit="cover" />
@@ -724,67 +750,84 @@ export default function AlbumDetailScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Photo grid */}
-        {visibleUploads.length === 0 ? (
-          <View style={styles.emptyGrid}>
-            <Text style={styles.emptyGridTitle}>Be the first to add some photos.</Text>
-            <Text style={styles.emptyGridSubtitle}>You were there, show us what happened.</Text>
-          </View>
-        ) : (
-          <View style={styles.grid}>
-            {visibleUploads
-              .map((u, idx) => {
-                const hearted = isHearted(u.id);
-                const isOwn = u.user_id === myUserId;
-                return (
-                  <Pressable
-                    key={u.id}
-                    style={styles.tile}
-                    onPress={() => setViewerIndex(idx)}
-                    onLongPress={() => showTileActions(u.id, isOwn, u.content_type === 'photo')}
-                    delayLongPress={250}
-                  >
-                    {u.signed_display_url ? (
-                      <Image source={{ uri: u.signed_display_url }} style={styles.tileImage} contentFit="cover" />
-                    ) : (
-                      <View style={[styles.tileImage, styles.tilePlaceholder]} />
-                    )}
-                    {u.content_type === 'video' && (
-                      <View style={styles.playOverlay}>
-                        <Ionicons name="play-circle" size={36} color={Colors.white} />
-                      </View>
-                    )}
-                    <View style={styles.tileFooter}>
-                      <Text style={styles.tileCredit} numberOfLines={1}>
-                        {u.uploader_name ? `by ${u.uploader_name}${isOwn ? ' (you)' : ''}` : ''}
-                      </Text>
-                      {(u.heart_count > 0 || hearted) && (
-                        <View style={styles.heartChip}>
-                          <Ionicons
-                            name={hearted ? 'heart' : 'heart-outline'}
-                            size={11}
-                            color={Colors.terracotta}
-                          />
-                          {u.heart_count > 0 && <Text style={styles.heartCount}>{u.heart_count}</Text>}
-                        </View>
-                      )}
-                    </View>
-                  </Pressable>
-                );
-              })}
-          </View>
-        )}
+    </View>
+  );
 
-        {/* Add more photos button */}
-        <TouchableOpacity
-          style={styles.addBtn}
-          onPress={() => router.push(`/album/upload/${eventId}` as any)}
-          activeOpacity={0.85}
+  const albumEmpty = (
+    <View style={styles.emptyGrid}>
+      <Text style={styles.emptyGridTitle}>Be the first to add some photos.</Text>
+      <Text style={styles.emptyGridSubtitle}>You were there, show us what happened.</Text>
+    </View>
+  );
+
+  const renderTile = ({ item: u, index: idx }: { item: (typeof visibleUploads)[number]; index: number }) => {
+    const hearted = isHearted(u.id);
+    const isOwn = u.user_id === myUserId;
+    return (
+      <View style={styles.tileCell}>
+        <Pressable
+          style={styles.tile}
+          onPress={() => setViewerIndex(idx)}
+          onLongPress={() => showTileActions(u.id, isOwn, u.content_type === 'photo')}
+          delayLongPress={250}
         >
-          <Ionicons name="add" size={18} color={Colors.white} />
-          <Text style={styles.addBtnText}>Add photos</Text>
-        </TouchableOpacity>
-      </ScrollView>
+          {u.signed_thumb_url ? (
+            <Image source={{ uri: u.signed_thumb_url }} style={styles.tileImage} contentFit="cover" />
+          ) : (
+            <View style={[styles.tileImage, styles.tilePlaceholder]} />
+          )}
+          {u.content_type === 'video' && (
+            <View style={styles.playOverlay}>
+              <Ionicons name="play-circle" size={36} color={Colors.white} />
+            </View>
+          )}
+          <View style={styles.tileFooter}>
+            <Text style={styles.tileCredit} numberOfLines={1}>
+              {u.uploader_name ? `by ${u.uploader_name}${isOwn ? ' (you)' : ''}` : ''}
+            </Text>
+            {(u.heart_count > 0 || hearted) && (
+              <View style={styles.heartChip}>
+                <Ionicons
+                  name={hearted ? 'heart' : 'heart-outline'}
+                  size={11}
+                  color={Colors.terracotta}
+                />
+                {u.heart_count > 0 && <Text style={styles.heartCount}>{u.heart_count}</Text>}
+              </View>
+            )}
+          </View>
+        </Pressable>
+      </View>
+    );
+  };
+
+  const albumFooter = (
+    <TouchableOpacity
+      style={styles.addBtn}
+      onPress={() => router.push(`/album/upload/${eventId}` as any)}
+      activeOpacity={0.85}
+    >
+      <Ionicons name="add" size={18} color={Colors.white} />
+      <Text style={styles.addBtnText}>Add photos</Text>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.root}>
+      <FlashList
+        data={visibleUploads}
+        numColumns={2}
+        keyExtractor={(u) => u.id}
+        renderItem={renderTile}
+        ListHeaderComponent={albumHeader}
+        ListEmptyComponent={albumEmpty}
+        ListFooterComponent={albumFooter}
+        estimatedItemSize={TILE_SIZE + 30}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
+      />
 
       {/* Full-screen viewer */}
       <Modal
@@ -916,7 +959,7 @@ const styles = StyleSheet.create({
   emptyGrid: { paddingHorizontal: 24, paddingVertical: 48, alignItems: 'center', gap: 6 },
   emptyGridTitle: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, textAlign: 'center' },
   emptyGridSubtitle: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, textAlign: 'center' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: GRID_PADDING, paddingTop: 16, gap: GRID_GAP },
+  tileCell: { flex: 1, alignItems: 'center' },
   tile: { width: TILE_SIZE, marginBottom: GRID_GAP },
   tileImage: { width: TILE_SIZE, height: TILE_SIZE, borderRadius: 4, backgroundColor: Colors.inputBg },
   tilePlaceholder: { alignItems: 'center', justifyContent: 'center' },
