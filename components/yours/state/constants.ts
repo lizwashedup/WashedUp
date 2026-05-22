@@ -147,4 +147,6 @@ export const COPY = {
 
   albumOpenFailed: "This album didn't open. Try again in a moment.",
   albumCollecting: 'Collecting photos',
+  albumAddYours: 'Add yours',
+  albumAddYoursBanner: 'Looking back on these will be fun. Add yours.',
 } as const;

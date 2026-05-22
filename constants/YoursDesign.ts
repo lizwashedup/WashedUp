@@ -60,6 +60,8 @@ export const ALBUM = {
   cardWidthRatio: 0.42,     // Of screen width; leaves room for gutters
   gridGap: 12,              // Horizontal gap between the two columns
   placeholderIconSize: 28,  // Icon in the "no uploads yet" card placeholder
+  uploadPhotoCap: 20,       // Per-person photo cap (server-enforced); the "Add yours" pill hides at/above it
+  ctaIconSize: 16,          // Icon size in the "Add yours" pill + the zero-upload banner
 } as const;
 
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────

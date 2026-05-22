@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { ALBUM } from '../../constants/YoursDesign';
 import { supabase } from '../../lib/supabase';
 import { logError } from '../../lib/logger';
 
@@ -576,6 +577,11 @@ export default function AlbumDetailScreen() {
   // inline every render already) — kept as a plain const because the early
   // returns above forbid adding a hook here.
   const visibleUploads = uploads.filter((u) => !optimisticHiddenIds.has(u.id));
+  // Photos the current user has personally added. Drives the "Add yours" pill
+  // and the zero-upload banner. Photos only, mirroring the server-side cap.
+  const myPhotoCount = uploads.filter(
+    (u) => u.user_id === myUserId && u.content_type === 'photo',
+  ).length;
 
   return (
     <View style={styles.root}>
@@ -633,7 +639,19 @@ export default function AlbumDetailScreen() {
               )
             )}
           />
-          <Text style={styles.attendeeNames}>{attendeeSummary}</Text>
+          <View style={styles.attendeeFooter}>
+            <Text style={styles.attendeeNames}>{attendeeSummary}</Text>
+            {myPhotoCount < ALBUM.uploadPhotoCap && (
+              <TouchableOpacity
+                style={styles.addYoursPill}
+                onPress={() => router.push(`/album/upload/${eventId}` as any)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add" size={ALBUM.ctaIconSize} color={Colors.white} />
+                <Text style={styles.addYoursPillText}>{COPY.albumAddYours}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {/* Personal name + memory note (per-user; others see their own) */}
@@ -691,6 +709,20 @@ export default function AlbumDetailScreen() {
             />
           </View>
         </View>
+
+        {/* Zero-upload nudge: you have not added any, but others have. The
+            totally-empty album is covered by the empty-grid invite below. */}
+        {myPhotoCount === 0 && visibleUploads.length > 0 && (
+          <TouchableOpacity
+            style={styles.addBanner}
+            onPress={() => router.push(`/album/upload/${eventId}` as any)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="camera-outline" size={ALBUM.ctaIconSize} color={Colors.terracotta} />
+            <Text style={styles.addBannerText}>{COPY.albumAddYoursBanner}</Text>
+            <Ionicons name="chevron-forward" size={ALBUM.ctaIconSize} color={Colors.terracotta} />
+          </TouchableOpacity>
+        )}
 
         {/* Photo grid */}
         {visibleUploads.length === 0 ? (
@@ -904,6 +936,20 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3, shadowRadius: 8,
   },
   addBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  attendeeFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  addYoursPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999,
+  },
+  addYoursPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
+  addBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: GRID_PADDING, marginTop: 12,
+    paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: Colors.brandSoft, borderRadius: 12,
+  },
+  addBannerText: { flex: 1, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   viewerRoot: { flex: 1, backgroundColor: Colors.shadowBlack, justifyContent: 'center' },
   viewerImage: { width: '100%', height: '100%' },
   viewerVideoFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
