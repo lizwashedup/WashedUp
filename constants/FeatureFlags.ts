@@ -33,9 +33,12 @@ export const PHONE_AUTH_ENABLED = true;
  * requests, activity-ring grid, ghost-avatar referrals, redesigned survey,
  * ping flow) backed by people_connections / people_pings / referral_invites.
  *
- * DO NOT flip to true in a committed file until the new system is fully
- * tested in sim AND the backing migrations (supabase/migrations/20260517*)
- * have been reviewed and applied to prod, including the gated archive of
- * the legacy friends / pinned_people data.
+ * Local dev: set EXPO_PUBLIC_YOURS_PAGE_ENABLED=true in .env.local (gitignored)
+ * to enable the rebuilt Yours page on your machine. The value below is env-driven
+ * and ships OFF wherever the var is unset (CI / prod / EAS), so there is nothing
+ * to flip back and it cannot ship on by accident. Do not enable it for a real
+ * build until the new system is tested AND the backing migrations
+ * (supabase/migrations/20260517*) are applied to prod, including the gated archive
+ * of the legacy friends / pinned_people data.
  */
-export const YOURS_PAGE_ENABLED = false;
+export const YOURS_PAGE_ENABLED = process.env.EXPO_PUBLIC_YOURS_PAGE_ENABLED === 'true';
