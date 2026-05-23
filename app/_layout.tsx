@@ -770,8 +770,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="plan/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="waitlist/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
-        <Stack.Screen name="album/[eventId]" options={{ headerShown: false, gestureEnabled: true }} />
-        <Stack.Screen name="album/upload/[eventId]" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="album/[eventId]" options={{ headerShown: false, gestureEnabled: true, fullScreenGestureEnabled: true }} />
+        <Stack.Screen name="album/upload/[eventId]" options={{ headerShown: false, gestureEnabled: true, fullScreenGestureEnabled: true }} />
         <Stack.Screen name="admin/events" options={{ headerShown: false }} />
       </Stack>
       {!authResolved && (
