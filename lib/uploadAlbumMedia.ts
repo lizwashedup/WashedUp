@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decode as base64ToArrayBuffer } from 'base64-arraybuffer';
 import * as Crypto from 'expo-crypto';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Image } from 'react-native';
 import { supabase } from './supabase';
 import { queryClient } from './queryClient';
 
@@ -62,6 +62,8 @@ type QueueItem = {
   status: 'pending' | 'uploading' | 'uploaded' | 'failed' | 'permanently_failed';
   attempts: number;
   error?: string;
+  originalUploaded?: boolean;     // photos: full-res original (+marketing) uploaded
+  originalAttempts?: number;      // retry counter for the background original
 };
 
 type Batch = {
@@ -235,6 +237,7 @@ async function processQueue(): Promise<void> {
         try {
           await callStartBatchRpc(batch);
           batch.rpcCalled = true;
+          await persistQueueWithBatch(batch);
         } catch (err) {
           // RPC failure leaves batch in queue; next foreground retries.
           await persistQueueWithBatch(batch);
@@ -243,7 +246,28 @@ async function processQueue(): Promise<void> {
       }
 
       if (batch.rpcCalled) {
-        // Done — remove from queue.
+        // Background originals phase: the display versions are live and the grid
+        // is populated (RPC done). Now upload each photo's full-res original
+        // (and its marketing copy, from that original). A failure here does not
+        // wedge the batch — it retries on the next foreground, then gives up
+        // after the attempt cap so a permanently broken original can't pin the
+        // batch in the queue. Videos already uploaded their original inline.
+        let originalsPending = false;
+        for (const item of batch.items) {
+          if (item.contentType !== 'photo' || item.originalUploaded) continue;
+          if ((item.originalAttempts ?? 0) >= MAX_UPLOAD_ATTEMPTS) continue;
+          item.originalAttempts = (item.originalAttempts ?? 0) + 1;
+          try {
+            await uploadOriginalAndMarketing(item, batch.options.marketingConsent);
+            item.originalUploaded = true;
+          } catch {
+            originalsPending = true;
+          }
+          await persistQueueWithBatch(batch);
+        }
+        if (originalsPending) break;  // retry remaining originals on next foreground
+
+        // RPC done and originals settled — remove from queue.
         queue = await readQueue();
         queue.batches = queue.batches.filter((b) => b.batchId !== batch.batchId);
         await writeQueue(queue);
@@ -268,12 +292,24 @@ async function uploadOne(item: QueueItem, marketingConsent: boolean): Promise<vo
   let httpContentType: string;
 
   if (item.contentType === 'photo') {
-    // Re-encode to JPEG for consistency. ImageManipulator handles HEIC/HEIF/PNG
-    // and any other format expo-image-picker hands us.
+    // DISPLAY version: downscale the longest edge to 2048 and re-encode JPEG at
+    // 0.7 (visually identical on phones, ~60-70% smaller). The full-res ORIGINAL
+    // is uploaded later by the originals phase, read from item.localUri (the
+    // untouched picker URI) — NOT this manipulated output. ImageManipulator
+    // handles HEIC/HEIF/PNG and anything else the picker hands us.
+    const actions: ImageManipulator.Action[] = [];
+    try {
+      const { width, height } = await getImageSize(item.localUri);
+      if (Math.max(width, height) > MAX_PHOTO_EDGE) {
+        actions.push(width >= height ? { resize: { width: MAX_PHOTO_EDGE } } : { resize: { height: MAX_PHOTO_EDGE } });
+      }
+    } catch {
+      // dimensions unavailable (e.g. some HEIC); skip resize, still re-encode + compress
+    }
     const result = await ImageManipulator.manipulateAsync(
       item.localUri,
-      [],
-      { compress: 0.95, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      actions,
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true },
     );
     if (!result.base64) throw new Error('ImageManipulator returned no base64');
     arrayBuffer = base64ToArrayBuffer(result.base64);
@@ -298,30 +334,56 @@ async function uploadOne(item: QueueItem, marketingConsent: boolean): Promise<vo
   // 23505 / "already exists" = treat as success (resume case).
   if (error && !/already exists/i.test(error.message)) throw error;
 
-  // Best-effort marketing copy. The album viewer reads only from album-media,
-  // so failures here never block the batch or the user. Logged for triage.
-  // Path layout matches album-media exactly so a glance at the marketing
-  // bucket in the Supabase dashboard mirrors the album bucket structure.
-  if (marketingConsent) {
-    try {
-      const { error: mErr } = await supabase.storage
-        .from(MARKETING_BUCKET)
-        .upload(item.storagePath, arrayBuffer, {
-          contentType: httpContentType,
-          upsert: false,
-        });
-      if (mErr && !/already exists/i.test(mErr.message)) {
-        console.warn(
-          '[albumUpload] marketing-media copy failed for',
-          item.storagePath,
-          ':',
-          mErr.message,
-        );
-      }
-    } catch (err) {
-      console.warn('[albumUpload] marketing-media copy threw:', err);
-    }
+  // Videos: the uploaded file IS the original, so the marketing copy is made
+  // here from the same bytes. Photos defer their marketing copy to the originals
+  // phase, which copies the full-res original (never the compressed display).
+  if (marketingConsent && item.contentType === 'video') {
+    await copyToMarketing(item.storagePath, arrayBuffer, httpContentType);
   }
+}
+
+// Best-effort marketing copy. Failures never block the batch or the user; the
+// path mirrors album-media so the marketing bucket structure matches it.
+async function copyToMarketing(path: string, buffer: ArrayBuffer, contentType: string): Promise<void> {
+  try {
+    const { error } = await supabase.storage
+      .from(MARKETING_BUCKET)
+      .upload(path, buffer, { contentType, upsert: true });
+    if (error && !/already exists/i.test(error.message)) {
+      console.warn('[albumUpload] marketing-media copy failed for', path, ':', error.message);
+    }
+  } catch (err) {
+    console.warn('[albumUpload] marketing-media copy threw:', err);
+  }
+}
+
+const MAX_PHOTO_EDGE = 2048;
+
+function getImageSize(uri: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
+  });
+}
+
+const PHOTO_MIME: Record<string, string> = {
+  heic: 'image/heic', heif: 'image/heif', png: 'image/png',
+  webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+};
+
+// Upload the full-res ORIGINAL (raw picker file, no compression/resize) to an
+// originals/ prefix in album-media, plus the marketing copy. Reads item.localUri
+// (the untouched picker URI), never the manipulated display output.
+async function uploadOriginalAndMarketing(item: QueueItem, marketingConsent: boolean): Promise<void> {
+  const res = await fetch(item.localUri);
+  const raw = await res.arrayBuffer();
+  const ext = (item.mediaFormat || 'jpg').toLowerCase();
+  const contentType = PHOTO_MIME[ext] ?? 'image/jpeg';
+  const originalPath = `${item.eventId}/${item.userId}/${item.uploadId}/originals/source.${ext}`;
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(originalPath, raw, { contentType, upsert: true });
+  if (error && !/already exists/i.test(error.message)) throw error;
+  if (marketingConsent) await copyToMarketing(originalPath, raw, contentType);
 }
 
 function guessVideoMime(format: string): string {
