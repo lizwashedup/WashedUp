@@ -79,122 +79,122 @@ type AlbumPayload = {
 };
 
 async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
-  const { data: { user } } = await supabase.auth.getUser();
+  // Phase 1: auth + the independent event-keyed queries, in parallel (these
+  // used to run as 4 serial round trips). RLS scopes them via the session.
+  const [userRes, albumRes, eventRes, membersRes] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.from('plan_albums').select('id, event_id, status, first_upload_at').eq('event_id', eventId).maybeSingle(),
+    supabase.from('events').select('id, title, start_time, location_text').eq('id', eventId).maybeSingle(),
+    supabase.from('event_members').select('user_id').eq('event_id', eventId).eq('status', 'joined'),
+  ]);
+  const user = userRes.data.user;
   if (!user) throw new Error('not authenticated');
+  const albumRow = albumRes.data;
+  const eventRow = eventRes.data;
+  const userIds = (membersRes.data ?? []).map((m) => m.user_id);
 
-  // 1. plan_albums (RLS filters to joined members)
-  const { data: albumRow } = await supabase
-    .from('plan_albums')
-    .select('id, event_id, status, first_upload_at')
-    .eq('event_id', eventId)
-    .maybeSingle();
+  // Phase 2: attendee profiles (needs member ids) and uploads + signed URLs
+  // (needs the album id) run concurrently. uploader_name is stitched on after
+  // both resolve, so signing doesn't wait on the profiles query.
+  const [profilesById, signedUploads] = await Promise.all([
+    (async () => {
+      const map = new Map<string, { first_name_display: string | null; profile_photo_url: string | null }>();
+      if (userIds.length === 0) return map;
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, first_name_display, profile_photo_url')
+        .in('id', userIds);
+      for (const p of profs ?? []) {
+        map.set(p.id, {
+          first_name_display: p.first_name_display ?? null,
+          profile_photo_url: p.profile_photo_url ?? null,
+        });
+      }
+      return map;
+    })(),
+    (async () => {
+      if (!albumRow) {
+        return [] as Array<AlbumUpload & { uploader_name: string | null; signed_display_url: string | null; signed_thumb_url: string | null }>;
+      }
+      const { data: rawUploads } = await supabase
+        .from('album_uploads')
+        .select('id, user_id, media_url, thumbnail_url, display_url, content_type, heart_count, created_at')
+        .eq('plan_album_id', albumRow.id)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: true });
 
-  // 2. event meta
-  const { data: eventRow } = await supabase
-    .from('events')
-    .select('id, title, start_time, location_text')
-    .eq('id', eventId)
-    .maybeSingle();
+      return Promise.all(
+        (rawUploads ?? []).map(async (u) => {
+          const path = u.display_url || u.media_url;
+          let signedUrl: string | null = null;
+          let thumbUrl: string | null = null;
+          try {
+            const { data: signedData, error } = await supabase.storage
+              .from('album-media')
+              .createSignedUrl(path, SIGNED_URL_TTL);
+            if (error) throw error;
+            signedUrl = signedData?.signedUrl ?? null;
+          } catch (err) {
+            // One bad signed URL shouldn't take down the whole album. Log and
+            // keep going — that asset just renders without an image.
+            logError(err, 'album.createSignedUrl');
+          }
+          // Photos get a small transformed thumbnail for the grid tile (the perf
+          // win). Videos reuse the full signed URL; video frame extraction is a
+          // Phase 4 concern. Any failure falls back to the full URL.
+          if (u.content_type === 'photo') {
+            try {
+              const { data: thumbData, error: thumbErr } = await supabase.storage
+                .from('album-media')
+                .createSignedUrl(path, SIGNED_URL_TTL, { transform: THUMB_TRANSFORM });
+              if (thumbErr) throw thumbErr;
+              thumbUrl = thumbData?.signedUrl ?? null;
+            } catch (err) {
+              logError(err, 'album.createSignedUrl.thumb');
+            }
+          }
+          return {
+            ...u,
+            uploader_name: null,
+            signed_display_url: signedUrl,
+            signed_thumb_url: thumbUrl ?? signedUrl,
+          } as any;
+        }),
+      );
+    })(),
+  ]);
 
-  // 3. attendees
-  const { data: members } = await supabase
-    .from('event_members')
-    .select('user_id')
-    .eq('event_id', eventId)
-    .eq('status', 'joined');
-  const userIds = (members ?? []).map((m) => m.user_id);
-  let profilesById = new Map<string, { first_name_display: string | null; profile_photo_url: string | null }>();
-  if (userIds.length > 0) {
-    const { data: profs } = await supabase
-      .from('profiles')
-      .select('id, first_name_display, profile_photo_url')
-      .in('id', userIds);
-    profilesById = new Map(
-      (profs ?? []).map((p) => [p.id, {
-        first_name_display: p.first_name_display ?? null,
-        profile_photo_url: p.profile_photo_url ?? null,
-      }]),
-    );
-  }
   const attendees: Attendee[] = userIds.map((uid) => ({
     user_id: uid,
     first_name_display: profilesById.get(uid)?.first_name_display ?? null,
     profile_photo_url: profilesById.get(uid)?.profile_photo_url ?? null,
   }));
   const nameByUserId = new Map(attendees.map((a) => [a.user_id, a.first_name_display]));
+  const uploads = signedUploads.map((u) => ({ ...u, uploader_name: nameByUserId.get(u.user_id) ?? null }));
 
-  // 4. uploads (RLS filters by visibility)
-  let uploads: Array<AlbumUpload & { uploader_name: string | null; signed_display_url: string | null; signed_thumb_url: string | null }> = [];
-  if (albumRow) {
-    const { data: rawUploads } = await supabase
-      .from('album_uploads')
-      .select('id, user_id, media_url, thumbnail_url, display_url, content_type, heart_count, created_at')
-      .eq('plan_album_id', albumRow.id)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: true });
-
-    uploads = await Promise.all(
-      (rawUploads ?? []).map(async (u) => {
-        const path = u.display_url || u.media_url;
-        let signedUrl: string | null = null;
-        let thumbUrl: string | null = null;
-        try {
-          const { data: signedData, error } = await supabase.storage
-            .from('album-media')
-            .createSignedUrl(path, SIGNED_URL_TTL);
-          if (error) throw error;
-          signedUrl = signedData?.signedUrl ?? null;
-        } catch (err) {
-          // One bad signed URL shouldn't take down the whole album. Log and
-          // keep going — that asset just renders without an image.
-          logError(err, 'album.createSignedUrl');
-        }
-        // Photos get a small transformed thumbnail for the grid tile (the perf
-        // win). Videos reuse the full signed URL; video frame extraction is a
-        // Phase 4 concern. Any failure falls back to the full URL.
-        if (u.content_type === 'photo') {
-          try {
-            const { data: thumbData, error: thumbErr } = await supabase.storage
-              .from('album-media')
-              .createSignedUrl(path, SIGNED_URL_TTL, { transform: THUMB_TRANSFORM });
-            if (thumbErr) throw thumbErr;
-            thumbUrl = thumbData?.signedUrl ?? null;
-          } catch (err) {
-            logError(err, 'album.createSignedUrl.thumb');
-          }
-        }
-        return {
-          ...u,
-          uploader_name: nameByUserId.get(u.user_id) ?? null,
-          signed_display_url: signedUrl,
-          signed_thumb_url: thumbUrl ?? signedUrl,
-        } as any;
-      }),
-    );
-  }
-
-  // 5. Caller's existing hearts on these uploads (drives the heart-toggle UI).
-  let myHeartedIds = new Set<string>();
-  if (uploads.length > 0) {
-    const { data: hearts } = await supabase
-      .from('album_hearts')
-      .select('upload_id')
-      .eq('user_id', user.id)
-      .in('upload_id', uploads.map((u) => u.id));
-    myHeartedIds = new Set((hearts ?? []).map((h) => h.upload_id));
-  }
-
-  // 6. Caller's per-album metadata (custom name, memory note, mute flag).
-  let myMetadata: AlbumPayload['myMetadata'] = null;
-  if (albumRow) {
-    const { data: meta } = await supabase
-      .from('album_user_metadata')
-      .select('custom_name, memory_note, notifications_muted, cover_upload_id')
-      .eq('plan_album_id', albumRow.id)
-      .eq('user_id', user.id)
-      .maybeSingle();
-    myMetadata = meta ?? null;
-  }
+  // Phase 3: caller's hearts (needs upload ids + user) and per-album metadata
+  // (needs album id + user), in parallel.
+  const [myHeartedIds, myMetadata] = await Promise.all([
+    (async () => {
+      if (uploads.length === 0) return new Set<string>();
+      const { data: hearts } = await supabase
+        .from('album_hearts')
+        .select('upload_id')
+        .eq('user_id', user.id)
+        .in('upload_id', uploads.map((u) => u.id));
+      return new Set((hearts ?? []).map((h) => h.upload_id));
+    })(),
+    (async (): Promise<AlbumPayload['myMetadata']> => {
+      if (!albumRow) return null;
+      const { data: meta } = await supabase
+        .from('album_user_metadata')
+        .select('custom_name, memory_note, notifications_muted, cover_upload_id')
+        .eq('plan_album_id', albumRow.id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      return meta ?? null;
+    })(),
+  ]);
 
   return {
     album: albumRow ? {
