@@ -36,6 +36,11 @@ export type AlbumUploadInput = {
   fileSizeBytes?: number;
   // Video duration in seconds (≤ 60). Photos: undefined.
   videoDurationSec?: number;
+  // Source pixel dims (asset.width/height) for the mosaic aspect ratio.
+  width?: number;
+  height?: number;
+  // EXIF DateTimeOriginal normalized to a UTC ISO string; chronological sort only.
+  takenAt?: string;
 };
 
 export type AlbumUploadOptions = {
@@ -58,6 +63,9 @@ type QueueItem = {
   mediaFormat: string;
   fileSizeBytes: number;          // resolved at enqueue time (best-effort)
   videoDurationSec?: number;
+  width?: number;
+  height?: number;
+  takenAt?: string;
   storagePath: string;            // {event_id}/{user_id}/{upload_id}/original.{ext}
   status: 'pending' | 'uploading' | 'uploaded' | 'failed' | 'permanently_failed';
   attempts: number;
@@ -115,6 +123,9 @@ export async function enqueueAlbumUploadBatch(
       mediaFormat: input.mediaFormat,
       fileSizeBytes: input.fileSizeBytes ?? 0,
       videoDurationSec: input.videoDurationSec,
+      width: input.width,
+      height: input.height,
+      takenAt: input.takenAt,
       storagePath: `${eventId}/${userId}/${uploadId}/original.${ext}`,
       status: 'pending',
       attempts: 0,
@@ -405,6 +416,9 @@ async function callStartBatchRpc(batch: Batch): Promise<void> {
     media_format: item.mediaFormat,
     file_size_bytes: item.fileSizeBytes,
     video_duration_sec: item.videoDurationSec ?? null,
+    width: item.width ?? null,
+    height: item.height ?? null,
+    taken_at: item.takenAt ?? null,
   }));
 
   const { error } = await supabase.rpc('start_album_upload_batch', {

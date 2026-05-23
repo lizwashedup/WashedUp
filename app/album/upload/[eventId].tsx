@@ -43,7 +43,23 @@ type SelectedAsset = {
   mediaFormat: string;        // 'heic', 'mov', 'jpg', etc.
   fileSizeBytes?: number;
   videoDurationSec?: number;
+  width?: number;             // source pixel dims, for the mosaic aspect ratio
+  height?: number;
+  takenAt?: string;           // EXIF DateTimeOriginal as a UTC ISO string; sort-only
 };
+
+// EXIF DateTimeOriginal is "YYYY:MM:DD HH:MM:SS" in the photo's local time with
+// no zone. taken_at is used only for chronological SORT within an album (all
+// photos share the event's timezone), never for display, so normalize to a
+// deterministic UTC ISO string and don't worry about the offset.
+function parseExifTakenAt(exif: Record<string, any> | null | undefined): string | undefined {
+  const raw = exif?.DateTimeOriginal ?? exif?.['{Exif}']?.DateTimeOriginal ?? exif?.DateTime;
+  if (typeof raw !== 'string') return undefined;
+  const m = raw.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return undefined;
+  const [, y, mo, d, h, mi, s] = m;
+  return `${y}-${mo}-${d}T${h}:${mi}:${s}Z`;
+}
 
 type RejectionCounts = {
   tooLong: number;
@@ -181,6 +197,7 @@ export default function AlbumUploadScreen() {
         selectionLimit: PHOTO_CAP + VIDEO_CAP,
         quality: 1,
         videoMaxDuration: MAX_VIDEO_SEC,
+        exif: true,
         ...(Platform.OS === 'ios'
           ? { videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality }
           : {}),
@@ -220,6 +237,9 @@ export default function AlbumUploadScreen() {
         mediaFormat: ext,
         fileSizeBytes: a.fileSize,
         videoDurationSec: isVideo && a.duration ? Math.round(a.duration / 1000) : undefined,
+        width: a.width,
+        height: a.height,
+        takenAt: isVideo ? undefined : parseExifTakenAt(a.exif),
       });
     }
 
@@ -272,6 +292,9 @@ export default function AlbumUploadScreen() {
         mediaFormat: a.mediaFormat,
         fileSizeBytes: a.fileSizeBytes,
         videoDurationSec: a.videoDurationSec,
+        width: a.width,
+        height: a.height,
+        takenAt: a.takenAt,
       }));
 
       await enqueueAlbumUploadBatch(String(eventId), myUserId, inputs, {

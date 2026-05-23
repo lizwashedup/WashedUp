@@ -64,6 +64,19 @@ export const ALBUM = {
   ctaIconSize: 16,          // Icon size in the "Add yours" pill + the zero-upload banner
 } as const;
 
+// ── Justified mosaic grid (Phase 3) ───────────────────────────────────────
+export const MOSAIC = {
+  targetRowHeight: 180,     // Ideal row height before scaling to fill width
+  gap: 2,                   // Gap between tiles (tight, Google Photos style)
+  tileRadius: 3,            // Per-tile corner radius
+  edgePadding: 4,           // Horizontal inset from the screen edge
+  minAspect: 0.6,           // Clamp floor (tall photos) so tiles don't get absurd
+  maxAspect: 2.4,           // Clamp ceiling (panoramas) so one tile can't dominate
+  fallbackAspect: 1,        // Square, for NULL/garbage dims (existing rows, EXIF fails)
+  overlayFontSize: 10,      // Uploader-name whisper
+  playIconSize: 30,         // Video play badge
+} as const;
+
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
 export const RING_STROKE = {
   fullPt: 2.5,
