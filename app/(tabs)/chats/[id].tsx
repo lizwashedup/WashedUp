@@ -51,6 +51,11 @@ import AttachmentSheet, { AttachmentSheetRef, AttachmentKey } from '../../../com
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
+import VoicePlayer from '../../../components/chat/VoicePlayer';
+import VoiceRecorder, { RecorderUiMode } from '../../../components/chat/VoiceRecorder';
+import { useVoiceRecorder } from '../../../hooks/useVoiceRecorder';
+import { uploadAudioToStorage } from '../../../lib/uploadAudio';
+import { logError } from '../../../lib/logger';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
@@ -295,7 +300,13 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
           onLongPress={handleLongPress}
           delayLongPress={400}
         >
-          {!!message.image_url ? (
+          {message.message_type === 'audio' && message.audio_url ? (
+            <VoicePlayer
+              uri={message.audio_url}
+              durationSeconds={message.duration_seconds ?? 0}
+              isOwn={isOwn}
+            />
+          ) : !!message.image_url ? (
             <Pressable
               onPress={() => onPhotoPress?.(message.image_url!)}
             >
@@ -537,6 +548,12 @@ const SCROLL_SHOW_THRESHOLD = 300;
 const SCROLL_AT_BOTTOM_THRESHOLD = 24;
 const SCROLL_BTN_GAP = 12;
 
+// Voice recording hold gesture: activate after a short hold, then slide left to
+// cancel or up to lock (hands-free), mirroring WhatsApp.
+const VOICE_HOLD_MS = 200;
+const VOICE_CANCEL_THRESHOLD = 80;
+const VOICE_LOCK_THRESHOLD = 80;
+
 const SwipeableRow = memo(function SwipeableRow({
   enabled,
   onTriggerReply,
@@ -640,7 +657,7 @@ export default function ChatScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [overlayMessage, setOverlayMessage] = useState<{ message: ChatMessage; isOwn: boolean } | null>(null);
   const listRef = useRef<FlatList>(null);
-  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, editMessage, toggleReaction, refetch } = useChat(id);
+  const { messages, loading, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, refetch } = useChat(id);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
   const [membersExpanded, setMembersExpanded] = useState(false);
@@ -1111,10 +1128,99 @@ export default function ChatScreen() {
   }));
 
   // Mic press is a placeholder until voice recording lands in Component 5.
-  const handleMicPress = useCallback(() => {
-    hapticLight();
-    // wired in Component 5 (VoiceRecorder)
+  // ── Voice recording ────────────────────────────────────────────────────
+  const recorder = useVoiceRecorder();
+  const [recordingMode, setRecordingMode] = useState<RecorderUiMode | 'idle'>('idle');
+  const [draft, setDraft] = useState<{ uri: string; durationSeconds: number } | null>(null);
+
+  const resetRecording = useCallback(() => {
+    setRecordingMode('idle');
+    setDraft(null);
   }, []);
+
+  const uploadAndSendAudio = useCallback(async (uri: string, durationSeconds: number) => {
+    if (!currentUserId) { resetRecording(); return; }
+    resetRecording();
+    try {
+      const url = await uploadAudioToStorage(id, currentUserId, uri);
+      await sendAudio(url, durationSeconds);
+      scrollToBottom();
+    } catch (e) {
+      logError(e, 'chat.uploadAndSendAudio');
+      Alert.alert("Couldn't send voice message", 'Please try again.');
+    }
+  }, [currentUserId, id, sendAudio, scrollToBottom, resetRecording]);
+
+  const beginRecording = useCallback(async () => {
+    if (isPast) return;
+    Keyboard.dismiss();
+    hapticMedium();
+    setRecordingMode('holding');
+    const ok = await recorder.start();
+    if (!ok) {
+      setRecordingMode('idle');
+      Alert.alert('Microphone needed', 'Enable microphone access in Settings to send voice messages.');
+    }
+  }, [isPast, recorder]);
+
+  const cancelRecording = useCallback(async () => {
+    hapticLight();
+    await recorder.cancel();
+    resetRecording();
+  }, [recorder, resetRecording]);
+
+  const lockRecording = useCallback(() => {
+    hapticLight();
+    setRecordingMode('locked');
+  }, []);
+
+  const stopRecordingToDraft = useCallback(async () => {
+    const res = await recorder.stop();
+    if (res) { setDraft(res); setRecordingMode('draft'); }
+    else resetRecording();
+  }, [recorder, resetRecording]);
+
+  // Finger lifted mid-hold (not locked, not slid to cancel): stop and send.
+  const finishHeldRecording = useCallback(async () => {
+    const res = await recorder.stop();
+    if (res) await uploadAndSendAudio(res.uri, res.durationSeconds);
+    else resetRecording();
+  }, [recorder, uploadAndSendAudio, resetRecording]);
+
+  const sendDraft = useCallback(async () => {
+    if (draft) await uploadAndSendAudio(draft.uri, draft.durationSeconds);
+  }, [draft, uploadAndSendAudio]);
+
+  const pauseResumeRecording = useCallback(() => {
+    if (recorder.status === 'paused') recorder.resume();
+    else recorder.pause();
+  }, [recorder]);
+
+  // Resolve a released hold from the final finger translation.
+  const endHoldGesture = useCallback((translationX: number, translationY: number) => {
+    if (translationY < -VOICE_LOCK_THRESHOLD) lockRecording();
+    else if (translationX < -VOICE_CANCEL_THRESHOLD) cancelRecording();
+    else finishHeldRecording();
+  }, [lockRecording, cancelRecording, finishHeldRecording]);
+
+  // Quick tap on the morph button: send when there's text; otherwise it's a
+  // no-op hint (voice messages are hold-to-record).
+  const handleMorphTap = useCallback(() => {
+    if (hasText) { handleSend(); return; }
+    hapticLight();
+  }, [hasText, handleSend]);
+
+  const micGesture = useMemo(() => {
+    const tap = Gesture.Tap().onEnd((_e, success) => {
+      if (success) runOnJS(handleMorphTap)();
+    });
+    const pan = Gesture.Pan()
+      .enabled(!hasText)
+      .activateAfterLongPress(VOICE_HOLD_MS)
+      .onStart(() => { runOnJS(beginRecording)(); })
+      .onEnd((e) => { runOnJS(endHoldGesture)(e.translationX, e.translationY); });
+    return Gesture.Exclusive(pan, tap);
+  }, [hasText, handleMorphTap, beginRecording, endHoldGesture]);
 
   // Emoji button is placement-only until the picker phase. No-op for now.
   const handleEmojiPress = useCallback(() => {}, []);
@@ -1655,20 +1761,37 @@ export default function ChatScreen() {
               textContentType="none"
             />
 
-            <TouchableOpacity
-              onPress={hasText ? handleSend : handleMicPress}
-              disabled={hasText && uploading}
-              activeOpacity={0.7}
-              style={chatStyles.sendMorphWrap}
-            >
-              <Animated.View style={[chatStyles.morphLayer, chatStyles.sendCircle, sendLayerStyle]}>
-                <Ionicons name="arrow-up" size={SEND_ARROW_ICON_SIZE} color={Colors.white} />
+            <GestureDetector gesture={micGesture}>
+              <Animated.View style={chatStyles.sendMorphWrap}>
+                <Animated.View style={[chatStyles.morphLayer, chatStyles.sendCircle, sendLayerStyle]}>
+                  <Ionicons name="arrow-up" size={SEND_ARROW_ICON_SIZE} color={Colors.white} />
+                </Animated.View>
+                <Animated.View style={[chatStyles.morphLayer, micLayerStyle]}>
+                  <Ionicons name="mic" size={SEND_MIC_ICON_SIZE} color={Colors.terracotta} />
+                </Animated.View>
               </Animated.View>
-              <Animated.View style={[chatStyles.morphLayer, micLayerStyle]}>
-                <Ionicons name="mic" size={SEND_MIC_ICON_SIZE} color={Colors.terracotta} />
-              </Animated.View>
-            </TouchableOpacity>
+            </GestureDetector>
           </View>
+
+          {recordingMode !== 'idle' && (
+            <View
+              style={chatStyles.recorderOverlay}
+              pointerEvents={recordingMode === 'holding' ? 'none' : 'auto'}
+            >
+              <VoiceRecorder
+                mode={recordingMode as RecorderUiMode}
+                durationMillis={recorder.durationMillis}
+                meterings={recorder.meterings}
+                isPaused={recorder.status === 'paused'}
+                draftUri={draft?.uri ?? null}
+                draftDuration={draft?.durationSeconds ?? 0}
+                onTrash={cancelRecording}
+                onPauseResume={pauseResumeRecording}
+                onStop={stopRecordingToDraft}
+                onSend={recordingMode === 'draft' ? sendDraft : finishHeldRecording}
+              />
+            </View>
+          )}
           </InputBarWrapper>
         )}
 
@@ -2096,6 +2219,13 @@ const chatStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendCircle: { backgroundColor: Colors.terracotta },
+  recorderOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.white,
+  },
 
   readOnlyBar: {
     alignItems: 'center',
