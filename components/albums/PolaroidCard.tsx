@@ -23,6 +23,7 @@ export type PolaroidCardProps = {
   dateText: string;               // "Sat, May 3"
   attendeeSummary?: string;       // "with Haley, Ash +2"
   coverUri?: string | null;       // signed display URL, or null when the album has no uploads yet
+  cacheKey?: string;              // stable storage-path key so a rotated signed URL serves the cached image
   onPress: () => void;
   onLongPress?: () => void;       // e.g. archive an empty album
 };
@@ -32,7 +33,7 @@ function pickTilt(index: number): number {
 }
 
 export const PolaroidCard = React.memo<PolaroidCardProps>(({
-  index, cardWidth, title, dateText, attendeeSummary, coverUri, onPress, onLongPress,
+  index, cardWidth, title, dateText, attendeeSummary, coverUri, cacheKey, onPress, onLongPress,
 }) => {
   const rotateDeg = useMemo(() => `${pickTilt(index)}deg`, [index]);
 
@@ -51,7 +52,7 @@ export const PolaroidCard = React.memo<PolaroidCardProps>(({
         <View style={styles.frame}>
           <View style={styles.photo}>
             {coverUri ? (
-              <Image source={{ uri: coverUri }} style={styles.photoImage} contentFit="cover" />
+              <Image source={{ uri: coverUri, cacheKey }} style={styles.photoImage} contentFit="cover" />
             ) : (
               <View style={styles.placeholderOverlay}>
                 <Ionicons name="images-outline" size={ALBUM.placeholderIconSize} color={Colors.terracotta} />

@@ -71,6 +71,10 @@ type AlbumRow = {
   custom_name: string | null;   // caller's personal album name, if set
   event_start_time: string;
   cover_signed_url: string | null;
+  // Storage path of the cover (no signature query params) used as a stable
+  // expo-image cacheKey so a rotated signed URL serves the cached bitmap.
+  // null when the cover falls back to the plain (non-rotating) event image_url.
+  cover_cache_key: string | null;
 };
 
 const SIGNED_URL_TTL_SEC = 7200; // 2h, matches the album detail screen
@@ -168,6 +172,7 @@ async function fetchAlbumsForUser(userId: string): Promise<AlbumRow[]> {
       custom_name: customNameByAlbum.get(a.id) ?? null,
       event_start_time: ev?.start_time ?? a.created_at,
       cover_signed_url: signedByAlbum.get(a.id) ?? ev?.image_url ?? null,
+      cover_cache_key: coverByAlbumId.get(a.id) ?? null,
     };
   });
 }
@@ -309,6 +314,7 @@ export function AlbumsGrid({ userId }: Props) {
             title={item.custom_name ?? item.event_title}
             dateText={formatDate(item.event_start_time)}
             coverUri={item.cover_signed_url}
+            cacheKey={item.cover_cache_key ?? undefined}
             onPress={() => handleAlbumPress(item.event_id)}
             onLongPress={item.first_upload_at == null
               ? () => handleArchive(item.event_id, item.custom_name ?? item.event_title)
