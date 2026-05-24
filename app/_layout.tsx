@@ -39,6 +39,7 @@ import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
@@ -143,10 +144,12 @@ function RootLayout() {
       >
         <QueryClientProvider client={queryClient}>
           <SafeAreaProvider>
-            <RootLayoutNav onReady={() => setAuthReady(true)} />
-            {showVideoSplash && (
-              <VideoSplash onFinish={() => setShowVideoSplash(false)} />
-            )}
+            <BottomSheetModalProvider>
+              <RootLayoutNav onReady={() => setAuthReady(true)} />
+              {showVideoSplash && (
+                <VideoSplash onFinish={() => setShowVideoSplash(false)} />
+              )}
+            </BottomSheetModalProvider>
           </SafeAreaProvider>
         </QueryClientProvider>
       </PostHogProvider>

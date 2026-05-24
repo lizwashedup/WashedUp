@@ -31,7 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 let Clipboard: typeof import('expo-clipboard') | null = null;
 try { Clipboard = require('expo-clipboard'); } catch {}
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -45,6 +45,7 @@ import { openUrl } from '../../../lib/url';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
+import AttachmentSheet, { AttachmentSheetRef, AttachmentKey } from '../../../components/chat/AttachmentSheet';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
@@ -516,6 +517,14 @@ const SWIPE_REPLY_ICON_LEFT = 16;
 const SWIPE_REPLY_ICON_MIN_SCALE = 0.6;
 const SWIPE_REPLY_ICON_SCALE_RANGE = 0.4;
 const SWIPE_REPLY_SPRING = { damping: 18, stiffness: 220, mass: 0.5 };
+
+// Input-bar send button morph: crossfade between mic (empty input) and send
+// (text entered). 0 = mic, 1 = send.
+const SEND_MORPH_DURATION = 150;
+const SEND_MORPH_MIN_SCALE = 0.85;
+const SEND_MORPH_SCALE_RANGE = 0.15;
+const SEND_MIC_ICON_SIZE = 22;
+const SEND_ARROW_ICON_SIZE = 18;
 
 const SwipeableRow = memo(function SwipeableRow({
   enabled,
@@ -1021,6 +1030,31 @@ export default function ChatScreen() {
     }
   }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo, scrollToBottom]);
 
+  // Send button morph (mic when empty, send when typing). A single shared value
+  // drives the crossfade so the two stacked icon layers animate in opposition.
+  const hasText = inputText.trim().length > 0;
+  const sendMorph = useSharedValue(0);
+  useEffect(() => {
+    sendMorph.value = withTiming(hasText ? 1 : 0, { duration: SEND_MORPH_DURATION });
+  }, [hasText, sendMorph]);
+  const micLayerStyle = useAnimatedStyle(() => ({
+    opacity: 1 - sendMorph.value,
+    transform: [{ scale: SEND_MORPH_MIN_SCALE + SEND_MORPH_SCALE_RANGE * (1 - sendMorph.value) }],
+  }));
+  const sendLayerStyle = useAnimatedStyle(() => ({
+    opacity: sendMorph.value,
+    transform: [{ scale: SEND_MORPH_MIN_SCALE + SEND_MORPH_SCALE_RANGE * sendMorph.value }],
+  }));
+
+  // Mic press is a placeholder until voice recording lands in Component 5.
+  const handleMicPress = useCallback(() => {
+    hapticLight();
+    // wired in Component 5 (VoiceRecorder)
+  }, []);
+
+  // Emoji button is placement-only until the picker phase. No-op for now.
+  const handleEmojiPress = useCallback(() => {}, []);
+
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
 
@@ -1098,12 +1132,19 @@ export default function ChatScreen() {
     }
   }, [currentUserId, sendLocation, scrollToBottom]);
 
-  const handleAttachPress = useCallback(() => {
-    if (!currentUserId) return;
-    Keyboard.dismiss();
+  const attachmentSheetRef = useRef<AttachmentSheetRef>(null);
 
-    const doLocation = () => {
-      setAlertInfo(null);
+  // Route an attachment-sheet selection to the existing handlers. Photos,
+  // Camera, and Location keep their current behavior; Document, Contact, and
+  // Poll are placeholders for later phases and intentionally no-op for now.
+  const handleAttachSelect = useCallback((key: AttachmentKey) => {
+    if (key === 'camera') {
+      doPhotoAction('camera');
+    } else if (key === 'photos') {
+      doPhotoAction('library');
+    } else if (key === 'location') {
+      // Confirm before sharing location. Brief delay lets the sheet finish
+      // dismissing before the alert presents.
       setTimeout(() => {
         setAlertInfo({
           title: 'Share your location?',
@@ -1113,34 +1154,15 @@ export default function ChatScreen() {
             { text: 'Cancel', style: 'cancel' as const },
           ],
         });
-      }, 350);
-    };
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Take Photo', 'Choose from Library', 'Share Location', 'Cancel'],
-          cancelButtonIndex: 3,
-        },
-        (idx) => {
-          if (idx === 0) doPhotoAction('camera');
-          else if (idx === 1) doPhotoAction('library');
-          else if (idx === 2) doLocation();
-        },
-      );
-    } else {
-      setAlertInfo({
-        title: 'Add to chat',
-        message: '',
-        buttons: [
-          { text: 'Take Photo', onPress: () => doPhotoAction('camera') },
-          { text: 'Choose from Library', onPress: () => doPhotoAction('library') },
-          { text: 'Share Location', onPress: doLocation },
-          { text: 'Cancel', style: 'cancel' },
-        ],
-      });
+      }, 300);
     }
-  }, [currentUserId, doPhotoAction, handleLocationSend]);
+  }, [doPhotoAction, handleLocationSend]);
+
+  const handleAttachPress = useCallback(() => {
+    if (!currentUserId) return;
+    Keyboard.dismiss();
+    attachmentSheetRef.current?.present();
+  }, [currentUserId]);
 
   type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string } | { type: 'time'; label: string; id: string };
   const enrichedItems = useMemo<EnrichedItem[]>(() => {
@@ -1533,6 +1555,12 @@ export default function ChatScreen() {
               )}
             </TouchableOpacity>
 
+            {/* Emoji button: placement only for now. The full emoji picker is a
+                later phase, so this is a no-op until then. */}
+            <TouchableOpacity onPress={handleEmojiPress} style={chatStyles.emojiBtn} disabled={uploading}>
+              <Ionicons name="happy-outline" size={24} color={Colors.terracotta} />
+            </TouchableOpacity>
+
             <TextInput
               style={chatStyles.input}
               value={inputText}
@@ -1557,11 +1585,17 @@ export default function ChatScreen() {
             />
 
             <TouchableOpacity
-              onPress={handleSend}
-              disabled={!inputText.trim() || uploading}
-              style={[chatStyles.sendBtn, inputText.trim() ? chatStyles.sendBtnActive : chatStyles.sendBtnDisabled]}
+              onPress={hasText ? handleSend : handleMicPress}
+              disabled={hasText && uploading}
+              activeOpacity={0.7}
+              style={chatStyles.sendMorphWrap}
             >
-              <Ionicons name="arrow-up" size={18} color={Colors.white} />
+              <Animated.View style={[chatStyles.morphLayer, chatStyles.sendCircle, sendLayerStyle]}>
+                <Ionicons name="arrow-up" size={SEND_ARROW_ICON_SIZE} color={Colors.white} />
+              </Animated.View>
+              <Animated.View style={[chatStyles.morphLayer, micLayerStyle]}>
+                <Ionicons name="mic" size={SEND_MIC_ICON_SIZE} color={Colors.terracotta} />
+              </Animated.View>
             </TouchableOpacity>
           </View>
           </InputBarWrapper>
@@ -1612,6 +1646,8 @@ export default function ChatScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+
+      <AttachmentSheet ref={attachmentSheetRef} onSelect={handleAttachSelect} />
 
       {/* Message interaction overlay */}
       <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)} statusBarTranslucent>
@@ -1959,16 +1995,29 @@ const chatStyles = StyleSheet.create({
     maxHeight: 100,
     textAlign: 'left',
   },
-  sendBtn: {
+  emojiBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 2,
   },
-  sendBtnActive: { backgroundColor: Colors.terracotta },
-  sendBtnDisabled: { backgroundColor: Colors.iconMuted },
+  sendMorphWrap: {
+    width: 36,
+    height: 36,
+    marginBottom: 2,
+  },
+  morphLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendCircle: { backgroundColor: Colors.terracotta },
 
   readOnlyBar: {
     alignItems: 'center',
