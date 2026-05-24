@@ -69,7 +69,12 @@ export const authedUserIdRef: { current: string | null } = { current: null };
  * start (JS runtime reload). No AsyncStorage; the throttle is intentionally
  * session-scoped and would be wrong to persist past app kill.
  */
-const OTP_REUSE_WINDOW_MS = 60_000;
+// Must stay <= verify-code.tsx's RESEND_COOLDOWN_S (30s). If this window is
+// longer than the cooldown, the resend button becomes tappable (at 0:30) while
+// this guard still reports "recently sent", so handleResend silently no-ops the
+// SMS until the window expires — users tap "resend" and nothing is sent. Keeping
+// the two equal makes the first tappable resend always dispatch a real code.
+const OTP_REUSE_WINDOW_MS = 30_000;
 let lastOtpSent: { phone: string; at: number } | null = null;
 
 export function wasOtpRecentlySent(phone: string): boolean {
