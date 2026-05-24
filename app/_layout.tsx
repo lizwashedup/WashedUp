@@ -37,7 +37,8 @@ LogBox.ignoreLogs([
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
@@ -132,24 +133,30 @@ function RootLayout() {
   const posthogApiKey = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
 
   return (
-    <PostHogProvider
-      apiKey={posthogApiKey || 'placeholder'}
-      options={{
-        host: 'https://us.i.posthog.com',
-        disabled: !posthogApiKey,
-      }}
-    >
-      <QueryClientProvider client={queryClient}>
-        <SafeAreaProvider>
-          <RootLayoutNav onReady={() => setAuthReady(true)} />
-          {showVideoSplash && (
-            <VideoSplash onFinish={() => setShowVideoSplash(false)} />
-          )}
-        </SafeAreaProvider>
-      </QueryClientProvider>
-    </PostHogProvider>
+    <GestureHandlerRootView style={styles.root}>
+      <PostHogProvider
+        apiKey={posthogApiKey || 'placeholder'}
+        options={{
+          host: 'https://us.i.posthog.com',
+          disabled: !posthogApiKey,
+        }}
+      >
+        <QueryClientProvider client={queryClient}>
+          <SafeAreaProvider>
+            <RootLayoutNav onReady={() => setAuthReady(true)} />
+            {showVideoSplash && (
+              <VideoSplash onFinish={() => setShowVideoSplash(false)} />
+            )}
+          </SafeAreaProvider>
+        </QueryClientProvider>
+      </PostHogProvider>
+    </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+});
 
 export default Sentry.wrap(RootLayout);
 
