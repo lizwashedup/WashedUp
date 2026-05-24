@@ -46,6 +46,8 @@ import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import AttachmentSheet, { AttachmentSheetRef, AttachmentKey } from '../../../components/chat/AttachmentSheet';
+import TypingIndicator from '../../../components/chat/TypingIndicator';
+import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
@@ -894,6 +896,27 @@ export default function ChatScreen() {
     retry: 2,
   });
 
+  // Typing indicators broadcast over an ephemeral Realtime channel (separate
+  // from the chat data channel). Our own display name comes from the already
+  // loaded member list, so no extra query is needed.
+  const currentUserName = useMemo(
+    () => event?.members.find(m => m.id === currentUserId)?.first_name ?? null,
+    [event?.members, currentUserId],
+  );
+  const { typingUsers, broadcastTyping, stopTyping } = useTypingIndicator(id, currentUserId, currentUserName);
+
+  const typingLabel = useMemo(() => {
+    if (typingUsers.length === 0) return null;
+    if (typingUsers.length === 1) return `${typingUsers[0].name} is typing...`;
+    if (typingUsers.length === 2) return `${typingUsers[0].name} and ${typingUsers[1].name} are typing...`;
+    return 'Several people are typing...';
+  }, [typingUsers]);
+
+  const handleInputChange = useCallback((text: string) => {
+    setInputText(text);
+    broadcastTyping();
+  }, [broadcastTyping]);
+
   const prefetchedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     messages.forEach(m => {
@@ -1020,6 +1043,7 @@ export default function ChatScreen() {
     const text = inputText.trim();
     if (!text || uploading) return;
     setInputText('');
+    stopTyping();
     if (editingMessageId) {
       editMessage(editingMessageId, text);
       setEditingMessageId(null);
@@ -1028,7 +1052,7 @@ export default function ChatScreen() {
       setReplyingTo(null);
       scrollToBottom();
     }
-  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo, scrollToBottom]);
+  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo, scrollToBottom, stopTyping]);
 
   // Send button morph (mic when empty, send when typing). A single shared value
   // drives the crossfade so the two stacked icon layers animate in opposition.
@@ -1198,7 +1222,9 @@ export default function ChatScreen() {
           <View style={chatStyles.headerCenter}>
             <Text style={chatStyles.headerTitle} numberOfLines={1}>{event?.title ?? '...'}</Text>
             {event && (
-              <Text style={chatStyles.headerSub}>{formatEventDate(event.start_time)}</Text>
+              <Text style={chatStyles.headerSub} numberOfLines={1}>
+                {typingLabel ?? formatEventDate(event.start_time)}
+              </Text>
             )}
           </View>
 
@@ -1354,6 +1380,9 @@ export default function ChatScreen() {
             windowSize={10}
             maxToRenderPerBatch={15}
             maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            // Inverted list: the header renders at the visual bottom (newest
+            // side), so the typing dots sit just above the input bar.
+            ListHeaderComponent={typingUsers.length > 0 ? <TypingIndicator /> : null}
             onScrollToIndexFailed={(info) => {
               listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
               setTimeout(() => {
@@ -1564,7 +1593,7 @@ export default function ChatScreen() {
             <TextInput
               style={chatStyles.input}
               value={inputText}
-              onChangeText={setInputText}
+              onChangeText={handleInputChange}
               placeholder="Message..."
               placeholderTextColor={Colors.warmGray}
               multiline
