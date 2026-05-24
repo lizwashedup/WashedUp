@@ -17,6 +17,8 @@ import {
   ScrollView,
   AppState,
   LayoutChangeEvent,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import * as Notifications from 'expo-notifications'; // setBadgeCountAsync only — local-only API, no server call. OneSignal SDK doesn't expose direct badge clear; revisit during cleanup.
@@ -48,6 +50,7 @@ import MiniProfileCard from '../../../components/MiniProfileCard';
 import AttachmentSheet, { AttachmentSheetRef, AttachmentKey } from '../../../components/chat/AttachmentSheet';
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
+import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
@@ -527,6 +530,12 @@ const SEND_MORPH_MIN_SCALE = 0.85;
 const SEND_MORPH_SCALE_RANGE = 0.15;
 const SEND_MIC_ICON_SIZE = 22;
 const SEND_ARROW_ICON_SIZE = 18;
+
+// Scroll-to-bottom button thresholds (inverted list: contentOffset.y grows as
+// you scroll up toward older messages; 0 = pinned to newest).
+const SCROLL_SHOW_THRESHOLD = 300;
+const SCROLL_AT_BOTTOM_THRESHOLD = 24;
+const SCROLL_BTN_GAP = 12;
 
 const SwipeableRow = memo(function SwipeableRow({
   enabled,
@@ -1039,6 +1048,37 @@ export default function ChatScreen() {
     });
   }, []);
 
+  // Floating scroll-to-bottom button + "new messages below" counter.
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [unreadBelow, setUnreadBelow] = useState(0);
+  const atBottomRef = useRef(true);
+  const lastMsgCountRef = useRef(0);
+
+  const handleListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    atBottomRef.current = y <= SCROLL_AT_BOTTOM_THRESHOLD;
+    setShowScrollBtn(y > SCROLL_SHOW_THRESHOLD);
+    if (atBottomRef.current) setUnreadBelow(0);
+  }, []);
+
+  // Count messages that arrive while the user is scrolled up; clear when they
+  // return to the bottom (handled in handleListScroll) or tap the button.
+  useEffect(() => {
+    if (messages.length > lastMsgCountRef.current) {
+      const delta = messages.length - lastMsgCountRef.current;
+      if (!atBottomRef.current) setUnreadBelow(c => c + delta);
+    }
+    lastMsgCountRef.current = messages.length;
+  }, [messages.length]);
+
+  const handleScrollToBottomPress = useCallback(() => {
+    scrollToBottom();
+    setUnreadBelow(0);
+  }, [scrollToBottom]);
+
+  const scrollBtnBottom =
+    (Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight) + bottomDockHeight + SCROLL_BTN_GAP;
+
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
     if (!text || uploading) return;
@@ -1380,6 +1420,8 @@ export default function ChatScreen() {
             windowSize={10}
             maxToRenderPerBatch={15}
             maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            onScroll={handleListScroll}
+            scrollEventThrottle={16}
             // Inverted list: the header renders at the visual bottom (newest
             // side), so the typing dots sit just above the input bar.
             ListHeaderComponent={typingUsers.length > 0 ? <TypingIndicator /> : null}
@@ -1629,6 +1671,13 @@ export default function ChatScreen() {
           </View>
           </InputBarWrapper>
         )}
+
+        <ScrollToBottomButton
+          visible={showScrollBtn}
+          count={unreadBelow}
+          bottomOffset={scrollBtnBottom}
+          onPress={handleScrollToBottomPress}
+        />
       </View>
 
       {/* Report user modal */}
