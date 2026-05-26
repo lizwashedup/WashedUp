@@ -42,13 +42,26 @@ export function useVoiceRecorder() {
   }, []);
 
   const start = useCallback(async (): Promise<boolean> => {
+    // Hoisted so the catch can unload a partially-prepared instance. expo-av
+    // allows only ONE prepared Recording at the native layer, so a leaked one
+    // makes every subsequent prepareToRecordAsync throw "Only one Recording
+    // object can be prepared at a given time".
+    let recording: Audio.Recording | null = null;
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) return false;
 
+      // Tear down any survivor before preparing a new one (rapid re-tap, or a
+      // prior teardown still settling) so the native recorder slot is free.
+      if (recordingRef.current) {
+        const stale = recordingRef.current;
+        recordingRef.current = null;
+        try { await stale.stopAndUnloadAsync(); } catch { /* already gone */ }
+      }
+
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
 
-      const recording = new Audio.Recording();
+      recording = new Audio.Recording();
       await recording.prepareToRecordAsync({
         ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
         isMeteringEnabled: true,
@@ -76,6 +89,12 @@ export function useVoiceRecorder() {
       return true;
     } catch (e) {
       logError(e, 'useVoiceRecorder.start');
+      // Unload the instance we just created so it doesn't stay prepared at the
+      // native layer and block the next start(). This is the leak that turned a
+      // one-off failure into a permanent "Only one Recording object" error.
+      if (recording) {
+        try { await recording.stopAndUnloadAsync(); } catch { /* already gone */ }
+      }
       recordingRef.current = null;
       reset();
       return false;
