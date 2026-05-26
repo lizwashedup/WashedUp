@@ -74,7 +74,9 @@ export default function VoicePlayer({ uri, durationSeconds, isOwn }: VoicePlayer
       if (!soundRef.current) {
         const { sound } = await Audio.Sound.createAsync(
           { uri },
-          { shouldPlay: true, rate: SPEEDS[speedIndex], shouldCorrectPitch: true },
+          // progressUpdateIntervalMillis keeps the waveform fill + elapsed time
+          // updating fluidly; the expo-av default is too coarse for a short clip.
+          { shouldPlay: true, rate: SPEEDS[speedIndex], shouldCorrectPitch: true, progressUpdateIntervalMillis: 80 },
           onStatus,
         );
         soundRef.current = sound;

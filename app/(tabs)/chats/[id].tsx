@@ -301,11 +301,18 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
           delayLongPress={400}
         >
           {message.message_type === 'audio' && message.audio_url ? (
-            <VoicePlayer
-              uri={message.audio_url}
-              durationSeconds={message.duration_seconds ?? 0}
-              isOwn={isOwn}
-            />
+            <View style={[
+              bubbleStyles.bubble,
+              bubbleStyles.bubbleText,
+              isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
+              borderRadius,
+            ]}>
+              <VoicePlayer
+                uri={message.audio_url}
+                durationSeconds={message.duration_seconds ?? 0}
+                isOwn={isOwn}
+              />
+            </View>
           ) : !!message.image_url ? (
             <Pressable
               onPress={() => onPhotoPress?.(message.image_url!)}
