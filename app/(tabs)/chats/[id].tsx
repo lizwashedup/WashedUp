@@ -1775,7 +1775,7 @@ export default function ChatScreen() {
 
           {recordingMode !== 'idle' && (
             <View
-              style={chatStyles.recorderOverlay}
+              style={[chatStyles.recorderOverlay, { paddingBottom: inputBarBottomPadding }]}
               pointerEvents={recordingMode === 'holding' ? 'none' : 'auto'}
             >
               <VoiceRecorder
@@ -2225,6 +2225,8 @@ const chatStyles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: Colors.white,
+    borderTopWidth: 1,
+    borderTopColor: Colors.inputBg,
   },
 
   readOnlyBar: {
