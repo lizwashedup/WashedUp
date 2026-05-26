@@ -623,6 +623,13 @@ export default function AlbumDetailScreen() {
     return (
       <SafeAreaView style={styles.loadingWrap}>
         <Text style={styles.emptyText}>{COPY.albumOpenFailed}</Text>
+        {/* Retry only helps when there's an eventId to re-query; a missing
+            deep-link param can't be refetched, so it just offers Go back. */}
+        {!!eventId && (
+          <TouchableOpacity onPress={() => void refetch()} style={styles.retryBtn} activeOpacity={0.85}>
+            <Text style={styles.retryBtnText}>{COPY.albumRetry}</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity onPress={() => router.back()} style={styles.backTextBtn}>
           <Text style={styles.backText}>Go back</Text>
         </TouchableOpacity>
@@ -879,7 +886,6 @@ export default function AlbumDetailScreen() {
         ListHeaderComponent={albumHeader}
         ListEmptyComponent={albumEmpty}
         ListFooterComponent={albumFooter}
-        estimatedItemSize={TILE_SIZE + 30}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -980,6 +986,17 @@ const styles = StyleSheet.create({
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray },
   backTextBtn: { padding: 12 },
   backText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  retryBtn: {
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 999,
+    shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  retryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   scroll: { paddingBottom: 80 },
   hero: { width: '100%', height: 320, backgroundColor: Colors.inputBg },
   heroImage: { width: '100%', height: '100%' },

@@ -146,6 +146,7 @@ export const COPY = {
   surveySkip: 'Skip',
 
   albumOpenFailed: "This album didn't open. Try again in a moment.",
+  albumRetry: 'Try again',
   albumCollecting: 'Collecting photos',
   albumAddYours: 'Add yours',
   albumAddYoursBanner: 'Looking back on these will be fun. Add yours.',

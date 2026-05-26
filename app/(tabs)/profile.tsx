@@ -13,6 +13,7 @@ import {
   Keyboard,
   Modal,
   Pressable,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -189,6 +190,18 @@ export default function ProfileScreen() {
     setShowDeleteFlow(false);
     setDeleteStep(1);
     setDeleteConfirmText('');
+  };
+
+  // Opens the native share sheet for the user's @handle, which includes Copy
+  // alongside any share target, so a single affordance covers both.
+  const shareHandle = async () => {
+    if (!profile?.handle) return;
+    hapticSelection();
+    try {
+      await Share.share({ message: `@${profile.handle}` });
+    } catch (err) {
+      logError(err, 'profile.shareHandle');
+    }
   };
 
   const openEditFlow = () => {
@@ -879,7 +892,15 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.profileName}>{profile?.first_name ?? 'Your Profile'}</Text>
           {profile?.handle ? (
-            <Text style={styles.profileHandle}>@{profile.handle}</Text>
+            <TouchableOpacity
+              onPress={shareHandle}
+              style={styles.handleShareRow}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.profileHandle}>@{profile.handle}</Text>
+              <Ionicons name="share-outline" size={14} color={Colors.warmGray} />
+            </TouchableOpacity>
           ) : (
             <TouchableOpacity onPress={openEditFlow} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.profileHandleLink}>Set a handle</Text>
@@ -1031,10 +1052,15 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
     marginTop: 4,
   },
+  handleShareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
+  },
   profileHandle: {
     ...bodySmall,
     color: Colors.warmGray,
-    marginTop: 2,
   },
   profileHandleLink: {
     ...bodySmall,
