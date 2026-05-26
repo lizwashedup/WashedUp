@@ -1400,7 +1400,7 @@ export default function PlanDetailScreen() {
             )}
           </TouchableOpacity>
           <View style={styles.creatorDetails}>
-            <Text style={styles.postedBy}>POSTED BY</Text>
+            <Text style={styles.postedBy}>POSTED</Text>
             <Text style={styles.creatorNameLarge}>{plan.creator?.first_name_display ?? 'Someone'}</Text>
             <Text style={styles.creatorMeta} numberOfLines={1}>{creatorMeta}</Text>
           </View>

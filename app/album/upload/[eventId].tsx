@@ -354,7 +354,7 @@ export default function AlbumUploadScreen() {
         )}
         {rejection && (
           <View style={styles.rejectionRow}>
-            <Ionicons name="information-circle-outline" size={16} color={Colors.gold} />
+            <Ionicons name="information-circle-outline" size={16} color={Colors.errorBrand} />
             <Text style={styles.rejectionText}>{rejectionMessage(rejection)}</Text>
           </View>
         )}

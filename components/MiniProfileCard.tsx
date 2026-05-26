@@ -341,7 +341,7 @@ const styles = StyleSheet.create({
   milestonePillText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
-    color: '#D97746',
+    color: Colors.terracotta,
   },
   funFactWrap: {
     alignItems: 'center',
@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
   identityPillText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
-    color: '#D97746',
+    color: Colors.terracotta,
   },
   identityExpanded: {
     alignItems: 'center',

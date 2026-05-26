@@ -1,13 +1,14 @@
 /**
  * Mark Icons — Minimal SVG line drawings for the Marks system.
- * Terracotta (#D97746) and asphalt (#1E1E1E) strokes on parchment backgrounds.
+ * Terracotta (#B5522E) and asphalt (#1E1E1E) strokes on parchment backgrounds.
  * Milestone marks (anchor, mainstay): circular containers.
  * Identity marks (all others): rounded square containers (12px radius).
  */
 import React from 'react';
 import Svg, { Path, Circle, Line, Rect, Text as SvgText } from 'react-native-svg';
+import Colors from '../../constants/Colors';
 
-const TERRACOTTA = '#D97746';
+const TERRACOTTA = Colors.terracotta;
 const ASPHALT = '#1E1E1E';
 
 interface IconProps {
