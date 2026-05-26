@@ -16,6 +16,7 @@ import {
   Linking,
   ScrollView,
   AppState,
+  BackHandler,
   LayoutChangeEvent,
   NativeSyntheticEvent,
   NativeScrollEvent,
@@ -1175,6 +1176,18 @@ export default function ChatScreen() {
     await recorder.cancel();
     resetRecording();
   }, [recorder, resetRecording]);
+
+  // Android: while a recording is in progress (holding/locked/draft), the
+  // hardware back button should cancel the recording rather than navigate away
+  // and silently discard it. Consume the event so navigation doesn't fire.
+  useEffect(() => {
+    if (Platform.OS !== 'android' || recordingMode === 'idle') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      void cancelRecording();
+      return true;
+    });
+    return () => sub.remove();
+  }, [recordingMode, cancelRecording]);
 
   const lockRecording = useCallback(() => {
     hapticLight();

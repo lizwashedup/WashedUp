@@ -1,15 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, LayoutChangeEvent, GestureResponderEvent } from 'react-native';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { logError } from '../../lib/logger';
 
-// Playback bubble for a voice message. Waveform bars are a stylized, stable
-// pattern seeded from the audio URL (the recorded amplitude envelope is not
-// persisted in Phase 1; see the metering-fallback note in the audit). The
-// progress marker and elapsed time are real, driven by expo-av playback status.
+// Playback bubble for a voice message, on expo-audio. Position/duration/playing
+// come from useAudioPlayerStatus (reactive, so the progress + time update
+// fluidly), and seekTo gives tap-to-scrub on the waveform. Waveform bars are
+// still a stylized pattern seeded from the URL; persisting the real recorded
+// amplitude envelope is a follow-up (see useVoiceRecorder's StoppedRecording).
 
 const BAR_COUNT = 28;
 const BAR_WIDTH = 3;
@@ -19,6 +19,7 @@ const BAR_MIN_RATIO = 0.25;
 const BAR_RADIUS = 1.5;
 const INACTIVE_BAR_OPACITY = 0.35;
 const CONTROL_ICON_SIZE = 26;
+const PLAYER_UPDATE_MS = 80; // status cadence; keeps the fill + timer smooth
 const SPEEDS = [1, 1.5, 2] as const;
 
 interface VoicePlayerProps {
@@ -46,70 +47,54 @@ function formatTime(totalSeconds: number): string {
 }
 
 export default function VoicePlayer({ uri, durationSeconds, isOwn }: VoicePlayerProps) {
-  const soundRef = useRef<Audio.Sound | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [positionMillis, setPositionMillis] = useState(0);
+  const player = useAudioPlayer(uri, { updateInterval: PLAYER_UPDATE_MS });
+  const playerStatus = useAudioPlayerStatus(player);
   const [speedIndex, setSpeedIndex] = useState(0);
+  const [waveWidth, setWaveWidth] = useState(0);
 
-  const totalMillis = durationSeconds * 1000;
   const bars = useMemo(() => seededBars(uri, BAR_COUNT), [uri]);
   const tint = isOwn ? Colors.white : Colors.terracotta;
 
-  const progress = totalMillis > 0 ? Math.min(1, positionMillis / totalMillis) : 0;
-  const elapsedSeconds = isPlaying || positionMillis > 0 ? positionMillis / 1000 : durationSeconds;
+  const isPlaying = playerStatus.playing;
+  const positionSec = playerStatus.currentTime ?? 0;
+  // Fall back to the stored duration until the player reports its own (the
+  // status duration is 0 until the asset finishes loading).
+  const totalSec = playerStatus.duration && playerStatus.duration > 0 ? playerStatus.duration : durationSeconds;
 
-  const onStatus = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-    setPositionMillis(status.positionMillis ?? 0);
-    setIsPlaying(status.isPlaying);
-    if (status.didJustFinish) {
-      setIsPlaying(false);
-      setPositionMillis(0);
-      soundRef.current?.setPositionAsync(0).catch(() => {});
+  const progress = totalSec > 0 ? Math.min(1, positionSec / totalSec) : 0;
+  const filledBars = Math.round(progress * BAR_COUNT);
+  const atEnd = totalSec > 0 && positionSec >= totalSec - 0.05;
+  const elapsedSeconds = isPlaying || (positionSec > 0 && !atEnd) ? positionSec : durationSeconds;
+
+  const togglePlay = useCallback(() => {
+    if (isPlaying) {
+      player.pause();
+      return;
     }
-  }, []);
+    // Replay from the start once a clip has finished.
+    if (atEnd) player.seekTo(0);
+    player.play();
+  }, [isPlaying, atEnd, player]);
 
-  const togglePlay = useCallback(async () => {
-    try {
-      if (!soundRef.current) {
-        const { sound } = await Audio.Sound.createAsync(
-          { uri },
-          // progressUpdateIntervalMillis keeps the waveform fill + elapsed time
-          // updating fluidly; the expo-av default is too coarse for a short clip.
-          { shouldPlay: true, rate: SPEEDS[speedIndex], shouldCorrectPitch: true, progressUpdateIntervalMillis: 80 },
-          onStatus,
-        );
-        soundRef.current = sound;
-        return;
-      }
-      if (isPlaying) {
-        await soundRef.current.pauseAsync();
-      } else {
-        await soundRef.current.playAsync();
-      }
-    } catch (e) {
-      logError(e, 'VoicePlayer.togglePlay');
-    }
-  }, [uri, speedIndex, isPlaying, onStatus]);
-
-  const cycleSpeed = useCallback(async () => {
+  const cycleSpeed = useCallback(() => {
     const next = (speedIndex + 1) % SPEEDS.length;
     setSpeedIndex(next);
-    try {
-      await soundRef.current?.setRateAsync(SPEEDS[next], true);
-    } catch (e) {
-      logError(e, 'VoicePlayer.cycleSpeed');
-    }
-  }, [speedIndex]);
+    player.setPlaybackRate(SPEEDS[next]);
+  }, [speedIndex, player]);
 
-  useEffect(() => {
-    return () => {
-      soundRef.current?.unloadAsync().catch(() => {});
-      soundRef.current = null;
-    };
+  const onWaveLayout = useCallback((e: LayoutChangeEvent) => {
+    setWaveWidth(e.nativeEvent.layout.width);
   }, []);
 
-  const filledBars = Math.round(progress * BAR_COUNT);
+  // Tap anywhere on the waveform to scrub to that position.
+  const onWaveSeek = useCallback(
+    (e: GestureResponderEvent) => {
+      if (waveWidth <= 0 || totalSec <= 0) return;
+      const frac = Math.max(0, Math.min(1, e.nativeEvent.locationX / waveWidth));
+      player.seekTo(frac * totalSec);
+    },
+    [waveWidth, totalSec, player],
+  );
 
   return (
     <View style={styles.container}>
@@ -122,7 +107,7 @@ export default function VoicePlayer({ uri, durationSeconds, isOwn }: VoicePlayer
         <Ionicons name={isPlaying ? 'pause' : 'play'} size={CONTROL_ICON_SIZE} color={tint} />
       </Pressable>
 
-      <View style={styles.waveform}>
+      <Pressable style={styles.waveform} onLayout={onWaveLayout} onPress={onWaveSeek}>
         {bars.map((ratio, i) => (
           <View
             key={i}
@@ -136,7 +121,7 @@ export default function VoicePlayer({ uri, durationSeconds, isOwn }: VoicePlayer
             ]}
           />
         ))}
-      </View>
+      </Pressable>
 
       <View style={styles.meta}>
         <Text style={[styles.duration, { color: tint }]}>{formatTime(elapsedSeconds)}</Text>

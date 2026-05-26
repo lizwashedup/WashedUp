@@ -1,164 +1,165 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Audio } from 'expo-av';
+import {
+  useAudioRecorder,
+  useAudioRecorderState,
+  setAudioModeAsync,
+  requestRecordingPermissionsAsync,
+  RecordingPresets,
+} from 'expo-audio';
 import { logError } from '../lib/logger';
 
-// Voice recording engine built on expo-av (SDK 54 ships expo-av deprecated but
-// functional; expo-audio migration is tracked tech debt, out of Phase 1 scope).
-// Records m4a/AAC via the HIGH_QUALITY preset and samples metering so the UI can
-// draw a live amplitude waveform.
+// Voice recording engine on expo-audio (expo-av was deprecated and is removed in
+// SDK 55). Records m4a/AAC via the HIGH_QUALITY preset (same container as before,
+// so existing chat-audio clips stay playable) and samples metering so the UI can
+// draw a live amplitude waveform. The single hook-owned recorder instance makes
+// the old "Only one Recording object can be prepared" class of bug structurally
+// impossible — there is exactly one recorder for the component's lifetime.
 
 export type RecorderStatus = 'idle' | 'recording' | 'paused';
 
-const METERING_INTERVAL_MS = 100;
 const METERING_SAMPLE_CAP = 48; // most recent bars kept for the live waveform
 const METERING_MIN_DB = -60; // map [-60dB, 0dB] -> [0, 1]
 
 export interface StoppedRecording {
   uri: string;
   durationSeconds: number;
+  // Normalized amplitude envelope captured during recording. Persisting this is
+  // what lets the sent message render a real waveform instead of a seeded one.
+  meterings: number[];
+}
+
+function normalizeMetering(db: number): number {
+  return Math.max(0, Math.min(1, (db - METERING_MIN_DB) / (0 - METERING_MIN_DB)));
 }
 
 export function useVoiceRecorder() {
-  const [status, setStatus] = useState<RecorderStatus>('idle');
-  const [durationMillis, setDurationMillis] = useState(0);
-  const [meterings, setMeterings] = useState<number[]>([]);
+  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
+  const recState = useAudioRecorderState(recorder);
 
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const [status, setStatus] = useState<RecorderStatus>('idle');
+  const [meterings, setMeterings] = useState<number[]>([]);
+  const meteringsRef = useRef<number[]>([]);
   const durationRef = useRef(0);
+
+  // Accumulate metering into a rolling buffer while actively recording (paused
+  // state still reports isRecording=false, so this naturally stops sampling).
+  useEffect(() => {
+    if (!recState.isRecording || typeof recState.metering !== 'number') return;
+    const norm = normalizeMetering(recState.metering);
+    const next = [...meteringsRef.current.slice(-(METERING_SAMPLE_CAP - 1)), norm];
+    meteringsRef.current = next;
+    setMeterings(next);
+  }, [recState.metering, recState.isRecording]);
+
+  // Keep the latest duration in a ref so stop() reads a fresh value without
+  // depending on the reactive state (avoids a stale closure).
+  useEffect(() => {
+    durationRef.current = recState.durationMillis ?? 0;
+  }, [recState.durationMillis]);
 
   const reset = useCallback(() => {
     setStatus('idle');
-    setDurationMillis(0);
     setMeterings([]);
+    meteringsRef.current = [];
     durationRef.current = 0;
   }, []);
 
   const releaseAudioMode = useCallback(async () => {
     try {
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      await setAudioModeAsync({ allowsRecording: false });
     } catch {
       // best-effort; not fatal
     }
   }, []);
 
   const start = useCallback(async (): Promise<boolean> => {
-    // Hoisted so the catch can unload a partially-prepared instance. expo-av
-    // allows only ONE prepared Recording at the native layer, so a leaked one
-    // makes every subsequent prepareToRecordAsync throw "Only one Recording
-    // object can be prepared at a given time".
-    let recording: Audio.Recording | null = null;
     try {
-      const perm = await Audio.requestPermissionsAsync();
+      const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) return false;
 
-      // Tear down any survivor before preparing a new one (rapid re-tap, or a
-      // prior teardown still settling) so the native recorder slot is free.
-      if (recordingRef.current) {
-        const stale = recordingRef.current;
-        recordingRef.current = null;
-        try { await stale.stopAndUnloadAsync(); } catch { /* already gone */ }
-      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
 
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-
-      recording = new Audio.Recording();
-      await recording.prepareToRecordAsync({
-        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        isMeteringEnabled: true,
-      });
-      recording.setProgressUpdateInterval(METERING_INTERVAL_MS);
-      recording.setOnRecordingStatusUpdate((s) => {
-        if (typeof s.durationMillis === 'number') {
-          durationRef.current = s.durationMillis;
-          setDurationMillis(s.durationMillis);
-        }
-        if (s.isRecording && typeof s.metering === 'number') {
-          const norm = Math.max(0, Math.min(1, (s.metering - METERING_MIN_DB) / (0 - METERING_MIN_DB)));
-          setMeterings((prev) => {
-            const next = prev.length >= METERING_SAMPLE_CAP ? prev.slice(1) : prev.slice();
-            next.push(norm);
-            return next;
-          });
-        }
-      });
-
-      recordingRef.current = recording;
-      reset();
-      await recording.startAsync();
+      meteringsRef.current = [];
+      setMeterings([]);
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setStatus('recording');
       return true;
     } catch (e) {
       logError(e, 'useVoiceRecorder.start');
-      // Unload the instance we just created so it doesn't stay prepared at the
-      // native layer and block the next start(). This is the leak that turned a
-      // one-off failure into a permanent "Only one Recording object" error.
-      if (recording) {
-        try { await recording.stopAndUnloadAsync(); } catch { /* already gone */ }
-      }
-      recordingRef.current = null;
       reset();
+      await releaseAudioMode();
       return false;
     }
-  }, [reset]);
+  }, [recorder, reset, releaseAudioMode]);
 
-  const pause = useCallback(async () => {
+  const pause = useCallback(() => {
     try {
-      await recordingRef.current?.pauseAsync();
+      recorder.pause();
       setStatus('paused');
     } catch (e) {
       logError(e, 'useVoiceRecorder.pause');
     }
-  }, []);
+  }, [recorder]);
 
-  const resume = useCallback(async () => {
+  const resume = useCallback(() => {
     try {
-      await recordingRef.current?.startAsync();
+      recorder.record();
       setStatus('recording');
     } catch (e) {
       logError(e, 'useVoiceRecorder.resume');
     }
-  }, []);
+  }, [recorder]);
 
   const cancel = useCallback(async () => {
-    const recording = recordingRef.current;
-    recordingRef.current = null;
-    if (recording) {
-      try { await recording.stopAndUnloadAsync(); } catch { /* already stopped */ }
+    try {
+      await recorder.stop();
+    } catch {
+      /* already stopped */
     }
     reset();
     await releaseAudioMode();
-  }, [reset, releaseAudioMode]);
+  }, [recorder, reset, releaseAudioMode]);
 
   const stop = useCallback(async (): Promise<StoppedRecording | null> => {
-    const recording = recordingRef.current;
-    if (!recording) return null;
-    recordingRef.current = null;
+    const capturedMeterings = meteringsRef.current.slice();
+    const ms = durationRef.current;
     try {
-      const finalStatus = await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      const ms = finalStatus.durationMillis ?? durationRef.current;
+      await recorder.stop();
+      const uri = recorder.uri;
       reset();
       await releaseAudioMode();
       if (!uri) return null;
-      return { uri, durationSeconds: Math.max(1, Math.round(ms / 1000)) };
+      return {
+        uri,
+        durationSeconds: Math.max(1, Math.round(ms / 1000)),
+        meterings: capturedMeterings,
+      };
     } catch (e) {
       logError(e, 'useVoiceRecorder.stop');
       reset();
       await releaseAudioMode();
       return null;
     }
-  }, [reset, releaseAudioMode]);
+  }, [recorder, reset, releaseAudioMode]);
 
   // Safety net: if the screen unmounts mid-recording, tear the recorder down.
   useEffect(() => {
     return () => {
-      const recording = recordingRef.current;
-      recordingRef.current = null;
-      if (recording) {
-        recording.stopAndUnloadAsync().catch(() => {});
+      if (recorder.isRecording) {
+        recorder.stop().catch(() => {});
       }
     };
-  }, []);
+  }, [recorder]);
 
-  return { status, durationMillis, meterings, start, pause, resume, cancel, stop };
+  return {
+    status,
+    durationMillis: recState.durationMillis ?? 0,
+    meterings,
+    start,
+    pause,
+    resume,
+    cancel,
+    stop,
+  };
 }

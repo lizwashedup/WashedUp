@@ -105,6 +105,12 @@
       "expo-updates",
       "expo-video",
       [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow WashedUp to access your microphone to record voice messages."
+        }
+      ],
+      [
         "onesignal-expo-plugin",
         {
           "mode": "production",
