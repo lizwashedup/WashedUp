@@ -211,7 +211,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
             </View>
           )}
           <Text style={styles.creatorName} numberOfLines={1}>
-            {`Posted by ${plan.creator?.first_name_display ?? 'Creator'}`}
+            {`${plan.creator?.first_name_display ?? 'Creator'} posted`}
           </Text>
         </View>
       </View>

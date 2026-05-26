@@ -383,7 +383,7 @@ export default function EventDetailScreen() {
                           </Text>
                         </View>
                       )}
-                      <Text style={styles.planCreatorName}>Posted by {plan.creator_name ?? 'Someone'}</Text>
+                      <Text style={styles.planCreatorName}>{plan.creator_name ?? 'Someone'} posted</Text>
                       {plan.primary_vibe && (
                         <View style={styles.planVibePill}>
                           <Text style={styles.planVibeText}>{plan.primary_vibe}</Text>
