@@ -17,6 +17,8 @@ import {
   ScrollView,
   AppState,
   LayoutChangeEvent,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import * as Notifications from 'expo-notifications'; // setBadgeCountAsync only — local-only API, no server call. OneSignal SDK doesn't expose direct badge clear; revisit during cleanup.
@@ -31,7 +33,8 @@ import { Ionicons } from '@expo/vector-icons';
 let Clipboard: typeof import('expo-clipboard') | null = null;
 try { Clipboard = require('expo-clipboard'); } catch {}
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useQuery } from '@tanstack/react-query';
@@ -44,6 +47,15 @@ import { openUrl } from '../../../lib/url';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
+import AttachmentSheet, { AttachmentSheetRef, AttachmentKey } from '../../../components/chat/AttachmentSheet';
+import TypingIndicator from '../../../components/chat/TypingIndicator';
+import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
+import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
+import VoicePlayer from '../../../components/chat/VoicePlayer';
+import VoiceRecorder, { RecorderUiMode } from '../../../components/chat/VoiceRecorder';
+import { useVoiceRecorder } from '../../../hooks/useVoiceRecorder';
+import { uploadAudioToStorage } from '../../../lib/uploadAudio';
+import { logError } from '../../../lib/logger';
 import { ReportModal } from '../../../components/modals/ReportModal';
 import { useBlock } from '../../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
@@ -288,7 +300,13 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
           onLongPress={handleLongPress}
           delayLongPress={400}
         >
-          {!!message.image_url ? (
+          {message.message_type === 'audio' && message.audio_url ? (
+            <VoicePlayer
+              uri={message.audio_url}
+              durationSeconds={message.duration_seconds ?? 0}
+              isOwn={isOwn}
+            />
+          ) : !!message.image_url ? (
             <Pressable
               onPress={() => onPhotoPress?.(message.image_url!)}
             >
@@ -499,6 +517,131 @@ const bubbleStyles = StyleSheet.create({
   locationTapHintOwn: { color: 'rgba(255,255,255,0.7)' },
 });
 
+// ─── Swipe to reply ─────────────────────────────────────────────────────────
+// Drag a message row left-to-right (finger moves rightward on screen,
+// independent of the inverted list) to enter reply mode, mirroring WhatsApp.
+// activeOffsetX keeps it from stealing the FlatList's vertical scroll and from
+// firing on Android's left-edge back gesture; failOffsetY cancels the moment
+// the drag turns vertical. At the threshold we fire hapticMedium once and, on
+// release, the same reply activation the long-press menu uses.
+const SWIPE_REPLY_THRESHOLD = 80;
+const SWIPE_REPLY_MAX_TRANSLATE = 96;
+const SWIPE_REPLY_ACTIVE_OFFSET_X = 20;
+const SWIPE_REPLY_FAIL_OFFSET_Y = 12;
+const SWIPE_REPLY_ICON_SIZE = 20;
+const SWIPE_REPLY_ICON_LEFT = 16;
+const SWIPE_REPLY_ICON_MIN_SCALE = 0.6;
+const SWIPE_REPLY_ICON_SCALE_RANGE = 0.4;
+const SWIPE_REPLY_SPRING = { damping: 18, stiffness: 220, mass: 0.5 };
+
+// Input-bar send button morph: crossfade between mic (empty input) and send
+// (text entered). 0 = mic, 1 = send.
+const SEND_MORPH_DURATION = 150;
+const SEND_MORPH_MIN_SCALE = 0.85;
+const SEND_MORPH_SCALE_RANGE = 0.15;
+const SEND_MIC_ICON_SIZE = 22;
+const SEND_ARROW_ICON_SIZE = 18;
+
+// Scroll-to-bottom button thresholds (inverted list: contentOffset.y grows as
+// you scroll up toward older messages; 0 = pinned to newest).
+const SCROLL_SHOW_THRESHOLD = 300;
+const SCROLL_AT_BOTTOM_THRESHOLD = 24;
+const SCROLL_BTN_GAP = 12;
+
+// Voice recording hold gesture: activate after a short hold, then slide left to
+// cancel or up to lock (hands-free), mirroring WhatsApp.
+const VOICE_HOLD_MS = 200;
+const VOICE_CANCEL_THRESHOLD = 80;
+const VOICE_LOCK_THRESHOLD = 80;
+
+const SwipeableRow = memo(function SwipeableRow({
+  enabled,
+  onTriggerReply,
+  containerStyle,
+  children,
+}: {
+  enabled: boolean;
+  onTriggerReply: () => void;
+  containerStyle: any;
+  children: React.ReactNode;
+}) {
+  const translateX = useSharedValue(0);
+  const triggered = useSharedValue(false);
+
+  // Keep the latest callback in a ref so the memoized gesture never calls a
+  // stale closure when the row re-renders.
+  const onTriggerReplyRef = useRef(onTriggerReply);
+  onTriggerReplyRef.current = onTriggerReply;
+  const fireReply = useCallback(() => onTriggerReplyRef.current?.(), []);
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(enabled)
+        .activeOffsetX([SWIPE_REPLY_ACTIVE_OFFSET_X, Number.MAX_SAFE_INTEGER])
+        .failOffsetY([-SWIPE_REPLY_FAIL_OFFSET_Y, SWIPE_REPLY_FAIL_OFFSET_Y])
+        .onBegin(() => {
+          triggered.value = false;
+        })
+        .onUpdate((e) => {
+          const x = Math.max(0, Math.min(e.translationX, SWIPE_REPLY_MAX_TRANSLATE));
+          translateX.value = x;
+          if (!triggered.value && x >= SWIPE_REPLY_THRESHOLD) {
+            triggered.value = true;
+            runOnJS(hapticMedium)();
+          }
+        })
+        .onEnd(() => {
+          if (triggered.value) runOnJS(fireReply)();
+        })
+        .onFinalize(() => {
+          translateX.value = withSpring(0, SWIPE_REPLY_SPRING);
+          triggered.value = false;
+        }),
+    [enabled, fireReply],
+  );
+
+  const rowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  const iconStyle = useAnimatedStyle(() => {
+    const progress = Math.min(translateX.value / SWIPE_REPLY_THRESHOLD, 1);
+    return {
+      opacity: progress,
+      transform: [
+        { scale: SWIPE_REPLY_ICON_MIN_SCALE + SWIPE_REPLY_ICON_SCALE_RANGE * progress },
+      ],
+    };
+  });
+
+  if (!enabled) {
+    return <View style={containerStyle}>{children}</View>;
+  }
+
+  return (
+    <View style={containerStyle}>
+      <Animated.View style={[swipeStyles.replyIcon, iconStyle]} pointerEvents="none">
+        <Ionicons name="arrow-undo" size={SWIPE_REPLY_ICON_SIZE} color={Colors.terracotta} />
+      </Animated.View>
+      <GestureDetector gesture={pan}>
+        <Animated.View style={rowStyle}>{children}</Animated.View>
+      </GestureDetector>
+    </View>
+  );
+});
+
+const swipeStyles = StyleSheet.create({
+  replyIcon: {
+    position: 'absolute',
+    left: SWIPE_REPLY_ICON_LEFT,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
@@ -514,7 +657,7 @@ export default function ChatScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [overlayMessage, setOverlayMessage] = useState<{ message: ChatMessage; isOwn: boolean } | null>(null);
   const listRef = useRef<FlatList>(null);
-  const { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, editMessage, toggleReaction, refetch } = useChat(id);
+  const { messages, loading, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, refetch } = useChat(id);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
   const [membersExpanded, setMembersExpanded] = useState(false);
@@ -779,6 +922,27 @@ export default function ChatScreen() {
     retry: 2,
   });
 
+  // Typing indicators broadcast over an ephemeral Realtime channel (separate
+  // from the chat data channel). Our own display name comes from the already
+  // loaded member list, so no extra query is needed.
+  const currentUserName = useMemo(
+    () => event?.members.find(m => m.id === currentUserId)?.first_name ?? null,
+    [event?.members, currentUserId],
+  );
+  const { typingUsers, broadcastTyping, stopTyping } = useTypingIndicator(id, currentUserId, currentUserName);
+
+  const typingLabel = useMemo(() => {
+    if (typingUsers.length === 0) return null;
+    if (typingUsers.length === 1) return `${typingUsers[0].name} is typing...`;
+    if (typingUsers.length === 2) return `${typingUsers[0].name} and ${typingUsers[1].name} are typing...`;
+    return 'Several people are typing...';
+  }, [typingUsers]);
+
+  const handleInputChange = useCallback((text: string) => {
+    setInputText(text);
+    broadcastTyping();
+  }, [broadcastTyping]);
+
   const prefetchedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     messages.forEach(m => {
@@ -901,10 +1065,42 @@ export default function ChatScreen() {
     });
   }, []);
 
+  // Floating scroll-to-bottom button + "new messages below" counter.
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [unreadBelow, setUnreadBelow] = useState(0);
+  const atBottomRef = useRef(true);
+  const lastMsgCountRef = useRef(0);
+
+  const handleListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    atBottomRef.current = y <= SCROLL_AT_BOTTOM_THRESHOLD;
+    setShowScrollBtn(y > SCROLL_SHOW_THRESHOLD);
+    if (atBottomRef.current) setUnreadBelow(0);
+  }, []);
+
+  // Count messages that arrive while the user is scrolled up; clear when they
+  // return to the bottom (handled in handleListScroll) or tap the button.
+  useEffect(() => {
+    if (messages.length > lastMsgCountRef.current) {
+      const delta = messages.length - lastMsgCountRef.current;
+      if (!atBottomRef.current) setUnreadBelow(c => c + delta);
+    }
+    lastMsgCountRef.current = messages.length;
+  }, [messages.length]);
+
+  const handleScrollToBottomPress = useCallback(() => {
+    scrollToBottom();
+    setUnreadBelow(0);
+  }, [scrollToBottom]);
+
+  const scrollBtnBottom =
+    (Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight) + bottomDockHeight + SCROLL_BTN_GAP;
+
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
     if (!text || uploading) return;
     setInputText('');
+    stopTyping();
     if (editingMessageId) {
       editMessage(editingMessageId, text);
       setEditingMessageId(null);
@@ -913,7 +1109,121 @@ export default function ChatScreen() {
       setReplyingTo(null);
       scrollToBottom();
     }
-  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo, scrollToBottom]);
+  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo, scrollToBottom, stopTyping]);
+
+  // Send button morph (mic when empty, send when typing). A single shared value
+  // drives the crossfade so the two stacked icon layers animate in opposition.
+  const hasText = inputText.trim().length > 0;
+  const sendMorph = useSharedValue(0);
+  useEffect(() => {
+    sendMorph.value = withTiming(hasText ? 1 : 0, { duration: SEND_MORPH_DURATION });
+  }, [hasText, sendMorph]);
+  const micLayerStyle = useAnimatedStyle(() => ({
+    opacity: 1 - sendMorph.value,
+    transform: [{ scale: SEND_MORPH_MIN_SCALE + SEND_MORPH_SCALE_RANGE * (1 - sendMorph.value) }],
+  }));
+  const sendLayerStyle = useAnimatedStyle(() => ({
+    opacity: sendMorph.value,
+    transform: [{ scale: SEND_MORPH_MIN_SCALE + SEND_MORPH_SCALE_RANGE * sendMorph.value }],
+  }));
+
+  // Mic press is a placeholder until voice recording lands in Component 5.
+  // ── Voice recording ────────────────────────────────────────────────────
+  const recorder = useVoiceRecorder();
+  const [recordingMode, setRecordingMode] = useState<RecorderUiMode | 'idle'>('idle');
+  const [draft, setDraft] = useState<{ uri: string; durationSeconds: number } | null>(null);
+
+  const resetRecording = useCallback(() => {
+    setRecordingMode('idle');
+    setDraft(null);
+  }, []);
+
+  const uploadAndSendAudio = useCallback(async (uri: string, durationSeconds: number) => {
+    if (!currentUserId) { resetRecording(); return; }
+    resetRecording();
+    try {
+      const url = await uploadAudioToStorage(id, currentUserId, uri);
+      await sendAudio(url, durationSeconds);
+      scrollToBottom();
+    } catch (e) {
+      logError(e, 'chat.uploadAndSendAudio');
+      Alert.alert("Couldn't send voice message", 'Please try again.');
+    }
+  }, [currentUserId, id, sendAudio, scrollToBottom, resetRecording]);
+
+  const beginRecording = useCallback(async () => {
+    if (isPast) return;
+    Keyboard.dismiss();
+    hapticMedium();
+    setRecordingMode('holding');
+    const ok = await recorder.start();
+    if (!ok) {
+      setRecordingMode('idle');
+      Alert.alert('Microphone needed', 'Enable microphone access in Settings to send voice messages.');
+    }
+  }, [isPast, recorder]);
+
+  const cancelRecording = useCallback(async () => {
+    hapticLight();
+    await recorder.cancel();
+    resetRecording();
+  }, [recorder, resetRecording]);
+
+  const lockRecording = useCallback(() => {
+    hapticLight();
+    setRecordingMode('locked');
+  }, []);
+
+  const stopRecordingToDraft = useCallback(async () => {
+    const res = await recorder.stop();
+    if (res) { setDraft(res); setRecordingMode('draft'); }
+    else resetRecording();
+  }, [recorder, resetRecording]);
+
+  // Finger lifted mid-hold (not locked, not slid to cancel): stop and send.
+  const finishHeldRecording = useCallback(async () => {
+    const res = await recorder.stop();
+    if (res) await uploadAndSendAudio(res.uri, res.durationSeconds);
+    else resetRecording();
+  }, [recorder, uploadAndSendAudio, resetRecording]);
+
+  const sendDraft = useCallback(async () => {
+    if (draft) await uploadAndSendAudio(draft.uri, draft.durationSeconds);
+  }, [draft, uploadAndSendAudio]);
+
+  const pauseResumeRecording = useCallback(() => {
+    if (recorder.status === 'paused') recorder.resume();
+    else recorder.pause();
+  }, [recorder]);
+
+  // Resolve a released hold from the final finger translation.
+  const endHoldGesture = useCallback((translationX: number, translationY: number) => {
+    if (translationY < -VOICE_LOCK_THRESHOLD) lockRecording();
+    else if (translationX < -VOICE_CANCEL_THRESHOLD) cancelRecording();
+    else finishHeldRecording();
+  }, [lockRecording, cancelRecording, finishHeldRecording]);
+
+  // Quick tap on the morph button: send when there's text; otherwise it's a
+  // no-op hint (voice messages are hold-to-record).
+  const handleMorphTap = useCallback(() => {
+    if (hasText) { handleSend(); return; }
+    hapticLight();
+  }, [hasText, handleSend]);
+
+  const micGesture = useMemo(() => {
+    const tap = Gesture.Tap().onEnd((_e, success) => {
+      if (success) runOnJS(handleMorphTap)();
+    });
+    const pan = Gesture.Pan()
+      .enabled(!hasText)
+      .activateAfterLongPress(VOICE_HOLD_MS)
+      .onStart(() => { runOnJS(beginRecording)(); })
+      .onEnd((e) => { runOnJS(endHoldGesture)(e.translationX, e.translationY); });
+    return Gesture.Exclusive(pan, tap);
+  }, [hasText, handleMorphTap, beginRecording, endHoldGesture]);
+
+  // Emoji button is placement-only until the picker phase. No-op for now.
+  const handleEmojiPress = useCallback(() => {}, []);
 
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
@@ -992,12 +1302,19 @@ export default function ChatScreen() {
     }
   }, [currentUserId, sendLocation, scrollToBottom]);
 
-  const handleAttachPress = useCallback(() => {
-    if (!currentUserId) return;
-    Keyboard.dismiss();
+  const attachmentSheetRef = useRef<AttachmentSheetRef>(null);
 
-    const doLocation = () => {
-      setAlertInfo(null);
+  // Route an attachment-sheet selection to the existing handlers. Photos,
+  // Camera, and Location keep their current behavior; Document, Contact, and
+  // Poll are placeholders for later phases and intentionally no-op for now.
+  const handleAttachSelect = useCallback((key: AttachmentKey) => {
+    if (key === 'camera') {
+      doPhotoAction('camera');
+    } else if (key === 'photos') {
+      doPhotoAction('library');
+    } else if (key === 'location') {
+      // Confirm before sharing location. Brief delay lets the sheet finish
+      // dismissing before the alert presents.
       setTimeout(() => {
         setAlertInfo({
           title: 'Share your location?',
@@ -1007,34 +1324,15 @@ export default function ChatScreen() {
             { text: 'Cancel', style: 'cancel' as const },
           ],
         });
-      }, 350);
-    };
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Take Photo', 'Choose from Library', 'Share Location', 'Cancel'],
-          cancelButtonIndex: 3,
-        },
-        (idx) => {
-          if (idx === 0) doPhotoAction('camera');
-          else if (idx === 1) doPhotoAction('library');
-          else if (idx === 2) doLocation();
-        },
-      );
-    } else {
-      setAlertInfo({
-        title: 'Add to chat',
-        message: '',
-        buttons: [
-          { text: 'Take Photo', onPress: () => doPhotoAction('camera') },
-          { text: 'Choose from Library', onPress: () => doPhotoAction('library') },
-          { text: 'Share Location', onPress: doLocation },
-          { text: 'Cancel', style: 'cancel' },
-        ],
-      });
+      }, 300);
     }
-  }, [currentUserId, doPhotoAction, handleLocationSend]);
+  }, [doPhotoAction, handleLocationSend]);
+
+  const handleAttachPress = useCallback(() => {
+    if (!currentUserId) return;
+    Keyboard.dismiss();
+    attachmentSheetRef.current?.present();
+  }, [currentUserId]);
 
   type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string } | { type: 'time'; label: string; id: string };
   const enrichedItems = useMemo<EnrichedItem[]>(() => {
@@ -1070,7 +1368,9 @@ export default function ChatScreen() {
           <View style={chatStyles.headerCenter}>
             <Text style={chatStyles.headerTitle} numberOfLines={1}>{event?.title ?? '...'}</Text>
             {event && (
-              <Text style={chatStyles.headerSub}>{formatEventDate(event.start_time)}</Text>
+              <Text style={chatStyles.headerSub} numberOfLines={1}>
+                {typingLabel ?? formatEventDate(event.start_time)}
+              </Text>
             )}
           </View>
 
@@ -1226,6 +1526,11 @@ export default function ChatScreen() {
             windowSize={10}
             maxToRenderPerBatch={15}
             maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            onScroll={handleListScroll}
+            scrollEventThrottle={16}
+            // Inverted list: the header renders at the visual bottom (newest
+            // side), so the typing dots sit just above the input bar.
+            ListHeaderComponent={typingUsers.length > 0 ? <TypingIndicator /> : null}
             onScrollToIndexFailed={(info) => {
               listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
               setTimeout(() => {
@@ -1307,7 +1612,18 @@ export default function ChatScreen() {
                 : chatStyles.msgGap10;
 
               return (
-                <View style={gap}>
+                <SwipeableRow
+                  containerStyle={gap}
+                  enabled={!isPast && msg.message_type === 'user'}
+                  onTriggerReply={() => {
+                    setReplyingTo({
+                      id: msg.id,
+                      content: msg.content,
+                      senderName: msg.sender?.first_name ?? 'Someone',
+                    });
+                    setEditingMessageId(null);
+                  }}
+                >
                   <MessageBubble
                     message={msg}
                     isOwn={isOwn}
@@ -1327,7 +1643,7 @@ export default function ChatScreen() {
                     }}
                     onAvatarPress={(uid) => setMiniProfileUserId(uid)}
                   />
-                </View>
+                </SwipeableRow>
               );
             }}
           />
@@ -1416,10 +1732,16 @@ export default function ChatScreen() {
               )}
             </TouchableOpacity>
 
+            {/* Emoji button: placement only for now. The full emoji picker is a
+                later phase, so this is a no-op until then. */}
+            <TouchableOpacity onPress={handleEmojiPress} style={chatStyles.emojiBtn} disabled={uploading}>
+              <Ionicons name="happy-outline" size={24} color={Colors.terracotta} />
+            </TouchableOpacity>
+
             <TextInput
               style={chatStyles.input}
               value={inputText}
-              onChangeText={setInputText}
+              onChangeText={handleInputChange}
               placeholder="Message..."
               placeholderTextColor={Colors.warmGray}
               multiline
@@ -1439,16 +1761,46 @@ export default function ChatScreen() {
               textContentType="none"
             />
 
-            <TouchableOpacity
-              onPress={handleSend}
-              disabled={!inputText.trim() || uploading}
-              style={[chatStyles.sendBtn, inputText.trim() ? chatStyles.sendBtnActive : chatStyles.sendBtnDisabled]}
-            >
-              <Ionicons name="arrow-up" size={18} color={Colors.white} />
-            </TouchableOpacity>
+            <GestureDetector gesture={micGesture}>
+              <Animated.View style={chatStyles.sendMorphWrap}>
+                <Animated.View style={[chatStyles.morphLayer, chatStyles.sendCircle, sendLayerStyle]}>
+                  <Ionicons name="arrow-up" size={SEND_ARROW_ICON_SIZE} color={Colors.white} />
+                </Animated.View>
+                <Animated.View style={[chatStyles.morphLayer, micLayerStyle]}>
+                  <Ionicons name="mic" size={SEND_MIC_ICON_SIZE} color={Colors.terracotta} />
+                </Animated.View>
+              </Animated.View>
+            </GestureDetector>
           </View>
+
+          {recordingMode !== 'idle' && (
+            <View
+              style={chatStyles.recorderOverlay}
+              pointerEvents={recordingMode === 'holding' ? 'none' : 'auto'}
+            >
+              <VoiceRecorder
+                mode={recordingMode as RecorderUiMode}
+                durationMillis={recorder.durationMillis}
+                meterings={recorder.meterings}
+                isPaused={recorder.status === 'paused'}
+                draftUri={draft?.uri ?? null}
+                draftDuration={draft?.durationSeconds ?? 0}
+                onTrash={cancelRecording}
+                onPauseResume={pauseResumeRecording}
+                onStop={stopRecordingToDraft}
+                onSend={recordingMode === 'draft' ? sendDraft : finishHeldRecording}
+              />
+            </View>
+          )}
           </InputBarWrapper>
         )}
+
+        <ScrollToBottomButton
+          visible={showScrollBtn}
+          count={unreadBelow}
+          bottomOffset={scrollBtnBottom}
+          onPress={handleScrollToBottomPress}
+        />
       </View>
 
       {/* Report user modal */}
@@ -1495,6 +1847,8 @@ export default function ChatScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+
+      <AttachmentSheet ref={attachmentSheetRef} onSelect={handleAttachSelect} />
 
       {/* Message interaction overlay */}
       <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)} statusBarTranslucent>
@@ -1842,16 +2196,36 @@ const chatStyles = StyleSheet.create({
     maxHeight: 100,
     textAlign: 'left',
   },
-  sendBtn: {
+  emojiBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 2,
   },
-  sendBtnActive: { backgroundColor: Colors.terracotta },
-  sendBtnDisabled: { backgroundColor: Colors.iconMuted },
+  sendMorphWrap: {
+    width: 36,
+    height: 36,
+    marginBottom: 2,
+  },
+  morphLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendCircle: { backgroundColor: Colors.terracotta },
+  recorderOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.white,
+  },
 
   readOnlyBar: {
     alignItems: 'center',

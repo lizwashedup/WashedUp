@@ -60,7 +60,7 @@ export function useChatList() {
           .eq('status', 'joined'),
         supabase
           .from('messages')
-          .select('event_id, content, created_at, image_url, user_id')
+          .select('event_id, content, created_at, image_url, audio_url, message_type, user_id')
           .in('event_id', allEventIds)
           .order('created_at', { ascending: false })
           .limit(allEventIds.length * 3),
@@ -98,7 +98,7 @@ export function useChatList() {
         return;
       }
 
-      const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; user_id: string }> = {};
+      const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; audio_url: string | null; message_type: string | null; user_id: string }> = {};
       (allMessages ?? []).forEach((msg: any) => {
         if (!lastMsgMap[msg.event_id]) {
           lastMsgMap[msg.event_id] = msg;
@@ -151,7 +151,9 @@ export function useChatList() {
             ? (() => {
                 const isOwn = lastMsg.user_id === user.id;
                 const senderName = isOwn ? 'You' : (senderNameMap[lastMsg.user_id] ?? null);
-                const text = lastMsg.image_url ? 'sent a photo' : lastMsg.content;
+                const text = lastMsg.message_type === 'audio' || lastMsg.audio_url
+                  ? 'sent a voice message'
+                  : lastMsg.image_url ? 'sent a photo' : lastMsg.content;
                 return senderName ? `${senderName}: ${text}` : text;
               })()
             : null,
@@ -212,7 +214,9 @@ export function useChatList() {
                 .maybeSingle();
               senderName = profile?.first_name_display ?? null;
             }
-            const text = msg.image_url ? 'sent a photo' : msg.content;
+            const text = msg.message_type === 'audio' || msg.audio_url
+              ? 'sent a voice message'
+              : msg.image_url ? 'sent a photo' : msg.content;
             const preview = senderName ? `${senderName}: ${text}` : text;
 
             setChats(prev => {

@@ -22,8 +22,10 @@ export interface ChatMessage {
   event_id: string;
   user_id: string;
   content: string;
-  message_type: 'user' | 'system' | 'location';
+  message_type: 'user' | 'system' | 'location' | 'audio';
   image_url?: string | null;
+  audio_url?: string | null;
+  duration_seconds?: number | null;
   created_at: string;
   reply_to_message_id?: string | null;
   reply_to?: ReplyTo | null;
@@ -151,7 +153,7 @@ export function useChat(eventId: string) {
       const [{ data }, { data: { user } }] = await Promise.all([
         supabase
           .from('messages')
-          .select('id, event_id, user_id, content, message_type, image_url, created_at, reply_to_message_id')
+          .select('id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id')
           .eq('event_id', eventId)
           .order('created_at', { ascending: true }),
         supabase.auth.getUser(),
@@ -400,6 +402,48 @@ export function useChat(eventId: string) {
     }
   }, [eventId]);
 
+  const sendAudio = useCallback(async (audioUrl: string, durationSeconds: number) => {
+    const userId = currentUserIdRef.current;
+    if (!userId) return;
+
+    // Optimistic insert: the audio is already uploaded by the caller, so this
+    // mirrors sendMessage/sendLocation: show immediately, reconcile the real id.
+    const optimisticId = `optimistic-${Date.now()}`;
+    const optimisticMsg: ChatMessage = {
+      id: optimisticId,
+      event_id: eventId,
+      user_id: userId,
+      content: '',
+      message_type: 'audio',
+      image_url: null,
+      audio_url: audioUrl,
+      duration_seconds: durationSeconds,
+      created_at: new Date().toISOString(),
+      reactions: [],
+      sender: null,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    const { data: inserted, error } = await supabase.from('messages').insert({
+      event_id: eventId,
+      user_id: userId,
+      content: '',
+      message_type: 'audio',
+      audio_url: audioUrl,
+      duration_seconds: durationSeconds,
+    }).select('id, created_at').single();
+
+    if (error) {
+      logError(error, 'useChat.sendAudio');
+      setMessages(prev => prev.filter(m => m.id !== optimisticId));
+      Alert.alert("Couldn't send voice message", 'Your voice message failed to send. Please try again.');
+    } else if (inserted) {
+      setMessages(prev => prev.map(m =>
+        m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
+      ));
+    }
+  }, [eventId]);
+
   const editMessage = useCallback(async (messageId: string, newContent: string) => {
     const userId = currentUserIdRef.current;
     if (!userId) return;
@@ -422,5 +466,5 @@ export function useChat(eventId: string) {
     }
   }, [fetchMessages]);
 
-  return { messages, loading, currentUserId, sendMessage, sendLocation, deleteMessage, editMessage, toggleReaction, refetch: fetchMessages };
+  return { messages, loading, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, refetch: fetchMessages };
 }

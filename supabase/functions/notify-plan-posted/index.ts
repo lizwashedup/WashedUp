@@ -1,6 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { fetchWithTimeout } from '../_shared/fetchWithTimeout.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
+const EXTERNAL_FETCH_TIMEOUT_MS = 10_000;
 const PLAN_ALERT_EMAIL = 'liz@washedup.app';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -69,7 +71,7 @@ Deno.serve(async (req) => {
       </div>
     `.trim();
 
-    const emailRes = await fetch('https://api.resend.com/emails', {
+    const emailRes = await fetchWithTimeout('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${RESEND_API_KEY}`,
@@ -81,7 +83,11 @@ Deno.serve(async (req) => {
         subject: `[WashedUp] New plan: "${plan.title}" by ${creatorName}`,
         html,
       }),
+      timeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
     });
+    if (!emailRes) {
+      console.error('[notify-plan-posted] Resend timeout or network error');
+    }
 
     // ── 2. Push notification to admin devices (dual-send during cutover) ──────
     // Same routing rule as send-push-notifications: OneSignal if the admin has
@@ -119,8 +125,8 @@ Deno.serve(async (req) => {
           .filter((t): t is string => !!t);
       }
 
-      const sendOneSignal: Promise<unknown> = osAdminIds.length > 0
-        ? fetch('https://api.onesignal.com/notifications', {
+      const sendOneSignal: Promise<Response | null> = osAdminIds.length > 0
+        ? fetchWithTimeout('https://api.onesignal.com/notifications', {
             method: 'POST',
             headers: {
               Authorization: `Key ${Deno.env.get('ONESIGNAL_REST_API_KEY')!}`,
@@ -134,11 +140,12 @@ Deno.serve(async (req) => {
               contents: { en: `"${plan.title}" by ${creatorName}` },
               data: { planId: plan.id, type: 'admin_plan_alert' },
             }),
-          }).catch((err) => console.error('[notify-plan-posted] OneSignal error:', err))
-        : Promise.resolve();
+            timeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
+          })
+        : Promise.resolve(null);
 
-      const sendExpo: Promise<unknown> = expoTokens.length > 0
-        ? fetch(EXPO_PUSH_URL, {
+      const sendExpo: Promise<Response | null> = expoTokens.length > 0
+        ? fetchWithTimeout(EXPO_PUSH_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(
@@ -150,14 +157,25 @@ Deno.serve(async (req) => {
                 sound: 'default',
               })),
             ),
-          }).catch((err) => console.error('[notify-plan-posted] Expo error:', err))
-        : Promise.resolve();
+            timeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
+          })
+        : Promise.resolve(null);
 
-      await Promise.all([sendOneSignal, sendExpo]);
+      const [osRes, expoRes] = await Promise.all([sendOneSignal, sendExpo]);
+      if (osAdminIds.length > 0 && !osRes) {
+        console.error('[notify-plan-posted] OneSignal timeout or network error');
+      } else if (osRes && !osRes.ok) {
+        console.error('[notify-plan-posted] OneSignal non-2xx:', osRes.status);
+      }
+      if (expoTokens.length > 0 && !expoRes) {
+        console.error('[notify-plan-posted] Expo timeout or network error');
+      } else if (expoRes && !expoRes.ok) {
+        console.error('[notify-plan-posted] Expo non-2xx:', expoRes.status);
+      }
     }
 
-    const emailBody = await emailRes.json();
-    return new Response(JSON.stringify({ sent: emailRes.ok, resend: emailBody }), {
+    const emailBody = emailRes ? await emailRes.json() : null;
+    return new Response(JSON.stringify({ sent: !!emailRes?.ok, resend: emailBody }), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {

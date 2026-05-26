@@ -1,6 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { fetchWithTimeout } from '../_shared/fetchWithTimeout.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
+const EXTERNAL_FETCH_TIMEOUT_MS = 10_000;
 const ALERT_EMAIL = Deno.env.get('REPORT_ALERT_EMAIL') ?? 'hello@washedup.app';
 
 interface ReportPayload {
@@ -86,7 +88,7 @@ Deno.serve(async (req) => {
       </div>
     `.trim();
 
-    const res = await fetch('https://api.resend.com/emails', {
+    const res = await fetchWithTimeout('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${RESEND_API_KEY}`,
@@ -98,7 +100,16 @@ Deno.serve(async (req) => {
         subject,
         html,
       }),
+      timeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
     });
+
+    if (!res) {
+      console.error('[notify-report] Resend timeout or network error');
+      return new Response(
+        JSON.stringify({ sent: false, error: 'timeout' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
 
     const resBody = await res.json();
 

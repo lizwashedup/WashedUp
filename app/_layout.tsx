@@ -17,7 +17,7 @@ import {
   PlusJakartaSans_500Medium,
   PlusJakartaSans_700Bold,
 } from '@expo-google-fonts/plus-jakarta-sans';
-import { Stack, useRouter, usePathname } from 'expo-router';
+import { Stack, useRouter, usePathname, useRootNavigationState } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { OneSignal } from 'react-native-onesignal';
 import { useEffect, useRef, useState } from 'react';
@@ -37,7 +37,9 @@ LogBox.ignoreLogs([
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
@@ -134,24 +136,32 @@ function RootLayout() {
   const posthogApiKey = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
 
   return (
-    <PostHogProvider
-      apiKey={posthogApiKey || 'placeholder'}
-      options={{
-        host: 'https://us.i.posthog.com',
-        disabled: !posthogApiKey,
-      }}
-    >
-      <QueryClientProvider client={queryClient}>
-        <SafeAreaProvider>
-          <RootLayoutNav onReady={() => setAuthReady(true)} />
-          {showVideoSplash && (
-            <VideoSplash onFinish={() => setShowVideoSplash(false)} />
-          )}
-        </SafeAreaProvider>
-      </QueryClientProvider>
-    </PostHogProvider>
+    <GestureHandlerRootView style={styles.root}>
+      <PostHogProvider
+        apiKey={posthogApiKey || 'placeholder'}
+        options={{
+          host: 'https://us.i.posthog.com',
+          disabled: !posthogApiKey,
+        }}
+      >
+        <QueryClientProvider client={queryClient}>
+          <SafeAreaProvider>
+            <BottomSheetModalProvider>
+              <RootLayoutNav onReady={() => setAuthReady(true)} />
+              {showVideoSplash && (
+                <VideoSplash onFinish={() => setShowVideoSplash(false)} />
+              )}
+            </BottomSheetModalProvider>
+          </SafeAreaProvider>
+        </QueryClientProvider>
+      </PostHogProvider>
+    </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+});
 
 export default Sentry.wrap(RootLayout);
 
@@ -166,6 +176,30 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const pathname = usePathname();
   const pathnameRef = useRef(pathname);
   useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
+
+  // Cold-start push tap race guard. OneSignal buffers a cold-start click and
+  // replays it the instant our JS listener attaches, but Expo Router's root
+  // navigation state hydrates a beat later. router.push() called before
+  // hydration is silently dropped, so we hold the destination in a ref and
+  // flush it the moment nav becomes ready. Applies to every notification
+  // type, not just album_ready.
+  const rootNavState = useRootNavigationState();
+  const navReady = !!rootNavState?.key;
+  const navReadyRef = useRef(navReady);
+  useEffect(() => { navReadyRef.current = navReady; }, [navReady]);
+  const pendingDeepLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (navReady && pendingDeepLinkRef.current) {
+      const href = pendingDeepLinkRef.current;
+      pendingDeepLinkRef.current = null;
+      router.push(href as any);
+    }
+  }, [navReady, router]);
+  const safePush = (href: string) => {
+    if (navReadyRef.current) router.push(href as any);
+    else pendingDeepLinkRef.current = href;
+  };
+
   const [authResolved, setAuthResolved] = useState(false);
   const [authedUserId, setAuthedUserId] = useState<string | null>(null);
   const [layoutAlert, setLayoutAlert] = useState<{ title: string; message: string } | null>(null);
@@ -364,16 +398,16 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       // flow; ready/someone-uploaded/more-photos-added/hearts-batched open the
       // album detail view.
       if (type === 'album_upload_prompt' || type === 'album_upload_reminder' || type === 'album_creator_no_uploads_nudge') {
-        if (data?.eventId) router.push(`/album/upload/${data.eventId}` as any);
+        if (data?.eventId) safePush(`/album/upload/${data.eventId}`);
       } else if (type === 'album_ready' || type === 'album_someone_uploaded' || type === 'album_more_photos_added' || type === 'album_hearts_batched') {
-        if (data?.eventId) router.push(`/album/${data.eventId}` as any);
+        if (data?.eventId) safePush(`/album/${data.eventId}`);
       } else if (
         (type === 'waitlist_request' || type === 'exception_slot_refunded') &&
         data?.eventId
       ) {
         // Creator-side waitlist-exception pushes open the manager screen
         // (creator-only server-side; non-creators get the auth screen there).
-        router.push(`/waitlist/${data.eventId}` as any);
+        safePush(`/waitlist/${data.eventId}`);
       } else if (
         (type === 'plan_invite' ||
           type === 'waitlist_spot' ||
@@ -388,7 +422,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // "Would go next time" section explicitly. Receiver may currently
         // no-op on the param; it's a marker for future scroll/analytics.
         const focusParam = type === 'interest_signal' ? '?focus=interest' : '';
-        router.push(`/plan/${data.eventId}${focusParam}` as any);
+        safePush(`/plan/${data.eventId}${focusParam}`);
       } else if (
         type === 'people_request' ||
         type === 'people_request_accepted' ||
@@ -396,19 +430,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       ) {
         // Yours system: the request banner + swipe stack live on the
         // Yours page. Single inbox routes people notifications there.
-        router.push('/(tabs)/friends' as any);
+        safePush('/(tabs)/friends');
       } else if (type === 'people_ping' && data?.eventId) {
-        // A ping IS the plan — open the plan detail, not the chat.
-        router.push(`/plan/${data.eventId}` as any);
+        // A ping IS the plan, open the plan detail, not the chat.
+        safePush(`/plan/${data.eventId}`);
       } else if (data?.chatId) {
-        router.push(`/(tabs)/chats/${data.chatId}` as any);
+        safePush(`/(tabs)/chats/${data.chatId}`);
       } else if (data?.eventId) {
-        router.push(`/(tabs)/chats/${data.eventId}` as any);
+        safePush(`/(tabs)/chats/${data.eventId}`);
       } else {
         // Final fallback for notification types that carry neither eventId
         // nor chatId (e.g. broadcast, future admin pings). Drop the user on
         // the chats list rather than no-op'ing the tap.
-        router.push('/(tabs)/chats' as any);
+        safePush('/(tabs)/chats');
       }
     };
 

@@ -20,6 +20,7 @@ import { ALBUM } from '../../constants/YoursDesign';
 import { FlashList } from '@shopify/flash-list';
 import { supabase } from '../../lib/supabase';
 import { logError } from '../../lib/logger';
+import { withTimeout } from '../../lib/withTimeout';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const GRID_COLS = 2;
@@ -32,6 +33,20 @@ const SIGNED_URL_TTL = 7200; // 2h, so long viewing sessions don't hit expired U
 // thumbnail is roughly 30 KB, the core Phase 2 perf win. The full-screen
 // viewer keeps the untransformed signed_display_url.
 const THUMB_TRANSFORM = { width: 400, height: 400, resize: 'cover' as const, quality: 70 };
+// Per-upload timeout for storage signed-URL generation. supabase-js has no
+// default fetch timeout; on a slow request a single hung call would stall the
+// whole Promise.all and leave the screen in an infinite-spinner state. 8s is
+// well above the p99 for createSignedUrl on healthy storage and short enough
+// that a hung asset just renders as a placeholder instead of blocking the album.
+const SIGNED_URL_TIMEOUT_MS = 8000;
+// Supabase returns a discriminated union with a nominal StorageError class on
+// the error branch. A plain object literal cannot satisfy that nominal type,
+// so the fallback is cast at the withTimeout call site. The runtime contract
+// (data: null, error: { message }) is still honored by the catch path.
+const SIGNED_URL_TIMEOUT_FALLBACK = {
+  data: null,
+  error: { name: 'TimeoutError', message: 'createSignedUrl timed out' },
+};
 
 type AlbumUpload = {
   id: string;
@@ -129,9 +144,11 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
           let signedUrl: string | null = null;
           let thumbUrl: string | null = null;
           try {
-            const { data: signedData, error } = await supabase.storage
-              .from('album-media')
-              .createSignedUrl(path, SIGNED_URL_TTL);
+            const { data: signedData, error } = await withTimeout(
+              supabase.storage.from('album-media').createSignedUrl(path, SIGNED_URL_TTL),
+              SIGNED_URL_TIMEOUT_MS,
+              SIGNED_URL_TIMEOUT_FALLBACK as any,
+            );
             if (error) throw error;
             signedUrl = signedData?.signedUrl ?? null;
           } catch (err) {
@@ -144,9 +161,13 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
           // Phase 4 concern. Any failure falls back to the full URL.
           if (u.content_type === 'photo') {
             try {
-              const { data: thumbData, error: thumbErr } = await supabase.storage
-                .from('album-media')
-                .createSignedUrl(path, SIGNED_URL_TTL, { transform: THUMB_TRANSFORM });
+              const { data: thumbData, error: thumbErr } = await withTimeout(
+                supabase.storage
+                  .from('album-media')
+                  .createSignedUrl(path, SIGNED_URL_TTL, { transform: THUMB_TRANSFORM }),
+                SIGNED_URL_TIMEOUT_MS,
+                SIGNED_URL_TIMEOUT_FALLBACK as any,
+              );
               if (thumbErr) throw thumbErr;
               thumbUrl = thumbData?.signedUrl ?? null;
             } catch (err) {
