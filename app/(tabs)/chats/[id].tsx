@@ -49,6 +49,7 @@ import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import AttachmentPanel, { AttachmentKey } from '../../../components/chat/AttachmentSheet';
+import EmojiPanel from '../../../components/chat/EmojiPanel';
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
@@ -160,6 +161,19 @@ function isSameDay(a: string, b: string): boolean {
 // ─── Linked Text ─────────────────────────────────────────────────────────────
 
 const URL_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
+
+// A message that is only 1-3 emoji (no letters/numbers) renders large with no
+// bubble, like iMessage/WhatsApp. Hermes may lack Intl.Segmenter, so fall back
+// to a code-point count; over-counting a ZWJ sequence just renders it as a
+// normal bubble, which is a safe default.
+function isEmojiOnly(text: string): boolean {
+  const t = text.trim();
+  if (!t || /[\p{L}\p{N}]/u.test(t)) return false;
+  if (!/\p{Extended_Pictographic}/u.test(t)) return false;
+  const Seg = (Intl as any)?.Segmenter;
+  const count = Seg ? Array.from(new Seg().segment(t)).length : Array.from(t).length;
+  return count <= 3;
+}
 
 function LinkedText({ text, style, linkStyle }: { text: string; style: any; linkStyle?: any }) {
   const parts = text.split(/(https?:\/\/[^\s]+|www\.[^\s]+)/i);
@@ -354,7 +368,9 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
                 </Text>
               </Pressable>
             );
-          })() : (
+          })() : isEmojiOnly(message.content) && !message.reply_to ? (
+            <Text style={bubbleStyles.emojiOnly}>{message.content}</Text>
+          ) : (
             <View style={[
               bubbleStyles.bubble,
               bubbleStyles.bubbleText,
@@ -427,6 +443,7 @@ const bubbleStyles = StyleSheet.create({
     backgroundColor: Colors.dividerWarm,
   },
   messageText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 22 },
+  emojiOnly: { fontSize: 44, lineHeight: 54, paddingVertical: 2 },
   messageTextOwn: { color: Colors.white },
   inlineTime: { fontSize: 10, color: Colors.tertiary, textAlign: 'right', marginTop: 3 },
   inlineTimeOwn: { color: 'rgba(255,255,255,0.6)' },
@@ -702,11 +719,13 @@ export default function ChatScreen() {
   // it. The bottom inset fed to the input bar + list is
   // max(keyboardHeight, panelOpen ? panelHeight : 0) so the keyboard<->panel
   // handoff never collapses to 0 for a frame (prevents the input bar jumping).
-  const [attachPanelOpen, setAttachPanelOpen] = useState(false);
+  // Which keyboard-height panel is showing (both share the substrate + inset).
+  const [activePanel, setActivePanel] = useState<'attach' | 'emoji' | null>(null);
+  const panelOpen = activePanel !== null;
   // Match the panel to the keyboard it replaces: track the observed keyboard
   // height; fall back until one is seen this session.
   const [panelHeight, setPanelHeight] = useState(PANEL_FALLBACK_HEIGHT);
-  const panelInset = attachPanelOpen ? panelHeight : 0;
+  const panelInset = panelOpen ? panelHeight : 0;
 
   const animatedKeyboard = useAnimatedKeyboard();
   // Panel inset mirrored to the UI thread so the Android animated bottom can
@@ -743,7 +762,7 @@ export default function ChatScreen() {
     // (keeps the inset from collapsing to 0 during the panel->keyboard handoff).
     const onKeyboardShown = (height: number) => {
       if (height > 0) setPanelHeight(height);
-      setAttachPanelOpen(false);
+      setActivePanel(null);
     };
     if (Platform.OS === 'ios') {
       const showSub = Keyboard.addListener('keyboardWillShow', (e) => {
@@ -774,7 +793,7 @@ export default function ChatScreen() {
   }, []);
   // The keyboard AND the attachment panel both span the home-indicator area, so
   // when either is up the bar sits flush on it (8) rather than adding insets.bottom.
-  const inputBarBottomPadding = keyboardVisible || attachPanelOpen ? 8 : insets.bottom + 8;
+  const inputBarBottomPadding = keyboardVisible || panelOpen ? 8 : insets.bottom + 8;
   // Measure the bottom dock (input bar + any reply/edit banners) so the
   // inverted FlatList can reserve exactly that much space at its visual
   // bottom. Inverted lists flip the content container, so paddingTop in
@@ -1227,13 +1246,13 @@ export default function ChatScreen() {
 
   // Android: hardware back closes the attachment panel instead of navigating.
   useEffect(() => {
-    if (Platform.OS !== 'android' || !attachPanelOpen) return;
+    if (Platform.OS !== 'android' || !panelOpen) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setAttachPanelOpen(false);
+      setActivePanel(null);
       return true;
     });
     return () => sub.remove();
-  }, [attachPanelOpen]);
+  }, [panelOpen]);
 
   const lockRecording = useCallback(() => {
     hapticLight();
@@ -1288,8 +1307,44 @@ export default function ChatScreen() {
     return Gesture.Exclusive(pan, tap);
   }, [hasText, handleMorphTap, beginRecording, endHoldGesture]);
 
-  // Emoji button is placement-only until the picker phase. No-op for now.
-  const handleEmojiPress = useCallback(() => {}, []);
+  // Smile button toggles the inline emoji panel (same substrate as attachments).
+  const handleEmojiToggle = useCallback(() => {
+    if (activePanel === 'emoji') {
+      textInputRef.current?.focus();
+    } else {
+      setActivePanel('emoji');
+      Keyboard.dismiss();
+    }
+  }, [activePanel]);
+
+  // Cursor position in the message input, so emoji insert where the caret is.
+  const selectionRef = useRef({ start: 0, end: 0 });
+  const insertEmoji = useCallback((emoji: string) => {
+    setInputText((prev) => {
+      const s = Math.min(selectionRef.current.start, prev.length);
+      const e = Math.min(selectionRef.current.end, prev.length);
+      const caret = s + emoji.length;
+      selectionRef.current = { start: caret, end: caret };
+      return prev.slice(0, s) + emoji + prev.slice(e);
+    });
+  }, []);
+  const handleEmojiBackspace = useCallback(() => {
+    setInputText((prev) => {
+      const s = Math.min(selectionRef.current.start, prev.length);
+      const e = Math.min(selectionRef.current.end, prev.length);
+      if (s !== e) {
+        selectionRef.current = { start: s, end: s };
+        return prev.slice(0, s) + prev.slice(e);
+      }
+      if (s <= 0) return prev;
+      // Delete one whole code point so a surrogate-pair emoji clears in one tap.
+      const head = Array.from(prev.slice(0, s));
+      head.pop();
+      const newHead = head.join('');
+      selectionRef.current = { start: newHead.length, end: newHead.length };
+      return newHead + prev.slice(e);
+    });
+  }, []);
 
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
@@ -1374,7 +1429,7 @@ export default function ChatScreen() {
   // Camera, and Location keep their current behavior; Document, Contact, and
   // Poll are placeholders for later commits and intentionally no-op for now.
   const handleAttachSelect = useCallback((key: AttachmentKey) => {
-    setAttachPanelOpen(false);
+    setActivePanel(null);
     if (key === 'camera') {
       doPhotoAction('camera');
     } else if (key === 'photos') {
@@ -1403,13 +1458,14 @@ export default function ChatScreen() {
   //    panel once the keyboard has taken over (again, no inset collapse).
   const handleAttachToggle = useCallback(() => {
     if (!currentUserId) return;
-    if (attachPanelOpen) {
+    if (activePanel === 'attach') {
       textInputRef.current?.focus();
     } else {
-      setAttachPanelOpen(true);
+      // From the emoji panel this just swaps content (keyboard already down).
+      setActivePanel('attach');
       Keyboard.dismiss();
     }
-  }, [currentUserId, attachPanelOpen]);
+  }, [currentUserId, activePanel]);
 
   type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string } | { type: 'time'; label: string; id: string };
   const enrichedItems = useMemo<EnrichedItem[]>(() => {
@@ -1806,11 +1862,11 @@ export default function ChatScreen() {
               style={chatStyles.cameraBtn}
               disabled={uploading}
               accessibilityRole="button"
-              accessibilityLabel={attachPanelOpen ? 'Show keyboard' : 'Add attachment'}
+              accessibilityLabel={activePanel === 'attach' ? 'Show keyboard' : 'Add attachment'}
             >
               {uploading ? (
                 <ActivityIndicator size="small" color={Colors.warmGray} />
-              ) : attachPanelOpen ? (
+              ) : activePanel === 'attach' ? (
                 // Deliberate single-family exception: Ionicons has no keyboard
                 // glyph (only keypad/dialpad), so the keyboard toggle uses
                 // MaterialIcons. Every other input-bar icon stays Ionicons.
@@ -1820,10 +1876,20 @@ export default function ChatScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Emoji button: placement only for now. The full emoji picker is a
-                later phase, so this is a no-op until then. */}
-            <TouchableOpacity onPress={handleEmojiPress} style={chatStyles.emojiBtn} disabled={uploading}>
-              <Ionicons name="happy-outline" size={24} color={Colors.terracotta} />
+            {/* Smile button toggles the inline emoji panel; morphs to a keyboard
+                icon while that panel is open. */}
+            <TouchableOpacity
+              onPress={handleEmojiToggle}
+              style={chatStyles.emojiBtn}
+              disabled={uploading}
+              accessibilityRole="button"
+              accessibilityLabel={activePanel === 'emoji' ? 'Show keyboard' : 'Open emoji picker'}
+            >
+              {activePanel === 'emoji' ? (
+                <MaterialIcons name="keyboard" size={24} color={Colors.terracotta} />
+              ) : (
+                <Ionicons name="happy-outline" size={24} color={Colors.terracotta} />
+              )}
             </TouchableOpacity>
 
             <TextInput
@@ -1831,6 +1897,7 @@ export default function ChatScreen() {
               style={chatStyles.input}
               value={inputText}
               onChangeText={handleInputChange}
+              onSelectionChange={(e) => { selectionRef.current = e.nativeEvent.selection; }}
               placeholder="Message..."
               placeholderTextColor={Colors.warmGray}
               multiline
@@ -1891,11 +1958,21 @@ export default function ChatScreen() {
           onPress={handleScrollToBottomPress}
         />
 
-        {/* Inline attachment panel: sits in the keyboard's footprint at the
-            screen bottom; the input bar (offset by panelInset) floats above it. */}
-        {attachPanelOpen && (
+        {/* Inline panel: sits in the keyboard's footprint at the screen bottom;
+            the input bar (offset by panelInset) floats above it. Attachment or
+            emoji share the same slot. */}
+        {panelOpen && (
           <View style={chatStyles.attachPanelWrap}>
-            <AttachmentPanel onSelect={handleAttachSelect} height={panelHeight} bottomInset={insets.bottom} />
+            {activePanel === 'attach' ? (
+              <AttachmentPanel onSelect={handleAttachSelect} height={panelHeight} bottomInset={insets.bottom} />
+            ) : (
+              <EmojiPanel
+                onSelect={insertEmoji}
+                onBackspace={handleEmojiBackspace}
+                height={panelHeight}
+                bottomInset={insets.bottom}
+              />
+            )}
           </View>
         )}
       </View>
