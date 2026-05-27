@@ -50,6 +50,7 @@ import MiniProfileCard from '../../../components/MiniProfileCard';
 import AttachmentPanel, { AttachmentKey } from '../../../components/chat/AttachmentSheet';
 import MediaPanel from '../../../components/chat/MediaPanel';
 import LocationPickerModal from '../../../components/chat/LocationPickerModal';
+import PhotoPreviewModal from '../../../components/chat/PhotoPreviewModal';
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
@@ -329,18 +330,23 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               />
             </View>
           ) : !!message.image_url ? (
-            <Pressable
-              onPress={() => onPhotoPress?.(message.image_url!)}
-            >
-              <Image
-                source={{ uri: message.image_url }}
-                style={[bubbleStyles.messageImage, borderRadius]}
-                contentFit="cover"
-                transition={200}
-                placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-                cachePolicy="memory-disk"
-              />
-            </Pressable>
+            <View>
+              <Pressable onPress={() => onPhotoPress?.(message.image_url!)}>
+                <Image
+                  source={{ uri: message.image_url }}
+                  style={[bubbleStyles.messageImage, borderRadius]}
+                  contentFit="cover"
+                  transition={200}
+                  placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+                  cachePolicy="memory-disk"
+                />
+              </Pressable>
+              {!!message.content?.trim() && (
+                <Text style={[bubbleStyles.imageCaption, isOwn && bubbleStyles.imageCaptionOwn]}>
+                  {message.content}
+                </Text>
+              )}
+            </View>
           ) : message.message_type === 'location' ? (() => {
             let lat = 0, lng = 0, address = '';
             try { const p = JSON.parse(message.content); lat = p.lat; lng = p.lng; address = p.address; } catch {}
@@ -444,6 +450,8 @@ const bubbleStyles = StyleSheet.create({
   },
   messageText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 22 },
   emojiOnly: { fontSize: 44, lineHeight: 54, paddingVertical: 2 },
+  imageCaption: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 21, marginTop: 6, maxWidth: 260 },
+  imageCaptionOwn: { color: Colors.darkWarm },
   messageTextOwn: { color: Colors.white },
   inlineTime: { fontSize: 10, color: Colors.tertiary, textAlign: 'right', marginTop: 3 },
   inlineTimeOwn: { color: 'rgba(255,255,255,0.6)' },
@@ -577,6 +585,7 @@ const SCROLL_BTN_GAP = 12;
 // this session (the panel then matches the keyboard it replaces).
 const PANEL_FALLBACK_HEIGHT = 280;
 const PANEL_ANIM_MS = 180;
+const PHOTO_BATCH_LIMIT = 10;
 
 // Voice recording hold gesture: activate after a short hold, then slide left to
 // cancel or up to lock (hands-free), mirroring WhatsApp.
@@ -723,6 +732,8 @@ export default function ChatScreen() {
   const [activePanel, setActivePanel] = useState<'attach' | 'emoji' | null>(null);
   const panelOpen = activePanel !== null;
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [pendingPhotos, setPendingPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
   // Match the panel to the keyboard it replaces: track the observed keyboard
   // height; fall back until one is seen this session.
   const [panelHeight, setPanelHeight] = useState(PANEL_FALLBACK_HEIGHT);
@@ -1357,6 +1368,8 @@ export default function ChatScreen() {
     scrollToBottom();
   }, [sendMessage, scrollToBottom]);
 
+  // Pick photos (camera = one, library = up to PHOTO_BATCH_LIMIT), then open the
+  // preview where the user can add a caption before sending.
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
 
@@ -1372,34 +1385,44 @@ export default function ChatScreen() {
       ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
       : await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
-          allowsMultipleSelection: false,
+          allowsMultipleSelection: true,
+          selectionLimit: PHOTO_BATCH_LIMIT,
           quality: 0.8,
         });
 
-    if (result.canceled || !result.assets?.[0]) return;
+    if (result.canceled || !result.assets?.length) return;
+    setPendingPhotos(result.assets);
+    setPhotoPreviewOpen(true);
+  }, [currentUserId]);
+
+  // Upload + send the previewed photos. Each photo is its own message; the
+  // caption rides the first one (rendered beneath the image).
+  const sendPhotos = useCallback(async (caption: string) => {
+    const assets = pendingPhotos;
+    setPhotoPreviewOpen(false);
+    setPendingPhotos([]);
+    if (!currentUserId || assets.length === 0) return;
 
     setUploading(true);
     try {
-      const asset = result.assets[0];
-      const manipulated = await ImageManipulator.manipulateAsync(
-        asset.uri,
-        [{ resize: { width: 1200 } }],
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-      );
-
-      if (!manipulated.base64) throw new Error('No base64 data');
-
-      const fileName = `${currentUserId}/${Date.now()}.jpg`;
-      const publicUrl = await uploadBase64ToStorage('chat-images', fileName, manipulated.base64);
-
-      await sendMessage('', publicUrl);
+      for (let i = 0; i < assets.length; i++) {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          assets[i].uri,
+          [{ resize: { width: 1200 } }],
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+        );
+        if (!manipulated.base64) continue;
+        const fileName = `${currentUserId}/${Date.now()}-${i}.jpg`;
+        const publicUrl = await uploadBase64ToStorage('chat-images', fileName, manipulated.base64);
+        await sendMessage(i === 0 ? caption.trim() : '', publicUrl);
+      }
       scrollToBottom();
     } catch {
-      setAlertInfo({ title: 'Could not send photo', message: 'Something went wrong uploading the image. Please try again.' });
+      setAlertInfo({ title: 'Could not send photos', message: 'Something went wrong uploading. Please try again.' });
     } finally {
       setUploading(false);
     }
-  }, [currentUserId, sendMessage, scrollToBottom]);
+  }, [pendingPhotos, currentUserId, sendMessage, scrollToBottom]);
 
   // Send a location chosen in the LocationPickerModal (map preview + address).
   const handleLocationConfirm = useCallback((latitude: number, longitude: number, address: string) => {
@@ -1970,6 +1993,14 @@ export default function ChatScreen() {
         visible={locationPickerOpen}
         onClose={() => setLocationPickerOpen(false)}
         onConfirm={handleLocationConfirm}
+      />
+
+      <PhotoPreviewModal
+        visible={photoPreviewOpen}
+        assets={pendingPhotos}
+        sending={uploading}
+        onCancel={() => { setPhotoPreviewOpen(false); setPendingPhotos([]); }}
+        onSend={sendPhotos}
       />
 
       {/* Full-screen photo viewer */}
