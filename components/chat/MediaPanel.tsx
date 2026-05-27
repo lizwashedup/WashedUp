@@ -3,15 +3,17 @@ import { View, Text, Pressable, TextInput, StyleSheet, useWindowDimensions } fro
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GiphySDK, GiphyGridView, GiphyContent } from '@giphy/react-native-sdk';
 import emojiGroups from 'unicode-emoji-json/data-by-group.json';
 import emojiByChar from 'unicode-emoji-json/data-by-emoji.json';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
-// Inline emoji picker rendered INSIDE the keyboard-height panel substrate (not a
-// modal), so the input bar stays visible and GIF can become a sibling tab next.
-// Pure-JS data (unicode-emoji-json); no native dependency. Skin-tone variants are
-// deferred for v1 (base emoji only).
+// Combined media picker rendered INSIDE the keyboard-height panel substrate
+// (not a modal), so the input bar stays visible. One smile-button entry point,
+// two tabs (Emoji | GIFs), one shared search field — the WhatsApp/Telegram/Signal
+// pattern. Emoji data is pure-JS (unicode-emoji-json); GIFs use the embeddable
+// GiphyGridView (native dep). Skin tones deferred for v1.
 
 const RECENTS_KEY = 'chat_emoji_recents';
 const RECENTS_MAX = 24;
@@ -19,12 +21,14 @@ const EMOJI_FONT_SIZE = 30;
 const COLUMN_TARGET_WIDTH = 44;
 const SEARCH_RESULT_CAP = 200;
 const TAB_ICON_FONT_SIZE = 22;
+const GIF_SPAN_COUNT = 3;
+const GIF_CELL_PADDING = 4;
+const GIPHY_API_KEY = process.env.EXPO_PUBLIC_GIPHY_SDK_KEY;
 
 type Group = { name: string; slug: string; emojis: { emoji: string; name: string; slug: string }[] };
 const GROUPS = emojiGroups as Group[];
 const EMOJI_NAMES = emojiByChar as Record<string, { name: string }>;
 
-// Recents tab uses a clock; each category uses a representative emoji as its tab.
 const CATEGORY_TABS: { slug: string; icon: string }[] = [
   { slug: 'recent', icon: '🕘' },
   { slug: 'smileys_emotion', icon: '😀' },
@@ -38,23 +42,35 @@ const CATEGORY_TABS: { slug: string; icon: string }[] = [
   { slug: 'flags', icon: '🏳️' },
 ];
 
-interface EmojiPanelProps {
+type MediaTab = 'emoji' | 'gif';
+
+interface MediaPanelProps {
   onSelect: (emoji: string) => void;
   onBackspace: () => void;
+  onGifSelect: (url: string) => void;
   height: number;
   bottomInset: number;
 }
 
-export default function EmojiPanel({ onSelect, onBackspace, height, bottomInset }: EmojiPanelProps) {
+export default function MediaPanel({ onSelect, onBackspace, onGifSelect, height, bottomInset }: MediaPanelProps) {
   const { width } = useWindowDimensions();
+  const [tab, setTab] = useState<MediaTab>('emoji');
   const [activeSlug, setActiveSlug] = useState('smileys_emotion');
   const [query, setQuery] = useState('');
   const [recents, setRecents] = useState<string[]>([]);
+  const [gifReady, setGifReady] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem(RECENTS_KEY)
       .then((v) => { if (v) { try { setRecents(JSON.parse(v)); } catch { /* ignore */ } } })
       .catch(() => {});
+  }, []);
+
+  // Configure the Giphy SDK once (idempotent). Without a key the GIF tab shows a
+  // friendly message instead of crashing.
+  useEffect(() => {
+    if (!GIPHY_API_KEY) return;
+    try { GiphySDK.configure({ apiKey: GIPHY_API_KEY }); setGifReady(true); } catch { /* leave gifReady false */ }
   }, []);
 
   const numColumns = Math.max(6, Math.floor(width / COLUMN_TARGET_WIDTH));
@@ -65,7 +81,7 @@ export default function EmojiPanel({ onSelect, onBackspace, height, bottomInset 
     return m;
   }, []);
 
-  const data: string[] = useMemo(() => {
+  const emojiData: string[] = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (q) {
       const out: string[] = [];
@@ -81,6 +97,11 @@ export default function EmojiPanel({ onSelect, onBackspace, height, bottomInset 
     return (groupBySlug.get(activeSlug)?.emojis ?? []).map((e) => e.emoji);
   }, [query, activeSlug, recents, groupBySlug]);
 
+  const gifContent = useMemo(
+    () => (query.trim() ? GiphyContent.search({ searchQuery: query.trim() }) : GiphyContent.trending({})),
+    [query],
+  );
+
   const handlePick = useCallback(
     (emoji: string) => {
       onSelect(emoji);
@@ -93,7 +114,16 @@ export default function EmojiPanel({ onSelect, onBackspace, height, bottomInset 
     [onSelect],
   );
 
-  const renderItem = useCallback(
+  const handleGifMedia = useCallback(
+    (e: { nativeEvent: { media?: any } }) => {
+      const media = e.nativeEvent?.media;
+      const url = media?.data?.images?.original?.url ?? media?.url;
+      if (url) onGifSelect(url);
+    },
+    [onGifSelect],
+  );
+
+  const renderEmoji = useCallback(
     ({ item }: { item: string }) => (
       <Pressable style={styles.cell} onPress={() => handlePick(item)} accessibilityRole="button" accessibilityLabel={item}>
         <Text style={styles.emoji}>{item}</Text>
@@ -110,39 +140,67 @@ export default function EmojiPanel({ onSelect, onBackspace, height, bottomInset 
           style={styles.search}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search emoji"
+          placeholder={tab === 'gif' ? 'Search GIFs' : 'Search emoji'}
           placeholderTextColor={Colors.warmGray}
           autoCorrect={false}
           autoCapitalize="none"
         />
-        <Pressable onPress={onBackspace} hitSlop={8} accessibilityRole="button" accessibilityLabel="Delete">
-          <Ionicons name="backspace-outline" size={22} color={Colors.warmGray} />
-        </Pressable>
+        {tab === 'emoji' && (
+          <Pressable onPress={onBackspace} hitSlop={8} accessibilityRole="button" accessibilityLabel="Delete">
+            <Ionicons name="backspace-outline" size={22} color={Colors.warmGray} />
+          </Pressable>
+        )}
       </View>
 
-      <FlashList
-        key={`${activeSlug}:${query ? 'q' : 'cat'}`}
-        data={data}
-        numColumns={numColumns}
-        keyExtractor={(item, i) => `${item}:${i}`}
-        renderItem={renderItem}
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <Text style={styles.empty}>{activeSlug === 'recent' && !query ? 'No recents yet' : 'No emoji found'}</Text>
-        }
-      />
+      <View style={styles.tabSwitch}>
+        {(['emoji', 'gif'] as MediaTab[]).map((t) => (
+          <Pressable
+            key={t}
+            style={[styles.switchBtn, tab === t && styles.switchBtnActive]}
+            onPress={() => setTab(t)}
+            accessibilityRole="button"
+            accessibilityLabel={t === 'emoji' ? 'Emoji' : 'GIFs'}
+          >
+            <Text style={[styles.switchText, tab === t && styles.switchTextActive]}>{t === 'emoji' ? 'Emoji' : 'GIFs'}</Text>
+          </Pressable>
+        ))}
+      </View>
 
-      {!query && (
-        <View style={styles.tabBar}>
+      {tab === 'emoji' ? (
+        <FlashList
+          key={`${activeSlug}:${query ? 'q' : 'cat'}`}
+          data={emojiData}
+          numColumns={numColumns}
+          keyExtractor={(item, i) => `${item}:${i}`}
+          renderItem={renderEmoji}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            <Text style={styles.empty}>{activeSlug === 'recent' && !query ? 'No recents yet' : 'No emoji found'}</Text>
+          }
+        />
+      ) : gifReady ? (
+        <GiphyGridView
+          content={gifContent}
+          cellPadding={GIF_CELL_PADDING}
+          spanCount={GIF_SPAN_COUNT}
+          style={styles.gifGrid}
+          onMediaSelect={handleGifMedia}
+        />
+      ) : (
+        <Text style={styles.empty}>GIFs are unavailable right now.</Text>
+      )}
+
+      {tab === 'emoji' && !query && (
+        <View style={styles.catBar}>
           {CATEGORY_TABS.map((t) => (
             <Pressable
               key={t.slug}
-              style={styles.tab}
+              style={styles.cat}
               onPress={() => setActiveSlug(t.slug)}
               accessibilityRole="button"
               accessibilityLabel={`${t.slug.replace(/_/g, ' ')} emoji`}
             >
-              <Text style={[styles.tabIcon, activeSlug === t.slug && styles.tabIconActive]}>{t.icon}</Text>
+              <Text style={[styles.catIcon, activeSlug === t.slug && styles.catIconActive]}>{t.icon}</Text>
             </Pressable>
           ))}
         </View>
@@ -175,6 +233,32 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
     padding: 0,
   },
+  tabSwitch: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  switchBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  switchBtnActive: {
+    backgroundColor: Colors.brandSoft,
+  },
+  switchText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
+  },
+  switchTextActive: {
+    color: Colors.terracotta,
+  },
+  gifGrid: {
+    flex: 1,
+    marginHorizontal: 8,
+  },
   cell: {
     flex: 1,
     aspectRatio: 1,
@@ -191,21 +275,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 24,
   },
-  tabBar: {
+  catBar: {
     flexDirection: 'row',
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
   },
-  tab: {
+  cat: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: 8,
   },
-  tabIcon: {
+  catIcon: {
     fontSize: TAB_ICON_FONT_SIZE,
     opacity: 0.45,
   },
-  tabIconActive: {
+  catIconActive: {
     opacity: 1,
   },
 });

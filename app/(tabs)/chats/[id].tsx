@@ -49,7 +49,7 @@ import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import AttachmentPanel, { AttachmentKey } from '../../../components/chat/AttachmentSheet';
-import EmojiPanel from '../../../components/chat/EmojiPanel';
+import MediaPanel from '../../../components/chat/MediaPanel';
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
@@ -1346,6 +1346,16 @@ export default function ChatScreen() {
     });
   }, []);
 
+  // Send a GIF: the Giphy URL goes straight in as the image_url (no upload), and
+  // the existing image bubble renders + autoplays it via expo-image. A dedicated
+  // 'gif' message_type (for chat-list preview text) is deferred to the pre-flip
+  // migration batch.
+  const sendGif = useCallback((url: string) => {
+    setActivePanel(null);
+    void sendMessage('', url);
+    scrollToBottom();
+  }, [sendMessage, scrollToBottom]);
+
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
     if (!currentUserId) return;
 
@@ -1966,9 +1976,10 @@ export default function ChatScreen() {
             {activePanel === 'attach' ? (
               <AttachmentPanel onSelect={handleAttachSelect} height={panelHeight} bottomInset={insets.bottom} />
             ) : (
-              <EmojiPanel
+              <MediaPanel
                 onSelect={insertEmoji}
                 onBackspace={handleEmojiBackspace}
+                onGifSelect={sendGif}
                 height={panelHeight}
                 bottomInset={insets.bottom}
               />
