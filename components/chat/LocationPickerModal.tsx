@@ -168,6 +168,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+    elevation: 3,
   },
   sendBtnDisabled: { opacity: 0.5 },
   sendText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
