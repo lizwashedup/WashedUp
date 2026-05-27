@@ -610,29 +610,16 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // guard, and keeps the common already-has-phone path RTT-free.
         let authPhone: string | null = session.user.phone ?? null;
         if (!authPhone) {
-          // The persisted JWT can lag a phone confirmed on another session, which
-          // would false-gate a user who actually has a phone. First trust a
-          // locally-remembered confirmation; otherwise read the authoritative
-          // server value with a generous timeout so a slow cold-start network
-          // can't collapse to "no phone". On total failure keep null — the gate
-          // is completable, never a frozen overlay.
-          const remembered = await AsyncStorage.getItem(`phone_verified:${session.user.id}`).catch(() => null);
-          if (remembered === 'true') {
-            authPhone = 'remembered';
-          } else {
-            const { data: { user: fresh } } = await withTimeout(
-              supabase.auth.getUser(),
-              8000,
-              { data: { user: null } } as any,
-            );
-            if (cancelled || isRecoveryRef.current) return;
-            authPhone = fresh?.phone ?? null;
-          }
-        }
-        // Remember a confirmed phone so future cold starts never false-gate, even
-        // when getUser() is slow.
-        if (authPhone && session.user.id) {
-          AsyncStorage.setItem(`phone_verified:${session.user.id}`, 'true').catch(() => {});
+          // On timeout, keep the JWT's phone (null) and proceed — worst
+          // case the user hits the phone gate they can complete, never a
+          // frozen overlay.
+          const { data: { user: fresh } } = await withTimeout(
+            supabase.auth.getUser(),
+            3000,
+            { data: { user: null } } as any,
+          );
+          if (cancelled || isRecoveryRef.current) return;
+          authPhone = fresh?.phone ?? null;
         }
         const dest = authedDest({
           onboarding_status: profileData.onboarding_status,
@@ -732,18 +719,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // so SIGNED_IN doesn't fire a duplicate select within the 60s stale
         // window. Falls back to a network fetch if the cache is empty/stale.
         const data = await withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null);
-        let signedInPhone: string | null = session.user.phone ?? null;
-        if (!signedInPhone) {
-          const remembered = await AsyncStorage.getItem(`phone_verified:${session.user.id}`).catch(() => null);
-          if (remembered === 'true') signedInPhone = 'remembered';
-        }
-        if (signedInPhone && session.user.id) {
-          AsyncStorage.setItem(`phone_verified:${session.user.id}`, 'true').catch(() => {});
-        }
         const dest = authedDest({
           onboarding_status: data?.onboarding_status,
           referral_source: data?.referral_source,
-          auth_phone: signedInPhone,
+          auth_phone: session.user.phone ?? null,
         });
         const now = Date.now();
         // Genuine fresh login committed — claim the identity so any
