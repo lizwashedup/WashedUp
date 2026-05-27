@@ -1,21 +1,17 @@
-import React, { forwardRef, useCallback, useImperativeHandle, useMemo, useRef } from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  BottomSheetModal,
-  BottomSheetView,
-  BottomSheetBackdrop,
-  BottomSheetBackdropProps,
-} from '@gorhom/bottom-sheet';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
-// The chat attachment menu. Opened from the + button in the input bar. Replaces
-// the old ActionSheetIOS / BrandedAlert split with a single branded bottom-sheet
-// grid that looks identical on iOS and Android. Photos/Camera/Location are wired
-// to the existing handlers; Document/Contact/Poll are placeholders for later
-// phases and no-op for now.
+// The chat attachment menu, rendered as an INLINE panel that takes the
+// keyboard's place beneath a still-visible input bar (WhatsApp pattern), not a
+// modal-over-backdrop. The input bar's left button toggles + <-> keyboard to
+// open/close it. This panel is the reusable "keyboard-height panel" substrate
+// that the emoji picker and GIF tab reuse in later chat-block commits.
+// Photos/Camera/Location are wired to handlers; Document/Contact/Poll are
+// placeholders pending later commits (Document is cut with the location
+// refactor; Poll is deferred).
 
 export type AttachmentKey =
   | 'photos'
@@ -25,13 +21,10 @@ export type AttachmentKey =
   | 'contact'
   | 'poll';
 
-export interface AttachmentSheetRef {
-  present: () => void;
-  dismiss: () => void;
-}
-
-interface AttachmentSheetProps {
+interface AttachmentPanelProps {
   onSelect: (key: AttachmentKey) => void;
+  // Matches the keyboard height it replaces, so the input bar doesn't jump.
+  height: number;
 }
 
 interface AttachmentItem {
@@ -44,9 +37,8 @@ const GRID_COLUMNS = 3;
 const ITEM_VERTICAL_GAP = 20;
 const ICON_CIRCLE_SIZE = 56;
 const ICON_SIZE = 26;
-const SHEET_HORIZONTAL_PADDING = 20;
-const SHEET_TOP_PADDING = 8;
-const SHEET_BOTTOM_PADDING = 12;
+const PANEL_HORIZONTAL_PADDING = 20;
+const PANEL_TOP_PADDING = 16;
 
 const ATTACHMENT_ITEMS: AttachmentItem[] = [
   { key: 'photos', label: 'Photos & videos', icon: 'images-outline' },
@@ -57,80 +49,37 @@ const ATTACHMENT_ITEMS: AttachmentItem[] = [
   { key: 'poll', label: 'Poll', icon: 'stats-chart-outline' },
 ];
 
-const AttachmentSheet = forwardRef<AttachmentSheetRef, AttachmentSheetProps>(
-  function AttachmentSheet({ onSelect }, ref) {
-    const insets = useSafeAreaInsets();
-    const modalRef = useRef<BottomSheetModal>(null);
-
-    useImperativeHandle(ref, () => ({
-      present: () => modalRef.current?.present(),
-      dismiss: () => modalRef.current?.dismiss(),
-    }));
-
-    const handlePress = useCallback(
-      (key: AttachmentKey) => {
-        modalRef.current?.dismiss();
-        onSelect(key);
-      },
-      [onSelect],
-    );
-
-    const renderBackdrop = useCallback(
-      (props: BottomSheetBackdropProps) => (
-        <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} />
-      ),
-      [],
-    );
-
-    const contentStyle = useMemo(
-      () => [styles.content, { paddingBottom: SHEET_BOTTOM_PADDING + insets.bottom }],
-      [insets.bottom],
-    );
-
-    return (
-      <BottomSheetModal
-        ref={modalRef}
-        enableDynamicSizing
-        backdropComponent={renderBackdrop}
-        backgroundStyle={styles.background}
-        handleIndicatorStyle={styles.handleIndicator}
-      >
-        <BottomSheetView style={contentStyle}>
-          <View style={styles.grid}>
-            {ATTACHMENT_ITEMS.map((item) => (
-              <TouchableOpacity
-                key={item.key}
-                style={styles.item}
-                activeOpacity={0.7}
-                onPress={() => handlePress(item.key)}
-              >
-                <View style={styles.iconCircle}>
-                  <Ionicons name={item.icon} size={ICON_SIZE} color={Colors.terracotta} />
-                </View>
-                <Text style={styles.label} numberOfLines={1}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </BottomSheetView>
-      </BottomSheetModal>
-    );
-  },
-);
-
-export default AttachmentSheet;
+export default function AttachmentPanel({ onSelect, height }: AttachmentPanelProps) {
+  return (
+    <View style={[styles.panel, { height }]}>
+      <View style={styles.grid}>
+        {ATTACHMENT_ITEMS.map((item) => (
+          <TouchableOpacity
+            key={item.key}
+            style={styles.item}
+            activeOpacity={0.7}
+            onPress={() => onSelect(item.key)}
+          >
+            <View style={styles.iconCircle}>
+              <Ionicons name={item.icon} size={ICON_SIZE} color={Colors.terracotta} />
+            </View>
+            <Text style={styles.label} numberOfLines={1}>
+              {item.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
-  background: {
+  panel: {
     backgroundColor: Colors.cardBg,
-  },
-  handleIndicator: {
-    backgroundColor: Colors.warmGray,
-  },
-  content: {
-    paddingHorizontal: SHEET_HORIZONTAL_PADDING,
-    paddingTop: SHEET_TOP_PADDING,
+    borderTopWidth: 1,
+    borderTopColor: Colors.inputBg,
+    paddingHorizontal: PANEL_HORIZONTAL_PADDING,
+    paddingTop: PANEL_TOP_PADDING,
   },
   grid: {
     flexDirection: 'row',

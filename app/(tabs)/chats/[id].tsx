@@ -27,7 +27,7 @@ import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 // Lazy-load expo-clipboard so older production binaries (built before this dep
 // was added) don't crash when this screen's module is imported. Mirrors the
 // pattern in lib/addToCalendar.ts and components/VideoSplash.tsx.
@@ -48,7 +48,7 @@ import { openUrl } from '../../../lib/url';
 import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/useChat';
 import MiniProfileCard from '../../../components/MiniProfileCard';
-import AttachmentSheet, { AttachmentSheetRef, AttachmentKey } from '../../../components/chat/AttachmentSheet';
+import AttachmentPanel, { AttachmentKey } from '../../../components/chat/AttachmentSheet';
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
@@ -556,6 +556,11 @@ const SCROLL_SHOW_THRESHOLD = 300;
 const SCROLL_AT_BOTTOM_THRESHOLD = 24;
 const SCROLL_BTN_GAP = 12;
 
+// Inline attachment panel height used until a real keyboard height is observed
+// this session (the panel then matches the keyboard it replaces).
+const PANEL_FALLBACK_HEIGHT = 280;
+const PANEL_ANIM_MS = 180;
+
 // Voice recording hold gesture: activate after a short hold, then slide left to
 // cancel or up to lock (hands-free), mirroring WhatsApp.
 const VOICE_HOLD_MS = 200;
@@ -691,9 +696,28 @@ export default function ChatScreen() {
   // JS state so the FlatList's contentContainerStyle can re-render with
   // the correct paddingTop reservation when the keyboard opens/closes.
   const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+
+  // Inline attachment panel ("keyboard-height panel" substrate, reused later by
+  // the emoji/GIF pickers). It REPLACES the keyboard and never coexists with
+  // it. The bottom inset fed to the input bar + list is
+  // max(keyboardHeight, panelOpen ? panelHeight : 0) so the keyboard<->panel
+  // handoff never collapses to 0 for a frame (prevents the input bar jumping).
+  const [attachPanelOpen, setAttachPanelOpen] = useState(false);
+  // Match the panel to the keyboard it replaces: remember the keyboard height
+  // observed this session; fall back until one is seen.
+  const lastKeyboardHeightRef = useRef(0);
+  const [panelHeight, setPanelHeight] = useState(PANEL_FALLBACK_HEIGHT);
+  const panelInset = attachPanelOpen ? panelHeight : 0;
+
   const animatedKeyboard = useAnimatedKeyboard();
+  // Panel inset mirrored to the UI thread so the Android animated bottom can
+  // max() it against the live keyboard height (and ease it for a smooth open).
+  const panelInsetSV = useSharedValue(0);
+  useEffect(() => {
+    panelInsetSV.value = withTiming(panelInset, { duration: PANEL_ANIM_MS });
+  }, [panelInset, panelInsetSV]);
   const androidInputBarAnimatedStyle = useAnimatedStyle(() => ({
-    bottom: animatedKeyboard.height.value,
+    bottom: Math.max(animatedKeyboard.height.value, panelInsetSV.value),
   }));
   useAnimatedReaction(
     () => animatedKeyboard.height.value,
@@ -701,11 +725,13 @@ export default function ChatScreen() {
     [],
   );
   // Android gets Animated.View driven by useAnimatedKeyboard; iOS gets
-  // plain View with static bottom from iosKeyboardHeight (unchanged).
+  // plain View with static bottom = max(keyboard, panel) inset.
   const InputBarWrapper: React.ComponentType<any> =
     Platform.OS === 'android' ? Animated.View : View;
   const inputBarBottomStyle =
-    Platform.OS === 'android' ? androidInputBarAnimatedStyle : { bottom: iosKeyboardHeight };
+    Platform.OS === 'android'
+      ? androidInputBarAnimatedStyle
+      : { bottom: Math.max(iosKeyboardHeight, panelInset) };
   useEffect(() => {
     // Inverted FlatList: offset 0 is the visual bottom (newest message).
     // When the keyboard opens we snap to that so the user always sees the
@@ -713,10 +739,21 @@ export default function ChatScreen() {
     const scrollToLatest = () => {
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
     };
+    // Remember the keyboard height so the attachment panel matches it, and
+    // close the panel only once the keyboard has actually taken over the space
+    // (keeps the inset from collapsing to 0 during the panel->keyboard handoff).
+    const onKeyboardShown = (height: number) => {
+      if (height > 0) {
+        lastKeyboardHeightRef.current = height;
+        setPanelHeight(height);
+      }
+      setAttachPanelOpen(false);
+    };
     if (Platform.OS === 'ios') {
       const showSub = Keyboard.addListener('keyboardWillShow', (e) => {
         setKeyboardVisible(true);
         setIosKeyboardHeight(e.endCoordinates.height);
+        onKeyboardShown(e.endCoordinates.height);
         scrollToLatest();
       });
       const hideSub = Keyboard.addListener('keyboardWillHide', () => {
@@ -728,8 +765,9 @@ export default function ChatScreen() {
         hideSub.remove();
       };
     }
-    const showSub = Keyboard.addListener('keyboardDidShow', () => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
       setKeyboardVisible(true);
+      onKeyboardShown(e.endCoordinates?.height ?? 0);
       scrollToLatest();
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
@@ -765,7 +803,7 @@ export default function ChatScreen() {
   const listBottomReservation =
     Platform.OS === 'ios'
       ? bottomDockHeight + 8
-      : bottomDockHeight + 8 + androidKeyboardHeight;
+      : bottomDockHeight + 8 + Math.max(androidKeyboardHeight, panelInset);
 
   useEffect(() => {
     console.log('[ChatList] bottomDockHeight:', bottomDockHeight, '| listBottomReservation:', listBottomReservation);
@@ -1102,7 +1140,7 @@ export default function ChatScreen() {
   }, [scrollToBottom]);
 
   const scrollBtnBottom =
-    (Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight) + bottomDockHeight + SCROLL_BTN_GAP;
+    Math.max(Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight, panelInset) + bottomDockHeight + SCROLL_BTN_GAP;
 
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
@@ -1188,6 +1226,16 @@ export default function ChatScreen() {
     });
     return () => sub.remove();
   }, [recordingMode, cancelRecording]);
+
+  // Android: hardware back closes the attachment panel instead of navigating.
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !attachPanelOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setAttachPanelOpen(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [attachPanelOpen]);
 
   const lockRecording = useCallback(() => {
     hapticLight();
@@ -1322,12 +1370,13 @@ export default function ChatScreen() {
     }
   }, [currentUserId, sendLocation, scrollToBottom]);
 
-  const attachmentSheetRef = useRef<AttachmentSheetRef>(null);
+  const textInputRef = useRef<TextInput>(null);
 
-  // Route an attachment-sheet selection to the existing handlers. Photos,
+  // Route an attachment-panel selection to the existing handlers. Photos,
   // Camera, and Location keep their current behavior; Document, Contact, and
-  // Poll are placeholders for later phases and intentionally no-op for now.
+  // Poll are placeholders for later commits and intentionally no-op for now.
   const handleAttachSelect = useCallback((key: AttachmentKey) => {
+    setAttachPanelOpen(false);
     if (key === 'camera') {
       doPhotoAction('camera');
     } else if (key === 'photos') {
@@ -1348,11 +1397,21 @@ export default function ChatScreen() {
     }
   }, [doPhotoAction, handleLocationSend]);
 
-  const handleAttachPress = useCallback(() => {
+  // Left input-bar button toggles + <-> keyboard.
+  //  - panel closed: open it, THEN dismiss the keyboard. Setting panelInset
+  //    first means the unified inset is max(keyboard, panel) throughout the
+  //    handoff, so the input bar never drops for a frame.
+  //  - panel open: refocus the input; the keyboard-show listener closes the
+  //    panel once the keyboard has taken over (again, no inset collapse).
+  const handleAttachToggle = useCallback(() => {
     if (!currentUserId) return;
-    Keyboard.dismiss();
-    attachmentSheetRef.current?.present();
-  }, [currentUserId]);
+    if (attachPanelOpen) {
+      textInputRef.current?.focus();
+    } else {
+      setAttachPanelOpen(true);
+      Keyboard.dismiss();
+    }
+  }, [currentUserId, attachPanelOpen]);
 
   type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string } | { type: 'time'; label: string; id: string };
   const enrichedItems = useMemo<EnrichedItem[]>(() => {
@@ -1533,7 +1592,7 @@ export default function ChatScreen() {
             inverted={true}
             style={[
               { flex: 1 },
-              Platform.OS === 'ios' && { marginBottom: iosKeyboardHeight },
+              Platform.OS === 'ios' && { marginBottom: Math.max(iosKeyboardHeight, panelInset) },
             ]}
             contentContainerStyle={{ paddingBottom: 12, paddingTop: listBottomReservation }}
             showsVerticalScrollIndicator={false}
@@ -1744,9 +1803,11 @@ export default function ChatScreen() {
                 : { paddingBottom: inputBarBottomPadding },
             ]}
           >
-            <TouchableOpacity onPress={handleAttachPress} style={chatStyles.cameraBtn} disabled={uploading}>
+            <TouchableOpacity onPress={handleAttachToggle} style={chatStyles.cameraBtn} disabled={uploading}>
               {uploading ? (
                 <ActivityIndicator size="small" color={Colors.warmGray} />
+              ) : attachPanelOpen ? (
+                <MaterialIcons name="keyboard" size={26} color={Colors.warmGray} />
               ) : (
                 <Ionicons name="add-circle-outline" size={26} color={Colors.warmGray} />
               )}
@@ -1759,6 +1820,7 @@ export default function ChatScreen() {
             </TouchableOpacity>
 
             <TextInput
+              ref={textInputRef}
               style={chatStyles.input}
               value={inputText}
               onChangeText={handleInputChange}
@@ -1821,6 +1883,14 @@ export default function ChatScreen() {
           bottomOffset={scrollBtnBottom}
           onPress={handleScrollToBottomPress}
         />
+
+        {/* Inline attachment panel: sits in the keyboard's footprint at the
+            screen bottom; the input bar (offset by panelInset) floats above it. */}
+        {attachPanelOpen && (
+          <View style={chatStyles.attachPanelWrap}>
+            <AttachmentPanel onSelect={handleAttachSelect} height={panelHeight} />
+          </View>
+        )}
       </View>
 
       {/* Report user modal */}
@@ -1868,7 +1938,6 @@ export default function ChatScreen() {
         onClose={() => setAlertInfo(null)}
       />
 
-      <AttachmentSheet ref={attachmentSheetRef} onSelect={handleAttachSelect} />
 
       {/* Message interaction overlay */}
       <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)} statusBarTranslucent>
@@ -2247,6 +2316,12 @@ const chatStyles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
+  },
+  attachPanelWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 
   readOnlyBar: {
