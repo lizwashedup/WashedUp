@@ -23,7 +23,6 @@ import {
 } from 'react-native';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import * as Notifications from 'expo-notifications'; // setBadgeCountAsync only — local-only API, no server call. OneSignal SDK doesn't expose direct badge clear; revisit during cleanup.
-import * as Location from 'expo-location';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
@@ -50,6 +49,7 @@ import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../../hooks/u
 import MiniProfileCard from '../../../components/MiniProfileCard';
 import AttachmentPanel, { AttachmentKey } from '../../../components/chat/AttachmentSheet';
 import MediaPanel from '../../../components/chat/MediaPanel';
+import LocationPickerModal from '../../../components/chat/LocationPickerModal';
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
@@ -722,6 +722,7 @@ export default function ChatScreen() {
   // Which keyboard-height panel is showing (both share the substrate + inset).
   const [activePanel, setActivePanel] = useState<'attach' | 'emoji' | null>(null);
   const panelOpen = activePanel !== null;
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   // Match the panel to the keyboard it replaces: track the observed keyboard
   // height; fall back until one is seen this session.
   const [panelHeight, setPanelHeight] = useState(PANEL_FALLBACK_HEIGHT);
@@ -1400,44 +1401,17 @@ export default function ChatScreen() {
     }
   }, [currentUserId, sendMessage, scrollToBottom]);
 
-  const handleLocationSend = useCallback(async () => {
-    if (!currentUserId) return;
-    Keyboard.dismiss();
-
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      setAlertInfo({ title: 'Location access needed', message: 'Please allow location access in Settings to share your location.' });
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const { latitude, longitude } = loc.coords;
-
-      const geocoded = await Location.reverseGeocodeAsync({ latitude, longitude });
-      const place = geocoded[0];
-      let address = '';
-      if (place) {
-        const parts = [place.name, place.street, place.city].filter(Boolean);
-        address = parts.join(', ');
-      }
-      if (!address) address = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-
-      await sendLocation(latitude, longitude, address);
-      scrollToBottom();
-    } catch {
-      setAlertInfo({ title: 'Could not get location', message: 'Something went wrong retrieving your location. Please try again.' });
-    } finally {
-      setUploading(false);
-    }
-  }, [currentUserId, sendLocation, scrollToBottom]);
+  // Send a location chosen in the LocationPickerModal (map preview + address).
+  const handleLocationConfirm = useCallback((latitude: number, longitude: number, address: string) => {
+    setLocationPickerOpen(false);
+    void sendLocation(latitude, longitude, address);
+    scrollToBottom();
+  }, [sendLocation, scrollToBottom]);
 
   const textInputRef = useRef<TextInput>(null);
 
-  // Route an attachment-panel selection to the existing handlers. Photos,
-  // Camera, and Location keep their current behavior; Document, Contact, and
-  // Poll are placeholders for later commits and intentionally no-op for now.
+  // Route an attachment-panel selection. Photos/Camera launch the picker;
+  // Location opens the map preview screen. (Document/Poll/Contact were removed.)
   const handleAttachSelect = useCallback((key: AttachmentKey) => {
     setActivePanel(null);
     if (key === 'camera') {
@@ -1445,20 +1419,10 @@ export default function ChatScreen() {
     } else if (key === 'photos') {
       doPhotoAction('library');
     } else if (key === 'location') {
-      // Confirm before sharing location. Brief delay lets the sheet finish
-      // dismissing before the alert presents.
-      setTimeout(() => {
-        setAlertInfo({
-          title: 'Share your location?',
-          message: 'Your current location will be sent to the group.',
-          buttons: [
-            { text: 'Send Location', onPress: handleLocationSend },
-            { text: 'Cancel', style: 'cancel' as const },
-          ],
-        });
-      }, 300);
+      Keyboard.dismiss();
+      setLocationPickerOpen(true);
     }
-  }, [doPhotoAction, handleLocationSend]);
+  }, [doPhotoAction]);
 
   // Left input-bar button toggles + <-> keyboard.
   //  - panel closed: open it, THEN dismiss the keyboard. Setting panelInset
@@ -2001,6 +1965,12 @@ export default function ChatScreen() {
           eventId={id}
         />
       )}
+
+      <LocationPickerModal
+        visible={locationPickerOpen}
+        onClose={() => setLocationPickerOpen(false)}
+        onConfirm={handleLocationConfirm}
+      />
 
       {/* Full-screen photo viewer */}
       <Modal visible={!!photoViewUrl} transparent animationType="fade" onRequestClose={() => setPhotoViewUrl(null)} statusBarTranslucent>

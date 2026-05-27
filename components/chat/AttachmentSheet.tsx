@@ -43,13 +43,13 @@ const ICON_SIZE = 26;
 const PANEL_HORIZONTAL_PADDING = 20;
 const PANEL_TOP_PADDING = 16;
 
+// Document / Contact / Poll were cut: Document/Poll aren't relevant to hangout
+// chats, and Contact (iOS contact picker) is redundant with @handles + the
+// friend graph. A WashedUp-shaped "share a profile" can be built later if needed.
 const ATTACHMENT_ITEMS: AttachmentItem[] = [
   { key: 'photos', label: 'Photos & videos', icon: 'images-outline' },
   { key: 'camera', label: 'Camera', icon: 'camera-outline' },
-  { key: 'document', label: 'Document', icon: 'document-outline' },
   { key: 'location', label: 'Location', icon: 'location-outline' },
-  { key: 'contact', label: 'Contact', icon: 'person-outline' },
-  { key: 'poll', label: 'Poll', icon: 'stats-chart-outline' },
 ];
 
 export default function AttachmentPanel({ onSelect, height, bottomInset }: AttachmentPanelProps) {
