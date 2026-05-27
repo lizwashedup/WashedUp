@@ -52,6 +52,7 @@ import MediaPanel from '../../../components/chat/MediaPanel';
 import LocationPickerModal from '../../../components/chat/LocationPickerModal';
 import PhotoPreviewModal from '../../../components/chat/PhotoPreviewModal';
 import ReactionEmojiPicker from '../../../components/chat/ReactionEmojiPicker';
+import LinkPreviewCard from '../../../components/chat/LinkPreviewCard';
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
@@ -164,6 +165,17 @@ function isSameDay(a: string, b: string): boolean {
 
 const URL_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
 
+const MENTION_SUGGESTION_LIMIT = 6;
+// Matches an "@name" being typed right at the caret (start of text or after
+// whitespace), capturing the partial name. Returns null when the caret isn't in
+// a mention, which closes the autocomplete.
+const MENTION_AT_CARET = /(?:^|\s)@([\p{L}\p{N}_]*)$/u;
+function mentionQueryAt(text: string, caret: number): string | null {
+  const before = text.slice(0, Math.max(0, Math.min(caret, text.length)));
+  const m = before.match(MENTION_AT_CARET);
+  return m ? m[1] : null;
+}
+
 // A message that is only 1-3 emoji (no letters/numbers) renders large with no
 // bubble, like iMessage/WhatsApp. Hermes may lack Intl.Segmenter, so fall back
 // to a code-point count; over-counting a ZWJ sequence just renders it as a
@@ -177,13 +189,25 @@ function isEmojiOnly(text: string): boolean {
   return count <= 3;
 }
 
-function LinkedText({ text, style, linkStyle }: { text: string; style: any; linkStyle?: any }) {
-  const parts = text.split(/(https?:\/\/[^\s]+|www\.[^\s]+)/i);
+// Splits on URLs and @mentions in one pass. URLs come first so an @ inside a
+// URL stays part of the link. Mentions are only highlighted when the @name
+// matches a known chat member (passed in lowercased), so a stray "@" is plain.
+const TOKEN_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+|@[\p{L}\p{N}_]+)/giu;
+
+function LinkedText({ text, style, linkStyle, mentionNames, mentionStyle }: {
+  text: string;
+  style: any;
+  linkStyle?: any;
+  mentionNames?: Set<string>;
+  mentionStyle?: any;
+}) {
+  const parts = text.split(TOKEN_PATTERN);
   if (parts.length === 1) return <Text style={style}>{text}</Text>;
 
   return (
     <Text style={style}>
       {parts.map((part, i) => {
+        if (!part) return null;
         if (URL_PATTERN.test(part)) {
           return (
             <Text
@@ -194,6 +218,9 @@ function LinkedText({ text, style, linkStyle }: { text: string; style: any; link
               {part}
             </Text>
           );
+        }
+        if (mentionNames && part[0] === '@' && mentionNames.has(part.slice(1).toLowerCase())) {
+          return <Text key={i} style={mentionStyle}>{part}</Text>;
         }
         return <Text key={i}>{part}</Text>;
       })}
@@ -231,9 +258,10 @@ interface BubbleProps {
   onMessageLongPress?: (message: ChatMessage, isOwn: boolean) => void;
   onReplyTap?: (messageId: string) => void;
   onAvatarPress?: (userId: string) => void;
+  mentionNames?: Set<string>;
 }
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, planTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap, onAvatarPress }: BubbleProps) {
+const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, planTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
   if (message.message_type === 'system') {
     let displayContent = message.content;
     if (planTitle) {
@@ -265,6 +293,9 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
     }
   }
   const iReacted = reactions.some(r => r.user_id === currentUserId);
+  // First link in a text message gets a rich preview card under the text (the
+  // card renders nothing until og-unfurl returns usable metadata).
+  const firstUrl = message.message_type === 'user' ? (message.content?.match(URL_PATTERN)?.[0] ?? null) : null;
 
   const borderRadius = isOwn
     ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 2 }
@@ -402,7 +433,10 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
                 text={message.content}
                 style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn]}
                 linkStyle={isOwn ? bubbleStyles.linkOwn : bubbleStyles.linkOther}
+                mentionNames={mentionNames}
+                mentionStyle={isOwn ? bubbleStyles.mentionOwn : bubbleStyles.mention}
               />
+              {firstUrl && <LinkPreviewCard url={firstUrl} isOwn={isOwn} />}
             </View>
           )}
 
@@ -458,6 +492,8 @@ const bubbleStyles = StyleSheet.create({
   inlineTimeOwn: { color: 'rgba(255,255,255,0.6)' },
   linkOther: { textDecorationLine: 'underline' as const, color: Colors.terracotta },
   linkOwn: { textDecorationLine: 'underline' as const, color: Colors.white },
+  mention: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
+  mentionOwn: { fontFamily: Fonts.sansBold, color: Colors.white },
   messageImage: { width: 240, height: 180 },
   systemRow: { alignItems: 'center', marginVertical: 8, paddingHorizontal: 16 },
   systemText: {
@@ -738,6 +774,9 @@ export default function ChatScreen() {
   // Message id whose full-emoji reaction picker is open (via the "+" on the
   // quick-react row); null when closed.
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
+  // The partial name typed after an "@" at the caret, or null when not composing
+  // a mention. Drives the autocomplete strip above the input bar.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   // Match the panel to the keyboard it replaces: track the observed keyboard
   // height; fall back until one is seen this session.
   const [panelHeight, setPanelHeight] = useState(PANEL_FALLBACK_HEIGHT);
@@ -1010,6 +1049,25 @@ export default function ChatScreen() {
   );
   const { typingUsers, broadcastTyping, stopTyping } = useTypingIndicator(id, currentUserId, currentUserName);
 
+  // Lowercased first names of everyone in the chat, for highlighting @mentions
+  // in rendered bubbles. Memoized so the Set reference stays stable (MessageBubble
+  // is memo'd).
+  const mentionNames = useMemo(() => {
+    const s = new Set<string>();
+    (event?.members ?? []).forEach(m => { if (m.first_name) s.add(m.first_name.toLowerCase()); });
+    return s;
+  }, [event?.members]);
+
+  // Candidates for the autocomplete strip: members whose first name starts with
+  // what's been typed after "@" (self excluded). Empty query lists everyone.
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return (event?.members ?? [])
+      .filter(m => m.id !== currentUserId && m.first_name && (q === '' || m.first_name.toLowerCase().startsWith(q)))
+      .slice(0, MENTION_SUGGESTION_LIMIT);
+  }, [mentionQuery, event?.members, currentUserId]);
+
   const typingLabel = useMemo(() => {
     if (typingUsers.length === 0) return null;
     if (typingUsers.length === 1) return `${typingUsers[0].name} is typing...`;
@@ -1017,10 +1075,16 @@ export default function ChatScreen() {
     return 'Several people are typing...';
   }, [typingUsers]);
 
+  // Latest input text, synchronously, so onSelectionChange can detect a mention
+  // against fresh text before React commits the state update.
+  const inputTextRef = useRef('');
   const handleInputChange = useCallback((text: string) => {
     setInputText(text);
+    inputTextRef.current = text;
     broadcastTyping();
+    setMentionQuery(mentionQueryAt(text, selectionRef.current.start));
   }, [broadcastTyping]);
+  useEffect(() => { inputTextRef.current = inputText; }, [inputText]);
 
   const prefetchedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -1179,6 +1243,7 @@ export default function ChatScreen() {
     const text = inputText.trim();
     if (!text || uploading) return;
     setInputText('');
+    setMentionQuery(null);
     stopTyping();
     if (editingMessageId) {
       editMessage(editingMessageId, text);
@@ -1343,6 +1408,21 @@ export default function ChatScreen() {
       selectionRef.current = { start: caret, end: caret };
       return prev.slice(0, s) + emoji + prev.slice(e);
     });
+  }, []);
+  // Replace the partial "@query" at the caret with the full "@Name " and close
+  // the autocomplete. Stored as plain text — mentions are highlighted on render
+  // by matching against the member list, so no schema change.
+  const insertMention = useCallback((firstName: string) => {
+    setInputText((prev) => {
+      const caret = Math.min(selectionRef.current.start, prev.length);
+      const replaced = prev.slice(0, caret).replace(/@[\p{L}\p{N}_]*$/u, `@${firstName} `);
+      const next = replaced + prev.slice(caret);
+      selectionRef.current = { start: replaced.length, end: replaced.length };
+      inputTextRef.current = next;
+      return next;
+    });
+    setMentionQuery(null);
+    textInputRef.current?.focus();
   }, []);
   const handleEmojiBackspace = useCallback(() => {
     setInputText((prev) => {
@@ -1776,6 +1856,7 @@ export default function ChatScreen() {
                       }
                     }}
                     onAvatarPress={(uid) => setMiniProfileUserId(uid)}
+                    mentionNames={mentionNames}
                   />
                 </SwipeableRow>
               );
@@ -1846,6 +1927,36 @@ export default function ChatScreen() {
                 </TouchableOpacity>
               </View>
             )}
+            {mentionQuery !== null && mentionCandidates.length > 0 && (
+              <View style={chatStyles.mentionBar}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={chatStyles.mentionBarContent}
+                >
+                  {mentionCandidates.map((m) => (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={chatStyles.mentionChip}
+                      onPress={() => insertMention(m.first_name!)}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Mention ${m.first_name}`}
+                    >
+                      {m.avatar_url ? (
+                        <Image source={{ uri: m.avatar_url }} style={chatStyles.mentionAvatar} contentFit="cover" />
+                      ) : (
+                        <View style={chatStyles.mentionAvatarFallback}>
+                          <Text style={chatStyles.mentionInitial}>{m.first_name?.[0]?.toUpperCase() ?? '?'}</Text>
+                        </View>
+                      )}
+                      <Text style={chatStyles.mentionName} numberOfLines={1}>{m.first_name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
           <View
             style={[
               chatStyles.inputBar,
@@ -1898,7 +2009,10 @@ export default function ChatScreen() {
               style={chatStyles.input}
               value={inputText}
               onChangeText={handleInputChange}
-              onSelectionChange={(e) => { selectionRef.current = e.nativeEvent.selection; }}
+              onSelectionChange={(e) => {
+                selectionRef.current = e.nativeEvent.selection;
+                setMentionQuery(mentionQueryAt(inputTextRef.current, e.nativeEvent.selection.start));
+              }}
               placeholder="Message..."
               placeholderTextColor={Colors.warmGray}
               multiline
@@ -2508,6 +2622,51 @@ const chatStyles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
     flex: 1,
+  },
+
+  mentionBar: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.inputBg,
+  },
+  mentionBarContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+    alignItems: 'center',
+  },
+  mentionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    backgroundColor: Colors.inputBg,
+  },
+  mentionAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: Colors.border,
+  },
+  mentionAvatarFallback: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: Colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mentionInitial: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+  },
+  mentionName: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+    maxWidth: 120,
   },
 
   photoModal: {
