@@ -25,6 +25,9 @@ interface AttachmentPanelProps {
   onSelect: (key: AttachmentKey) => void;
   // Matches the keyboard height it replaces, so the input bar doesn't jump.
   height: number;
+  // Home-indicator floor so the bottom grid row clears the indicator when the
+  // panel falls back to a default height (no keyboard observed yet).
+  bottomInset: number;
 }
 
 interface AttachmentItem {
@@ -49,9 +52,9 @@ const ATTACHMENT_ITEMS: AttachmentItem[] = [
   { key: 'poll', label: 'Poll', icon: 'stats-chart-outline' },
 ];
 
-export default function AttachmentPanel({ onSelect, height }: AttachmentPanelProps) {
+export default function AttachmentPanel({ onSelect, height, bottomInset }: AttachmentPanelProps) {
   return (
-    <View style={[styles.panel, { height }]}>
+    <View style={[styles.panel, { height, paddingBottom: bottomInset }]}>
       <View style={styles.grid}>
         {ATTACHMENT_ITEMS.map((item) => (
           <TouchableOpacity
@@ -59,6 +62,8 @@ export default function AttachmentPanel({ onSelect, height }: AttachmentPanelPro
             style={styles.item}
             activeOpacity={0.7}
             onPress={() => onSelect(item.key)}
+            accessibilityRole="button"
+            accessibilityLabel={item.label}
           >
             <View style={styles.iconCircle}>
               <Ionicons name={item.icon} size={ICON_SIZE} color={Colors.terracotta} />

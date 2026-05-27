@@ -703,9 +703,8 @@ export default function ChatScreen() {
   // max(keyboardHeight, panelOpen ? panelHeight : 0) so the keyboard<->panel
   // handoff never collapses to 0 for a frame (prevents the input bar jumping).
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
-  // Match the panel to the keyboard it replaces: remember the keyboard height
-  // observed this session; fall back until one is seen.
-  const lastKeyboardHeightRef = useRef(0);
+  // Match the panel to the keyboard it replaces: track the observed keyboard
+  // height; fall back until one is seen this session.
   const [panelHeight, setPanelHeight] = useState(PANEL_FALLBACK_HEIGHT);
   const panelInset = attachPanelOpen ? panelHeight : 0;
 
@@ -743,10 +742,7 @@ export default function ChatScreen() {
     // close the panel only once the keyboard has actually taken over the space
     // (keeps the inset from collapsing to 0 during the panel->keyboard handoff).
     const onKeyboardShown = (height: number) => {
-      if (height > 0) {
-        lastKeyboardHeightRef.current = height;
-        setPanelHeight(height);
-      }
+      if (height > 0) setPanelHeight(height);
       setAttachPanelOpen(false);
     };
     if (Platform.OS === 'ios') {
@@ -776,7 +772,9 @@ export default function ChatScreen() {
       hideSub.remove();
     };
   }, []);
-  const inputBarBottomPadding = keyboardVisible ? 8 : insets.bottom + 8;
+  // The keyboard AND the attachment panel both span the home-indicator area, so
+  // when either is up the bar sits flush on it (8) rather than adding insets.bottom.
+  const inputBarBottomPadding = keyboardVisible || attachPanelOpen ? 8 : insets.bottom + 8;
   // Measure the bottom dock (input bar + any reply/edit banners) so the
   // inverted FlatList can reserve exactly that much space at its visual
   // bottom. Inverted lists flip the content container, so paddingTop in
@@ -1803,10 +1801,19 @@ export default function ChatScreen() {
                 : { paddingBottom: inputBarBottomPadding },
             ]}
           >
-            <TouchableOpacity onPress={handleAttachToggle} style={chatStyles.cameraBtn} disabled={uploading}>
+            <TouchableOpacity
+              onPress={handleAttachToggle}
+              style={chatStyles.cameraBtn}
+              disabled={uploading}
+              accessibilityRole="button"
+              accessibilityLabel={attachPanelOpen ? 'Show keyboard' : 'Add attachment'}
+            >
               {uploading ? (
                 <ActivityIndicator size="small" color={Colors.warmGray} />
               ) : attachPanelOpen ? (
+                // Deliberate single-family exception: Ionicons has no keyboard
+                // glyph (only keypad/dialpad), so the keyboard toggle uses
+                // MaterialIcons. Every other input-bar icon stays Ionicons.
                 <MaterialIcons name="keyboard" size={26} color={Colors.warmGray} />
               ) : (
                 <Ionicons name="add-circle-outline" size={26} color={Colors.warmGray} />
@@ -1888,7 +1895,7 @@ export default function ChatScreen() {
             screen bottom; the input bar (offset by panelInset) floats above it. */}
         {attachPanelOpen && (
           <View style={chatStyles.attachPanelWrap}>
-            <AttachmentPanel onSelect={handleAttachSelect} height={panelHeight} />
+            <AttachmentPanel onSelect={handleAttachSelect} height={panelHeight} bottomInset={insets.bottom} />
           </View>
         )}
       </View>
