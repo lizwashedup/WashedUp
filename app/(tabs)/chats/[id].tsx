@@ -51,6 +51,7 @@ import AttachmentPanel, { AttachmentKey } from '../../../components/chat/Attachm
 import MediaPanel from '../../../components/chat/MediaPanel';
 import LocationPickerModal from '../../../components/chat/LocationPickerModal';
 import PhotoPreviewModal from '../../../components/chat/PhotoPreviewModal';
+import ReactionEmojiPicker from '../../../components/chat/ReactionEmojiPicker';
 import TypingIndicator from '../../../components/chat/TypingIndicator';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import ScrollToBottomButton from '../../../components/chat/ScrollToBottomButton';
@@ -734,6 +735,9 @@ export default function ChatScreen() {
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [pendingPhotos, setPendingPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
+  // Message id whose full-emoji reaction picker is open (via the "+" on the
+  // quick-react row); null when closed.
+  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
   // Match the panel to the keyboard it replaces: track the observed keyboard
   // height; fall back until one is seen this session.
   const [panelHeight, setPanelHeight] = useState(PANEL_FALLBACK_HEIGHT);
@@ -2003,6 +2007,16 @@ export default function ChatScreen() {
         onSend={sendPhotos}
       />
 
+      <ReactionEmojiPicker
+        visible={!!reactionPickerMsgId}
+        onSelect={(emoji) => {
+          const reactionKey = emoji === '❤️' ? 'heart' : emoji;
+          if (reactionPickerMsgId) toggleReaction(reactionPickerMsgId, reactionKey);
+          setReactionPickerMsgId(null);
+        }}
+        onClose={() => setReactionPickerMsgId(null)}
+      />
+
       {/* Full-screen photo viewer */}
       <Modal visible={!!photoViewUrl} transparent animationType="fade" onRequestClose={() => setPhotoViewUrl(null)} statusBarTranslucent>
         <Pressable style={chatStyles.photoModal} onPress={() => setPhotoViewUrl(null)}>
@@ -2053,6 +2067,19 @@ export default function ChatScreen() {
                   }}
                 />
               ))}
+              <TouchableOpacity
+                style={overlayStyles.emojiBtn}
+                onPress={() => {
+                  hapticLight();
+                  setReactionPickerMsgId(overlayMessage!.message.id);
+                  setOverlayMessage(null);
+                }}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="More reactions"
+              >
+                <Ionicons name="add" size={24} color={Colors.textMedium} />
+              </TouchableOpacity>
             </View>
             )}
 
