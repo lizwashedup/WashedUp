@@ -3,7 +3,7 @@ import { View, Text, Pressable, TextInput, StyleSheet, useWindowDimensions } fro
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GiphySDK, GiphyGridView, GiphyContent } from '@giphy/react-native-sdk';
+import { GiphyGridView, GiphyContent } from '@giphy/react-native-sdk';
 import emojiGroups from 'unicode-emoji-json/data-by-group.json';
 import emojiByChar from 'unicode-emoji-json/data-by-emoji.json';
 import Colors from '../../constants/Colors';
@@ -58,19 +58,14 @@ export default function MediaPanel({ onSelect, onBackspace, onGifSelect, height,
   const [activeSlug, setActiveSlug] = useState('smileys_emotion');
   const [query, setQuery] = useState('');
   const [recents, setRecents] = useState<string[]>([]);
-  const [gifReady, setGifReady] = useState(false);
+  // The SDK is configured at app boot (app/_layout.tsx). Without a key the GIF
+  // tab shows a friendly message instead of crashing.
+  const gifReady = !!GIPHY_API_KEY;
 
   useEffect(() => {
     AsyncStorage.getItem(RECENTS_KEY)
       .then((v) => { if (v) { try { setRecents(JSON.parse(v)); } catch { /* ignore */ } } })
       .catch(() => {});
-  }, []);
-
-  // Configure the Giphy SDK once (idempotent). Without a key the GIF tab shows a
-  // friendly message instead of crashing.
-  useEffect(() => {
-    if (!GIPHY_API_KEY) return;
-    try { GiphySDK.configure({ apiKey: GIPHY_API_KEY }); setGifReady(true); } catch { /* leave gifReady false */ }
   }, []);
 
   const numColumns = Math.max(6, Math.floor(width / COLUMN_TARGET_WIDTH));
@@ -168,10 +163,9 @@ export default function MediaPanel({ onSelect, onBackspace, onGifSelect, height,
 
       {tab === 'emoji' ? (
         <FlashList
-          key={`${activeSlug}:${query ? 'q' : 'cat'}`}
           data={emojiData}
           numColumns={numColumns}
-          keyExtractor={(item, i) => `${item}:${i}`}
+          keyExtractor={(item) => item}
           renderItem={renderEmoji}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
