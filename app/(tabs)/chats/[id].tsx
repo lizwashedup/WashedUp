@@ -283,19 +283,27 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
 
   const reactions = message.reactions ?? [];
   const totalReactions = reactions.length;
-  // Collect unique emojis in order of first appearance
-  const uniqueEmojis: string[] = [];
-  const seen = new Set<string>();
-  for (const r of reactions) {
-    if (!seen.has(r.reaction)) {
-      seen.add(r.reaction);
-      uniqueEmojis.push(r.reaction);
+  // Collect unique emojis in order of first appearance — memoized so a parent
+  // re-render that didn't touch reactions skips the loop.
+  const uniqueEmojis = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const r of reactions) {
+      if (!seen.has(r.reaction)) { seen.add(r.reaction); out.push(r.reaction); }
     }
-  }
+    return out;
+  }, [reactions]);
   const iReacted = reactions.some(r => r.user_id === currentUserId);
   // First link in a text message gets a rich preview card under the text (the
-  // card renders nothing until og-unfurl returns usable metadata).
-  const firstUrl = message.message_type === 'user' ? (message.content?.match(URL_PATTERN)?.[0] ?? null) : null;
+  // card renders nothing until og-unfurl returns usable metadata). Memoized so
+  // the regex doesn't re-run on unrelated re-renders.
+  const firstUrl = useMemo(
+    () => (message.message_type === 'user' ? (message.content?.match(URL_PATTERN)?.[0] ?? null) : null),
+    [message.message_type, message.content],
+  );
+  // Cache the emoji-only verdict per content — the regex/Segmenter test is
+  // cheap individually but runs for every bubble on every list re-render.
+  const isEmojiOnlyMsg = useMemo(() => isEmojiOnly(message.content), [message.content]);
 
   const borderRadius = isOwn
     ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 2 }
@@ -406,7 +414,7 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
                 </Text>
               </Pressable>
             );
-          })() : isEmojiOnly(message.content) && !message.reply_to ? (
+          })() : isEmojiOnlyMsg && !message.reply_to ? (
             <Text style={bubbleStyles.emojiOnly}>{message.content}</Text>
           ) : (
             <View style={[
@@ -1566,6 +1574,31 @@ export default function ChatScreen() {
     return items.reverse();
   }, [messages]);
 
+  // Stable callbacks for MessageBubble's memo to actually work — inline lambdas
+  // at the call site would create new function refs every render and break it,
+  // which made every keystroke re-render every row (visible Android jank).
+  const handleReaction = useCallback(
+    (msgId: string, emoji?: string) => toggleReaction(msgId, emoji ?? 'heart'),
+    [toggleReaction],
+  );
+  const handleMessageLongPress = useCallback(
+    (msg: ChatMessage, ownFlag: boolean) => setOverlayMessage({ message: msg, isOwn: ownFlag }),
+    [],
+  );
+  // enrichedItems is read via a ref so this callback stays stable across message
+  // updates — depending on enrichedItems directly would re-break the memo every
+  // time a new message lands.
+  const enrichedItemsRef = useRef(enrichedItems);
+  useEffect(() => { enrichedItemsRef.current = enrichedItems; }, [enrichedItems]);
+  const handleReplyTap = useCallback((msgId: string) => {
+    const items = enrichedItemsRef.current;
+    const idx = items.findIndex(item => !('type' in item) && item.id === msgId);
+    if (idx >= 0) {
+      listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+    }
+  }, []);
+  const handleAvatarPress = useCallback((uid: string) => setMiniProfileUserId(uid), []);
+
   return (
     <View style={{ flex: 1, backgroundColor: Colors.parchment }}>
       {/* ── Header ── */}
@@ -1847,15 +1880,10 @@ export default function ChatScreen() {
                     currentUserId={currentUserId}
                     planTitle={event?.title}
                     onPhotoPress={setPhotoViewUrl}
-                    onReaction={(msgId, emoji) => toggleReaction(msgId, emoji ?? 'heart')}
-                    onMessageLongPress={(msg, own) => setOverlayMessage({ message: msg, isOwn: own })}
-                    onReplyTap={(msgId) => {
-                      const idx = enrichedItems.findIndex(item => !('type' in item) && item.id === msgId);
-                      if (idx >= 0) {
-                        listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
-                      }
-                    }}
-                    onAvatarPress={(uid) => setMiniProfileUserId(uid)}
+                    onReaction={handleReaction}
+                    onMessageLongPress={handleMessageLongPress}
+                    onReplyTap={handleReplyTap}
+                    onAvatarPress={handleAvatarPress}
                     mentionNames={mentionNames}
                   />
                 </SwipeableRow>
