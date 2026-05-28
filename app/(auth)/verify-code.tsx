@@ -495,16 +495,12 @@ const styles = StyleSheet.create({
   gap28: { height: 28 },
   cellsBare: {
     paddingVertical: 4,
-    width: '100%',
-    alignSelf: 'center',
   },
   cellsCard: {
     backgroundColor: Colors.cream,
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 10,
-    width: '100%',
-    alignSelf: 'center',
     shadowColor: Colors.brandDeep,
     shadowOffset: { width: 0, height: 24 },
     shadowOpacity: 0.28,

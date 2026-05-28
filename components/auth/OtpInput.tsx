@@ -138,7 +138,6 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
 
   return (
     <Pressable
-      style={styles.pressable}
       onPress={focus}
       accessibilityRole="button"
       accessibilityLabel="enter verification code"
@@ -174,27 +173,16 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
 const CELL_W = 44;
 const CELL_H = 60;
 const CELL_RADIUS = 10;
-const CELL_GAP = 6;
-const CELL_COUNT = 6;
-// Row caps at this width so cells hit CELL_W on wide screens, then shrink
-// fluidly via flex:1 on narrow phones (iPhone SE / Android compact ≤ 360 wide).
-// Pre-fix the row was a fixed 294px which overflowed the SE's 264px content area.
-const ROW_MAX_WIDTH = CELL_COUNT * CELL_W + (CELL_COUNT - 1) * CELL_GAP;
 
 const styles = StyleSheet.create({
-  pressable: { width: '100%' },
   row: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: CELL_GAP,
-    width: '100%',
-    maxWidth: ROW_MAX_WIDTH,
-    alignSelf: 'center',
+    gap: 6,
   },
   cell: {
-    flex: 1,
-    maxWidth: CELL_W,
-    aspectRatio: CELL_W / CELL_H,
+    width: CELL_W,
+    height: CELL_H,
     borderRadius: CELL_RADIUS,
     alignItems: 'center',
     justifyContent: 'center',
