@@ -371,7 +371,11 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
             </View>
           ) : !!message.image_url ? (
             <View>
-              <Pressable onPress={() => onPhotoPress?.(message.image_url!)}>
+              <Pressable
+                onPress={() => onPhotoPress?.(message.image_url!)}
+                onLongPress={handleLongPress}
+                delayLongPress={400}
+              >
                 <Image
                   source={{ uri: message.image_url }}
                   style={[bubbleStyles.messageImage, borderRadius]}
@@ -415,7 +419,12 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               </Pressable>
             );
           })() : isEmojiOnlyMsg && !message.reply_to ? (
-            <Text style={bubbleStyles.emojiOnly}>{message.content}</Text>
+            // Wrap the emoji glyph in a padded View so the outer Pressable has a
+            // real hit area — a bare Text loses the long-press to the row-level
+            // SwipeableRow's pan gesture on Android, hiding the delete overlay.
+            <View style={bubbleStyles.emojiOnlyWrap}>
+              <Text style={bubbleStyles.emojiOnly}>{message.content}</Text>
+            </View>
           ) : (
             <View style={[
               bubbleStyles.bubble,
@@ -493,6 +502,7 @@ const bubbleStyles = StyleSheet.create({
   },
   messageText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 22 },
   emojiOnly: { fontSize: 44, lineHeight: 54, paddingVertical: 2 },
+  emojiOnlyWrap: { paddingVertical: 6, paddingHorizontal: 10 },
   imageCaption: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 21, marginTop: 6, maxWidth: 260 },
   imageCaptionOwn: { color: Colors.darkWarm },
   messageTextOwn: { color: Colors.white },
