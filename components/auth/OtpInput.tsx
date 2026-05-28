@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Animated,
   Easing,
   Platform,
+  useWindowDimensions,
   type StyleProp,
   type ViewStyle,
   type TextStyle,
@@ -51,6 +52,20 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
 ) {
   const inputRef = useRef<TextInput>(null);
   const shake = useRef(new Animated.Value(0)).current;
+
+  // Responsive cell sizing — cells cap at the design CELL_W on phones that
+  // can accommodate, shrink fluidly on iPhone SE / Android compact / Z Fold
+  // cover. Matches the canonical RN pattern documented by
+  // react-native-confirmation-code-field. Memoized so it only recomputes on
+  // orientation change, not every render.
+  const { width: screenW } = useWindowDimensions();
+  const computedCell = useMemo(() => {
+    const PARENT_PADDING = 56; // verify-code KAV uses paddingHorizontal: 28 (× 2)
+    const totalGaps = (CELL_COUNT - 1) * CELL_GAP;
+    const w = Math.min(CELL_W, Math.floor((screenW - PARENT_PADDING - totalGaps) / CELL_COUNT));
+    const h = Math.round(w * (CELL_H / CELL_W));
+    return { width: w, height: h };
+  }, [screenW]);
 
   // On web, react-native-web maps autoComplete="sms-otp" to the HTML
   // autocomplete="one-time-code" input. Chrome throws
@@ -130,7 +145,7 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
     }
 
     return (
-      <View key={i} style={[styles.cell, cellStyle]}>
+      <View key={i} style={[styles.cell, computedCell, cellStyle]}>
         <Text style={textStyle}>{ch}</Text>
       </View>
     );
@@ -138,7 +153,6 @@ export const OtpInput = forwardRef<OtpInputHandle, Props>(function OtpInput(
 
   return (
     <Pressable
-      style={styles.pressable}
       onPress={focus}
       accessibilityRole="button"
       accessibilityLabel="enter verification code"
@@ -176,25 +190,14 @@ const CELL_H = 60;
 const CELL_RADIUS = 10;
 const CELL_GAP = 6;
 const CELL_COUNT = 6;
-// Row caps at this width so cells hit CELL_W on wide screens, then shrink
-// fluidly via flex:1 on narrow phones (iPhone SE / Android compact ≤ 360 wide).
-// Pre-fix the row was a fixed 294px which overflowed the SE's 264px content area.
-const ROW_MAX_WIDTH = CELL_COUNT * CELL_W + (CELL_COUNT - 1) * CELL_GAP;
 
 const styles = StyleSheet.create({
-  pressable: { width: '100%' },
   row: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: CELL_GAP,
-    width: '100%',
-    maxWidth: ROW_MAX_WIDTH,
-    alignSelf: 'center',
   },
   cell: {
-    flex: 1,
-    maxWidth: CELL_W,
-    aspectRatio: CELL_W / CELL_H,
     borderRadius: CELL_RADIUS,
     alignItems: 'center',
     justifyContent: 'center',
