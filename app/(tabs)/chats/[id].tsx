@@ -165,6 +165,26 @@ function isSameDay(a: string, b: string): boolean {
 
 const URL_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
 
+// Image bubble sizing — bounds the bubble while preserving the source image's
+// aspect ratio (the old 240x180 + contentFit:cover cropped tall GIFs to their
+// top). Intrinsic w/h is captured via expo-image's onLoad and cached so the
+// same image (e.g. a GIF reused in scrollback) doesn't re-measure on every
+// remount.
+const MESSAGE_IMAGE_MAX_WIDTH = 240;
+const MESSAGE_IMAGE_MAX_HEIGHT = 320;
+const MESSAGE_IMAGE_DEFAULT_AR = 4 / 3;
+const imageSizeCache = new Map<string, { w: number; h: number }>();
+function fitImage(natural: { w: number; h: number } | null) {
+  const ar = natural && natural.h > 0 ? natural.w / natural.h : MESSAGE_IMAGE_DEFAULT_AR;
+  let width = MESSAGE_IMAGE_MAX_WIDTH;
+  let height = width / ar;
+  if (height > MESSAGE_IMAGE_MAX_HEIGHT) {
+    height = MESSAGE_IMAGE_MAX_HEIGHT;
+    width = height * ar;
+  }
+  return { width: Math.round(width), height: Math.round(height) };
+}
+
 const MENTION_SUGGESTION_LIMIT = 6;
 // Matches an "@name" being typed right at the caret (start of text or after
 // whitespace), capturing the partial name. Returns null when the caret isn't in
@@ -304,6 +324,14 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
   // Cache the emoji-only verdict per content — the regex/Segmenter test is
   // cheap individually but runs for every bubble on every list re-render.
   const isEmojiOnlyMsg = useMemo(() => isEmojiOnly(message.content), [message.content]);
+  // Intrinsic image size — seeded from the module-level cache if we've seen
+  // this URL before, otherwise updated by the Image's onLoad. fitImage clamps
+  // to the bubble bounds while keeping the source aspect ratio (no more
+  // top-of-GIF cropping for portrait sources).
+  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(
+    () => (message.image_url ? imageSizeCache.get(message.image_url) ?? null : null),
+  );
+  const imageDisplaySize = useMemo(() => fitImage(imgSize), [imgSize]);
 
   const borderRadius = isOwn
     ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 2 }
@@ -378,11 +406,19 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               >
                 <Image
                   source={{ uri: message.image_url }}
-                  style={[bubbleStyles.messageImage, borderRadius]}
-                  contentFit="cover"
+                  style={[bubbleStyles.messageImage, imageDisplaySize, borderRadius]}
+                  contentFit="contain"
                   transition={200}
                   placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
                   cachePolicy="memory-disk"
+                  onLoad={(e) => {
+                    const w = e.source?.width;
+                    const h = e.source?.height;
+                    if (w && h && message.image_url) {
+                      imageSizeCache.set(message.image_url, { w, h });
+                      setImgSize({ w, h });
+                    }
+                  }}
                 />
               </Pressable>
               {!!message.content?.trim() && (
@@ -512,7 +548,7 @@ const bubbleStyles = StyleSheet.create({
   linkOwn: { textDecorationLine: 'underline' as const, color: Colors.white },
   mention: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
   mentionOwn: { fontFamily: Fonts.sansBold, color: Colors.white },
-  messageImage: { width: 240, height: 180 },
+  messageImage: { backgroundColor: Colors.inputBg },
   systemRow: { alignItems: 'center', marginVertical: 8, paddingHorizontal: 16 },
   systemText: {
     fontFamily: Fonts.sans,
