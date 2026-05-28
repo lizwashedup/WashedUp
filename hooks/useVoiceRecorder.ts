@@ -19,6 +19,12 @@ export type RecorderStatus = 'idle' | 'recording' | 'paused';
 
 const METERING_SAMPLE_CAP = 48; // most recent bars kept for the live waveform
 const METERING_MIN_DB = -60; // map [-60dB, 0dB] -> [0, 1]
+// Throttle React state emission of the rolling metering buffer. expo-audio
+// pushes metering updates well above 30 Hz, and re-rendering the waveform
+// on every tick floods the JS thread on Android (visible lag behind speech).
+// 12 Hz is visually smooth and slashes React work ~5x; the ref still
+// accumulates every sample so the stored envelope keeps its full resolution.
+const METERING_EMIT_INTERVAL_MS = 80;
 
 export interface StoppedRecording {
   uri: string;
@@ -39,16 +45,24 @@ export function useVoiceRecorder() {
   const [status, setStatus] = useState<RecorderStatus>('idle');
   const [meterings, setMeterings] = useState<number[]>([]);
   const meteringsRef = useRef<number[]>([]);
+  const lastEmitRef = useRef(0);
   const durationRef = useRef(0);
 
   // Accumulate metering into a rolling buffer while actively recording (paused
   // state still reports isRecording=false, so this naturally stops sampling).
+  // The ref captures every sample (used by stop() for the persisted envelope);
+  // setMeterings only fires at most every METERING_EMIT_INTERVAL_MS to keep
+  // Android renders bounded — see the constant above.
   useEffect(() => {
     if (!recState.isRecording || typeof recState.metering !== 'number') return;
     const norm = normalizeMetering(recState.metering);
     const next = [...meteringsRef.current.slice(-(METERING_SAMPLE_CAP - 1)), norm];
     meteringsRef.current = next;
-    setMeterings(next);
+    const now = Date.now();
+    if (now - lastEmitRef.current >= METERING_EMIT_INTERVAL_MS) {
+      lastEmitRef.current = now;
+      setMeterings(next);
+    }
   }, [recState.metering, recState.isRecording]);
 
   // Keep the latest duration in a ref so stop() reads a fresh value without
@@ -61,6 +75,7 @@ export function useVoiceRecorder() {
     setStatus('idle');
     setMeterings([]);
     meteringsRef.current = [];
+    lastEmitRef.current = 0;
     durationRef.current = 0;
   }, []);
 

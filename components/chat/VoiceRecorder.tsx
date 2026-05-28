@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { memo, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -47,7 +47,10 @@ function formatTime(totalMillis: number): string {
   return `${m}:${r < 10 ? '0' : ''}${r}`;
 }
 
-function LiveWaveform({ meterings }: { meterings: number[] }) {
+// Memoized so a parent re-render that didn't change `meterings` doesn't remap
+// the 48 bars. Combined with the metering-emit throttle in useVoiceRecorder,
+// this keeps the waveform off the Android render hot path.
+const LiveWaveform = memo(function LiveWaveform({ meterings }: { meterings: number[] }) {
   return (
     <View style={styles.waveform}>
       {meterings.map((ratio, i) => (
@@ -58,7 +61,7 @@ function LiveWaveform({ meterings }: { meterings: number[] }) {
       ))}
     </View>
   );
-}
+});
 
 function RecordingDot() {
   const opacity = useSharedValue(1);
@@ -69,7 +72,7 @@ function RecordingDot() {
   return <Animated.View style={[styles.dot, animatedStyle]} />;
 }
 
-export default function VoiceRecorder({
+function VoiceRecorder({
   mode,
   durationMillis,
   meterings,
@@ -199,3 +202,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+// Memoized so unrelated screen re-renders (chat messages arriving, typing
+// indicators, keyboard animation) don't recursively re-render the recording UI.
+export default memo(VoiceRecorder);
