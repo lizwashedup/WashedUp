@@ -69,13 +69,15 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- chat_reads uniqueness for circle rows. The existing unique on (user_id,
--- event_id) treats NULL event_id as distinct, so it would NOT stop duplicate
--- circle read-rows. Mirror it with a partial unique on (user_id, circle_id).
+-- chat_reads uniqueness for circle rows. A PLAIN (non-partial) unique on
+-- (user_id, circle_id): event rows have circle_id NULL and NULLs are distinct,
+-- so events are unaffected; circle rows get one read-marker per user. It is
+-- intentionally non-partial so the client read-path upsert can target it with
+-- onConflict 'user_id,circle_id' (supabase-js emits no partial predicate, so a
+-- partial index would not match the ON CONFLICT specification).
 -- ---------------------------------------------------------------------------
 CREATE UNIQUE INDEX IF NOT EXISTS chat_reads_user_id_circle_id_key
-  ON public.chat_reads (user_id, circle_id)
-  WHERE circle_id IS NOT NULL;
+  ON public.chat_reads (user_id, circle_id);
 
 -- ---------------------------------------------------------------------------
 -- Lookup indexes for the circle chat path.
