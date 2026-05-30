@@ -19,7 +19,10 @@ export interface ReplyTo {
 
 export interface ChatMessage {
   id: string;
-  event_id: string;
+  // A message is parented by EITHER an event (plan) OR a circle, never both
+  // (DB XOR constraint). Both optional here so the same shape serves both.
+  event_id?: string | null;
+  circle_id?: string | null;
   user_id: string;
   content: string;
   message_type: 'user' | 'system' | 'location' | 'audio';
@@ -36,6 +39,16 @@ export interface ChatMessage {
     avatar_url: string | null;
   } | null;
 }
+
+/**
+ * A chat conversation is keyed by either a plan (event) or a circle. The hook
+ * switches its data source, realtime channel, and read path on this key. Plan
+ * chats behave exactly as before; the circle branch is reachable only behind
+ * GROUPS_ENABLED + the gated circle route.
+ */
+export type ConversationKey =
+  | { kind: 'event'; id: string }
+  | { kind: 'circle'; id: string };
 
 async function attachSenders(messages: any[]): Promise<ChatMessage[]> {
   const allIds = messages.map(m => m.user_id).filter(Boolean);
@@ -63,7 +76,15 @@ async function attachSenders(messages: any[]): Promise<ChatMessage[]> {
   })) as ChatMessage[];
 }
 
-export function useChat(eventId: string) {
+export function useChat(key: ConversationKey) {
+  // Primitive fields drive all effect/callback deps so a fresh key object on
+  // each render does not re-subscribe the realtime channel.
+  const { kind, id: conversationId } = key;
+  // Polymorphic parent column: plans use event_id, circles use circle_id.
+  const parentCol: 'event_id' | 'circle_id' = kind === 'event' ? 'event_id' : 'circle_id';
+  // Spread onto inserts/optimistic rows so exactly one parent column is set.
+  const parentFields: Record<string, string> = { [parentCol]: conversationId };
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string>('');
@@ -90,15 +111,19 @@ export function useChat(eventId: string) {
   const cancelledRef = useRef(false);
 
   useEffect(() => {
-    if (!eventId) return;
+    if (!conversationId) return;
     cancelledRef.current = false;
     fetchMessages();
 
+    // Event channel name kept byte-identical to before; circles use a distinct name.
+    const channelName = kind === 'event' ? `chat:${conversationId}` : `chat:circle:${conversationId}`;
+    const filter = `${parentCol}=eq.${conversationId}`;
+
     const channel = supabase
-      .channel(`chat:${eventId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
+        { event: 'INSERT', schema: 'public', table: 'messages', filter },
         async (payload) => {
           const newMsg = payload.new as any;
           if (blockedIdsRef.current[newMsg.user_id]) return;
@@ -122,7 +147,7 @@ export function useChat(eventId: string) {
       )
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter },
         (payload) => {
           const updated = payload.new as any;
           if (updated?.id && !cancelledRef.current) {
@@ -134,7 +159,7 @@ export function useChat(eventId: string) {
       )
       .on(
         'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
+        { event: 'DELETE', schema: 'public', table: 'messages', filter },
         (payload) => {
           const deleted = payload.old as any;
           if (deleted?.id && !cancelledRef.current) {
@@ -145,42 +170,58 @@ export function useChat(eventId: string) {
       .subscribe();
 
     return () => { cancelledRef.current = true; supabase.removeChannel(channel); };
-  }, [eventId]);
+  }, [kind, conversationId]);
 
   const fetchMessages = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
+      // Event path selects the ORIGINAL columns only (no circle_id) so it stays
+      // byte-identical to before and works against prod, which has no circle_id
+      // column until the Circles migration is applied. Only the circle path adds it.
+      const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id${kind === 'circle' ? ', circle_id' : ''}`;
       const [{ data }, { data: { user } }] = await Promise.all([
         supabase
           .from('messages')
-          .select('id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id')
-          .eq('event_id', eventId)
+          .select(selectCols)
+          .eq(parentCol, conversationId)
           .order('created_at', { ascending: true }),
         supabase.auth.getUser(),
       ]);
       if (cancelledRef.current) return;
       if (user) {
         const msgIds = (data ?? []).map((m: any) => m.id);
+        // Mark this conversation read. Plans and circles use different unique
+        // keys on chat_reads, so the onConflict target differs.
+        const readUpsert = kind === 'event'
+          ? supabase.from('chat_reads').upsert(
+              { event_id: conversationId, user_id: user.id, last_read_at: new Date().toISOString() },
+              { onConflict: 'event_id,user_id' },
+            )
+          : supabase.from('chat_reads').upsert(
+              { circle_id: conversationId, user_id: user.id, last_read_at: new Date().toISOString() },
+              { onConflict: 'user_id,circle_id' },
+            );
+        // new_message notifications are event-only today; circles have no
+        // notification type yet, so the circle branch skips the clear + badge.
+        const notifClear = kind === 'event'
+          ? supabase.from('app_notifications')
+              .update({ status: 'read' })
+              .eq('user_id', user.id)
+              .eq('event_id', conversationId)
+              .eq('type', 'new_message')
+              .eq('status', 'unread')
+          : Promise.resolve({ data: null });
         const [{ data: profile }, , , { data: reactionsData }] = await Promise.all([
           supabase.from('profiles').select('blocked_users').eq('id', user.id).maybeSingle(),
-          supabase.from('chat_reads').upsert(
-            { event_id: eventId, user_id: user.id, last_read_at: new Date().toISOString() },
-            { onConflict: 'event_id,user_id' },
-          ),
-          // Mark new_message notifications for this chat as read so the tab badge clears
-          supabase.from('app_notifications')
-            .update({ status: 'read' })
-            .eq('user_id', user.id)
-            .eq('event_id', eventId)
-            .eq('type', 'new_message')
-            .eq('status', 'unread'),
+          readUpsert,
+          notifClear,
           msgIds.length > 0
             ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
             : Promise.resolve({ data: [] as any[] }),
         ]);
         if (cancelledRef.current) return;
-        // Invalidate tab badge so it reflects the just-cleared notifications
-        queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
+        // Invalidate tab badge so it reflects the just-cleared notifications (event chats only).
+        if (kind === 'event') queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
 
         const reactionsByMsg: Record<string, MessageReaction[]> = {};
         (reactionsData ?? []).forEach((r: any) => {
@@ -215,7 +256,7 @@ export function useChat(eventId: string) {
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
-  }, [eventId]);
+  }, [kind, conversationId]);
 
   const toggleReaction = useCallback(async (messageId: string, reaction = 'heart') => {
     const userId = currentUserIdRef.current;
@@ -279,7 +320,7 @@ export function useChat(eventId: string) {
     } finally {
       reactionInFlightRef.current.delete(messageId);
     }
-  }, [eventId]);
+  }, []);
 
   const deleteMessage = useCallback(async (messageId: string) => {
     const userId = currentUserIdRef.current;
@@ -325,7 +366,7 @@ export function useChat(eventId: string) {
 
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
-      event_id: eventId,
+      ...parentFields,
       user_id: userId,
       content: content || '',
       message_type: 'user',
@@ -340,7 +381,7 @@ export function useChat(eventId: string) {
 
     // Insert and select back the real row so we can confirm the message even if real-time is slow
     const insertData: any = {
-      event_id: eventId,
+      ...parentFields,
       user_id: userId,
       content: content || '',
       message_type: 'user',
@@ -361,7 +402,7 @@ export function useChat(eventId: string) {
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
       ));
     }
-  }, [eventId]);
+  }, [kind, conversationId]);
 
   const sendLocation = useCallback(async (lat: number, lng: number, address: string) => {
     const userId = currentUserIdRef.current;
@@ -373,7 +414,7 @@ export function useChat(eventId: string) {
     const optimisticId = `optimistic-${Date.now()}`;
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
-      event_id: eventId,
+      ...parentFields,
       user_id: userId,
       content,
       message_type: 'location',
@@ -385,7 +426,7 @@ export function useChat(eventId: string) {
     setMessages(prev => [...prev, optimisticMsg]);
 
     const { data: inserted, error } = await supabase.from('messages').insert({
-      event_id: eventId,
+      ...parentFields,
       user_id: userId,
       content,
       message_type: 'location',
@@ -400,7 +441,7 @@ export function useChat(eventId: string) {
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
       ));
     }
-  }, [eventId]);
+  }, [kind, conversationId]);
 
   const sendAudio = useCallback(async (audioUrl: string, durationSeconds: number) => {
     const userId = currentUserIdRef.current;
@@ -411,7 +452,7 @@ export function useChat(eventId: string) {
     const optimisticId = `optimistic-${Date.now()}`;
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
-      event_id: eventId,
+      ...parentFields,
       user_id: userId,
       content: '',
       message_type: 'audio',
@@ -425,7 +466,7 @@ export function useChat(eventId: string) {
     setMessages(prev => [...prev, optimisticMsg]);
 
     const { data: inserted, error } = await supabase.from('messages').insert({
-      event_id: eventId,
+      ...parentFields,
       user_id: userId,
       content: '',
       message_type: 'audio',
@@ -442,7 +483,7 @@ export function useChat(eventId: string) {
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
       ));
     }
-  }, [eventId]);
+  }, [kind, conversationId]);
 
   const editMessage = useCallback(async (messageId: string, newContent: string) => {
     const userId = currentUserIdRef.current;
