@@ -55,6 +55,14 @@ function formatEventDate(dateString: string): string {
   return `${dayStr} at ${timeStr}`;
 }
 
+// Route a chat row to its screen by kind. Circle chats use the gated circle
+// route stub; plan chats keep the existing /(tabs)/chats/[id] route.
+function chatHref(chat: ChatPreview): string {
+  return chat.kind === 'circle'
+    ? `/(tabs)/chats/circle/${chat.conversationId}`
+    : `/(tabs)/chats/${chat.conversationId}`;
+}
+
 const ChatSeparator = () => <View style={styles.separator} />;
 
 const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) {
@@ -180,7 +188,7 @@ export default function ChatsScreen() {
   const renderChat = useCallback(({ item }: { item: ChatPreview }) => (
     <ChatRow
       chat={item}
-      onPress={() => router.push(`/(tabs)/chats/${item.eventId}` as any)}
+      onPress={() => router.push(chatHref(item) as any)}
     />
   ), [router]);
 
@@ -221,7 +229,7 @@ export default function ChatsScreen() {
         <FlatList
           decelerationRate="normal"
           data={activeChats}
-          keyExtractor={item => item.eventId}
+          keyExtractor={item => item.conversationId}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.terracotta} />
           }
@@ -255,11 +263,11 @@ export default function ChatsScreen() {
                 </View>
               </TouchableOpacity>
               {pastExpanded && pastChats.map((chat, i) => (
-                <React.Fragment key={chat.eventId}>
+                <React.Fragment key={chat.conversationId}>
                   {i > 0 && <View style={styles.separator} />}
                   <ChatRow
                     chat={chat}
-                    onPress={() => router.push(`/(tabs)/chats/${chat.eventId}` as any)}
+                    onPress={() => router.push(chatHref(chat) as any)}
                   />
                 </React.Fragment>
               ))}

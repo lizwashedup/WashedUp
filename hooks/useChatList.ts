@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { GROUPS_ENABLED } from '../constants/FeatureFlags';
 
 export interface ChatPreview {
-  eventId: string;
+  // A conversation row is either a plan (event) chat or a circle chat.
+  kind: 'event' | 'circle';
+  // Generic id used for routing + list keys, regardless of kind.
+  conversationId: string;
+  // Event rows only (kept so event-specific call sites keep compiling).
+  eventId?: string;
   title: string;
   category: string | null;
   image_url: string | null;
@@ -14,6 +20,103 @@ export interface ChatPreview {
   is_past: boolean;
   ticket_url: string | null;
   member_avatars: string[];
+}
+
+/**
+ * Build circle-chat previews for the current user. Reachable only behind
+ * GROUPS_ENABLED (the circles tables/RPCs are not applied to prod yet), and the
+ * caller wraps this so any failure degrades to an event-only list.
+ */
+async function fetchCircleChats(userId: string): Promise<ChatPreview[]> {
+  const { data: memberships } = await supabase
+    .from('circle_members')
+    .select('circle_id, circles ( id, name, cover_upload_id, status, created_at )')
+    .eq('user_id', userId)
+    .eq('status', 'joined');
+
+  const circleIds = (memberships ?? []).map((m: any) => m.circles?.id).filter(Boolean);
+  if (circleIds.length === 0) return [];
+
+  const [{ data: countRows }, { data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows }] = await Promise.all([
+    supabase.from('circle_members').select('circle_id').in('circle_id', circleIds).eq('status', 'joined'),
+    supabase.from('messages')
+      .select('circle_id, content, created_at, image_url, audio_url, message_type, user_id')
+      .in('circle_id', circleIds)
+      .order('created_at', { ascending: false })
+      .limit(circleIds.length * 3),
+    supabase.from('chat_reads').select('circle_id, last_read_at').eq('user_id', userId).in('circle_id', circleIds),
+    supabase.from('messages')
+      .select('circle_id, created_at')
+      .in('circle_id', circleIds)
+      .neq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(circleIds.length * 20),
+    supabase.from('circle_members')
+      .select('circle_id, user_id, profiles_public!inner(profile_photo_url, first_name_display)')
+      .in('circle_id', circleIds)
+      .eq('status', 'joined'),
+  ]);
+
+  const realCounts: Record<string, number> = {};
+  (countRows ?? []).forEach((r: any) => { realCounts[r.circle_id] = (realCounts[r.circle_id] ?? 0) + 1; });
+
+  const lastMsgMap: Record<string, any> = {};
+  (allMessages ?? []).forEach((msg: any) => { if (!lastMsgMap[msg.circle_id]) lastMsgMap[msg.circle_id] = msg; });
+
+  const senderNameMap: Record<string, string> = {};
+  const avatarMap: Record<string, string[]> = {};
+  (memberRows ?? []).forEach((r: any) => {
+    const profile = r.profiles_public as any;
+    const name = profile?.first_name_display;
+    if (name && r.user_id && !senderNameMap[r.user_id]) senderNameMap[r.user_id] = name;
+    const url = profile?.profile_photo_url;
+    if (url && r.circle_id) {
+      if (!avatarMap[r.circle_id]) avatarMap[r.circle_id] = [];
+      if (avatarMap[r.circle_id].length < 4) avatarMap[r.circle_id].push(url);
+    }
+  });
+
+  const readMap: Record<string, string> = {};
+  (allReads ?? []).forEach((r: any) => { readMap[r.circle_id] = r.last_read_at; });
+
+  const unreadMap: Record<string, number> = {};
+  (otherMessages ?? []).forEach((msg: any) => {
+    const lastRead = readMap[msg.circle_id];
+    if (!lastRead || msg.created_at > lastRead) {
+      unreadMap[msg.circle_id] = (unreadMap[msg.circle_id] ?? 0) + 1;
+    }
+  });
+
+  return (memberships ?? [])
+    .map((m: any) => m.circles)
+    .filter(Boolean)
+    .map((circle: any): ChatPreview => {
+      const lastMsg = lastMsgMap[circle.id];
+      return {
+        kind: 'circle',
+        conversationId: circle.id,
+        title: circle.name,
+        category: null,
+        image_url: null,
+        start_time: circle.created_at,
+        member_count: realCounts[circle.id] ?? 0,
+        ticket_url: null,
+        last_message: lastMsg
+          ? (() => {
+              const isOwn = lastMsg.user_id === userId;
+              const senderName = isOwn ? 'You' : (senderNameMap[lastMsg.user_id] ?? null);
+              const text = lastMsg.message_type === 'audio' || lastMsg.audio_url
+                ? 'sent a voice message'
+                : lastMsg.image_url ? 'sent a photo' : lastMsg.content;
+              return senderName ? `${senderName}: ${text}` : text;
+            })()
+          : null,
+        last_message_at: lastMsg?.created_at ?? null,
+        unread_count: unreadMap[circle.id] ?? 0,
+        is_past: false,
+        member_avatars: avatarMap[circle.id] ?? [],
+      };
+    });
 }
 
 export function useChatList() {
@@ -42,127 +145,141 @@ export function useChatList() {
       if (membershipsError || !memberships) return;
 
       const allEventIds = memberships.map((m: any) => m.events?.id).filter(Boolean);
-      if (allEventIds.length === 0) {
-        setChats([]);
-        return;
-      }
 
       // Run all 5 queries in parallel against allEventIds. Member-count drift
       // correction (events.member_count vs real joined rows) used to be a
       // sequential pre-step before the batch; folding it in saves a round-trip.
       // The memberRows2 query also pulls first_name_display so we get sender
       // names alongside avatars without a separate sender-profiles lookup.
-      const [{ data: memberCountRows }, { data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = await Promise.all([
-        supabase
-          .from('event_members')
-          .select('event_id')
-          .in('event_id', allEventIds)
-          .eq('status', 'joined'),
-        supabase
-          .from('messages')
-          .select('event_id, content, created_at, image_url, audio_url, message_type, user_id')
-          .in('event_id', allEventIds)
-          .order('created_at', { ascending: false })
-          .limit(allEventIds.length * 3),
-        supabase
-          .from('chat_reads')
-          .select('event_id, last_read_at')
-          .eq('user_id', user.id)
-          .in('event_id', allEventIds),
-        supabase
-          .from('messages')
-          .select('event_id, created_at')
-          .in('event_id', allEventIds)
-          .neq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(allEventIds.length * 20),
-        supabase
-          .from('event_members')
-          .select('event_id, user_id, profiles_public!inner(profile_photo_url, first_name_display)')
-          .in('event_id', allEventIds)
-          .eq('status', 'joined'),
-      ]);
+      let eventPreviews: ChatPreview[] = [];
+      if (allEventIds.length > 0) {
+        const [{ data: memberCountRows }, { data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = await Promise.all([
+          supabase
+            .from('event_members')
+            .select('event_id')
+            .in('event_id', allEventIds)
+            .eq('status', 'joined'),
+          supabase
+            .from('messages')
+            .select('event_id, content, created_at, image_url, audio_url, message_type, user_id')
+            .in('event_id', allEventIds)
+            .order('created_at', { ascending: false })
+            .limit(allEventIds.length * 3),
+          supabase
+            .from('chat_reads')
+            .select('event_id, last_read_at')
+            .eq('user_id', user.id)
+            .in('event_id', allEventIds),
+          supabase
+            .from('messages')
+            .select('event_id, created_at')
+            .in('event_id', allEventIds)
+            .neq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(allEventIds.length * 20),
+          supabase
+            .from('event_members')
+            .select('event_id, user_id, profiles_public!inner(profile_photo_url, first_name_display)')
+            .in('event_id', allEventIds)
+            .eq('status', 'joined'),
+        ]);
 
-      const realCounts: Record<string, number> = {};
-      (memberCountRows ?? []).forEach((r: any) => {
-        realCounts[r.event_id] = (realCounts[r.event_id] ?? 0) + 1;
-      });
+        const realCounts: Record<string, number> = {};
+        (memberCountRows ?? []).forEach((r: any) => {
+          realCounts[r.event_id] = (realCounts[r.event_id] ?? 0) + 1;
+        });
 
-      const eligible = memberships.filter((m: any) => {
-        const e = m.events;
-        return e && (realCounts[e.id] >= 2 || e.status === 'cancelled');
-      });
+        const eligible = memberships.filter((m: any) => {
+          const e = m.events;
+          return e && (realCounts[e.id] >= 2 || e.status === 'cancelled');
+        });
 
-      if (eligible.length === 0) {
+        const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; audio_url: string | null; message_type: string | null; user_id: string }> = {};
+        (allMessages ?? []).forEach((msg: any) => {
+          if (!lastMsgMap[msg.event_id]) {
+            lastMsgMap[msg.event_id] = msg;
+          }
+        });
+
+        // Build sender-name + avatar maps from the single memberRows2 query.
+        const senderNameMap: Record<string, string> = {};
+        const avatarMap: Record<string, string[]> = {};
+        (memberRows2 ?? []).forEach((r: any) => {
+          const profile = r.profiles_public as any;
+          const name = profile?.first_name_display;
+          if (name && r.user_id && !senderNameMap[r.user_id]) {
+            senderNameMap[r.user_id] = name;
+          }
+          const url = profile?.profile_photo_url;
+          if (url && r.event_id) {
+            if (!avatarMap[r.event_id]) avatarMap[r.event_id] = [];
+            if (avatarMap[r.event_id].length < 4) avatarMap[r.event_id].push(url);
+          }
+        });
+
+        const readMap: Record<string, string> = {};
+        (allReads ?? []).forEach((r: any) => {
+          readMap[r.event_id] = r.last_read_at;
+        });
+
+        const unreadMap: Record<string, number> = {};
+        (otherMessages ?? []).forEach((msg: any) => {
+          const lastRead = readMap[msg.event_id];
+          if (!lastRead || msg.created_at > lastRead) {
+            unreadMap[msg.event_id] = (unreadMap[msg.event_id] ?? 0) + 1;
+          }
+        });
+
+        eventPreviews = eligible.map((m: any): ChatPreview => {
+          const event = m.events;
+          const isPast = event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
+          const lastMsg = lastMsgMap[event.id];
+
+          return {
+            kind: 'event',
+            conversationId: event.id,
+            eventId: event.id,
+            title: event.title,
+            category: event.primary_vibe ?? null,
+            image_url: event.image_url ?? null,
+            start_time: event.start_time,
+            member_count: realCounts[event.id] ?? event.member_count ?? 0,
+            ticket_url: event.tickets_url ?? null,
+            last_message: lastMsg
+              ? (() => {
+                  const isOwn = lastMsg.user_id === user.id;
+                  const senderName = isOwn ? 'You' : (senderNameMap[lastMsg.user_id] ?? null);
+                  const text = lastMsg.message_type === 'audio' || lastMsg.audio_url
+                    ? 'sent a voice message'
+                    : lastMsg.image_url ? 'sent a photo' : lastMsg.content;
+                  return senderName ? `${senderName}: ${text}` : text;
+                })()
+              : null,
+            last_message_at: lastMsg?.created_at ?? null,
+            unread_count: unreadMap[event.id] ?? 0,
+            is_past: isPast,
+            member_avatars: avatarMap[event.id] ?? [],
+          };
+        });
+      }
+
+      // Circle chats are additive and gated. Isolated so any circle-side failure
+      // (tables not applied, RLS, network) degrades to an event-only list and can
+      // never break the plan chat list.
+      let circlePreviews: ChatPreview[] = [];
+      if (GROUPS_ENABLED) {
+        try {
+          circlePreviews = await fetchCircleChats(user.id);
+        } catch {
+          circlePreviews = [];
+        }
+      }
+
+      const previews = [...eventPreviews, ...circlePreviews];
+      if (previews.length === 0) {
         setChats([]);
         return;
       }
-
-      const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; audio_url: string | null; message_type: string | null; user_id: string }> = {};
-      (allMessages ?? []).forEach((msg: any) => {
-        if (!lastMsgMap[msg.event_id]) {
-          lastMsgMap[msg.event_id] = msg;
-        }
-      });
-
-      // Build sender-name + avatar maps from the single memberRows2 query.
-      const senderNameMap: Record<string, string> = {};
-      const avatarMap: Record<string, string[]> = {};
-      (memberRows2 ?? []).forEach((r: any) => {
-        const profile = r.profiles_public as any;
-        const name = profile?.first_name_display;
-        if (name && r.user_id && !senderNameMap[r.user_id]) {
-          senderNameMap[r.user_id] = name;
-        }
-        const url = profile?.profile_photo_url;
-        if (url && r.event_id) {
-          if (!avatarMap[r.event_id]) avatarMap[r.event_id] = [];
-          if (avatarMap[r.event_id].length < 4) avatarMap[r.event_id].push(url);
-        }
-      });
-
-      const readMap: Record<string, string> = {};
-      (allReads ?? []).forEach((r: any) => {
-        readMap[r.event_id] = r.last_read_at;
-      });
-
-      const unreadMap: Record<string, number> = {};
-      (otherMessages ?? []).forEach((msg: any) => {
-        const lastRead = readMap[msg.event_id];
-        if (!lastRead || msg.created_at > lastRead) {
-          unreadMap[msg.event_id] = (unreadMap[msg.event_id] ?? 0) + 1;
-        }
-      });
-
-      const previews: ChatPreview[] = eligible.map((m: any) => {
-        const event = m.events;
-        const isPast = event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
-        const lastMsg = lastMsgMap[event.id];
-
-        return {
-          eventId: event.id,
-          title: event.title,
-          category: event.primary_vibe ?? null,
-          image_url: event.image_url ?? null,
-          start_time: event.start_time,
-          member_count: realCounts[event.id] ?? event.member_count ?? 0,
-          ticket_url: event.tickets_url ?? null,
-          last_message: lastMsg
-            ? (() => {
-                const isOwn = lastMsg.user_id === user.id;
-                const senderName = isOwn ? 'You' : (senderNameMap[lastMsg.user_id] ?? null);
-                const text = lastMsg.message_type === 'audio' || lastMsg.audio_url
-                  ? 'sent a voice message'
-                  : lastMsg.image_url ? 'sent a photo' : lastMsg.content;
-                return senderName ? `${senderName}: ${text}` : text;
-              })()
-            : null,
-          last_message_at: lastMsg?.created_at ?? null,
-          unread_count: unreadMap[event.id] ?? 0,
-          is_past: isPast,
-          member_avatars: avatarMap[event.id] ?? [],
-        };
-      });
 
       const active = previews
         .filter(p => !p.is_past)
@@ -181,9 +298,9 @@ export function useChatList() {
     fetchChats();
   }, [fetchChats]);
 
-  const eventIdsRef = useRef(new Set<string>());
+  const convIdsRef = useRef(new Set<string>());
   useEffect(() => {
-    eventIdsRef.current = new Set(chats.map(c => c.eventId));
+    convIdsRef.current = new Set(chats.map(c => c.conversationId));
   }, [chats]);
 
   const hasChatsRef = useRef(false);
@@ -199,8 +316,10 @@ export function useChatList() {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         async (payload) => {
           const msg = payload.new as any;
-          const eid = msg?.event_id;
-          if (!eid || !hasChatsRef.current || !eventIdsRef.current.has(eid)) return;
+          // Match either parent. circle_id is only considered behind the flag
+          // (and is null on event messages), so plan chats are unaffected.
+          const convId = msg?.event_id ?? (GROUPS_ENABLED ? msg?.circle_id : null);
+          if (!convId || !hasChatsRef.current || !convIdsRef.current.has(convId)) return;
 
           // Incremental update: patch the affected chat instead of full refetch
           try {
@@ -221,7 +340,7 @@ export function useChatList() {
 
             setChats(prev => {
               const updated = prev.map(c => {
-                if (c.eventId !== eid) return c;
+                if (c.conversationId !== convId) return c;
                 return {
                   ...c,
                   last_message: preview,
