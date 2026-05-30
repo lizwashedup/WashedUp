@@ -19,3 +19,24 @@ export function withTimeout<T>(p: PromiseLike<T>, ms: number, fallback: T): Prom
     setTimeout(() => finish(fallback), ms);
   });
 }
+
+// Like withTimeout, but REJECTS on timeout instead of resolving to a fallback,
+// and passes through `p`'s own resolution or rejection unchanged. Use this
+// when the caller still wants normal success/error semantics (e.g. React Query
+// retry + isError) but must never hang on a request that never settles.
+// supabase-js has no client-side request timeout, so a half-open socket on a
+// flaky connection leaves a query pending forever — which keeps a loading gate
+// (e.g. the Plans welcome overlay) up indefinitely. This converts that hang
+// into an ordinary rejection so the query can retry and eventually settle.
+export function withDeadline<T>(p: PromiseLike<T>, ms: number, label = 'request'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let done = false;
+    const settle = (cb: (v: any) => void, v: any) => {
+      if (done) return;
+      done = true;
+      cb(v);
+    };
+    p.then((v) => settle(resolve, v), (e) => settle(reject, e));
+    setTimeout(() => settle(reject, new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+}
