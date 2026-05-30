@@ -42,3 +42,26 @@ export const PHONE_AUTH_ENABLED = true;
  * of the legacy friends / pinned_people data.
  */
 export const YOURS_PAGE_ENABLED = process.env.EXPO_PUBLIC_YOURS_PAGE_ENABLED === 'true';
+
+/**
+ * Circles (people + circles).
+ *
+ * GROUPS_ENABLED is the legacy flag name for the Circles feature. It is kept
+ * for consistency with existing references. "Circles" is the user-facing term.
+ *
+ * When false (current prod default): nothing changes. No Circles surfaces are
+ * rendered anywhere, and the Yours tab, chat, and plan flows behave exactly as
+ * shipped.
+ *
+ * When true: the Circles surfaces (directory in Yours, circle noticeboard,
+ * circle chat, The Room) render, backed by the circles / circle_members tables
+ * and the polymorphic circle_id chat path.
+ *
+ * Local dev: set EXPO_PUBLIC_GROUPS_ENABLED=true in .env.local (gitignored) to
+ * enable Circles on your machine. The value below is env-driven and ships OFF
+ * wherever the var is unset (CI / prod / EAS), so there is nothing to flip back
+ * and it cannot ship on by accident. Do not enable it for a real build until
+ * Circles is tested AND the backing migrations (supabase/migrations/20260530*)
+ * are applied to prod.
+ */
+export const GROUPS_ENABLED = process.env.EXPO_PUBLIC_GROUPS_ENABLED === 'true';
