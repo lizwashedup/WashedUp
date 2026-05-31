@@ -241,6 +241,10 @@ export default function TabLayout() {
         name="chats/[id]"
         options={{ href: null, tabBarStyle: { display: 'none' } }}
       />
+      <Tabs.Screen
+        name="chats/circle/[id]"
+        options={{ href: null, tabBarStyle: { display: 'none' } }}
+      />
     </Tabs>
   );
 }
