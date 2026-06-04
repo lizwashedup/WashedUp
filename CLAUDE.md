@@ -122,6 +122,7 @@ The "gold is decorative only" rule has two intentional exceptions where gold *is
 
 - **Phone-auth OTP success state** uses #C5A55A intentionally (success affirmation, not a CTA).
 - **"I'd go next time" interest signal button** (Next Time! feature, plan detail screen) uses #D4BF82 as a filled button. Reasoning: terracotta is reserved for primary CTAs ("I'm going," "Post It") that say "act now." Gold says "this is a low-pressure, optional micro-commitment." Treating this button as a primary terracotta CTA would over-weight what is by design a foot-in-the-door signal, not an action. The button after-tap state (checkmark + "[Creator] knows you're interested") also uses gold for the same reason.
+- **"ping" button on the "you & [name]" keep page** (Yours / People) uses #D4BF82 as a filled button (asphalt text), sitting next to the terracotta-fill "invite to a plan." Same framing as the Next Time button: ping is the low-pressure warm nudge ("thinking of you for this") versus invite's "do this now." Making ping a terracotta CTA would over-weight a deliberately soft action and flatten the warm/act-now contrast the keep page depends on.
 
 Do not extend this exception to additional buttons without writing it here first.
 

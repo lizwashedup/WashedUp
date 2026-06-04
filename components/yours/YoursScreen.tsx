@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -28,6 +28,8 @@ import RequestBanner from './requests/RequestBanner';
 import PathsSheet from './paths/PathsSheet';
 import ProfileCardSheet from './profile/ProfileCardSheet';
 import RequestStack from './requests/RequestStack';
+import PeopleSearchBar from './search/PeopleSearchBar';
+import PeopleSearchResults from './search/PeopleSearchResults';
 import type { YoursGridPerson } from '../../lib/yours/types';
 
 /**
@@ -63,9 +65,30 @@ export default function YoursScreen() {
   const { ensureReferralCode } = useReferral();
 
   const [tab, setTab] = useState<YoursTab>('people');
+  const [query, setQuery] = useState('');
   const [pathsOpen, setPathsOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
   const [profileTarget, setProfileTarget] = useState<string | null>(null);
+
+  // A people_request notification routes here with ?openRequests=1 so the
+  // accept card stack opens directly instead of the user hunting for the
+  // banner. Consume it once, only when there is actually a request waiting.
+  const { openRequests } = useLocalSearchParams<{ openRequests?: string }>();
+  const autoOpenedRequestsRef = useRef(false);
+  useEffect(() => {
+    if (openRequests !== '1') {
+      autoOpenedRequestsRef.current = false;
+      return;
+    }
+    if (autoOpenedRequestsRef.current) return;
+    if (requests.length > 0) {
+      autoOpenedRequestsRef.current = true;
+      setRequestsOpen(true);
+      // Consume the flag so it doesn't re-open the stack on a later tab
+      // revisit (the ref only guards within a single mount).
+      router.setParams({ openRequests: undefined } as never);
+    }
+  }, [openRequests, requests.length]);
 
   // Track which user ids have already been seen so the light-up plays
   // once for a freshly added person and never on scroll recycle.
@@ -106,22 +129,40 @@ export default function YoursScreen() {
   // are handled outside this function so the tabs stay visible.
   const renderPeopleBody = () => {
     if (state === 'populated') {
+      const searching = query.trim().length > 0;
       return (
-        <PopulatedView
-          userId={uid}
-          activeTab="people"
-          people={people}
-          requestCount={requests.length}
-          lightUpIds={lightUpIds}
-          onAdd={() => setPathsOpen(true)}
-          onOpenRequests={() => setRequestsOpen(true)}
-          onPressPerson={(p: YoursGridPerson) => setProfileTarget(p.user_id)}
-          onLongPressPerson={(p: YoursGridPerson) => setProfileTarget(p.user_id)}
-          onPressPill={(p: YoursGridPerson) =>
-            p.upcoming_event_id &&
-            router.push(`/plan/${p.upcoming_event_id}` as never)
-          }
-        />
+        <View style={styles.fill}>
+          <PeopleSearchBar value={query} onChange={setQuery} />
+          {searching ? (
+            <PeopleSearchResults
+              userId={uid}
+              query={query}
+              people={people}
+              onOpenPerson={(id) => router.push(`/person/${id}` as never)}
+              onOpenMinimal={(id) => setProfileTarget(id)}
+            />
+          ) : (
+            <PopulatedView
+              userId={uid}
+              activeTab="people"
+              people={people}
+              requestCount={requests.length}
+              lightUpIds={lightUpIds}
+              onAdd={() => setPathsOpen(true)}
+              onOpenRequests={() => setRequestsOpen(true)}
+              onPressPerson={(p: YoursGridPerson) =>
+                router.push(`/person/${p.user_id}` as never)
+              }
+              onLongPressPerson={(p: YoursGridPerson) =>
+                router.push(`/person/${p.user_id}` as never)
+              }
+              onPressPill={(p: YoursGridPerson) =>
+                p.upcoming_event_id &&
+                router.push(`/plan/${p.upcoming_event_id}` as never)
+              }
+            />
+          )}
+        </View>
       );
     }
     if (state === 'fresh') {

@@ -150,4 +150,42 @@ export const COPY = {
   albumCollecting: 'Collecting photos',
   albumAddYours: 'Add yours',
   albumAddYoursBanner: 'Looking back on these will be fun. Add yours.',
+
+  // ── People hub search (find the people you already have) ───────────────
+  searchPlaceholder: 'Search your people, or a handle',
+  searchYoursSection: 'in your people',
+  searchNewSection: 'not in your people',
+  searchNoResults: 'No one by that name.',
+  searchNoResultsSub: 'Search a full handle to find someone new.',
+
+  // ── "you & [name]" keep page (the relationship view) ───────────────────
+  // Lexicon: never "friend"/"friendship". The page is "you & [name]" and
+  // the framing word is "kept". No em/en dashes; commas or "to".
+  keepBack: 'Back',
+  keepMore: 'More',
+  // Hero. "you and [name]" renders [name] in terracotta display italic.
+  keepYouAnd: 'you and',
+  keepSince: (dateLabel: string) => `kept since ${dateLabel}`,
+  // Duration suffix, e.g. "two months in". Empty when too new to bother.
+  keepDuration: (durLabel: string) => `${durLabel} in`,
+  // Stat row labels (the big number sits above each).
+  keepStatPlans: 'plans together',
+  keepStatAlbums: 'albums shared',
+  keepStatComingUp: 'coming up',
+  // Actions. Ping only shows when there is an upcoming shared plan to ping
+  // about (ping_person is event-anchored). Invite always shows.
+  keepPing: 'ping',
+  keepInvite: 'invite to a plan',
+  keepPingSent: (name: string) => `${name} knows about it.`,
+  // Section labels.
+  keepComingUpTogether: 'coming up together',
+  keepStorySoFar: 'your story so far',
+  // Timeline. The oldest shared plan is marked as the beginning.
+  keepFirstPlan: 'first plan',
+  keepTheBeginning: 'the beginning',
+  // Connected but no album-backed shared plans yet.
+  keepStoryEmpty: 'Your story is just getting started.',
+  keepStoryEmptySub: (name: string) => `Invite ${name} to something.`,
+  // Closing whisper at the foot of the page.
+  keepClosing: 'Quietly building, one plan at a time.',
 } as const;

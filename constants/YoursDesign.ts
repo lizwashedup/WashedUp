@@ -77,6 +77,33 @@ export const MOSAIC = {
   playIconSize: 30,         // Video play badge
 } as const;
 
+// ── People hub search field ───────────────────────────────────────────────
+// A persistent field at the top of the People hub: filters the people you
+// already have, and resolves an exact handle for someone new.
+export const SEARCH = {
+  fieldHeight: 44,
+  fieldRadius: 12,
+  iconSize: 18,
+  horizontalInset: 16,   // Matches LAYOUT.gridHorizontalMargin
+} as const;
+
+// ── "you & [name]" keep page geometry ─────────────────────────────────────
+// Two photos lean toward a central italic ampersand (the most analog
+// gesture in the brand). The lean is a small symmetric rotation with the
+// inner edges overlapping behind the "&".
+export const KEEP = {
+  heroPhoto: 92,            // Diameter (pt) of each leaning hero photo
+  heroLeanDeg: 7,           // Symmetric inward tilt (left +, right -)
+  heroOverlap: 14,          // Inner-edge overlap (pt) so photos meet at the &
+  ampersandSize: 34,        // Cormorant italic "&" between the photos
+  heroToName: 14,           // Gap from photos down to "you and [name]"
+  statGap: 28,              // Horizontal gap between the three hero stats
+  timelineDot: 22,          // Diameter of a timeline node
+  timelineDotIcon: 14,      // Icon inside a timeline node
+  timelineLineWidth: 1.5,   // The vertical spine connecting nodes
+  timelineRowGap: 18,       // Vertical gap between timeline rows
+} as const;
+
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
 export const RING_STROKE = {
   fullPt: 2.5,
