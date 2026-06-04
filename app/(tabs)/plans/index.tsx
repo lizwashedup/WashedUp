@@ -527,7 +527,17 @@ export default function PlansScreen() {
     let initDone = false;
 
     async function init() {
-      const { data } = await supabase.auth.getSession();
+      // Bounded: an unwrapped getSession() can hang on a stale/expired session
+      // whose token refresh never settles, which leaves `userId` null forever →
+      // the feed query stays disabled → the welcome overlay never sees data and
+      // (pre-watchdog builds) traps the user. Fail open to no-session; the
+      // onAuthStateChange listener below and the userIdTimedOut retry recover
+      // once the refresh actually completes. Mirrors app/_layout.tsx.
+      const { data } = await withTimeout(
+        supabase.auth.getSession(),
+        6000,
+        { data: { session: null } } as any,
+      );
       if (cancelled) return;
       const id = data.session?.user?.id ?? null;
 
@@ -1493,7 +1503,13 @@ export default function PlansScreen() {
               <Text style={styles.errorMessage}>Sign in may have timed out. Try again or restart the app.</Text>
               <TouchableOpacity style={styles.retryButton} onPress={() => {
               setUserIdTimedOut(false);
-              supabase.auth.getSession().then(({ data }) => setUserId(data.session?.user?.id ?? null));
+              // Bounded retry: don't re-hit an unwrapped getSession() that can
+              // hang the same way the initial load did.
+              withTimeout(
+                supabase.auth.getSession(),
+                6000,
+                { data: { session: null } } as any,
+              ).then(({ data }) => setUserId(data.session?.user?.id ?? null));
             }}>
                 <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
