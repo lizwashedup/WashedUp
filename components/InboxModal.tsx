@@ -169,10 +169,16 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
       if (action === 'acted' && notifType && YOURS_NOTIF_TYPES.has(notifType)) {
         // Single inbox: a people request / acceptance / referral-joined
-        // notification routes to the Yours page, where the request banner
-        // and swipe stack are waiting for action. No event_id involved.
+        // notification routes to the Yours page. No event_id involved.
+        // A people_request is directly actionable, so carry a flag that
+        // auto-opens the accept card stack instead of leaving the user to
+        // hunt for the request banner (or find nothing if it's stale).
         onClose();
-        router.push('/(tabs)/friends' as any);
+        if (notifType === 'people_request') {
+          router.push('/(tabs)/friends?openRequests=1' as any);
+        } else {
+          router.push('/(tabs)/friends' as any);
+        }
         return;
       }
       if (action === 'acted' && eventId) {
