@@ -209,6 +209,10 @@ export const COPY = {
   circleLeaveError: "Couldn't leave just now. Try again.",
   // Load failure.
   circleLoadError: "This circle didn't load.",
+  // Persistent circle chat (stacked under the noticeboard).
+  circleComposerPlaceholder: 'Message the circle',
+  circleChatStart: 'This is the beginning. Say something to get it going.',
+  circleLocationLabel: 'Shared location',
 
   // ── "you & [name]" keep page (the relationship view) ───────────────────
   // Lexicon: never "friend"/"friendship". The page is "you & [name]" and

@@ -149,6 +149,27 @@ export const CIRCLE_HOME = {
   emptyPlanIcon: 22,
 } as const;
 
+// ── Circle chat (the persistent conversation stacked under the noticeboard) ─
+export const CIRCLE_CHAT = {
+  composerMinHeight: 40,
+  composerMaxHeight: 120,
+  composerRadius: 20,
+  composerPadH: 12,
+  composerPadV: 8,
+  composerGap: 8,
+  sendButton: 36,
+  sendIcon: 20,
+  listPadTop: 4,
+  listPadBottom: 10,
+  // Bubble geometry (mirrors the plan chat's bubble for visual parity).
+  bubbleRadius: 18,        // The three "full" corners of a chat bubble
+  bubbleTail: 2,           // The tail corner (bottom-near-sender)
+  bubbleAvatar: 28,        // Other-sender avatar beside a bubble
+  reactionDangle: 12,      // How far the reaction badge hangs below the bubble
+  imageSide: 220,          // Square cap for an image message
+  nearBottomPx: 140,       // "Near the bottom" threshold for auto-follow
+} as const;
+
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
 export const RING_STROKE = {
   fullPt: 2.5,

@@ -11,12 +11,11 @@ import {
   View,
   Text,
   Pressable,
-  ScrollView,
   ActivityIndicator,
   Alert,
   StyleSheet,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, MoreHorizontal } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -28,10 +27,16 @@ import { useAuthUserId } from '../yours/state/useAuthUserId';
 import { useCircle } from '../../hooks/useCircle';
 import { useLeaveCircle } from '../../hooks/useLeaveCircle';
 import { BrandedAlert } from '../BrandedAlert';
-import CircleNoticeboard from './CircleNoticeboard';
+import CircleChat from './CircleChat';
+
+// Distance from the top of the screen to the top of the chat surface, so the
+// keyboard-avoiding chat offsets correctly: the safe-area top inset plus the
+// header band (its vertical padding on both sides + the icon row height).
+const HEADER_BAND = CIRCLE_HOME.headerVPad * 2 + CIRCLE_HOME.headerIcon;
 
 export default function CircleHome({ circleId }: { circleId: string }) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { data: userId } = useAuthUserId();
   const { data, isLoading, isError, refetch } = useCircle(circleId);
   const leaveCircle = useLeaveCircle(userId);
@@ -100,12 +105,11 @@ export default function CircleHome({ circleId }: { circleId: string }) {
           </Pressable>
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-        >
-          <CircleNoticeboard payload={data} />
-        </ScrollView>
+        <CircleChat
+          circleId={circleId}
+          payload={data}
+          headerOffset={insets.top + HEADER_BAND}
+        />
       )}
 
       {/* Leave confirmation (the only overflow action in v1) */}
@@ -142,7 +146,6 @@ const styles = StyleSheet.create({
   },
   headerSpacer: { width: CIRCLE_HOME.headerIcon },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  scroll: { paddingBottom: 32 },
   errorText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
