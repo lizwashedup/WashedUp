@@ -77,6 +77,7 @@ export const YOURS_HEADER_ACTION: 'fill' | 'outline' = 'outline';
 export const COPY = {
   wordmark: 'yours',
   tabPeople: 'Your People',
+  tabCircles: 'Circles',
   tabAlbums: 'Albums',
 
   // SIM-EYEBALL #3: request banner phrasing
@@ -157,6 +158,27 @@ export const COPY = {
   searchNewSection: 'not in your people',
   searchNoResults: 'No one by that name.',
   searchNoResultsSub: 'Search a full handle to find someone new.',
+
+  // ── Circles directory (Yours > Circles) ────────────────────────────────
+  // A thin list of the circles you're in, each deep-linking to its home.
+  // Lexicon: "circle" only, never group/crew/etc. No em/en dashes.
+  // Row meta.
+  circleMembers: (n: number) => (n === 1 ? '1 person' : `${n} people`),
+  // Shown in place of a last-activity time when a circle has no messages yet.
+  circleQuiet: 'Quietly kept',
+  // The first-class "make a circle" entry point (also lives on Chats).
+  circleMakeCta: 'Make a circle',
+  circleMakeSub: 'Gather a few of your people',
+  // Empty state when you have people but no circles yet: a warm invitation.
+  circlesEmptyTitle: 'Your circles live here.',
+  circlesEmptySub: 'A few of your people, one running list of plans together.',
+  // Empty state when you have no people yet: point at the prerequisite first.
+  circlesNeedPeopleTitle: 'Circles start with your people.',
+  circlesNeedPeopleSub: 'Add a few people first, then gather them into a circle.',
+  circlesNeedPeopleCta: 'Add people',
+  // Loading / error.
+  circlesError: "Your circles didn't load.",
+  circlesRetry: 'Try again',
 
   // ── "you & [name]" keep page (the relationship view) ───────────────────
   // Lexicon: never "friend"/"friendship". The page is "you & [name]" and

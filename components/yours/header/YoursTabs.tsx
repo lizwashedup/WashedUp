@@ -2,9 +2,10 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import { GROUPS_ENABLED } from '../../../constants/FeatureFlags';
 import { COPY } from '../state/constants';
 
-export type YoursTab = 'people' | 'albums';
+export type YoursTab = 'people' | 'circles' | 'albums';
 
 /** Full-width underline tabs (active: asphalt + terracotta underline). */
 export default function YoursTabs({
@@ -14,14 +15,19 @@ export default function YoursTabs({
   active: YoursTab;
   onChange: (t: YoursTab) => void;
 }) {
+  // Circles sits between People and Albums (spec tab order), and only when the
+  // feature is on. Off in prod, so the tab bar stays People + Albums there.
+  const tabs: ReadonlyArray<readonly [YoursTab, string]> = [
+    ['people', COPY.tabPeople],
+    ...(GROUPS_ENABLED
+      ? ([['circles', COPY.tabCircles]] as const)
+      : []),
+    ['albums', COPY.tabAlbums],
+  ];
+
   return (
     <View style={styles.row}>
-      {(
-        [
-          ['people', COPY.tabPeople],
-          ['albums', COPY.tabAlbums],
-        ] as const
-      ).map(([key, label]) => {
+      {tabs.map(([key, label]) => {
         const on = active === key;
         return (
           <Pressable

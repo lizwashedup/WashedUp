@@ -104,6 +104,27 @@ export const KEEP = {
   timelineRowGap: 18,       // Vertical gap between timeline rows
 } as const;
 
+// ── Circles directory + row geometry ──────────────────────────────────────
+// The Yours > Circles tab is a thin list. A circle cover is a rounded SQUARE
+// (not a round avatar) so a circle row reads as "a place" and never gets
+// mistaken for a person's face in the People grid.
+export const CIRCLE = {
+  rowCover: 52,            // Cover thumb diameter in a directory row
+  rowCoverRadius: 16,      // Soft-square cover corner radius
+  rowVerticalPad: 14,      // Row top/bottom padding
+  rowGap: 14,              // Cover to text column
+  rowChevron: 18,          // Trailing chevron size
+  dividerInset: 16,        // Left inset of the hairline divider
+  monogramSize: 24,        // Cormorant italic monogram in a coverless cover
+  createIcon: 22,          // Plus glyph in the "make a circle" affordance
+  emptyIcon: 38,           // Glyph in the empty / need-people state
+  emptyBubble: 84,         // Diameter of the empty-state icon bubble
+  emptyBubbleRadius: 42,   // = emptyBubble / 2 (keep in lockstep to stay round)
+  emptyBubbleGap: 20,      // Gap from the bubble down to the title
+  emptyPadH: 40,           // Horizontal inset of the empty-state column
+  emptyPadBottom: 48,      // Optical lift off the tab bar
+} as const;
+
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
 export const RING_STROKE = {
   fullPt: 2.5,

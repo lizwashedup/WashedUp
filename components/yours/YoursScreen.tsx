@@ -11,6 +11,7 @@ import { Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { SPACING } from '../../constants/YoursDesign';
+import { GROUPS_ENABLED } from '../../constants/FeatureFlags';
 import { useAuthUserId } from './state/useAuthUserId';
 import { useYoursGrid } from '../../hooks/useYoursGrid';
 import { useIncomingRequests } from '../../hooks/useIncomingRequests';
@@ -30,6 +31,7 @@ import ProfileCardSheet from './profile/ProfileCardSheet';
 import RequestStack from './requests/RequestStack';
 import PeopleSearchBar from './search/PeopleSearchBar';
 import PeopleSearchResults from './search/PeopleSearchResults';
+import CirclesDirectory from './circles/CirclesDirectory';
 import type { YoursGridPerson } from '../../lib/yours/types';
 
 /**
@@ -116,6 +118,13 @@ export default function YoursScreen() {
     } catch {
       /* surfaced elsewhere; invite is best-effort */
     }
+  };
+
+  // Create-circle entry point. The 3-step create flow is built in Step 8; until
+  // then this is intentionally inert (the whole surface is gated behind
+  // GROUPS_ENABLED, so no dead button ever reaches prod). Wired in Step 8.
+  const openCreateCircle = () => {
+    /* Step 8: open the create-circle flow */
   };
 
   const state: 'loading' | 'populated' | 'fresh' | 'empty' = useMemo(() => {
@@ -208,9 +217,21 @@ export default function YoursScreen() {
             />
           )}
 
-          {tab === 'people' ? (
-            renderPeopleBody()
-          ) : (
+          {tab === 'people' && renderPeopleBody()}
+          {GROUPS_ENABLED && tab === 'circles' && (
+            <View style={styles.fill}>
+              <CirclesDirectory
+                userId={uid}
+                hasPeople={people.length > 0}
+                onOpenCircle={(id) =>
+                  router.push(`/(tabs)/chats/circle/${id}` as never)
+                }
+                onCreate={openCreateCircle}
+                onAddPeople={() => setPathsOpen(true)}
+              />
+            </View>
+          )}
+          {tab === 'albums' && (
             <View style={styles.fill}>
               <AlbumsGrid userId={uid} />
             </View>
