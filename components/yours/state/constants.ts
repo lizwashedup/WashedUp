@@ -180,6 +180,36 @@ export const COPY = {
   circlesError: "Your circles didn't load.",
   circlesRetry: 'Try again',
 
+  // ── Circle home (the stacked surface on Chats) ──────────────────────────
+  // The noticeboard above the persistent circle chat. "Circle" only; no
+  // group/crew/host; no em/en dashes.
+  circleHomeBack: 'Back',
+  circleHomeMore: 'More',
+  // Members section.
+  circleWhoLabel: "who's in it",
+  // Fallback name under an avatar when a member has no display name or handle.
+  circleMemberFallback: 'Someone',
+  circleHomeMembers: (n: number) => (n === 1 ? '1 person' : `${n} people`),
+  // Plans on the circle's calendar. Empty in v1 (circle plans land in Step 8).
+  circlePlansLabel: 'coming up',
+  circlePlansEmpty: 'No plans on the calendar yet.',
+  circlePlansEmptySub: 'When the circle makes a plan, it shows up here.',
+  // Recently-together section (hidden until there is history).
+  circleRecentLabel: 'recently together',
+  // The Room: a reserved, opt-in planner. UI only this release, no logic.
+  circleRoomTitle: 'the room is listening',
+  circleRoomSub: 'An optional planner for your circle. Not on yet.',
+  // Leave a circle. Plan history is untouched (spec section 3).
+  circleLeave: 'Leave circle',
+  circleLeaveTitle: 'Leave this circle?',
+  circleLeaveBody:
+    'Your plans together stay in your history. You can be added back later.',
+  circleLeaveStay: 'Stay',
+  circleLeaveGo: 'Leave',
+  circleLeaveError: "Couldn't leave just now. Try again.",
+  // Load failure.
+  circleLoadError: "This circle didn't load.",
+
   // ── "you & [name]" keep page (the relationship view) ───────────────────
   // Lexicon: never "friend"/"friendship". The page is "you & [name]" and
   // the framing word is "kept". No em/en dashes; commas or "to".

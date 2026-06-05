@@ -125,6 +125,30 @@ export const CIRCLE = {
   emptyPadBottom: 48,      // Optical lift off the tab bar
 } as const;
 
+// ── Circle home (the stacked surface on Chats) ────────────────────────────
+// The circle home is one surface: a noticeboard (cover, members, plans, the
+// reserved Room slot) stacked above the persistent circle chat.
+export const CIRCLE_HOME = {
+  coverHero: 64,           // Cover squircle at the top of the home
+  coverHeroRadius: 20,
+  coverMonogram: 30,       // Monogram inside a coverless hero cover
+  headerVPad: 12,          // Top-bar vertical padding
+  headerIcon: 24,          // Back chevron / overflow glyph
+  memberAvatar: 44,        // Members-row avatar diameter
+  memberChipWidth: 60,     // Member chip width (avatar + breathing room for the name)
+  memberChipGap: 16,       // Gap between member chips
+  memberNameGap: 6,        // Avatar to name (under it)
+  sectionGapV: 24,         // Vertical gap between noticeboard sections
+  sectionPadH: 16,         // Horizontal inset of noticeboard content
+  sectionLabelGap: 12,     // Section label to its content
+  slotRadius: 16,          // Plan / room slot card radius
+  slotPadV: 18,            // Vertical padding inside a slot card
+  slotPadH: 16,
+  roomDashWidth: 1.5,      // The Room reserved-slot dashed border width
+  roomIcon: 20,            // Glyph in The Room slot
+  emptyPlanIcon: 22,
+} as const;
+
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
 export const RING_STROKE = {
   fullPt: 2.5,

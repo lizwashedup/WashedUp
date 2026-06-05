@@ -27,3 +27,39 @@ export interface MyCircle {
   /** Newest message in the whole-circle chat, or null if it has none yet. */
   last_message_at: string | null;
 }
+
+/** The full circles row, as embedded in `get_circle().circle`. */
+export interface CircleDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  creator_user_id: string | null;
+  cover_upload_id: string | null;
+  status: CircleStatus;
+  room_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One joined member, as embedded in `get_circle().members`. */
+export interface CircleMember {
+  user_id: string;
+  role: CircleRole;
+  joined_at: string;
+  first_name_display: string | null;
+  last_name: string | null;
+  handle: string | null;
+  profile_photo_url: string | null;
+}
+
+/**
+ * The noticeboard payload from `get_circle()`. `pinned_plan` and
+ * `recent_together` are stable extension points: the RPC returns them as
+ * null / [] in v1 (wired in later steps), so the shape never has to change.
+ */
+export interface CirclePayload {
+  circle: CircleDetail;
+  members: CircleMember[];
+  pinned_plan: unknown | null;
+  recent_together: unknown[];
+}
