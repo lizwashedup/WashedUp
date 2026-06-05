@@ -46,6 +46,24 @@ export interface MyCircle {
   last_message_at: string | null;
 }
 
+/** A person inside a co-attendance suggestion (resolved by get_circle_suggestions). */
+export interface SuggestionPerson {
+  user_id: string;
+  first_name_display: string | null;
+  handle: string | null;
+  profile_photo_url: string | null;
+}
+
+/** One pending co-attendance suggestion (spec section 3, "start a circle?"). */
+export interface CircleSuggestion {
+  id: string;
+  suggested_user_ids: string[];
+  shared_event_ids: string[];
+  shared_count: number;
+  created_at: string;
+  people: SuggestionPerson[];
+}
+
 /** The full circles row, as embedded in `get_circle().circle`. */
 export interface CircleDetail {
   id: string;

@@ -6,7 +6,7 @@
  *
  * Mounted only behind GROUPS_ENABLED (the /circle/new route guards it).
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, X } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -28,6 +28,7 @@ import { hapticSelection } from '../../../lib/haptics';
 import { useAuthUserId } from '../../yours/state/useAuthUserId';
 import { useYoursGrid } from '../../../hooks/useYoursGrid';
 import { useCreateCircle } from '../../../hooks/useCreateCircle';
+import { useSetSuggestionStatus } from '../../../hooks/useCircleSuggestions';
 import type { CircleInvitePolicy } from '../../../lib/circles/types';
 import IdentityStep from './IdentityStep';
 import PeopleStep from './PeopleStep';
@@ -38,14 +39,32 @@ const MIN_OTHERS = 2; // creator + 2 = a circle of three
 
 export default function CreateCircleFlow() {
   const router = useRouter();
+  // Seeded from a co-attendance suggestion: pre-select those people and mark
+  // the suggestion converted once the circle is made.
+  const { seed, suggestion } = useLocalSearchParams<{ seed?: string; suggestion?: string }>();
   const { data: userId } = useAuthUserId();
   const { data: people = [] } = useYoursGrid(userId);
   const createCircle = useCreateCircle(userId);
+  const setSuggestionStatus = useSetSuggestionStatus(userId);
 
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Apply a suggestion seed ONCE the grid has loaded, intersected with it: only
+  // people actually in your grid get pre-selected, so every selected person is
+  // visible and removable in the picker (no invisible phantom members shipped
+  // to create_circle, and selected.size stays in sync with the checkmarks).
+  const seedAppliedRef = useRef(false);
+  useEffect(() => {
+    if (seedAppliedRef.current) return;
+    if (typeof seed !== 'string' || !seed || people.length === 0) return;
+    const seedIds = new Set(seed.split(',').filter(Boolean));
+    const valid = people.filter((p) => seedIds.has(p.user_id)).map((p) => p.user_id);
+    seedAppliedRef.current = true;
+    if (valid.length > 0) setSelected(new Set(valid));
+  }, [seed, people]);
   const [policy, setPolicy] = useState<CircleInvitePolicy>('only_me');
   const [adminIds, setAdminIds] = useState<Set<string>>(new Set());
 
@@ -106,8 +125,14 @@ export default function CreateCircleFlow() {
         adminUserIds: policy === 'chosen' ? Array.from(adminIds) : [],
       },
       {
-        onSuccess: (circleId) =>
-          router.replace(`/(tabs)/chats/circle/${circleId}` as never),
+        onSuccess: (circleId) => {
+          // Best-effort: mark the seeding suggestion converted so it stops
+          // showing. Never blocks navigation into the new circle.
+          if (typeof suggestion === 'string' && suggestion) {
+            setSuggestionStatus.mutate({ id: suggestion, status: 'converted' });
+          }
+          router.replace(`/(tabs)/chats/circle/${circleId}` as never);
+        },
         onError: () => Alert.alert(COPY.circleCreateError),
       },
     );

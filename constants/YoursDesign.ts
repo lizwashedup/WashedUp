@@ -189,6 +189,18 @@ export const CIRCLE_CREATE = {
   footerBtnHeight: 52,
 } as const;
 
+// ── Co-attendance suggestion card ─────────────────────────────────────────
+export const CIRCLE_SUGGEST = {
+  cardRadius: 16,
+  cardPadV: 16,
+  cardPadH: 16,
+  cardMarginH: 16,
+  goldAccentWidth: 3,   // Decorative warm-nudge left border (gold, not a CTA)
+  avatar: 34,
+  avatarOverlap: 10,
+  maxFaces: 3,
+} as const;
+
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
 export const RING_STROKE = {
   fullPt: 2.5,

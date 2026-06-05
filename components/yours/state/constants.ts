@@ -242,6 +242,14 @@ export const COPY = {
   circleChosenAdminsLabel: 'who else can add people',
   circleCreateError: "Couldn't make the circle. Try again.",
 
+  // ── Co-attendance suggestion card (Step 10) ──────────────────────────────
+  // A warm, recognition-over-guilt nudge. "You" leads the subject list.
+  circleSuggestYou: 'You',
+  circleSuggestBody: (subject: string, n: number) =>
+    `${subject} have done ${n} ${n === 1 ? 'plan' : 'plans'} together.`,
+  circleSuggestStart: 'Start a circle',
+  circleSuggestNotNow: 'Not now',
+
   // ── "you & [name]" keep page (the relationship view) ───────────────────
   // Lexicon: never "friend"/"friendship". The page is "you & [name]" and
   // the framing word is "kept". No em/en dashes; commas or "to".

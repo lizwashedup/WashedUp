@@ -15,15 +15,18 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Plus } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { CIRCLE } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 import { useMyCircles } from '../../../hooks/useMyCircles';
-import type { MyCircle } from '../../../lib/circles/types';
+import { useCircleSuggestions, useSetSuggestionStatus } from '../../../hooks/useCircleSuggestions';
+import type { MyCircle, CircleSuggestion } from '../../../lib/circles/types';
 import CircleRow from './CircleRow';
 import CirclesEmptyState from './CirclesEmptyState';
+import SuggestionCard from './SuggestionCard';
 
 /** First-class "make a circle" affordance, shaped like a directory row. */
 function CreateCircleRow({ onPress }: { onPress: () => void }) {
@@ -61,8 +64,34 @@ export default function CirclesDirectory({
   onCreate: () => void;
   onAddPeople: () => void;
 }) {
+  const router = useRouter();
   const { data: circles = [], isLoading, isError, refetch, isRefetching } =
     useMyCircles(userId);
+  // Suggestions degrade quietly: if they fail to load the directory still works.
+  const { data: suggestions = [] } = useCircleSuggestions(userId);
+  const setSuggestionStatus = useSetSuggestionStatus(userId);
+
+  const onStartSuggestion = (s: CircleSuggestion) => {
+    const seed = s.suggested_user_ids.join(',');
+    router.push(`/circle/new?seed=${seed}&suggestion=${s.id}` as never);
+  };
+  const onDismissSuggestion = (s: CircleSuggestion) => {
+    setSuggestionStatus.mutate({ id: s.id, status: 'dismissed' });
+  };
+
+  const header = (
+    <>
+      {suggestions.map((s) => (
+        <SuggestionCard
+          key={s.id}
+          suggestion={s}
+          onStart={onStartSuggestion}
+          onDismiss={onDismissSuggestion}
+        />
+      ))}
+      <CreateCircleRow onPress={onCreate} />
+    </>
+  );
 
   if (isLoading) {
     return (
@@ -88,7 +117,9 @@ export default function CirclesDirectory({
     );
   }
 
-  if (circles.length === 0) {
+  // Only the truly-empty case (no circles AND no suggestions) gets the full
+  // empty state; a suggestion alone is worth showing the list for.
+  if (circles.length === 0 && suggestions.length === 0) {
     return (
       <CirclesEmptyState
         hasPeople={hasPeople}
@@ -102,7 +133,7 @@ export default function CirclesDirectory({
     <FlatList<MyCircle>
       data={circles}
       keyExtractor={(c) => c.id}
-      ListHeaderComponent={<CreateCircleRow onPress={onCreate} />}
+      ListHeaderComponent={header}
       renderItem={({ item }) => (
         <CircleRow circle={item} onPress={onOpenCircle} />
       )}

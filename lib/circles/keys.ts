@@ -8,4 +8,6 @@ export const circleKeys = {
   mine: (userId: string) => ['circles', 'mine', userId] as const,
   /** A single circle's noticeboard payload. */
   detail: (circleId: string) => ['circles', 'detail', circleId] as const,
+  /** The caller's pending co-attendance suggestions. */
+  suggestions: (userId: string) => ['circles', 'suggestions', userId] as const,
 };
