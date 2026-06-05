@@ -75,7 +75,24 @@ export default function YoursScreen() {
   // A people_request notification routes here with ?openRequests=1 so the
   // accept card stack opens directly instead of the user hunting for the
   // banner. Consume it once, only when there is actually a request waiting.
-  const { openRequests } = useLocalSearchParams<{ openRequests?: string }>();
+  const { openRequests, tab: tabParam } = useLocalSearchParams<{
+    openRequests?: string;
+    tab?: string;
+  }>();
+  // Deep-link into the Circles tab (the Chats > Circles empty state routes here
+  // with ?tab=circles). Consume once per mount, mirroring the openRequests
+  // guard below, so it never re-asserts over a later manual tab tap. Circles is
+  // flag-gated; only this one value is emitted anywhere.
+  const tabConsumedRef = useRef(false);
+  useEffect(() => {
+    if (tabConsumedRef.current) return;
+    if (tabParam === 'circles' && GROUPS_ENABLED) {
+      tabConsumedRef.current = true;
+      setTab('circles');
+      router.setParams({ tab: undefined } as never);
+    }
+  }, [tabParam]);
+
   const autoOpenedRequestsRef = useRef(false);
   useEffect(() => {
     if (openRequests !== '1') {

@@ -20,10 +20,50 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
+import { GROUPS_ENABLED, YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+
+// Chats sections (spec section 5). Only shown when GROUPS_ENABLED; otherwise the
+// list behaves exactly as it ships today (events only, no segmented control).
+type ChatSection = 'all' | 'plans' | 'circles';
+const CHAT_SECTIONS: ReadonlyArray<readonly [ChatSection, string]> = [
+  ['all', 'All'],
+  ['plans', 'Plans'],
+  ['circles', 'Circles'],
+];
+
+/** Full-width underline tabs (active: asphalt + terracotta underline). */
+function ChatSegments({
+  value,
+  onChange,
+}: {
+  value: ChatSection;
+  onChange: (s: ChatSection) => void;
+}) {
+  return (
+    <View style={styles.segmentRow}>
+      {CHAT_SECTIONS.map(([key, label]) => {
+        const on = value === key;
+        return (
+          <TouchableOpacity
+            key={key}
+            onPress={() => onChange(key)}
+            style={styles.segmentTab}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: on }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.segmentLabel, on && styles.segmentLabelOn]}>{label}</Text>
+            {on && <View style={styles.segmentUnderline} />}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
 
 function formatTime(dateString: string): string {
   const date = new Date(dateString);
@@ -139,6 +179,9 @@ export default function ChatsScreen() {
   const { chats, loading, refetch } = useChatList();
   const [refreshing, setRefreshing] = React.useState(false);
   const [pastExpanded, setPastExpanded] = React.useState(false);
+  // Off prod (GROUPS_ENABLED false) this stays 'all' and the segmented control
+  // is never rendered, so the list is identical to today.
+  const [section, setSection] = React.useState<ChatSection>('all');
 
   const queryClient = useQueryClient();
   // Throttle the focus-driven chat-list refetch. It runs ~5 parallel
@@ -182,8 +225,17 @@ export default function ChatsScreen() {
     try { await refetch(); } finally { setRefreshing(false); }
   }, [refetch]);
 
-  const activeChats = useMemo(() => chats.filter(c => !c.is_past), [chats]);
-  const pastChats = useMemo(() => chats.filter(c => c.is_past), [chats]);
+  // Filter by section first (plans = event chats, circles = circle chats),
+  // then split active vs past within the section.
+  const sectionChats = useMemo(() => {
+    if (section === 'plans') return chats.filter(c => c.kind === 'event');
+    if (section === 'circles') return chats.filter(c => c.kind === 'circle');
+    return chats;
+  }, [chats, section]);
+  const activeChats = useMemo(() => sectionChats.filter(c => !c.is_past), [sectionChats]);
+  // Circle chats are persistent (never is_past), so pastChats is always empty in
+  // the Circles section and its "Past Plans" footer never renders there.
+  const pastChats = useMemo(() => sectionChats.filter(c => c.is_past), [sectionChats]);
 
   const renderChat = useCallback(({ item }: { item: ChatPreview }) => (
     <ChatRow
@@ -210,6 +262,10 @@ export default function ChatsScreen() {
         <Text style={styles.headerTitle}>Chats</Text>
         <ProfileButton />
       </View>
+
+      {GROUPS_ENABLED && chats.length > 0 && (
+        <ChatSegments value={section} onChange={setSection} />
+      )}
 
       {chats.length === 0 ? (
         <View style={styles.emptyState}>
@@ -238,15 +294,35 @@ export default function ChatsScreen() {
           ListHeaderComponent={activeChats.length > 0 ? <Text style={styles.sectionLabel}>Active</Text> : null}
           renderItem={renderChat}
           ListEmptyComponent={
-            <View style={styles.noActiveState}>
-              <Text style={styles.noActiveText}>No active chats yet. Join a plan to start chatting.</Text>
-              <TouchableOpacity
-                style={styles.noActiveButton}
-                onPress={() => router.push('/(tabs)/plans')}
-              >
-                <Text style={styles.noActiveButtonText}>Browse Plans</Text>
-              </TouchableOpacity>
-            </View>
+            section === 'circles' ? (
+              <View style={styles.noActiveState}>
+                <Text style={styles.noActiveText}>
+                  Your circles show up here. Make one from your people.
+                </Text>
+                {/* The create entry point lives on Yours > Circles, which needs
+                    YOURS_PAGE_ENABLED (independent of GROUPS_ENABLED). Only show
+                    the CTA when that destination actually works, so it can never
+                    dead-end on the legacy People screen. */}
+                {YOURS_PAGE_ENABLED && (
+                  <TouchableOpacity
+                    style={styles.noActiveButton}
+                    onPress={() => router.push('/(tabs)/friends?tab=circles' as any)}
+                  >
+                    <Text style={styles.noActiveButtonText}>Make a circle</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <View style={styles.noActiveState}>
+                <Text style={styles.noActiveText}>No active chats yet. Join a plan to start chatting.</Text>
+                <TouchableOpacity
+                  style={styles.noActiveButton}
+                  onPress={() => router.push('/(tabs)/plans')}
+                >
+                  <Text style={styles.noActiveButtonText}>Browse Plans</Text>
+                </TouchableOpacity>
+              </View>
+            )
           }
           ListFooterComponent={pastChats.length > 0 ? (
             <View>
@@ -296,6 +372,25 @@ const styles = StyleSheet.create({
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingBottom: 32 },
+
+  segmentRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 4,
+  },
+  segmentTab: { marginRight: 24, paddingVertical: 8 },
+  segmentLabel: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.tertiary,
+  },
+  segmentLabelOn: { color: Colors.asphalt, fontFamily: Fonts.sansBold },
+  segmentUnderline: {
+    height: 2.5,
+    backgroundColor: Colors.terracotta,
+    borderRadius: 2,
+    marginTop: 6,
+  },
 
   sectionLabel: {
     fontWeight: '700',
