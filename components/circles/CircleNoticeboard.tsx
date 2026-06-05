@@ -1,5 +1,5 @@
 /**
- * CircleNoticeboard — the people + plans + details surface of a circle home.
+ * CircleNoticeboard - the people + plans + details surface of a circle home.
  * A pure content block (no scroll container of its own) so the circle home can
  * render it directly now, and later drop it in as the header above the
  * persistent circle chat (the "stacked" surface).

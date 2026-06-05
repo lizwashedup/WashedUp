@@ -1,5 +1,5 @@
 /**
- * Circles — react-query key factory. Mirrors lib/yours/keys.ts so circle
+ * Circles - react-query key factory. Mirrors lib/yours/keys.ts so circle
  * queries invalidate predictably alongside the rest of the Yours surface.
  */
 export const circleKeys = {

@@ -5,14 +5,14 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
 -- ║ DO NOT APPLY THIS ALONE. It writes app_notifications rows for circle  ║
 -- ║ messages with event_id NULL + circle_id set. The send-push-           ║
--- ║ notifications edge function (PROTECTED — not edited here) currently   ║
+-- ║ notifications edge function (PROTECTED - not edited here) currently   ║
 -- ║ builds its deep-link from event_id, so until it is taught to route    ║
 -- ║ circle_id rows to /(tabs)/chats/circle/[circle_id], these pushes will ║
 -- ║ have a missing/wrong tap target. Apply this together with the         ║
 -- ║ approved send-push change. See the proposal:                          ║
 -- ║   "WashedUp x Claude/WashedUp Q2/2026-06-05-circle-push-proposal.md"  ║
 -- ║ Also needs the circle notification-clear wiring (useChat circle       ║
--- ║ branch currently skips clearing new_message rows) — see the proposal. ║
+-- ║ branch currently skips clearing new_message rows) - see the proposal. ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 --
 -- DESIGN NOTES

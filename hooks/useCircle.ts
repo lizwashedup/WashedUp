@@ -1,5 +1,5 @@
 /**
- * useCircle — one circle's noticeboard payload for the circle home.
+ * useCircle - one circle's noticeboard payload for the circle home.
  *
  * Wraps `get_circle(p_circle_id)` (SECURITY DEFINER; raises if the caller is
  * not a joined member). Returns jsonb, so the payload arrives already parsed.

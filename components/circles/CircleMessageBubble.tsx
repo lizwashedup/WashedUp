@@ -1,5 +1,5 @@
 /**
- * CircleMessageBubble — one message in a circle chat. A lean, self-contained
+ * CircleMessageBubble - one message in a circle chat. A lean, self-contained
  * bubble that matches the plan chat's visual language (own = terracotta fill,
  * other = warm divider fill, 18/2 asymmetric radii, sender name · time, a
  * white reaction badge dangling below).

@@ -1,5 +1,5 @@
 /**
- * CircleChat — the persistent circle conversation, stacked beneath the
+ * CircleChat - the persistent circle conversation, stacked beneath the
  * noticeboard on one surface (the "stacked" circle home). A non-inverted
  * FlatList renders the noticeboard as its header and the messages below it.
  *

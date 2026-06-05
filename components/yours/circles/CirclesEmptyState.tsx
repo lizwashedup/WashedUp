@@ -1,5 +1,5 @@
 /**
- * CirclesEmptyState — warm, never-a-void empty state for Yours > Circles.
+ * CirclesEmptyState - warm, never-a-void empty state for Yours > Circles.
  *
  * Two variants, chosen by whether the user has any people yet (spec section 2,
  * "empty states route to the right next action"):

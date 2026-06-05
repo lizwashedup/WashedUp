@@ -1,5 +1,5 @@
 /**
- * CircleRow — one thin row in the Yours > Circles directory. Cover + name +
+ * CircleRow - one thin row in the Yours > Circles directory. Cover + name +
  * a quiet meta line (member count, last activity), deep-linking to the circle
  * home. Mirrors the chat-list row's calm density, in the Yours design system.
  */

@@ -1,5 +1,5 @@
 /**
- * CirclesDirectory — the Yours > Circles tab body. A thin list of the circles
+ * CirclesDirectory - the Yours > Circles tab body. A thin list of the circles
  * you're in, each deep-linking to the circle home, with a first-class "make a
  * circle" affordance pinned at the top. Full loading / error / empty coverage.
  *

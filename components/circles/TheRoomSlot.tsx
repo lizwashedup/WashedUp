@@ -1,5 +1,5 @@
 /**
- * TheRoomSlot — the reserved, gold-dashed placeholder for The Room, the opt-in
+ * TheRoomSlot - the reserved, gold-dashed placeholder for The Room, the opt-in
  * AI planner that proposes activities to a circle (spec section 3).
  *
  * UI ONLY. No Room logic ships this release: this is the design reservation

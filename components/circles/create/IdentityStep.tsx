@@ -1,5 +1,5 @@
 /**
- * IdentityStep — step 1 of the create-circle flow: name (required) + an
+ * IdentityStep - step 1 of the create-circle flow: name (required) + an
  * optional description, with a live monogram cover preview. Cover-photo upload
  * is deferred (the cover_upload_id origin is undefined in v1; circles use the
  * monogram cover), so there is no photo picker here yet.

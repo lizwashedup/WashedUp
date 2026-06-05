@@ -1,10 +1,10 @@
 /**
- * useCircleSuggestions — the caller's pending co-attendance suggestions
+ * useCircleSuggestions - the caller's pending co-attendance suggestions
  * ("people you keep showing up with could be a circle"). Wraps
  * get_circle_suggestions (jsonb, names pre-resolved). Empty until the detection
  * job has run; degrades to [] on error so the directory never breaks on it.
  *
- * useSetSuggestionStatus — dismiss ('not now') or mark converted (started a
+ * useSetSuggestionStatus - dismiss ('not now') or mark converted (started a
  * circle from it), via set_circle_suggestion_status.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';

@@ -1,5 +1,5 @@
 /**
- * useMyCircles — the caller's joined circles for the Yours > Circles directory.
+ * useMyCircles - the caller's joined circles for the Yours > Circles directory.
  *
  * Wraps the `get_my_circles()` RPC (SECURITY DEFINER, authorizes on auth.uid()).
  * The RPC takes no params; userId is passed only to gate `enabled` and key the

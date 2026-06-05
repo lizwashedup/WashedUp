@@ -1,5 +1,5 @@
 /**
- * CircleHome — the circle's home surface (reached from Yours > Circles and from
+ * CircleHome - the circle's home surface (reached from Yours > Circles and from
  * the circle chat list). v1 renders the noticeboard (cover, members, plans,
  * the reserved Room slot) in a scroll; the persistent circle chat stacks in
  * below it in a following chunk (6b).

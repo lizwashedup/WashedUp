@@ -1,5 +1,5 @@
 /**
- * CircleMembersRow — the circle's roster as a horizontal row of face chips
+ * CircleMembersRow - the circle's roster as a horizontal row of face chips
  * (photo + first name). Read-only in v1; admin management lands in Step 8.
  */
 import React from 'react';

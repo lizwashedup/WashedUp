@@ -1,5 +1,5 @@
 /**
- * PermissionsStep — step 3: who can add people, the spec's role-based admin
+ * PermissionsStep - step 3: who can add people, the spec's role-based admin
  * model. only_me (creator-only admin), chosen (pick admins from the members you
  * just selected), or everyone (the network-extension mode: any member can add
  * someone you don't know). 'everyone' maps to update_circle set-all-admins;

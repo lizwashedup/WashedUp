@@ -1,5 +1,5 @@
 /**
- * CreateCircleFlow — the 3-step create-circle wizard (identity, people,
+ * CreateCircleFlow - the 3-step create-circle wizard (identity, people,
  * permissions). Owns all wizard state; each step is a presentational child.
  * On submit it calls create_circle (+ update_circle for the invite policy) and
  * replaces into the new circle home.

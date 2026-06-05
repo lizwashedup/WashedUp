@@ -1,5 +1,5 @@
 /**
- * CircleComposer — the text composer pinned at the bottom of a circle chat.
+ * CircleComposer - the text composer pinned at the bottom of a circle chat.
  * Text only in v1; the "Make a Plan" plus-menu (Step 8) and the attach/voice
  * affordances (a later chat-parity pass) layer on here.
  */

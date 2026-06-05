@@ -1,5 +1,5 @@
 /**
- * Circles — client types.
+ * Circles - client types.
  *
  * These mirror the jsonb shapes returned by the circle RPCs in
  * supabase/migrations/20260530220300_circles_rpcs.sql. The RPCs return jsonb
@@ -29,7 +29,7 @@ export interface CreateCircleArgs {
 }
 
 /**
- * One row from `get_my_circles()` — a circle the caller has joined. Powers the
+ * One row from `get_my_circles()` - a circle the caller has joined. Powers the
  * Yours > Circles directory.
  */
 export interface MyCircle {

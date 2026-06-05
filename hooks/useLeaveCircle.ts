@@ -1,5 +1,5 @@
 /**
- * useLeaveCircle — leave a circle (spec section 3). Plan history is untouched;
+ * useLeaveCircle - leave a circle (spec section 3). Plan history is untouched;
  * the row just flips to status 'left'. Invalidates the directory so the circle
  * drops out of Yours > Circles on success.
  */

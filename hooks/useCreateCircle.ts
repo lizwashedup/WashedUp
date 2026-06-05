@@ -1,5 +1,5 @@
 /**
- * useCreateCircle — create a circle and apply its invite policy.
+ * useCreateCircle - create a circle and apply its invite policy.
  *
  * create_circle seeds the caller as admin and the picked people as members
  * (the 'only_me' default). For 'everyone' / 'chosen' we follow up with

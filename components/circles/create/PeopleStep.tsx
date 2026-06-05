@@ -1,5 +1,5 @@
 /**
- * PeopleStep — step 2 of the create-circle flow: multi-select from the people
+ * PeopleStep - step 2 of the create-circle flow: multi-select from the people
  * you already have. A circle is three or more, so the flow requires at least
  * two picks (you make three). If you have no people yet, this points at the
  * prerequisite instead.

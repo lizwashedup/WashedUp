@@ -1,5 +1,5 @@
 /**
- * SuggestionCard — the co-attendance nudge: "You, Tyler, and Sara have done 4
+ * SuggestionCard - the co-attendance nudge: "You, Tyler, and Sara have done 4
  * plans together. Start a circle?" A warm, recognition-over-guilt prompt (gold
  * left accent is decorative; the CTA is a normal terracotta action). Dismiss is
  * a quiet "Not now".

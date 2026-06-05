@@ -1,5 +1,5 @@
 /**
- * CircleCover — a circle's identity thumbnail.
+ * CircleCover - a circle's identity thumbnail.
  *
  * A rounded square (not a round avatar) so a circle never reads as a person's
  * face. When a cover photo exists it fills the tile; otherwise a warm
