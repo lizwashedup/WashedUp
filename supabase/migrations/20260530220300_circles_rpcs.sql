@@ -193,7 +193,7 @@ BEGIN
     RAISE EXCEPTION 'not authenticated';
   END IF;
 
-  SELECT COALESCE(jsonb_agg(row_to_jsonb(d) ORDER BY (d.last_message_at IS NULL), d.last_message_at DESC, d.created_at DESC), '[]'::jsonb)
+  SELECT COALESCE(jsonb_agg(to_jsonb(d) ORDER BY (d.last_message_at IS NULL), d.last_message_at DESC, d.created_at DESC), '[]'::jsonb)
   INTO v_out
   FROM (
     SELECT
@@ -352,7 +352,7 @@ BEGIN
     RAISE EXCEPTION 'not a member of this circle';
   END IF;
 
-  SELECT COALESCE(jsonb_agg(row_to_jsonb(r) ORDER BY r.created_at DESC), '[]'::jsonb)
+  SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.created_at DESC), '[]'::jsonb)
   INTO v_out
   FROM (
     SELECT

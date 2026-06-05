@@ -38,7 +38,7 @@ BEGIN
     RAISE EXCEPTION 'not authenticated';
   END IF;
 
-  SELECT COALESCE(jsonb_agg(row_to_jsonb(d) ORDER BY d.created_at DESC), '[]'::jsonb)
+  SELECT COALESCE(jsonb_agg(to_jsonb(d) ORDER BY d.created_at DESC), '[]'::jsonb)
   INTO v_out
   FROM (
     SELECT
