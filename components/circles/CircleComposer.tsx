@@ -29,7 +29,7 @@ export default function CircleComposer({
         value={value}
         onChangeText={onChange}
         placeholder={COPY.circleComposerPlaceholder}
-        placeholderTextColor={Colors.textLight}
+        placeholderTextColor={Colors.tertiary}
         multiline
         maxLength={2000}
       />

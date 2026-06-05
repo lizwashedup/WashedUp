@@ -170,6 +170,25 @@ export const CIRCLE_CHAT = {
   nearBottomPx: 140,       // "Near the bottom" threshold for auto-follow
 } as const;
 
+// ── Create-circle flow (3-step wizard) ────────────────────────────────────
+export const CIRCLE_CREATE = {
+  coverPreview: 88,        // Live monogram cover preview on the identity step
+  coverPreviewRadius: 24,
+  coverMonogram: 40,
+  stepDot: 6,              // Progress dot
+  stepDotGap: 6,
+  fieldRadius: 12,
+  fieldMinHeight: 48,
+  descMinHeight: 84,
+  pickAvatar: 48,          // People-picker avatar
+  pickCheck: 22,           // Selected check size
+  pickRowPadV: 10,
+  optionRadius: 16,        // Permission option card
+  optionPadV: 16,
+  optionPadH: 16,
+  footerBtnHeight: 52,
+} as const;
+
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
 export const RING_STROKE = {
   fullPt: 2.5,

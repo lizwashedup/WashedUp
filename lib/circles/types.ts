@@ -11,6 +11,24 @@ export type CircleRole = 'admin' | 'member';
 export type CircleStatus = 'forming' | 'active' | 'archived';
 
 /**
+ * Who can add people to a circle (spec section 3, the role-based admin model):
+ *   only_me  - the creator stays the sole admin (create_circle's default).
+ *   chosen   - the creator picks specific members to also be admins.
+ *   everyone - every member is an admin (the intentional network-extension
+ *              mode: a member can add someone the creator doesn't know).
+ */
+export type CircleInvitePolicy = 'only_me' | 'chosen' | 'everyone';
+
+export interface CreateCircleArgs {
+  name: string;
+  description: string | null;
+  memberUserIds: string[];
+  invitePolicy: CircleInvitePolicy;
+  /** Members to promote to admin when invitePolicy === 'chosen'. */
+  adminUserIds: string[];
+}
+
+/**
  * One row from `get_my_circles()` — a circle the caller has joined. Powers the
  * Yours > Circles directory.
  */

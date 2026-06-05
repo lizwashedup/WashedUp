@@ -214,6 +214,34 @@ export const COPY = {
   circleChatStart: 'This is the beginning. Say something to get it going.',
   circleLocationLabel: 'Shared location',
 
+  // ── Create-circle flow (3 steps) ────────────────────────────────────────
+  circleCreateTitle: 'New circle',
+  circleCreateNext: 'Next',
+  circleCreateMake: 'Make the circle',
+  // Step 1, identity.
+  circleStep1Title: 'Name your circle',
+  circleNamePlaceholder: 'Circle name',
+  circleDescPlaceholder: 'What brings you together? (optional)',
+  // Step 2, people.
+  circleStep2Title: "Who's in it",
+  circleStep2Sub: 'Pick from your people. A circle is three or more.',
+  circlePickedCount: (n: number) => `${n} selected`,
+  circleStep2NeedMore: 'Pick at least two to make a circle.',
+  circleNoPeopleTitle: 'You need people first.',
+  circleNoPeopleSub: 'Add a few people, then gather them into a circle.',
+  circleNoPeopleCta: 'Add people',
+  // Step 3, who can add people (the admin model).
+  circleStep3Title: 'Who can add people',
+  circlePolicyOnlyMe: 'Only me',
+  circlePolicyOnlyMeSub: 'You add everyone, and you stay the only admin.',
+  circlePolicyChosen: 'Chosen people',
+  circlePolicyChosenSub: 'You and the people you pick can add others.',
+  circlePolicyEveryone: 'Everyone',
+  circlePolicyEveryoneSub:
+    "Anyone in the circle can add others, even people you don't know yet.",
+  circleChosenAdminsLabel: 'who else can add people',
+  circleCreateError: "Couldn't make the circle. Try again.",
+
   // ── "you & [name]" keep page (the relationship view) ───────────────────
   // Lexicon: never "friend"/"friendship". The page is "you & [name]" and
   // the framing word is "kept". No em/en dashes; commas or "to".

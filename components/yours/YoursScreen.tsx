@@ -137,11 +137,9 @@ export default function YoursScreen() {
     }
   };
 
-  // Create-circle entry point. The 3-step create flow is built in Step 8; until
-  // then this is intentionally inert (the whole surface is gated behind
-  // GROUPS_ENABLED, so no dead button ever reaches prod). Wired in Step 8.
+  // Create-circle entry point: the 3-step create flow at /circle/new (gated).
   const openCreateCircle = () => {
-    /* Step 8: open the create-circle flow */
+    router.push('/circle/new' as never);
   };
 
   const state: 'loading' | 'populated' | 'fresh' | 'empty' = useMemo(() => {
