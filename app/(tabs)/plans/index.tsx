@@ -40,6 +40,7 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import { fetchPlans, fetchInterestedPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { supabase } from '../../../lib/supabase';
+import { withTimeout, withDeadline } from '../../../lib/withTimeout';
 import { friendlyError } from '../../../lib/friendlyError';
 import { postAuthTransitionRef } from '../../../lib/navState';
 import { useBlock } from '../../../hooks/useBlock';
@@ -75,6 +76,22 @@ const wLogo = require('../../../assets/images/w-logo-waves.png');
  */
 const MIN_WELCOME_DISPLAY_MS = 1500;
 const EXIT_DURATION_MS = 420;
+
+// Hard ceiling on how long the welcome overlay may capture touches. The overlay
+// blocks the whole app while data loads; if a feed query never settles (a
+// half-open socket on a flaky connection — supabase-js has no client-side
+// timeout), `dataReady` would stay false forever and the user gets a rendered
+// but unresponsive front page. Mirrors the cold-start auth watchdog in
+// app/_layout.tsx: after this deadline the overlay releases regardless, so it
+// can never trap the user. (Reported 2026-05-29.)
+const WELCOME_OVERLAY_MAX_MS = 10000;
+// Per-query upper bounds so a never-settling request can't pin the loading
+// gates. Feed uses withDeadline (rejects → React Query retry/isError still
+// work); the lighter queries use withTimeout (resolve empty — they already
+// degrade to [] on error, so this preserves observable behavior).
+const FEED_DEADLINE_MS = 15000;
+const WISHLISTS_TIMEOUT_MS = 8000;
+const MY_PLANS_TIMEOUT_MS = 12000;
 
 function WelcomeLoading({
   done,
@@ -488,6 +505,9 @@ export default function PlansScreen() {
   const [showWelcome, setShowWelcome] = useState(false);
   const welcomeBannerOpacity = useRef(new Animated.Value(1)).current;
   const [welcomeOverlayDone, setWelcomeOverlayDone] = useState(false);
+  // Backstop so the welcome overlay can never block touches forever if the
+  // feed queries never settle. Set true by a watchdog timer below.
+  const [welcomeWatchdogFired, setWelcomeWatchdogFired] = useState(false);
   // One-shot consume of the post-auth transition flag. Any sign-in path
   // (login.tsx, verify-code.tsx) sets `postAuthTransitionRef.active`; we
   // read once on mount so the WelcomeLoading overlay covers the
@@ -507,7 +527,17 @@ export default function PlansScreen() {
     let initDone = false;
 
     async function init() {
-      const { data } = await supabase.auth.getSession();
+      // Bounded: an unwrapped getSession() can hang on a stale/expired session
+      // whose token refresh never settles, which leaves `userId` null forever →
+      // the feed query stays disabled → the welcome overlay never sees data and
+      // (pre-watchdog builds) traps the user. Fail open to no-session; the
+      // onAuthStateChange listener below and the userIdTimedOut retry recover
+      // once the refresh actually completes. Mirrors app/_layout.tsx.
+      const { data } = await withTimeout(
+        supabase.auth.getSession(),
+        6000,
+        { data: { session: null } } as any,
+      );
       if (cancelled) return;
       const id = data.session?.user?.id ?? null;
 
@@ -650,7 +680,9 @@ export default function PlansScreen() {
 
   const { data: allPlans = [], isLoading, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['events', 'feed', userId],
-    queryFn: () => fetchPlans(userId!),
+    // Bounded so a stuck request rejects (and retries) instead of hanging the
+    // loading gate forever. See FEED_DEADLINE_MS.
+    queryFn: () => withDeadline(fetchPlans(userId!), FEED_DEADLINE_MS, 'feed'),
     enabled: !!userId,
     staleTime: 60_000,
     retry: 2,
@@ -682,7 +714,11 @@ export default function PlansScreen() {
     queryKey: ['wishlists', userId],
     queryFn: async () => {
       if (!userId) return [];
-      const { data } = await supabase.from('wishlists').select('event_id').eq('user_id', userId);
+      const { data } = await withTimeout(
+        supabase.from('wishlists').select('event_id').eq('user_id', userId),
+        WISHLISTS_TIMEOUT_MS,
+        { data: [] } as any,
+      );
       return (data ?? []).map((r: any) => r.event_id as string);
     },
     enabled: !!userId,
@@ -792,7 +828,8 @@ export default function PlansScreen() {
 
   const { data: myPlans = [], isLoading: myPlansLoading } = useQuery<Plan[]>({
     queryKey: ['my-plans', userId],
-    queryFn: async () => {
+    // Whole multi-step body bounded so a stuck sub-request can't pin the gate.
+    queryFn: () => withTimeout((async () => {
       if (!userId) return [];
 
       const { data: memberships, error: memError } = await supabase
@@ -888,7 +925,7 @@ export default function PlansScreen() {
           creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
         } as Plan;
       });
-    },
+    })(), MY_PLANS_TIMEOUT_MS, []),
     enabled: !!userId,
     staleTime: 10_000,
     // NOTE: no refetchOnMount:'always' — see the feed query above. This
@@ -1302,6 +1339,19 @@ export default function PlansScreen() {
   // (plus its own min-display timer) to decide when to fade away.
   const dataReady = !!userId && !isLoading && !wishlistsLoading && !myPlansLoading;
   const showWelcomeOverlay = (showWelcome || postAuthTransition) && !welcomeOverlayDone;
+
+  // Watchdog: while the overlay is up and data hasn't resolved, arm a timer
+  // that force-releases it. Guarantees the app becomes touchable within
+  // WELCOME_OVERLAY_MAX_MS even if a query never settles underneath.
+  React.useEffect(() => {
+    if (!showWelcomeOverlay || dataReady || welcomeWatchdogFired) return;
+    const t = setTimeout(() => setWelcomeWatchdogFired(true), WELCOME_OVERLAY_MAX_MS);
+    return () => clearTimeout(t);
+  }, [showWelcomeOverlay, dataReady, welcomeWatchdogFired]);
+
+  // The overlay treats "watchdog fired" the same as "data ready": stop
+  // capturing touches and begin its exit. Data keeps loading underneath.
+  const overlayReady = dataReady || welcomeWatchdogFired;
   const emptyMessage = heartFilter
     ? 'When you save a plan it shows up here'
     : allPlans.length > 0
@@ -1453,7 +1503,13 @@ export default function PlansScreen() {
               <Text style={styles.errorMessage}>Sign in may have timed out. Try again or restart the app.</Text>
               <TouchableOpacity style={styles.retryButton} onPress={() => {
               setUserIdTimedOut(false);
-              supabase.auth.getSession().then(({ data }) => setUserId(data.session?.user?.id ?? null));
+              // Bounded retry: don't re-hit an unwrapped getSession() that can
+              // hang the same way the initial load did.
+              withTimeout(
+                supabase.auth.getSession(),
+                6000,
+                { data: { session: null } } as any,
+              ).then(({ data }) => setUserId(data.session?.user?.id ?? null));
             }}>
                 <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
@@ -1635,10 +1691,10 @@ export default function PlansScreen() {
           // View already does the same dance, but pointerEvents doesn't
           // propagate UP from child to parent, so the wrapper has to opt
           // out independently.
-          pointerEvents={dataReady ? 'none' : 'auto'}
+          pointerEvents={overlayReady ? 'none' : 'auto'}
         >
           <WelcomeLoading
-            done={dataReady}
+            done={overlayReady}
             onExit={() => setWelcomeOverlayDone(true)}
           />
         </View>
