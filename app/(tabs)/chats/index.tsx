@@ -23,6 +23,7 @@ import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
 import { GROUPS_ENABLED, YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
+import CircleCover from '../../../components/yours/circles/CircleCover';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 
@@ -115,7 +116,11 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
       style={[styles.row, hasUnread && styles.rowUnread, chat.is_past && styles.rowPast]}
     >
       <View style={styles.avatarContainer}>
-        {chat.image_url ? (
+        {chat.kind === 'circle' ? (
+          // Circle rows use the same monogram cover as the Yours > Circles
+          // directory, not the w-logo plan placeholder.
+          <CircleCover name={chat.title} coverUrl={null} />
+        ) : chat.image_url ? (
           <Image
             source={{ uri: chat.image_url }}
             style={styles.avatar}
@@ -151,18 +156,25 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
           </Text>
         </View>
 
-        <View style={styles.datePill}>
-          <Text style={styles.datePillText}>{formatEventDate(chat.start_time)}</Text>
-        </View>
-        {!chat.is_past && new Date(chat.start_time) < new Date() && (() => {
-          const hl = Math.round(48 - ((Date.now() - new Date(chat.start_time).getTime()) / (1000 * 60 * 60)));
-          if (hl <= 0) return null;
-          return (
-            <Text style={styles.countdownText}>
-              {`chat stays active for ${hl} more hours`}
-            </Text>
-          );
-        })()}
+        {/* Plan date pill + the 48h expiry countdown are event-only. Circle
+            chats are persistent and have no plan date (start_time is just the
+            circle's created_at), so neither belongs on a circle row. */}
+        {chat.kind === 'event' && (
+          <>
+            <View style={styles.datePill}>
+              <Text style={styles.datePillText}>{formatEventDate(chat.start_time)}</Text>
+            </View>
+            {!chat.is_past && new Date(chat.start_time) < new Date() && (() => {
+              const hl = Math.round(48 - ((Date.now() - new Date(chat.start_time).getTime()) / (1000 * 60 * 60)));
+              if (hl <= 0) return null;
+              return (
+                <Text style={styles.countdownText}>
+                  {`chat stays active for ${hl} more hours`}
+                </Text>
+              );
+            })()}
+          </>
+        )}
       </View>
 
       {hasUnread && (
