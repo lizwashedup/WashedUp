@@ -42,6 +42,18 @@ Branch: `feature/yours-page-rebuild`. All gated behind `GROUPS_ENABLED` / `YOURS
 4. `0105cbf` plan-detail join dispatch + member intro-bypass + Start-a-chat / Open-it-up; added release_circle_plan + circle_name to held migration 2.
 5. `d957a46` circle plans in the noticeboard coming-up slot.
 
+## Two audit passes (full results in the morning report)
+Ran two independent reviewers over `9fb8693..HEAD`. **Fixed** (commit 769be0a):
+- plan-detail capacity/eligibility gates blocked circle members from joining their own circle's plan (isFull clamps to MAX_GROUP=8; isEligible blocks single-gender) -> added effectiveIsFull/effectiveIsEligible.
+- create_circle_plan: gender_rule text->enum needed an explicit `::gender_rule` cast (would have failed on apply).
+- create_circle_plan self-test: suppress AFTER triggers so the smoke INSERTs can't enqueue the notify-plan-posted admin alert.
+- join_circle_plan_atomic: preserve creator 'host' role on re-join.
+- useCirclePlanContext: degrade on PGRST202/404, not just 42883 (flag-on-before-migration safety).
+- BottomSheet/composer: bound the ScrollView so it scrolls on small screens.
+- Android '+' menu title was mislabeled 'Add people'.
+
+**Reviewed and accepted / deferred (not bugs or low-risk):** feed `is_circle_member` per-row cost once circle plans exist (perf follow-up); release posts no circle-chat announcement (product choice); stranger hitting a circle_only deep link gets a soft "just for the circle" error (edge); two BrandedAlerts can't actually stack (close-after-press ordering); buildDays "Today" stale past midnight is caught by the future-time guard; a deleted circle turns its plan into a normal public plan (SET NULL by design). A few dead COPY keys left in place for later wiring (gender pill, open status).
+
 ## Deferred (logged, NOT done) — secondary surfacing, feature is functionally complete without them
 - **Chats-list "private to circle" tag**: the Chats list row source (app/(tabs)/chats/index.tsx + its chats hook) does not carry `circle_visibility`; threading it through is a deeper change. The tag already appears on the PlanCard and in the circle noticeboard, so the concept is surfaced. Deferred.
 - **Directory upcoming-plan pill / "plans together" count** on the Yours > Circles cards: `get_my_circles` returns no plan data; needs a batch per-circle plan query. Deferred.
