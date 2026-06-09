@@ -830,6 +830,19 @@ export default function PlanDetailScreen() {
     return true;
   }, [plan, userGender, userAge]);
 
+  // Circle plans use stranger_cap (not max_invites) for capacity and let circle
+  // MEMBERS bypass the gender/age eligibility gate (they already know the
+  // group). Without these overrides the normal isFull (clamped to MAX_GROUP=8)
+  // and isEligible gates would block a circle member from joining their own
+  // circle's plan once 8 people are in, or on a single-gender plan.
+  const circleMemberJoining = isCirclePlan && circleViewerIsMember;
+  const effectiveIsEligible = circleMemberJoining ? true : isEligible;
+  const effectiveIsFull = circleMemberJoining
+    ? false
+    : isCirclePlan
+      ? (circleCtx?.viewer_stranger_spots_left ?? 1) <= 0
+      : isFull;
+
   // ─── Join ────────────────────────────────────────────────────────────────────
 
   const joinMutation = useMutation({
@@ -1687,7 +1700,7 @@ export default function PlanDetailScreen() {
         )}
 
         {/* H. CTA hints (button is in sticky bar) */}
-        {!isCreator && !isMember && isEligible && !isFull && (
+        {!isCreator && !isMember && isEligible && !isFull && !isCirclePlan && (
           <View style={styles.ctaBlock}>
             {!isFeatured && spotsLeft > 0 && spotsLeft <= 2 && (
               <Text style={styles.ctaInfo}>
@@ -1821,7 +1834,7 @@ export default function PlanDetailScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        ) : !isEligible ? (
+        ) : !effectiveIsEligible ? (
           <View style={styles.ineligibleBar}>
             <Text style={styles.ineligibleText}>This plan isn't available for you</Text>
             <Text style={styles.ineligibleSub}>It's restricted by age or gender</Text>
@@ -1834,7 +1847,7 @@ export default function PlanDetailScreen() {
           >
             <Text style={styles.claimSpotText}>Claim Your Spot</Text>
           </TouchableOpacity>
-        ) : isFull ? (
+        ) : effectiveIsFull ? (
           <TouchableOpacity
             style={[
               styles.waitlistButton,

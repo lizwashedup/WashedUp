@@ -227,7 +227,9 @@ export const COPY = {
   // Header "+" menu: add people now, or make a plan (placeholder this build).
   circlePlusAddPeople: 'Add people now',
   circlePlusMakePlan: 'Make a plan',
-  circlePlusMakePlanSoon: 'Plans from a circle are coming soon.',
+  // Neutral title for the Android "+" menu Alert (it offers both add-people and
+  // make-a-plan, so it must not be titled "Add people").
+  circlePlusMenuTitle: 'What would you like to do?',
   circlePlusCancel: 'Cancel',
   // Add-people sheet (also used to grow a DM into a circle).
   circleAddTitle: 'Add people',

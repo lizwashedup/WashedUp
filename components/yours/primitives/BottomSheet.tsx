@@ -128,7 +128,10 @@ export default function BottomSheet({
         ]}
         {...panResponder.panHandlers}
       >
-        <Pressable onStartShouldSetResponder={() => true}>
+        <Pressable
+          onStartShouldSetResponder={() => true}
+          style={heightPct ? styles.fillContent : undefined}
+        >
           <View style={styles.handle} />
           {children}
         </Pressable>
@@ -158,4 +161,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.iconMuted,
     marginBottom: 12,
   },
+  // When the sheet is fixed-height (heightPct set), let the content wrapper fill
+  // it so a ScrollView child is bounded and scrolls instead of overflowing.
+  fillContent: { flex: 1 },
 });

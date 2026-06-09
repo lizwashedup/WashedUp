@@ -70,7 +70,7 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         },
       );
     } else {
-      Alert.alert(COPY.circleAddTitle, undefined, [
+      Alert.alert(COPY.circlePlusMenuTitle, undefined, [
         { text: COPY.circlePlusAddPeople, onPress: () => setAddOpen(true) },
         { text: COPY.circlePlusMakePlan, onPress: () => setPlanOpen(true) },
         { text: COPY.circlePlusCancel, style: 'cancel' },

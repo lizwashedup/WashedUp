@@ -119,7 +119,7 @@ BEGIN
   VALUES (
     btrim(p_title), p_description, p_start_time, p_end_time, COALESCE(p_drop_in, true),
     p_location_text, p_location_lat, p_location_lng, p_tickets_url,
-    p_primary_vibe, COALESCE(p_gender_rule,'mixed'), p_target_age_min, p_target_age_max,
+    p_primary_vibe, COALESCE(p_gender_rule,'mixed')::gender_rule, p_target_age_min, p_target_age_max,
     p_host_message, p_image_url, p_neighborhood, COALESCE(p_city,'Los Angeles'),
     v_uid, 'forming', 1, 15,
     p_circle_id, p_visibility, v_cap, v_has_own_chat
@@ -201,6 +201,14 @@ BEGIN
   END IF;
 
   BEGIN
+    -- Suppress AFTER triggers for the smoke-test so the test event INSERTs do
+    -- not enqueue the notify-plan-posted admin email/push (the txn rolls back,
+    -- but this removes even the tiny enqueue-then-rollback race). Ignore if the
+    -- apply role may not set it; the rollback is still the real safety net.
+    BEGIN
+      PERFORM set_config('session_replication_role', 'replica', true);
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid)::text, true);
 
     -- open plan -> own chat, stranger_cap 4, status forming

@@ -187,7 +187,12 @@ export default function CirclePlanComposer({
 
   return (
     <BottomSheet visible={visible} onClose={close} heightPct={CIRCLE_PLAN.sheetHeightPct}>
-      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>{COPY.circlePlanComposerTitle}</Text>
 
         {/* What */}
@@ -401,6 +406,8 @@ export default function CirclePlanComposer({
 }
 
 const styles = StyleSheet.create({
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: CIRCLE_PLAN.sectionGap },
   title: {
     fontFamily: Fonts.displayBold,
     fontSize: 26,

@@ -33,9 +33,20 @@ export function useCirclePlanContext(eventId: string | null | undefined) {
         p_event_id: eventId,
       });
       // If the RPC isn't deployed yet (held migration), degrade to "normal plan"
-      // so the detail screen behaves exactly as it does today.
+      // so the detail screen behaves exactly as it does today. PostgREST returns
+      // PGRST202 / HTTP 404 ("Could not find the function ...") when a function
+      // is absent from the schema cache; a direct SQL miss is 42883. Catch all.
       if (error) {
-        if (error.message?.includes('does not exist') || (error as any).code === '42883') {
+        const code = (error as any).code;
+        const status = (error as any).status;
+        const msg = error.message ?? '';
+        if (
+          code === 'PGRST202' ||
+          code === '42883' ||
+          status === 404 ||
+          msg.includes('Could not find the function') ||
+          msg.includes('does not exist')
+        ) {
           return { is_circle_plan: false };
         }
         throw error;
