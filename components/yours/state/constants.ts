@@ -315,4 +315,58 @@ export const COPY = {
   keepStoryEmptySub: (name: string) => `Invite ${name} to something.`,
   // Closing whisper at the foot of the page.
   keepClosing: 'Quietly building, one plan at a time.',
+
+  // ── Circle-aware plans (make a plan from a circle chat or DM) ───────────
+  // Lexicon: "circle" / "{circle name}" only; never group/crew/host/friends.
+  // No em/en dashes. All copy verbatim from the locked spec.
+  circlePlanComposerTitle: 'New plan',
+  circlePlanWhatLabel: 'What',
+  circlePlanWhatPlaceholder: "What's the plan?",
+  circlePlanWhereLabel: 'Where',
+  circlePlanWherePlaceholder: 'Add a place (optional)',
+  circlePlanWhenLabel: 'When',
+  circlePlanWhenPlaceholder: 'Pick a day and time',
+  // The single audience question.
+  circlePlanWhoLabel: 'who is this for',
+  circlePlanJustUs: 'Just us',
+  circlePlanJustUsSub: (circle: string) => `Only ${circle}.`,
+  circlePlanOpenUp: 'Open it up',
+  circlePlanOpenUpSub: 'Let a few others join from the feed.',
+  // Just-us recipients.
+  circlePlanEveryone: (circle: string) => `Everyone in ${circle}`,
+  circlePlanPickPeople: 'Pick people',
+  circlePlanPickHelper:
+    'Everyone keeps this in the circle chat. Pick a few and they get their own chat.',
+  // Open-it-up stranger stepper.
+  circlePlanStepperLabel: 'How many others can join?',
+  circlePlanStepperSub: (circle: string) => `On top of ${circle}, up to 7 from the feed.`,
+  // Inherited single-gender pill.
+  circlePlanGenderWomen: 'Shown to women only',
+  circlePlanGenderMen: 'Shown to men only',
+  // Primary action + errors.
+  circlePlanPost: 'Post the plan',
+  circlePlanTitleRequired: 'Give the plan a name first.',
+  circlePlanWhenRequired: 'Pick when it happens.',
+  circlePlanError: "Couldn't post the plan. Try again.",
+  // Posted-card framing.
+  circlePlanJoinLine: "Join if you're around.",
+  circlePlanFromBadge: 'from a circle',
+  circlePlanPrivateTag: 'private to circle',
+  circlePlanOpenStatus: (inCount: number, total: number, cap: number) =>
+    `${inCount} of ${total} in. Up to ${cap} others welcome.`,
+  // Start-a-chat affordance (whole-circle just-us plan with no chat yet).
+  circlePlanStartChat: 'Start a chat for this',
+  circlePlanStartChatSub: (circle: string) => `Keep this plan's planning out of ${circle}.`,
+  circlePlanStartChatError: "Couldn't start the chat just now. Try again.",
+  // Release a just-us plan to others (lives on the plan detail card).
+  circlePlanRelease: 'Open it up',
+  circlePlanReleaseExplain: (circle: string) =>
+    `Opening this up starts a separate chat, so ${circle} stays just yours.`,
+  circlePlanReleaseConfirm: 'Open it up',
+  circlePlanReleaseCancel: 'Keep it just us',
+  circlePlanReleaseError: "Couldn't open it up just now. Try again.",
+
+  // ── Keep-page empty state (you & [name], no shared history yet) ─────────
+  keepEmptyHeadline: (name: string) => `This is where you and ${name} begins.`,
+  keepEmptyAction: 'Make the first plan.',
 } as const;

@@ -23,12 +23,14 @@ import { useCircle } from '../../../../hooks/useCircle';
 import { circleDisplay } from '../../../../lib/circles/display';
 import ChatThread, { ChatThreadMember } from '../../../../components/chat/ChatThread';
 import AddPeopleSheet from '../../../../components/circles/AddPeopleSheet';
+import CirclePlanComposer from '../../../../components/circles/plan/CirclePlanComposer';
 
 function CircleChatScreenInner({ circleId }: { circleId: string }) {
   const router = useRouter();
   const { data: myUserId } = useAuthUserId();
   const { data, isError } = useCircle(circleId);
   const [addOpen, setAddOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
 
   const members: ChatThreadMember[] = (data?.members ?? []).map((m) => ({
     id: m.user_id,
@@ -54,9 +56,8 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
       )
     : null;
 
-  // The "+" header menu: add people now, or make a plan (placeholder this build).
+  // The "+" header menu: add people now, or make a plan.
   const openPlusMenu = () => {
-    const makePlanSoon = () => Alert.alert(COPY.circlePlusMakePlan, COPY.circlePlusMakePlanSoon);
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
@@ -65,13 +66,13 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         },
         (i) => {
           if (i === 0) setAddOpen(true);
-          else if (i === 1) makePlanSoon();
+          else if (i === 1) setPlanOpen(true);
         },
       );
     } else {
       Alert.alert(COPY.circleAddTitle, undefined, [
         { text: COPY.circlePlusAddPeople, onPress: () => setAddOpen(true) },
-        { text: COPY.circlePlusMakePlan, onPress: makePlanSoon },
+        { text: COPY.circlePlusMakePlan, onPress: () => setPlanOpen(true) },
         { text: COPY.circlePlusCancel, style: 'cancel' },
       ]);
     }
@@ -112,6 +113,25 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         circleId={circleId}
         existingMemberIds={memberIds}
         onClose={() => setAddOpen(false)}
+      />
+      <CirclePlanComposer
+        visible={planOpen}
+        onClose={() => setPlanOpen(false)}
+        circleId={circleId}
+        circleName={disp?.title ?? data?.circle.name ?? ''}
+        members={(data?.members ?? []).map((m) => ({
+          user_id: m.user_id,
+          first_name_display: m.first_name_display,
+          profile_photo_url: m.profile_photo_url,
+        }))}
+        isDm={!!disp?.isDm}
+        onPosted={(result) => {
+          // Open plan / picked-subset plans get their own chat -> open it.
+          // A whole-circle just-us plan lives in this circle chat already.
+          if (result.has_own_chat) {
+            router.push(`/plan/${result.event_id}` as any);
+          }
+        }}
       />
     </>
   );

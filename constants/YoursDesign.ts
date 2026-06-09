@@ -222,6 +222,39 @@ export const CIRCLE_SUGGEST = {
   maxFaces: 3,
 } as const;
 
+// ── Make-a-plan-from-a-circle composer ────────────────────────────────────
+// A sheet: standard plan fields (what/where/when) above the WHO IS THIS FOR
+// block (two audience cards + conditional reveals). One scroll, calm spacing.
+export const CIRCLE_PLAN = {
+  sheetHeightPct: 0.9,
+  sectionGap: 20,        // Between major blocks
+  labelGap: 8,           // Section label to its control
+  fieldRadius: 12,
+  fieldMinHeight: 48,
+  fieldPadH: 14,
+  fieldPadV: 12,
+  dayChipPadH: 14,       // Day + time picker chips
+  dayChipPadV: 8,
+  chipGap: 8,
+  timeChipMinWidth: 44,
+  cardRadius: 16,        // Audience cards
+  cardPadV: 14,
+  cardPadH: 14,
+  cardGap: 10,
+  cardBorder: 1.5,
+  chipRadius: 999,       // Recipient chips, gender pill
+  chipPadH: 14,
+  chipPadV: 8,
+  stepperBtn: 38,        // Stranger-count stepper
+  stepperRadius: 19,
+  stepperGap: 16,
+  memberAvatar: 44,      // Member multiselect
+  memberCheck: 18,
+  memberRowGap: 14,
+  postHeight: 52,        // Primary action pill
+  postRadius: 999,
+} as const;
+
 // ── Activity ring strokes (color side lives in state/constants.ts) ────────
 export const RING_STROKE = {
   fullPt: 2.5,
