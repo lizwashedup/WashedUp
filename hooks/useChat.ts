@@ -220,8 +220,11 @@ export function useChat(key: ConversationKey) {
             : Promise.resolve({ data: [] as any[] }),
         ]);
         if (cancelledRef.current) return;
-        // Invalidate tab badge so it reflects the just-cleared notifications (event chats only).
-        if (kind === 'event') queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
+        // Invalidate the Chats tab badge so it reflects this conversation being
+        // read. Plans clear app_notifications above; circles have no notification
+        // type yet, but their unread count is derived from chat_reads.last_read_at
+        // (just upserted), so the badge must still refresh for circle reads.
+        queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
 
         const reactionsByMsg: Record<string, MessageReaction[]> = {};
         (reactionsData ?? []).forEach((r: any) => {

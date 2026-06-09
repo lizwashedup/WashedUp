@@ -26,6 +26,9 @@ export function useTypingIndicator(
   eventId: string | undefined,
   currentUserId: string | null,
   currentUserName: string | null,
+  // Plan chats keep the original `typing:${id}` channel byte-identical; circle/DM
+  // chats use a distinct namespace so the two never cross.
+  kind: 'event' | 'circle' = 'event',
 ) {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
 
@@ -45,7 +48,8 @@ export function useTypingIndicator(
       );
     };
 
-    const channel = supabase.channel(`typing:${eventId}`, {
+    const channelName = kind === 'event' ? `typing:${eventId}` : `typing:circle:${eventId}`;
+    const channel = supabase.channel(channelName, {
       config: { broadcast: { self: false } },
     });
 
@@ -92,7 +96,7 @@ export function useTypingIndicator(
       channelRef.current = null;
       supabase.removeChannel(channel);
     };
-  }, [eventId, currentUserId]);
+  }, [eventId, currentUserId, kind]);
 
   const sendTyping = useCallback(
     (isTyping: boolean) => {
