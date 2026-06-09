@@ -9,6 +9,7 @@
  */
 import { useMutation } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { markChatListDirty } from '../lib/chatListSignal';
 
 export function useGetOrCreateDm() {
   return useMutation({
@@ -19,5 +20,8 @@ export function useGetOrCreateDm() {
       if (error) throw error;
       return data as string;
     },
+    // A fresh DM should appear in the Chats list right away, not after the
+    // throttled focus refetch. (Runs alongside any per-call onSuccess.)
+    onSuccess: () => markChatListDirty(),
   });
 }

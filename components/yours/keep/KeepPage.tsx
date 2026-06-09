@@ -188,13 +188,21 @@ export default function KeepPage({
 
         <View style={styles.actions}>
           <Pressable
-            style={[styles.actionBtn, styles.actionGold]}
+            style={[styles.actionBtn, styles.actionGold, getOrCreateDm.isPending && styles.actionDisabled]}
             onPress={onMessage}
+            disabled={getOrCreateDm.isPending}
             accessibilityRole="button"
+            accessibilityState={{ disabled: getOrCreateDm.isPending }}
             accessibilityLabel={`${COPY.keepMessage} ${name}`}
           >
-            <MessageCircle size={16} color={Colors.asphalt} />
-            <Text style={styles.actionGoldText}>{COPY.keepMessage}</Text>
+            {getOrCreateDm.isPending ? (
+              <ActivityIndicator color={Colors.asphalt} />
+            ) : (
+              <>
+                <MessageCircle size={16} color={Colors.asphalt} />
+                <Text style={styles.actionGoldText}>{COPY.keepMessage}</Text>
+              </>
+            )}
           </Pressable>
           <Pressable
             style={[styles.actionBtn, styles.actionPrimary]}
@@ -269,6 +277,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 14,
   },
+  actionDisabled: { opacity: 0.55 },
   actionPrimary: { backgroundColor: Colors.terracotta },
   actionPrimaryText: {
     fontFamily: Fonts.sansBold,

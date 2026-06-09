@@ -19,6 +19,7 @@ const wLogo = require('../../../assets/images/w-logo-waves.png');
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
+import { consumeChatListDirty } from '../../../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
 import { GROUPS_ENABLED, YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
@@ -206,7 +207,9 @@ export default function ChatsScreen() {
   useFocusEffect(
     React.useCallback(() => {
       const nowTs = Date.now();
-      if (nowTs - lastChatsFocusFetchRef.current > 30_000) {
+      // A just-created conversation (e.g. a new DM) sets the dirty flag so we
+      // refetch immediately, bypassing the throttle; otherwise throttle to 30s.
+      if (consumeChatListDirty() || nowTs - lastChatsFocusFetchRef.current > 30_000) {
         lastChatsFocusFetchRef.current = nowTs;
         refetch();
       }

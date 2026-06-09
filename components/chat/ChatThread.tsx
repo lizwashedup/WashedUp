@@ -1585,9 +1585,9 @@ export default function ChatThread(props: ChatThreadProps) {
   const handleAvatarPress = useCallback((uid: string) => setMiniProfileUserId(uid), []);
 
   return (
-    <View style={{ flex: 1, backgroundColor: Colors.parchment }}>
+    <View style={chatStyles.screen}>
       {/* ── Header ── */}
-      <SafeAreaView edges={['top']} style={{ backgroundColor: Colors.white }}>
+      <SafeAreaView edges={['top']} style={chatStyles.headerSafe}>
         <View style={chatStyles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -1609,8 +1609,10 @@ export default function ChatThread(props: ChatThreadProps) {
           <TouchableOpacity
             onPress={props.onViewContext}
             style={chatStyles.viewPlanBtn}
+            accessibilityRole="button"
+            accessibilityLabel={props.viewContextLabel}
           >
-            <Text style={chatStyles.viewPlanText}>{props.viewContextLabel}</Text>
+            <Text style={chatStyles.viewPlanText} numberOfLines={1}>{props.viewContextLabel}</Text>
           </TouchableOpacity>
 
           {props.headerMenu.type === 'plus' ? (
@@ -1734,9 +1736,9 @@ export default function ChatThread(props: ChatThreadProps) {
           FlatList (inverted) reserves exactly the dock height via
           paddingTop on its content container so new messages never hide
           behind the bar. */}
-      <View style={{ flex: 1 }}>
+      <View style={chatStyles.listWrap}>
         {loading ? (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={chatStyles.loadingWrap}>
             <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
         ) : (
@@ -2278,6 +2280,10 @@ export default function ChatThread(props: ChatThreadProps) {
 }
 
 const chatStyles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: Colors.parchment },
+  headerSafe: { backgroundColor: Colors.white },
+  listWrap: { flex: 1 },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   pushBanner: {
     backgroundColor: Colors.inputBg,
     paddingVertical: 10,
@@ -2330,6 +2336,9 @@ const chatStyles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 4,
+    // Cap so a long DM counterpart name ("View Magdalena") can't crowd/wrap the
+    // header; the title (flex:1) truncates first, then this.
+    maxWidth: 150,
   },
   viewPlanText: { fontSize: 12, fontWeight: '600' as const, color: Colors.terracotta },
   ellipsisBtn: {
@@ -2489,7 +2498,7 @@ const chatStyles = StyleSheet.create({
   countdownText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
-    color: '#78695C',
+    color: Colors.secondary,
     fontStyle: 'italic',
     textAlign: 'center',
     paddingVertical: 6,

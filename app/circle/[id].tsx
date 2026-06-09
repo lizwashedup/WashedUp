@@ -24,6 +24,7 @@ import { hapticSelection } from '../../lib/haptics';
 import { useAuthUserId } from '../../components/yours/state/useAuthUserId';
 import { useCircle } from '../../hooks/useCircle';
 import { useLeaveCircle } from '../../hooks/useLeaveCircle';
+import { circleDisplay } from '../../lib/circles/display';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import CircleNoticeboard from '../../components/circles/CircleNoticeboard';
 import AddPeopleSheet from '../../components/circles/AddPeopleSheet';
@@ -37,7 +38,20 @@ function CircleDetail({ circleId }: { circleId: string }) {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
 
-  const title = data?.circle.name ?? '';
+  // Unnamed circles (DMs grown to a circle, name='') render by member names, not
+  // blank. circleDisplay gives "Marlowe, Sage" for 3+ and the counterpart for 2.
+  const display = data && userId
+    ? circleDisplay(
+        data.circle.name,
+        data.members.map((m) => ({
+          user_id: m.user_id,
+          name: m.first_name_display,
+          avatar_url: m.profile_photo_url,
+        })),
+        userId,
+      )
+    : null;
+  const title = display?.title ?? data?.circle.name ?? '';
   const memberIds = data?.members.map((m) => m.user_id) ?? [];
 
   const doLeave = () => {
@@ -99,7 +113,7 @@ function CircleDetail({ circleId }: { circleId: string }) {
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-          <CircleNoticeboard payload={data} onAddPeople={() => setAddOpen(true)} />
+          <CircleNoticeboard payload={data} displayName={title} onAddPeople={() => setAddOpen(true)} />
         </ScrollView>
       )}
 

@@ -26,9 +26,13 @@ function SectionLabel({ children }: { children: string }) {
 
 export default function CircleNoticeboard({
   payload,
+  displayName,
   onAddPeople,
 }: {
   payload: CirclePayload;
+  // Resolved title (member names for an unnamed/DM-grown circle); falls back to
+  // the stored name. Keeps the hero from ever showing a blank name.
+  displayName?: string;
   onAddPeople?: () => void;
 }) {
   const { circle, members } = payload;
@@ -38,14 +42,14 @@ export default function CircleNoticeboard({
       {/* Identity hero */}
       <View style={styles.hero}>
         <CircleCover
-          name={circle.name}
+          name={displayName?.trim() || circle.name}
           coverUrl={null}
           size={CIRCLE_HOME.coverHero}
           radius={CIRCLE_HOME.coverHeroRadius}
           monogramSize={CIRCLE_HOME.coverMonogram}
         />
         <Text style={styles.name} numberOfLines={2}>
-          {circle.name}
+          {displayName?.trim() || circle.name}
         </Text>
         <Text style={styles.memberCount}>{COPY.circleHomeMembers(members.length)}</Text>
         {!!circle.description?.trim() && (
