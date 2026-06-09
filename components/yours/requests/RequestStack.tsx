@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -56,12 +56,17 @@ export default function RequestStack({
     });
 
   // Close once nothing is left to act on and no block prompt is open.
+  // onClose is an inline arrow from the parent (new identity every render), so
+  // ref it - otherwise the parent's frequent re-renders would clear+re-arm this
+  // timer indefinitely and the "all caught up" screen would never auto-close.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!card && !blockFor) {
-      const t = setTimeout(onClose, 600);
+      const t = setTimeout(() => onCloseRef.current(), 600);
       return () => clearTimeout(t);
     }
-  }, [card, blockFor, onClose]);
+  }, [card, blockFor]);
 
   const onAdd = (r: IncomingRequest) => {
     if (resolved.has(r.connection_id)) return; // sync guard vs rapid double-tap
@@ -79,10 +84,15 @@ export default function RequestStack({
   const onNotNow = (r: IncomingRequest) => {
     if (resolved.has(r.connection_id)) return; // sync guard vs rapid double-tap
     markResolved(r.connection_id);
+    setBlockFor(r);
     decline
       .mutateAsync({ requesterId: r.requester_user_id, block: false })
-      .catch(() => {});
-    setBlockFor(r);
+      .catch((e) => {
+        // Surface the failure instead of silently hiding a still-pending row.
+        unresolve(r.connection_id);
+        setBlockFor(null);
+        Alert.alert('', friendlyConnectionError(e));
+      });
   };
   const onBlock = (r: IncomingRequest) => {
     decline
