@@ -3,7 +3,8 @@
  * (photo + first name). Read-only in v1; admin management lands in Step 8.
  */
 import React from 'react';
-import { View, Text, Image, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Image, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { CIRCLE_HOME } from '../../constants/YoursDesign';
@@ -42,7 +43,13 @@ function MemberChip({ member }: { member: CircleMember }) {
   );
 }
 
-export default function CircleMembersRow({ members }: { members: CircleMember[] }) {
+export default function CircleMembersRow({
+  members,
+  onAdd,
+}: {
+  members: CircleMember[];
+  onAdd?: () => void;
+}) {
   return (
     <ScrollView
       horizontal
@@ -52,6 +59,21 @@ export default function CircleMembersRow({ members }: { members: CircleMember[] 
       {members.map((m) => (
         <MemberChip key={m.user_id} member={m} />
       ))}
+      {onAdd && (
+        <Pressable
+          onPress={onAdd}
+          style={styles.chip}
+          accessibilityRole="button"
+          accessibilityLabel={COPY.circleAddTitle}
+        >
+          <View style={[styles.avatar, styles.addAvatar]}>
+            <Plus size={20} color={Colors.terracotta} strokeWidth={2} />
+          </View>
+          <Text style={[styles.name, styles.addName]} numberOfLines={1}>
+            {COPY.circleAddCell}
+          </Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -76,6 +98,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: Colors.brandSoft,
   },
+  addAvatar: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.brandSoft,
+    borderWidth: 1,
+    borderColor: Colors.terracotta,
+    borderStyle: 'dashed',
+  },
   initial: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyMD,
@@ -87,5 +117,9 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     marginTop: CIRCLE_HOME.memberNameGap,
     textAlign: 'center',
+  },
+  addName: {
+    fontFamily: Fonts.sansBold,
+    color: Colors.terracotta,
   },
 });

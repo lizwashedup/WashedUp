@@ -197,7 +197,9 @@ export const COPY = {
   // Recently-together section (hidden until there is history).
   circleRecentLabel: 'recently together',
   // The Room: a reserved, opt-in planner. UI only this release, no logic.
-  circleRoomTitle: 'the room is listening',
+  // Title is just "the room" (the "AI planner" label was dropped per the
+  // 2026-06-08 copy system); the sub carries the "not on yet" framing.
+  circleRoomTitle: 'the room',
   circleRoomSub: 'An optional planner for your circle. Not on yet.',
   // Leave a circle. Plan history is untouched (spec section 3).
   circleLeave: 'Leave circle',
@@ -209,10 +211,25 @@ export const COPY = {
   circleLeaveError: "Couldn't leave just now. Try again.",
   // Load failure.
   circleLoadError: "This circle didn't load.",
-  // Persistent circle chat (stacked under the noticeboard).
-  circleComposerPlaceholder: 'Message the circle',
+  // Circle chat (the shared chat surface) + its header.
   circleChatStart: 'This is the beginning. Say something to get it going.',
-  circleLocationLabel: 'Shared location',
+  // Header "View circle" button (opens the circle detail page).
+  circleViewButton: 'View circle',
+  // Header "+" menu: add people now, or make a plan (placeholder this build).
+  circlePlusAddPeople: 'Add people now',
+  circlePlusMakePlan: 'Make a plan',
+  circlePlusMakePlanSoon: 'Plans from a circle are coming soon.',
+  circlePlusCancel: 'Cancel',
+  // Add-people sheet (also used to grow a DM into a circle).
+  circleAddTitle: 'Add people',
+  // Short label on the trailing "+add" chip in the members row.
+  circleAddCell: 'add',
+  circleAddSub: 'Pick from your people. They join the moment you add them.',
+  circleAddConfirm: (n: number) =>
+    n === 1 ? 'Add 1 person' : `Add ${n} people`,
+  circleAddEmptyTitle: 'Everyone you know is already here.',
+  circleAddEmptySub: 'Add more people on the People tab first, then add them here.',
+  circleAddError: "Couldn't add them just now. Try again.",
 
   // ── Create-circle flow (3 steps) ────────────────────────────────────────
   circleCreateTitle: 'New circle',

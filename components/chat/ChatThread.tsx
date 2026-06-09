@@ -104,8 +104,10 @@ export interface ChatThreadProps {
   // Chrome slots rendered inside the shared body
   renderHeaderBanner?: () => React.ReactElement | null;
   renderPinnedFooter?: () => React.ReactElement | null;
-  // Moderation: the full member list for the report sheet (avatar row is capped)
-  fetchReportMembers: () => Promise<{ id: string; name: string }[]>;
+  // Moderation: the full member list for the report sheet (avatar row is capped).
+  // Only used by the 'report' header menu; circle/DM use the '+' menu and reach
+  // report via avatar -> mini profile, so this is optional for them.
+  fetchReportMembers?: () => Promise<{ id: string; name: string }[]>;
   reportEventId?: string;
   // active_chat presence write (plan-only column); circles skip it
   enablePresence?: boolean;
@@ -1133,7 +1135,7 @@ export default function ChatThread(props: ChatThreadProps) {
   const handleReportMenu = useCallback(async () => {
     // The full member list (avatar row is capped) comes from the per-kind wrapper:
     // plans query event_members, circles query circle_members.
-    const reportMembers = await props.fetchReportMembers();
+    const reportMembers = (await props.fetchReportMembers?.()) ?? [];
 
     if (reportMembers.length === 0) {
       setAlertInfo({ title: 'No other members', message: 'There are no other members in this chat to report.' });

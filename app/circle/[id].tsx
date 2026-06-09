@@ -1,58 +1,51 @@
 /**
- * CircleHome - the circle's home surface (reached from Yours > Circles and from
- * the circle chat list). v1 renders the noticeboard (cover, members, plans,
- * the reserved Room slot) in a scroll; the persistent circle chat stacks in
- * below it in a following chunk (6b).
+ * View-circle detail page.
  *
- * Mounted only behind GROUPS_ENABLED (the route guards it).
+ * Reached from the circle chat header's "View circle" button. This is the
+ * circle's noticeboard moved off the chat surface: identity (cover + name +
+ * member count + description), "who's in it" (with an add affordance), "coming
+ * up" plans, and the reserved gold "the room" slot. Circle management that used
+ * to live on the stacked home (leave) now lives here, in the header overflow.
+ *
+ * Gated behind GROUPS_ENABLED (a direct hit with the flag off bounces to Chats).
+ * Note: the static `circle/new` route takes precedence over this dynamic one.
  */
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-} from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronLeft, MoreHorizontal } from 'lucide-react-native';
+import { GROUPS_ENABLED } from '../../constants/FeatureFlags';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { CIRCLE_HOME } from '../../constants/YoursDesign';
-import { COPY } from '../yours/state/constants';
+import { COPY } from '../../components/yours/state/constants';
 import { hapticSelection } from '../../lib/haptics';
-import { useAuthUserId } from '../yours/state/useAuthUserId';
+import { useAuthUserId } from '../../components/yours/state/useAuthUserId';
 import { useCircle } from '../../hooks/useCircle';
 import { useLeaveCircle } from '../../hooks/useLeaveCircle';
-import { BrandedAlert } from '../BrandedAlert';
-import CircleChat from './CircleChat';
+import { BrandedAlert } from '../../components/BrandedAlert';
+import CircleNoticeboard from '../../components/circles/CircleNoticeboard';
+import AddPeopleSheet from '../../components/circles/AddPeopleSheet';
 
-// Distance from the top of the screen to the top of the chat surface, so the
-// keyboard-avoiding chat offsets correctly: the safe-area top inset plus the
-// header band (its vertical padding on both sides + the icon row height).
-const HEADER_BAND = CIRCLE_HOME.headerVPad * 2 + CIRCLE_HOME.headerIcon;
-
-export default function CircleHome({ circleId }: { circleId: string }) {
+function CircleDetail({ circleId }: { circleId: string }) {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { data: userId } = useAuthUserId();
   const { data, isLoading, isError, refetch } = useCircle(circleId);
   const leaveCircle = useLeaveCircle(userId);
 
-  // Single confirm modal (v1 has exactly one overflow action: leave). A real
-  // multi-action sheet arrives in Step 8 (invite / edit / admin); chaining two
-  // modals here is unreliable because BrandedAlert fires onPress then onClose
-  // in the same tick, so we open the confirm directly.
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const title = data?.circle.name ?? '';
+  const memberIds = data?.members.map((m) => m.user_id) ?? [];
 
   const doLeave = () => {
-    if (leaveCircle.isPending) return; // guard a double-tap before the modal closes
+    if (leaveCircle.isPending) return;
     leaveCircle.mutate(circleId, {
-      onSuccess: () => router.back(),
+      // Leaving makes both this page and the circle chat invalid, so pop the
+      // whole circle stack back to the Chats list rather than to the dead chat.
+      onSuccess: () => router.dismissAll(),
       onError: () => Alert.alert(COPY.circleLeaveError),
     });
   };
@@ -75,7 +68,7 @@ export default function CircleHome({ circleId }: { circleId: string }) {
           <Pressable
             onPress={() => {
               hapticSelection();
-              setConfirmOpen(true);
+              setConfirmLeave(true);
             }}
             hitSlop={12}
             accessibilityRole="button"
@@ -105,26 +98,38 @@ export default function CircleHome({ circleId }: { circleId: string }) {
           </Pressable>
         </View>
       ) : (
-        <CircleChat
-          circleId={circleId}
-          payload={data}
-          headerOffset={insets.top + HEADER_BAND}
-        />
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+          <CircleNoticeboard payload={data} onAddPeople={() => setAddOpen(true)} />
+        </ScrollView>
       )}
 
-      {/* Leave confirmation (the only overflow action in v1) */}
+      <AddPeopleSheet
+        visible={addOpen}
+        circleId={circleId}
+        existingMemberIds={memberIds}
+        onClose={() => setAddOpen(false)}
+      />
+
       <BrandedAlert
-        visible={confirmOpen}
+        visible={confirmLeave}
         title={COPY.circleLeaveTitle}
         message={COPY.circleLeaveBody}
         buttons={[
           { text: COPY.circleLeaveStay, style: 'cancel' },
           { text: COPY.circleLeaveGo, style: 'destructive', onPress: doLeave },
         ]}
-        onClose={() => setConfirmOpen(false)}
+        onClose={() => setConfirmLeave(false)}
       />
     </SafeAreaView>
   );
+}
+
+export default function CircleDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  if (!GROUPS_ENABLED || !id) {
+    return <Redirect href="/(tabs)/chats" />;
+  }
+  return <CircleDetail circleId={id} />;
 }
 
 const styles = StyleSheet.create({
@@ -145,6 +150,7 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
   },
   headerSpacer: { width: CIRCLE_HOME.headerIcon },
+  scroll: { paddingBottom: 32 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   errorText: {
     fontFamily: Fonts.sans,

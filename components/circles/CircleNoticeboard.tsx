@@ -24,7 +24,13 @@ function SectionLabel({ children }: { children: string }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
-export default function CircleNoticeboard({ payload }: { payload: CirclePayload }) {
+export default function CircleNoticeboard({
+  payload,
+  onAddPeople,
+}: {
+  payload: CirclePayload;
+  onAddPeople?: () => void;
+}) {
   const { circle, members } = payload;
 
   return (
@@ -50,7 +56,7 @@ export default function CircleNoticeboard({ payload }: { payload: CirclePayload 
       {/* Members */}
       <View style={styles.section}>
         <SectionLabel>{COPY.circleWhoLabel}</SectionLabel>
-        <CircleMembersRow members={members} />
+        <CircleMembersRow members={members} onAdd={onAddPeople} />
       </View>
 
       {/* Plans on the calendar (empty in v1) */}
