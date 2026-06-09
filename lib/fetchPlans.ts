@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { GROUPS_ENABLED } from '../constants/FeatureFlags';
 
 /**
  * Batch-fetch accurate joined counts from event_members.
@@ -46,6 +47,9 @@ export interface Plan {
   featured_type: 'washedup_event' | 'birthday_party' | null;
   cluster_root_id: string | null;
   allow_duplicate: boolean;
+  circle_id?: string | null;
+  circle_visibility?: 'circle_only' | 'open' | null;
+  stranger_cap?: number | null;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -115,7 +119,14 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
       : Promise.resolve({ data: [] as { creator_user_id: string }[], error: null }),
     supabase
       .from('events')
-      .select('id, featured_type, allow_duplicate')
+      // Circle columns only exist once the (held) circle-plan migrations are
+      // applied. Until GROUPS_ENABLED is flipped (and those migrations land),
+      // select only the shipped columns so the feed enrichment never errors.
+      .select(
+        GROUPS_ENABLED
+          ? 'id, featured_type, allow_duplicate, circle_id, circle_visibility, stranger_cap'
+          : 'id, featured_type, allow_duplicate',
+      )
       .in('id', plans.map((p) => p.id)),
   ]);
 
@@ -124,15 +135,27 @@ export async function fetchPlans(userId: string): Promise<Plan[]> {
   if (!featuredTypeResult.error) {
     const featuredTypeById: Record<string, 'washedup_event' | 'birthday_party' | null> = {};
     const allowDuplicateById: Record<string, boolean> = {};
-    (featuredTypeResult.data ?? []).forEach(
-      (row: { id: string; featured_type: string | null; allow_duplicate: boolean | null }) => {
+    const circleById: Record<string, { circle_id: string | null; circle_visibility: 'circle_only' | 'open' | null; stranger_cap: number | null }> = {};
+    ((featuredTypeResult.data ?? []) as unknown as Array<{ id: string; featured_type: string | null; allow_duplicate: boolean | null; circle_id?: string | null; circle_visibility?: 'circle_only' | 'open' | null; stranger_cap?: number | null }>).forEach(
+      (row) => {
         featuredTypeById[row.id] = (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null;
         allowDuplicateById[row.id] = row.allow_duplicate ?? true;
+        circleById[row.id] = {
+          circle_id: row.circle_id ?? null,
+          circle_visibility: row.circle_visibility ?? null,
+          stranger_cap: row.stranger_cap ?? null,
+        };
       },
     );
     plans.forEach((p) => {
       p.featured_type = featuredTypeById[p.id] ?? null;
       if (p.id in allowDuplicateById) p.allow_duplicate = allowDuplicateById[p.id];
+      const c = circleById[p.id];
+      if (c) {
+        p.circle_id = c.circle_id;
+        p.circle_visibility = c.circle_visibility;
+        p.stranger_cap = c.stranger_cap;
+      }
     });
   }
 

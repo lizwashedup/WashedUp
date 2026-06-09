@@ -31,6 +31,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { getPlanPinColor } from '../../lib/planColors';
+import { COPY } from '../yours/state/constants';
 
 
 interface PlanCardProps {
@@ -49,6 +50,12 @@ interface PlanCardProps {
     is_featured?: boolean;
     featured_type?: 'washedup_event' | 'birthday_party' | null;
     allow_duplicate?: boolean;
+    // Circle-aware plans (optional; absent on normal plans). When circle_id is
+    // set the card carries the "from a circle" badge / "private to circle" tag,
+    // the low-pressure join line, and stranger-cap-based spots.
+    circle_id?: string | null;
+    circle_visibility?: 'circle_only' | 'open' | null;
+    stranger_cap?: number | null;
     creator: {
       id?: string;
       first_name_display: string;
@@ -188,7 +195,12 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     : Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
   const spotsLeft = Math.max(0, totalCapacity - going);
   const isFull = going >= totalCapacity;
-  const showSpotsLeftBadge = !isFeatured && spotsLeft >= 1 && spotsLeft <= 2 && !isFull;
+  // Circle plans use stranger_cap, not max_invites, so the normal spots/full
+  // math does not apply: never show the "N left" urgency badge on them.
+  const isCirclePlan = !!plan.circle_id;
+  const isOpenCircle = isCirclePlan && plan.circle_visibility === 'open';
+  const isJustUsCircle = isCirclePlan && plan.circle_visibility === 'circle_only';
+  const showSpotsLeftBadge = !isFeatured && !isCirclePlan && spotsLeft >= 1 && spotsLeft <= 2 && !isFull;
 
   // ── Spots-left pulse animation ──
   const pulseScale = useSharedValue(1);
@@ -331,11 +343,21 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
           (gold "washedup event" or pink "birthday party") OR regular category
           + women-only pills. Happening-now leads visually so users scanning
           the feed spot live plans first. */}
-      {(isHappeningNow || isFeatured || plan.category || plan.gender_rule === 'women_only') ? (
+      {(isHappeningNow || isFeatured || plan.category || plan.gender_rule === 'women_only' || isCirclePlan) ? (
         <View style={styles.categoryRow}>
           {isHappeningNow && (
             <View style={styles.happeningNowPill}>
               <Text style={styles.happeningNowPillText}>happening now</Text>
+            </View>
+          )}
+          {isOpenCircle && (
+            <View style={styles.fromCircleBadge}>
+              <Text style={styles.fromCircleBadgeText}>{COPY.circlePlanFromBadge}</Text>
+            </View>
+          )}
+          {isJustUsCircle && (
+            <View style={styles.privateCircleTag}>
+              <Text style={styles.privateCircleTagText}>{COPY.circlePlanPrivateTag}</Text>
             </View>
           )}
           {isFeatured ? (
@@ -409,9 +431,13 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         </View>
       )}
 
-      {/* E. Footer — spots + CTA */}
+      {/* E. Footer: spots + CTA. Circle plans lead with the low-pressure join
+          line ("Join if you're around.") instead of stranger-cap-incorrect
+          spots math. */}
       <View style={styles.footer}>
-        {!isBirthdayParty && (
+        {isCirclePlan ? (
+          <Text style={styles.joinLine}>{COPY.circlePlanJoinLine}</Text>
+        ) : !isBirthdayParty && (
           isFeatured ? (
             <Text style={styles.spotsLabel}>
               <Text style={styles.spotsNumber}>{going}</Text>
@@ -649,6 +675,33 @@ const styles = StyleSheet.create({
     color: Colors.birthdayPink,
     letterSpacing: 0.2,
   },
+  // "from a circle": soft gold-tinted badge (decorative bg only; text stays
+  // warm-dark, never gold, per the palette rule).
+  fromCircleBadge: {
+    backgroundColor: Colors.goldenAmberTint15,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  fromCircleBadgeText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: Colors.darkWarm,
+    letterSpacing: 0.2,
+  },
+  // "private to circle": quiet neutral tag for a Just-us plan.
+  privateCircleTag: {
+    backgroundColor: Colors.dividerWarm,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  privateCircleTagText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 10,
+    color: Colors.secondary,
+    letterSpacing: 0.2,
+  },
   birthdaySubtitle: {
     fontFamily: Fonts.displayItalic,
     fontSize: FontSizes.bodySM,
@@ -697,6 +750,12 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: 13,
     color: Colors.secondary,
+  },
+  // Low-pressure circle-plan join line (the emotional core of the card).
+  joinLine: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 13,
+    color: Colors.darkWarm,
   },
   spotsNumber: {
     fontFamily: Fonts.sansBold,
