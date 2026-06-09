@@ -1,7 +1,8 @@
 /**
- * CirclesDirectory - the Yours > Circles tab body. A thin list of the circles
- * you're in, each deep-linking to the circle home, with a first-class "make a
- * circle" affordance pinned at the top. Full loading / error / empty coverage.
+ * CirclesDirectory - the Yours > Circles tab body. A list of rich cards for the
+ * circles you're in, each deep-linking to the circle home, with a summary header
+ * card (count, tagline, branded "New circle" button) pinned at the top. Full
+ * loading / error / empty coverage.
  *
  * Gated by GROUPS_ENABLED upstream (the Circles tab only mounts when on).
  */
@@ -14,43 +15,19 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { Plus } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
-import { CIRCLE } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
-import { hapticSelection } from '../../../lib/haptics';
 import { useMyCircles } from '../../../hooks/useMyCircles';
+import { useCircleMemberPreviews } from '../../../hooks/useCircleMemberPreviews';
 import { useCircleSuggestions, useSetSuggestionStatus } from '../../../hooks/useCircleSuggestions';
 import { isDmCircle } from '../../../lib/circles/display';
 import type { MyCircle, CircleSuggestion } from '../../../lib/circles/types';
-import CircleRow from './CircleRow';
+import CircleCard from './CircleCard';
+import CirclesSummaryHeader from './CirclesSummaryHeader';
 import CirclesEmptyState from './CirclesEmptyState';
 import SuggestionCard from './SuggestionCard';
-
-/** First-class "make a circle" affordance, shaped like a directory row. */
-function CreateCircleRow({ onPress }: { onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={() => {
-        hapticSelection();
-        onPress();
-      }}
-      style={({ pressed }) => [styles.createRow, pressed && styles.rowPressed]}
-      accessibilityRole="button"
-      accessibilityLabel={COPY.circleMakeCta}
-    >
-      <View style={styles.createTile}>
-        <Plus size={CIRCLE.createIcon} color={Colors.terracotta} strokeWidth={2.5} />
-      </View>
-      <View style={styles.createBody}>
-        <Text style={styles.createTitle}>{COPY.circleMakeCta}</Text>
-        <Text style={styles.createSub}>{COPY.circleMakeSub}</Text>
-      </View>
-    </Pressable>
-  );
-}
 
 export default function CirclesDirectory({
   userId,
@@ -70,6 +47,12 @@ export default function CirclesDirectory({
     useMyCircles(userId);
   // DMs are unnamed 2-person circles; they live in Chats, not this directory.
   const circles = rawCircles.filter((c) => !isDmCircle(c.name, c.member_count));
+  // Member faces for the cards' overlapping-avatar rows. Degrades quietly: if it
+  // fails, cards still render their tile + name + meta.
+  const { data: memberPreviews = {} } = useCircleMemberPreviews(
+    circles.map((c) => c.id),
+    userId,
+  );
   // Suggestions degrade quietly: if they fail to load the directory still works.
   const { data: suggestions = [] } = useCircleSuggestions(userId);
   const setSuggestionStatus = useSetSuggestionStatus(userId);
@@ -84,6 +67,7 @@ export default function CirclesDirectory({
 
   const header = (
     <>
+      <CirclesSummaryHeader count={circles.length} onCreate={onCreate} />
       {suggestions.map((s) => (
         <SuggestionCard
           key={s.id}
@@ -92,7 +76,6 @@ export default function CirclesDirectory({
           onDismiss={onDismissSuggestion}
         />
       ))}
-      <CreateCircleRow onPress={onCreate} />
     </>
   );
 
@@ -138,9 +121,12 @@ export default function CirclesDirectory({
       keyExtractor={(c) => c.id}
       ListHeaderComponent={header}
       renderItem={({ item }) => (
-        <CircleRow circle={item} onPress={onOpenCircle} />
+        <CircleCard
+          circle={item}
+          members={memberPreviews[item.id] ?? []}
+          onPress={onOpenCircle}
+        />
       )}
-      ItemSeparatorComponent={() => <View style={styles.divider} />}
       contentContainerStyle={styles.listContent}
       refreshing={isRefetching}
       onRefresh={refetch}
@@ -152,42 +138,7 @@ export default function CirclesDirectory({
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   listContent: { paddingBottom: 32 },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.border,
-    marginLeft: CIRCLE.dividerInset + CIRCLE.rowCover + CIRCLE.rowGap,
-  },
   rowPressed: { backgroundColor: Colors.warmTint },
-  // Create affordance
-  createRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: CIRCLE.rowVerticalPad,
-    paddingHorizontal: CIRCLE.dividerInset,
-  },
-  createTile: {
-    width: CIRCLE.rowCover,
-    height: CIRCLE.rowCover,
-    borderRadius: CIRCLE.rowCoverRadius,
-    backgroundColor: Colors.brandSoft,
-    borderWidth: 1.5,
-    borderColor: Colors.terracotta,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  createBody: { flex: 1, marginLeft: CIRCLE.rowGap },
-  createTitle: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.terracotta,
-  },
-  createSub: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.secondary,
-    marginTop: 3,
-  },
   errorText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,

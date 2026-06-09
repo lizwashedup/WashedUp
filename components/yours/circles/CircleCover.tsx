@@ -29,12 +29,20 @@ export default function CircleCover({
   size = CIRCLE.rowCover,
   radius = CIRCLE.rowCoverRadius,
   monogramSize = CIRCLE.monogramSize,
+  tone = 'terracotta',
 }: {
   name: string;
   coverUrl?: string | null;
   size?: number;
   radius?: number;
   monogramSize?: number;
+  /**
+   * Coverless-square treatment. 'terracotta' (default) keeps the original
+   * brand-soft square. 'gold' is the directory-card look: a gold-tinted square
+   * (decorative) with the monogram letter still in terracotta (the standing
+   * "no gold for text" rule keeps the letter off gold).
+   */
+  tone?: 'terracotta' | 'gold';
 }) {
   const box = { width: size, height: size, borderRadius: radius };
 
@@ -50,7 +58,9 @@ export default function CircleCover({
 
   const monogram = monogramOf(name);
   return (
-    <View style={[styles.cover, styles.placeholder, box]}>
+    <View
+      style={[styles.cover, styles.placeholder, tone === 'gold' && styles.gold, box]}
+    >
       {monogram ? (
         <Text style={[styles.monogram, { fontSize: monogramSize }]}>{monogram}</Text>
       ) : (
@@ -67,6 +77,9 @@ const styles = StyleSheet.create({
   placeholder: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  gold: {
+    backgroundColor: Colors.goldBadgeSoft,
   },
   monogram: {
     fontFamily: Fonts.displayItalic,

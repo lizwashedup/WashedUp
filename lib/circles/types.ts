@@ -52,6 +52,16 @@ export interface MyCircle {
   display_name?: string;
 }
 
+/**
+ * One member preview for a directory card's overlapping-avatar row. Batch-resolved
+ * client-side by useCircleMemberPreviews (get_my_circles returns no member faces).
+ */
+export interface MemberPreview {
+  user_id: string;
+  name: string | null;
+  photo_url: string | null;
+}
+
 /** A person inside a co-attendance suggestion (resolved by get_circle_suggestions). */
 export interface SuggestionPerson {
   user_id: string;

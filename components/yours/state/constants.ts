@@ -171,6 +171,13 @@ export const COPY = {
   // The first-class "make a circle" entry point (also lives on Chats).
   circleMakeCta: 'Make a circle',
   circleMakeSub: 'Gather a few of your people',
+  // Summary header card (sits above the rich card list). The "plans this week"
+  // half of the label fills in next chunk, once circle-plans data exists.
+  circleDirCount: (n: number) => (n === 1 ? '1 circle' : `${n} circles`),
+  circleDirTagline: 'your people. your plans.',
+  circleDirNewCta: 'New circle',
+  // Overflow chip on a card's overlapping-avatar row, e.g. "+3".
+  circleDirOverflow: (n: number) => `+${n}`,
   // Empty state when you have people but no circles yet: a warm invitation.
   circlesEmptyTitle: 'Your circles live here.',
   circlesEmptySub: 'A few of your people, one running list of plans together.',

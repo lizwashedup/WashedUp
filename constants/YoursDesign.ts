@@ -128,6 +128,42 @@ export const CIRCLE = {
                            // sibling iconBubble paints only with explicit w+h)
 } as const;
 
+// ── Circles directory cards (the rich Yours > Circles list) ───────────────
+// Each circle is a white rounded card (NOT a thin row): a leading gold monogram
+// square (or cover photo), a serif-italic name + people-count meta, and an
+// overlapping member-avatar row. A summary header card sits above the list with
+// the count label, tagline, and a branded "New circle" button.
+export const CIRCLE_DIR = {
+  // Summary header card
+  headerMarginH: 16,
+  headerMarginTop: 12,
+  headerRadius: 16,
+  headerPadV: 16,
+  headerPadH: 16,
+  headerLabelGap: 6,    // Uppercase label down to the tagline
+  ctaWidth: 136,        // Explicit fill on the inner View (a bare Pressable pill
+  ctaHeight: 44,        // collapses as a flex child; the fill needs concrete w+h)
+  ctaGap: 6,            // Plus icon to label
+  ctaIcon: 16,
+  // Circle card
+  cardMarginH: 16,
+  cardGap: 12,          // Vertical gap between cards
+  cardRadius: 16,
+  cardPadV: 16,
+  cardPadH: 16,
+  cover: 60,            // Leading monogram / cover square
+  coverRadius: 16,
+  monogram: 26,
+  coverToText: 14,      // Cover square to the name/meta column
+  nameToMeta: 4,
+  topToAvatars: 14,     // Name/meta row down to the avatar stack
+  // Member-avatar stack
+  avatar: 32,
+  avatarOverlap: 11,    // Negative margin between overlapping faces
+  avatarBorder: 2,      // Card-colored ring separating overlapping faces
+  maxFaces: 5,          // Faces shown before the "+N" overflow chip
+} as const;
+
 // ── Circle home (the stacked surface on Chats) ────────────────────────────
 // The circle home is one surface: a noticeboard (cover, members, plans, the
 // reserved Room slot) stacked above the persistent circle chat.
