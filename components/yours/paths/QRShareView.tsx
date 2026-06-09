@@ -99,7 +99,7 @@ export default function QRShareView({ userId }: { userId: string }) {
           backgroundColor={Colors.cream}
         />
       </View>
-      <Text style={styles.hint}>Have a friend scan this to add you</Text>
+      <Text style={styles.hint}>Have someone scan this to add you</Text>
     </View>
   );
 }

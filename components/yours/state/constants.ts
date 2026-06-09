@@ -81,13 +81,13 @@ export const COPY = {
   tabAlbums: 'Albums',
 
   // SIM-EYEBALL #3: request banner phrasing
-  requestBannerOne: 'Someone wants to join yours',
-  requestBannerMany: (n: number) => `${n} people want to join yours`,
+  requestBannerOne: 'Someone wants to add you',
+  requestBannerMany: (n: number) => `${n} people want to add you`,
 
   requestAdd: 'Add them',
   requestNotNow: 'Not now',
   // SIM-EYEBALL #3: block prompt
-  blockPromptTitle: (name: string) => `Want to block ${name} too?`,
+  blockPromptTitle: (name: string) => `Block ${name}?`,
   blockPromptBlock: 'Block',
   blockPromptKeep: "No, I'm good",
 

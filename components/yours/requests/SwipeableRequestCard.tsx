@@ -136,6 +136,12 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
     gap: 12,
+    // Soft terracotta lift so the white card doesn't read flat on parchment.
+    shadowColor: Colors.terracotta,
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
   name: {
     fontFamily: Fonts.sansBold,

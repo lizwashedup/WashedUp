@@ -123,6 +123,9 @@ export const CIRCLE = {
   emptyBubbleGap: 20,      // Gap from the bubble down to the title
   emptyPadH: 40,           // Horizontal inset of the empty-state column
   emptyPadBottom: 48,      // Optical lift off the tab bar
+  emptyCtaW: 220,          // Empty-state CTA pill width (explicit: padding/minHeight
+  emptyCtaH: 52,           // collapse to text size in this centered column; the
+                           // sibling iconBubble paints only with explicit w+h)
 } as const;
 
 // ── Circle home (the stacked surface on Chats) ────────────────────────────

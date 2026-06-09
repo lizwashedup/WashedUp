@@ -45,11 +45,16 @@ export default function CirclesEmptyState({
           hapticSelection();
           onPress();
         }}
-        style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
         accessibilityRole="button"
         accessibilityLabel={ctaLabel}
       >
-        <Text style={styles.ctaLabel}>{ctaLabel}</Text>
+        {/* Pill styling lives on an inner View: a Pressable with a
+            function-form style collapsed to text size in this centered
+            column (no fill), while a View with explicit dimensions paints
+            (same as iconBubble). */}
+        <View style={styles.cta}>
+          <Text style={styles.ctaLabel}>{ctaLabel}</Text>
+        </View>
       </Pressable>
     </View>
   );
@@ -88,14 +93,17 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   cta: {
-    alignSelf: 'center',
+    // Explicit width + height (no alignSelf, no padding-sizing). In this
+    // centered column, padding/minHeight collapse to text size and the fill
+    // never paints; the sibling iconBubble paints only because it has explicit
+    // dimensions. Parent `wrap` (alignItems:center) centers this.
+    width: CIRCLE.emptyCtaW,
+    height: CIRCLE.emptyCtaH,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 48,
     backgroundColor: Colors.terracotta,
     borderRadius: 999,
-    paddingHorizontal: 28,
     shadowColor: Colors.terracotta,
     shadowOpacity: 0.3,
     shadowRadius: 8,

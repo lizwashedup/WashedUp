@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   Modal,
   Pressable,
   StyleSheet,
-  ActivityIndicator,
 } from 'react-native';
 import { X } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,38 +33,62 @@ export default function RequestStack({
   userId: string;
   requests: IncomingRequest[];
 }) {
-  const [idx, setIdx] = useState(0);
+  const [resolved, setResolved] = useState<Set<string>>(new Set());
   const [blockFor, setBlockFor] = useState<IncomingRequest | null>(null);
   const { accept, decline } = usePeopleConnectionMutations(userId);
 
-  const current = requests[idx];
-  const advance = () => {
-    setIdx((i) => i + 1);
-    if (idx + 1 >= requests.length) setTimeout(onClose, 250);
-  };
+  // Work off a filtered queue, not a fixed index: resolving a request
+  // invalidates the incoming-requests query, so the `requests` prop shrinks
+  // underneath us. An index would then skip the next card (it slid into the
+  // just-resolved slot). Taking the first request whose connection_id we
+  // haven't resolved is stable across refetches.
+  const card = resolved.size
+    ? requests.find((r) => !resolved.has(r.connection_id)) ?? null
+    : requests[0] ?? null;
 
-  const onAdd = async (r: IncomingRequest) => {
-    try {
-      await accept.mutateAsync(r.requester_user_id);
-      advance();
-    } catch (e) {
-      Alert.alert('', friendlyConnectionError(e));
+  const markResolved = (id: string) =>
+    setResolved((prev) => new Set(prev).add(id));
+  const unresolve = (id: string) =>
+    setResolved((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+  // Close once nothing is left to act on and no block prompt is open.
+  useEffect(() => {
+    if (!card && !blockFor) {
+      const t = setTimeout(onClose, 600);
+      return () => clearTimeout(t);
     }
+  }, [card, blockFor, onClose]);
+
+  const onAdd = (r: IncomingRequest) => {
+    markResolved(r.connection_id);
+    accept.mutateAsync(r.requester_user_id).catch((e) => {
+      unresolve(r.connection_id);
+      Alert.alert('', friendlyConnectionError(e));
+    });
   };
 
+  // "Not now" is a SOFT decline (can_re_request stays true via the RPC): it
+  // commits immediately, then offers the optional Block escalation. The block
+  // prompt's auto-dismiss and "No, I'm good" commit nothing extra; only the
+  // explicit "Block" button escalates to a permanent, blocked decline.
   const onNotNow = (r: IncomingRequest) => {
+    markResolved(r.connection_id);
+    decline
+      .mutateAsync({ requesterId: r.requester_user_id, block: false })
+      .catch(() => {});
     setBlockFor(r);
   };
-
-  const finishDecline = async (r: IncomingRequest, block: boolean) => {
-    try {
-      await decline.mutateAsync({ requesterId: r.requester_user_id, block });
-    } catch {
-      /* declining is best-effort; the row may already be gone */
-    }
+  const onBlock = (r: IncomingRequest) => {
+    decline
+      .mutateAsync({ requesterId: r.requester_user_id, block: true })
+      .catch(() => {});
     setBlockFor(null);
-    advance();
   };
+  const dismissBlockPrompt = () => setBlockFor(null);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -81,23 +104,21 @@ export default function RequestStack({
         </Pressable>
 
         <View style={styles.stack}>
-          {!current ? (
-            <Text style={styles.done}>You're all caught up.</Text>
-          ) : blockFor ? (
+          {blockFor ? (
             <BlockPrompt
               name={blockFor.first_name_display ?? 'them'}
-              onBlock={() => finishDecline(blockFor, true)}
-              onKeep={() => finishDecline(blockFor, false)}
+              onBlock={() => onBlock(blockFor)}
+              onKeep={dismissBlockPrompt}
             />
-          ) : accept.isPending ? (
-            <ActivityIndicator color={Colors.terracotta} />
-          ) : (
+          ) : card ? (
             <SwipeableRequestCard
-              key={current.connection_id}
-              req={current}
-              onAdd={() => onAdd(current)}
-              onNotNow={() => onNotNow(current)}
+              key={card.connection_id}
+              req={card}
+              onAdd={() => onAdd(card)}
+              onNotNow={() => onNotNow(card)}
             />
+          ) : (
+            <Text style={styles.done}>You're all caught up.</Text>
           )}
         </View>
       </SafeAreaView>
