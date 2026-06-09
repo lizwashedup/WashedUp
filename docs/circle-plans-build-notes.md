@@ -25,5 +25,25 @@ Branch: `feature/yours-page-rebuild`. All gated behind `GROUPS_ENABLED` / `YOURS
 - Sentry REACT-NATIVE-Z: code already fixed at HEAD `9fb8693` (no code change needed). Resolving the Sentry issue needs you to run `/mcp` → authenticate "claude.ai Sentry"; I cannot resolve it without that. (Or resolve manually in the Sentry UI.)
 - Local self-test: see end of file for whether a local Supabase stack was available.
 
-## Build log
-(updated as parts land)
+## Verification results
+- **tsc**: `npx tsc --noEmit` clean (0 errors) after every part.
+- **Forbidden-word + dash lint**: all new user-facing strings clean (no crew/friend/friendship/group/regulars/host; no em/en dashes). The only "host" usages are DB column/role names (host_message, role 'host'), which must not change.
+- **Migration self-tests**: NOT run. The sim/dev `.env.local` points at PROD (upstjumasqblszevlgik) and the rule is no prod apply / no prod run; no local Supabase stack was stood up (repointing env or applying to prod was out of bounds). The 4 migrations carry in-transaction smoke-call self-tests that will run on apply. **This is the checkpoint: run them on a clone/local, or approve the prod apply, before flip.**
+- **Live sim screenshots** (iPhone 17 Pro Max, idb, against prod with GROUPS_ENABLED=true), in `docs/circle-plans-shots/`:
+  - `01-circles-tab` directory, `02-circle-chat`, `03-plus-menu` ("Make a plan" now wired, no longer "Coming soon"),
+  - `04-composer-justus` (Just us selected, Everyone/Pick people chips + helper),
+  - `05-composer-open` (Open it up + the 2-7 stepper at 4, "On top of {circle}, up to 7 from the feed."). Post button correctly disabled with no title.
+  - The composer is client-only so it renders against prod without the migrations. **Data-dependent states (posted card badge/tag, Start-a-chat / Open-it-up rows, noticeboard plan rows, member intro-bypass join) could NOT be screenshotted**: they require the held migrations live on the sim's DB (= prod), which the no-prod rule forbids. They are covered by code review + the migration self-tests instead, and should be shot after the migrations are applied on a clone/local.
+
+## Build log (commits on feature/yours-page-rebuild)
+1. `f79cd7e` 4 held backend migrations (review-only) + build notes.
+2. `5e18500` Make-a-plan composer + create flow + hooks + COPY + tokens + trigger wiring.
+3. `1bb7424` posted plan card circle states (badge / tag / join line), gated feed enrichment.
+4. `0105cbf` plan-detail join dispatch + member intro-bypass + Start-a-chat / Open-it-up; added release_circle_plan + circle_name to held migration 2.
+5. `d957a46` circle plans in the noticeboard coming-up slot.
+
+## Deferred (logged, NOT done) — secondary surfacing, feature is functionally complete without them
+- **Chats-list "private to circle" tag**: the Chats list row source (app/(tabs)/chats/index.tsx + its chats hook) does not carry `circle_visibility`; threading it through is a deeper change. The tag already appears on the PlanCard and in the circle noticeboard, so the concept is surfaced. Deferred.
+- **Directory upcoming-plan pill / "plans together" count** on the Yours > Circles cards: `get_my_circles` returns no plan data; needs a batch per-circle plan query. Deferred.
+- **Single-gender circle plans in the composer**: composer leaves gender = mixed ("inherited, not set here"); backend + feed fully support single-gender if `gender_rule` is set later.
+- **Sentry REACT-NATIVE-Z**: already code-fixed at HEAD; needs you to authenticate Sentry MCP (`/mcp`) or resolve in the UI.
