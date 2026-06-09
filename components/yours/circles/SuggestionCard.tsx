@@ -35,7 +35,7 @@ export default function SuggestionCard({
   onStart: (s: CircleSuggestion) => void;
   onDismiss: (s: CircleSuggestion) => void;
 }) {
-  const people = suggestion.people;
+  const people = suggestion.people ?? []; // defensive: never crash the tab if the RPC omits it
   const faces = people.slice(0, CIRCLE_SUGGEST.maxFaces);
   const subject = oxford([COPY.circleSuggestYou, ...people.map(nameOf)]);
 

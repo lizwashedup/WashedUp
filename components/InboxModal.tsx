@@ -21,6 +21,7 @@ import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { supabase } from '../lib/supabase';
 import { INBOX_COUNT_KEY, WAITLIST_MANAGER_KEY } from '../constants/QueryKeys';
+import { YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
 import {
   acceptWaitlistException,
   declineWaitlistException,
@@ -174,7 +175,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         // auto-opens the accept card stack instead of leaving the user to
         // hunt for the request banner (or find nothing if it's stale).
         onClose();
-        if (notifType === 'people_request') {
+        // Only the rebuilt Yours screen handles ?openRequests=1; with the flag
+        // off the legacy screen can't, so route plain to avoid a dead-end.
+        if (notifType === 'people_request' && YOURS_PAGE_ENABLED) {
           router.push('/(tabs)/friends?openRequests=1' as any);
         } else {
           router.push('/(tabs)/friends' as any);

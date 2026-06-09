@@ -64,6 +64,7 @@ export default function RequestStack({
   }, [card, blockFor, onClose]);
 
   const onAdd = (r: IncomingRequest) => {
+    if (resolved.has(r.connection_id)) return; // sync guard vs rapid double-tap
     markResolved(r.connection_id);
     accept.mutateAsync(r.requester_user_id).catch((e) => {
       unresolve(r.connection_id);
@@ -76,6 +77,7 @@ export default function RequestStack({
   // prompt's auto-dismiss and "No, I'm good" commit nothing extra; only the
   // explicit "Block" button escalates to a permanent, blocked decline.
   const onNotNow = (r: IncomingRequest) => {
+    if (resolved.has(r.connection_id)) return; // sync guard vs rapid double-tap
     markResolved(r.connection_id);
     decline
       .mutateAsync({ requesterId: r.requester_user_id, block: false })

@@ -51,10 +51,12 @@ export default function CirclesEmptyState({
         {/* Pill styling lives on an inner View: a Pressable with a
             function-form style collapsed to text size in this centered
             column (no fill), while a View with explicit dimensions paints
-            (same as iconBubble). */}
-        <View style={styles.cta}>
-          <Text style={styles.ctaLabel}>{ctaLabel}</Text>
-        </View>
+            (same as iconBubble). The pressed feedback rides the inner View. */}
+        {({ pressed }) => (
+          <View style={[styles.cta, pressed && styles.ctaPressed]}>
+            <Text style={styles.ctaLabel}>{ctaLabel}</Text>
+          </View>
+        )}
       </Pressable>
     </View>
   );
@@ -108,6 +110,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
+    elevation: 4, // Android: shadow* alone is invisible without elevation
   },
   ctaPressed: { opacity: 0.85 },
   ctaLabel: {
