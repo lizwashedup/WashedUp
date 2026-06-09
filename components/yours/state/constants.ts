@@ -164,6 +164,8 @@ export const COPY = {
   // Lexicon: "circle" only, never group/crew/etc. No em/en dashes.
   // Row meta.
   circleMembers: (n: number) => (n === 1 ? '1 person' : `${n} people`),
+  // Last-resort title for an unnamed circle if member names can't be resolved.
+  circleUnnamed: 'New circle',
   // Shown in place of a last-activity time when a circle has no messages yet.
   circleQuiet: 'Quietly kept',
   // The first-class "make a circle" entry point (also lives on Chats).

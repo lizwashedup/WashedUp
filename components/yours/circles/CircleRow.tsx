@@ -45,6 +45,9 @@ export default function CircleRow({
   const activity = circle.last_message_at
     ? formatLastActivity(circle.last_message_at)
     : COPY.circleQuiet;
+  // Unnamed circles (grown DMs) render by member names (resolved in useMyCircles);
+  // named circles use their name. Never blank.
+  const title = (circle.name ?? '').trim() || circle.display_name || COPY.circleUnnamed;
 
   return (
     <Pressable
@@ -54,12 +57,12 @@ export default function CircleRow({
       }}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${circle.name}, ${COPY.circleMembers(circle.member_count)}`}
+      accessibilityLabel={`${title}, ${COPY.circleMembers(circle.member_count)}`}
     >
-      <CircleCover name={circle.name} coverUrl={null} />
+      <CircleCover name={title} coverUrl={null} />
       <View style={styles.body}>
         <Text style={styles.name} numberOfLines={1}>
-          {circle.name}
+          {title}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
           {COPY.circleMembers(circle.member_count)}

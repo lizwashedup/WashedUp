@@ -44,6 +44,12 @@ export interface MyCircle {
   member_count: number;
   /** Newest message in the whole-circle chat, or null if it has none yet. */
   last_message_at: string | null;
+  /**
+   * Client-resolved title for an UNNAMED circle (name=''), set by useMyCircles
+   * from the other members' names so the directory never shows a blank row.
+   * Undefined for named circles (use `name`).
+   */
+  display_name?: string;
 }
 
 /** A person inside a co-attendance suggestion (resolved by get_circle_suggestions). */
