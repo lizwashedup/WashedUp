@@ -147,6 +147,62 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- release_circle_plan: the "Open it up" affordance on the plan detail card.
+-- Flips a circle_only plan to open (posting it to the public feed), sets the
+-- stranger cap, and ensures the plan has its own chat (releasing is the
+-- automatic version of spawn_plan_chat). One-directional and idempotent.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.release_circle_plan(
+  p_event_id     uuid,
+  p_stranger_cap integer DEFAULT 4
+)
+  RETURNS void
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_uid   uuid := auth.uid();
+  v_event RECORD;
+  v_cap   integer := COALESCE(p_stranger_cap, 4);
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'not authenticated';
+  END IF;
+  IF v_cap < 2 OR v_cap > 7 THEN
+    RAISE EXCEPTION 'stranger_cap must be 2..7';
+  END IF;
+
+  SELECT * INTO v_event FROM public.events WHERE id = p_event_id FOR UPDATE;
+  IF v_event IS NULL THEN
+    RAISE EXCEPTION 'plan not found';
+  END IF;
+  IF v_event.circle_id IS NULL THEN
+    RAISE EXCEPTION 'not a circle plan';
+  END IF;
+  IF NOT public.is_circle_member(v_event.circle_id, v_uid) THEN
+    RAISE EXCEPTION 'not a member of this circle';
+  END IF;
+
+  IF v_event.circle_visibility = 'open' THEN
+    RETURN; -- already open
+  END IF;
+
+  UPDATE public.events
+  SET circle_visibility = 'open',
+      stranger_cap      = v_cap,
+      has_own_chat      = true
+  WHERE id = p_event_id;
+
+  -- If it had no chat of its own, releasing spawns one now.
+  IF NOT v_event.has_own_chat THEN
+    INSERT INTO public.messages (event_id, user_id, content, message_type)
+    VALUES (p_event_id, v_uid, 'Opened this plan up', 'system');
+  END IF;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- get_circle_plan_context: one read the plan-detail screen makes to decide the
 -- join path and the intro gate. Works for a normal plan (returns
 -- is_circle_plan=false), for a member, and for a stranger viewing an open plan.
@@ -163,6 +219,7 @@ DECLARE
   v_event     RECORD;
   v_is_member boolean := false;
   v_spots     integer := NULL;
+  v_name      text;
 BEGIN
   SELECT circle_id, circle_visibility, stranger_cap, has_own_chat
     INTO v_event
@@ -173,6 +230,7 @@ BEGIN
   END IF;
 
   v_is_member := (v_uid IS NOT NULL) AND public.is_circle_member(v_event.circle_id, v_uid);
+  SELECT name INTO v_name FROM public.circles WHERE id = v_event.circle_id;
 
   IF v_event.stranger_cap IS NOT NULL THEN
     v_spots := GREATEST(0, v_event.stranger_cap - (
@@ -186,6 +244,7 @@ BEGIN
   RETURN jsonb_build_object(
     'is_circle_plan', true,
     'circle_id', v_event.circle_id,
+    'circle_name', v_name,
     'circle_visibility', v_event.circle_visibility,
     'stranger_cap', v_event.stranger_cap,
     'has_own_chat', v_event.has_own_chat,
@@ -200,10 +259,12 @@ $$;
 -- ---------------------------------------------------------------------------
 REVOKE ALL ON FUNCTION public.join_circle_plan_atomic(uuid, uuid, integer, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.spawn_plan_chat(uuid)                              FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.release_circle_plan(uuid, integer)                 FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.get_circle_plan_context(uuid)                      FROM PUBLIC, anon;
 
 GRANT EXECUTE ON FUNCTION public.join_circle_plan_atomic(uuid, uuid, integer, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.spawn_plan_chat(uuid)                              TO authenticated;
+GRANT EXECUTE ON FUNCTION public.release_circle_plan(uuid, integer)                 TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_circle_plan_context(uuid)                      TO authenticated;
 
 -- ---------------------------------------------------------------------------
@@ -218,7 +279,7 @@ DECLARE
   v_uid   uuid;
   v_out   jsonb;
 BEGIN
-  FOREACH v_fn IN ARRAY ARRAY['join_circle_plan_atomic','spawn_plan_chat','get_circle_plan_context']
+  FOREACH v_fn IN ARRAY ARRAY['join_circle_plan_atomic','spawn_plan_chat','release_circle_plan','get_circle_plan_context']
   LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = v_fn AND prosecdef) THEN
       RAISE EXCEPTION 'RPC % missing or not SECURITY DEFINER', v_fn;

@@ -40,7 +40,10 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
-import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
+import { YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
+import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
+import CirclePlanCoordination from '../../components/circles/plan/CirclePlanCoordination';
+import { COPY } from '../../components/yours/state/constants';
 import PingAfterPlanModal from '../../components/yours/ping/PingAfterPlanModal';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_MAX_CAPACITY, FEATURED_DEFAULT_CAPACITY } from '../../constants/GroupLimits';
@@ -667,6 +670,14 @@ export default function PlanDetailScreen() {
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
 
+  // Circle-aware plans: one read (gated; degrades to is_circle_plan=false when
+  // the held RPC is absent / GROUPS_ENABLED off) drives the join path, the
+  // member intro-bypass, and the Start-a-chat / Open-it-up affordances.
+  const { data: circleCtx } = useCirclePlanContext(GROUPS_ENABLED ? id : null);
+  const isCirclePlan = !!circleCtx?.is_circle_plan;
+  const circleViewerIsMember = !!circleCtx?.viewer_is_member;
+  const circleName = circleCtx?.circle_name?.trim() || 'your circle';
+
   // Creator-only "Waitlist (N)" count. Shares WAITLIST_MANAGER_KEY with the
   // manager route so opening it is instant and the count refreshes when the
   // manager invalidates.
@@ -829,6 +840,46 @@ export default function PlanDetailScreen() {
       if (greeting?.trim()) {
         const filter = checkContent(greeting.trim());
         if (!filter.ok) throw new Error(filter.reason ?? 'Your message contains language that goes against our community guidelines.');
+      }
+
+      // Circle plans route through join_circle_plan_atomic (members uncapped,
+      // strangers capped at stranger_cap, circle_only blocks non-members). The
+      // normal-plan gender eligibility check does not apply: circle members
+      // bypass it, and stranger eligibility is enforced by the RPC itself.
+      if (isCirclePlan) {
+        const { data: cData, error: cErr } = await supabase.rpc('join_circle_plan_atomic', {
+          p_event_id: id,
+          p_user_id: currentUserId,
+          p_age_at_join: userAge ?? null,
+          p_gender_at_join: userGender ?? null,
+        });
+        if (cErr) throw cErr;
+        if (cData === 'full') throw new Error('This plan is full for now.');
+        if (cData === 'not_eligible') throw new Error('This plan is just for the circle.');
+        if (cData === 'not_found') throw new Error('This plan no longer exists.');
+
+        // Only a plan with its own (event-parented) chat has a surface for the
+        // join system line / intro greeting. A whole-circle just-us plan lives
+        // in the circle chat, so skip these inserts there.
+        if (circleCtx?.has_own_chat) {
+          const { error: sysErr } = await supabase.from('messages').insert({
+            event_id: id,
+            user_id: currentUserId,
+            content: 'joined the plan',
+            message_type: 'system',
+          });
+          if (sysErr) console.warn('[WashedUp] System message insert failed:', sysErr);
+          if (greeting && greeting.trim().length > 0) {
+            const { error: gErr } = await supabase.from('messages').insert({
+              event_id: id,
+              user_id: currentUserId,
+              content: greeting.trim(),
+              message_type: 'user',
+            });
+            if (gErr) console.warn('[WashedUp] Greeting insert failed:', gErr);
+          }
+        }
+        return;
       }
 
       try {
@@ -1646,6 +1697,18 @@ export default function PlanDetailScreen() {
             <Text style={styles.ctaSub}>A group chat opens the moment you join</Text>
           </View>
         )}
+
+        {/* Circle-plan coordination: Start a chat / Open it up. The component
+            renders only for a circle member viewing a circle_only plan. */}
+        {GROUPS_ENABLED && isCirclePlan && id && (
+          <CirclePlanCoordination
+            eventId={id}
+            circleName={circleName}
+            visibility={circleCtx?.circle_visibility}
+            hasOwnChat={circleCtx?.has_own_chat}
+            viewerIsMember={circleViewerIsMember}
+          />
+        )}
       </ScrollView>
 
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
@@ -1858,7 +1921,14 @@ export default function PlanDetailScreen() {
             style={styles.joinButton}
             onPress={() => {
               hapticMedium();
-              setJoinModalVisible(true);
+              // Circle members bypass the "say hi" intro gate (they already know
+              // the group): join directly, no greeting modal. Strangers on an
+              // open circle plan keep the modal, exactly like a normal plan.
+              if (isCirclePlan && circleViewerIsMember) {
+                joinMutation.mutate(undefined);
+              } else {
+                setJoinModalVisible(true);
+              }
             }}
             activeOpacity={0.9}
           >

@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase';
 export interface CirclePlanContext {
   is_circle_plan: boolean;
   circle_id?: string | null;
+  circle_name?: string | null;
   circle_visibility?: 'circle_only' | 'open' | null;
   stranger_cap?: number | null;
   has_own_chat?: boolean;
