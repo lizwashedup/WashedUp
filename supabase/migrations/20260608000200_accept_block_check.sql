@@ -1,5 +1,6 @@
 -- ===========================================================================
--- REVIEW ONLY - NOT YET APPLIED (await Liz's go-ahead).
+-- APPLIED to prod 2026-06-08 via Supabase MCP (verbatim, BEGIN/COMMIT self-test
+-- passed). Idempotent CREATE OR REPLACE; not registered in schema_migrations.
 --
 -- Finding #4 (M2). Hardens accept_people_request with a block check so you can
 -- never accept a request from someone you've blocked (or who blocked you).

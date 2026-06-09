@@ -1,5 +1,6 @@
 -- ===========================================================================
--- REVIEW ONLY - NOT YET APPLIED (await Liz's go-ahead).
+-- APPLIED to prod 2026-06-08 via Supabase MCP (verbatim, BEGIN/COMMIT self-test
+-- passed). Idempotent CREATE OR REPLACE; not registered in schema_migrations.
 --
 -- Decline-trap fix (M1). Makes "Not now" a SOFT decline:
 --   p_block = false  -> status='declined', can_re_request = TRUE  (re-requestable)

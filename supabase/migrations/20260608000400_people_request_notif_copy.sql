@@ -1,15 +1,15 @@
 -- ===========================================================================
--- REVIEW ONLY - NOT YET APPLIED (await Liz's go-ahead).
+-- APPLIED to prod 2026-06-08 via Supabase MCP (verbatim, self-test passed).
 --
 -- Notification copy (M4). The people_request notification is written by the
 -- notify_people_connection trigger (not the client), so the copy change lives
 -- here. Per the copy-system doc, "Notification (people request)":
 --   title: "New people request"            -> "{Name} wants to add you"
 --   body:  "{Name} wants to add you to their people"
---          -> "{Name} wants to add you to {his/her/their} people"  (gendered)
 --
--- Pronoun: man->his, woman->her, else (non_binary OR null)->their.
--- (149 prod profiles have gender NULL -> "their"; see M3 note / flag for Liz.)
+-- "their" for everyone (Liz, 2026-06-08) - no gender lookup. The notification
+-- is a standalone glanceable surface (title + body in the bell inbox), so it
+-- keeps the name in both, unlike the in-card context line.
 -- Only the people_request branch changes; people_request_accepted is untouched.
 -- CREATE OR REPLACE FUNCTION keeps the existing trg_notify_people_connection.
 -- ===========================================================================
@@ -23,20 +23,12 @@ CREATE OR REPLACE FUNCTION public.notify_people_connection()
 AS $$
 DECLARE
   v_requester_name text;
-  v_requester_gender text;
   v_recipient_name text;
-  v_pronoun text;
 BEGIN
   IF NEW.status = 'pending'
      AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'pending') THEN
-    SELECT first_name_display, gender INTO v_requester_name, v_requester_gender
+    SELECT first_name_display INTO v_requester_name
     FROM public.profiles WHERE id = NEW.requester_user_id;
-
-    v_pronoun := CASE v_requester_gender
-                   WHEN 'man'   THEN 'his'
-                   WHEN 'woman' THEN 'her'
-                   ELSE 'their'
-                 END;
 
     INSERT INTO public.app_notifications
       (user_id, type, title, body, actor_user_id, status)
@@ -45,7 +37,7 @@ BEGIN
       'people_request',
       COALESCE(v_requester_name, 'Someone') || ' wants to add you',
       COALESCE(v_requester_name, 'Someone')
-        || ' wants to add you to ' || v_pronoun || ' people',
+        || ' wants to add you to their people',
       NEW.requester_user_id,
       'unread'
     );
@@ -94,7 +86,7 @@ BEGIN
     ORDER BY created_at DESC LIMIT 1;
 
     IF v_title NOT LIKE '% wants to add you'
-       OR v_body NOT LIKE '% wants to add you to %people' THEN
+       OR v_body NOT LIKE '% wants to add you to their people' THEN
       RAISE EXCEPTION 'self-test: notif copy wrong (title "%", body "%")', v_title, v_body;
     END IF;
 

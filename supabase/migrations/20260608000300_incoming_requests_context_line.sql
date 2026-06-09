@@ -1,26 +1,22 @@
 -- ===========================================================================
--- REVIEW ONLY - NOT YET APPLIED (await Liz's go-ahead).
+-- APPLIED to prod 2026-06-08 via Supabase MCP (verbatim, self-test passed).
 --
 -- Request-card copy (M3). Rewrites context_line in get_incoming_people_requests
--- to lead with real shared history and fall back to a gendered line instead of
--- the generic "Found you on WashedUp" (copy-system doc, "Incoming request card"):
---   plan_history     -> "You were both on {plan}"        (kept; strongest cue)
---   referral_invite  -> "{Name} invited you to WashedUp" (kept)
---   else (handle/..) -> "wants to add you to {his/her/their} people"
+-- to lead with real shared history and fall back to a warm line instead of the
+-- generic "Found you on WashedUp" (copy-system doc, "Incoming request card").
 --
--- Pronoun by gender: man->his, woman->her, else (non_binary OR null)->their.
--- NOTE: 149 prod profiles currently have gender = NULL (legacy, pre safety-lock);
--- they fall through to "their". Flag for Liz: backfill those, or keep "their".
+-- Decisions (Liz, 2026-06-08):
+--   * "their" for EVERYONE - no gender lookup, no misgendering risk, sidesteps
+--     the 149 null-gender profiles (logged as a data-integrity note, no action).
+--   * NO name in any context line - the card title already shows {Name}. This
+--     includes the referral variant ("invited you to WashedUp", not
+--     "{Name} invited you to WashedUp").
 --
--- NAME-IN-LINE DECISION (Liz's call at review): the card already shows {Name}
--- as the title, so the fallback here OMITS the name ("wants to add you to her
--- people") to avoid "Sage / Sage wants to add you...". The copy-system doc's
--- literal is "{Name} wants to add you to {pronoun} people"; the existing
--- referral_invite variant DOES repeat the name. If you'd rather match the doc
--- literally, prepend: COALESCE(pr.first_name_display,'They') || ' '.
+--   plan_history     -> "You were both on {plan}"
+--   referral_invite  -> "invited you to WashedUp"
+--   else (handle/..) -> "wants to add you to their people"
 --
--- Signature unchanged (same RETURN TABLE columns) - only the context_line
--- expression and the gender read change.
+-- Signature unchanged (same RETURN TABLE columns); gender no longer read.
 -- ===========================================================================
 BEGIN;
 
@@ -61,15 +57,9 @@ BEGIN
       WHEN 'plan_history' THEN
         'You were both on ' || COALESCE(ev.title, 'a plan')
       WHEN 'referral_invite' THEN
-        COALESCE(pr.first_name_display, 'They') || ' invited you to WashedUp'
+        'invited you to WashedUp'
       ELSE
-        'wants to add you to '
-        || CASE pr.gender
-             WHEN 'man'   THEN 'his'
-             WHEN 'woman' THEN 'her'
-             ELSE 'their'
-           END
-        || ' people'
+        'wants to add you to their people'
     END AS context_line,
     pc.requested_at
   FROM public.people_connections pc
@@ -104,7 +94,7 @@ BEGIN
     FROM public.get_incoming_people_requests(v_me)
     WHERE requester_user_id = v_them;
 
-    IF v_line NOT LIKE 'wants to add you to %people' THEN
+    IF v_line <> 'wants to add you to their people' THEN
       RAISE EXCEPTION 'self-test: handle_lookup fallback wrong (got "%")', v_line;
     END IF;
 
