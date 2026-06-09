@@ -10,13 +10,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { ChevronLeft, MoreHorizontal, Bell, CalendarPlus } from 'lucide-react-native';
+import { ChevronLeft, MoreHorizontal, MessageCircle, CalendarPlus } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 import { useProfileCard } from '../../../hooks/useProfileCard';
 import { useMyFace } from '../../../hooks/useMyFace';
+import { useGetOrCreateDm } from '../../../hooks/useGetOrCreateDm';
 import {
   usePeopleConnectionMutations,
   friendlyConnectionError,
@@ -68,8 +69,9 @@ export default function KeepPage({
 }) {
   const { data: card, isLoading } = useProfileCard(userId, targetId);
   const { data: myFace } = useMyFace(userId);
-  const { sendRequest, remove, setVisibility, ping } =
+  const { sendRequest, remove, setVisibility } =
     usePeopleConnectionMutations(userId);
+  const getOrCreateDm = useGetOrCreateDm();
 
   const name = card?.first_name_display ?? 'them';
 
@@ -101,18 +103,14 @@ export default function KeepPage({
     ]);
   };
 
-  const nextShared = card?.upcoming?.[0] ?? null;
-
-  const onPing = () => {
-    if (!card || !nextShared) return;
+  const onMessage = () => {
+    if (!card || getOrCreateDm.isPending) return;
     hapticSelection();
-    ping.mutate(
-      { recipientId: card.user_id, eventId: nextShared.event_id },
-      {
-        onSuccess: () => Alert.alert('', COPY.keepPingSent(name)),
-        onError: (e) => Alert.alert('', friendlyConnectionError(e)),
-      },
-    );
+    getOrCreateDm.mutate(card.user_id, {
+      onSuccess: (circleId) =>
+        router.push(`/(tabs)/chats/circle/${circleId}` as never),
+      onError: () => Alert.alert('', COPY.keepMessageError),
+    });
   };
 
   const onInvite = () => {
@@ -189,25 +187,23 @@ export default function KeepPage({
         />
 
         <View style={styles.actions}>
-          {!!nextShared && (
-            <Pressable
-              style={[styles.actionBtn, styles.actionGold]}
-              onPress={onPing}
-              accessibilityRole="button"
-              accessibilityLabel={`${COPY.keepPing} ${name}`}
-            >
-              <Bell size={16} color={Colors.asphalt} />
-              <Text style={styles.actionGoldText}>{COPY.keepPing}</Text>
-            </Pressable>
-          )}
+          <Pressable
+            style={[styles.actionBtn, styles.actionGold]}
+            onPress={onMessage}
+            accessibilityRole="button"
+            accessibilityLabel={`${COPY.keepMessage} ${name}`}
+          >
+            <MessageCircle size={16} color={Colors.asphalt} />
+            <Text style={styles.actionGoldText}>{COPY.keepMessage}</Text>
+          </Pressable>
           <Pressable
             style={[styles.actionBtn, styles.actionPrimary]}
             onPress={onInvite}
             accessibilityRole="button"
-            accessibilityLabel={COPY.keepInvite}
+            accessibilityLabel={COPY.keepMakePlan}
           >
             <CalendarPlus size={16} color={Colors.white} />
-            <Text style={styles.actionPrimaryText}>{COPY.keepInvite}</Text>
+            <Text style={styles.actionPrimaryText}>{COPY.keepMakePlan}</Text>
           </Pressable>
         </View>
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { GROUPS_ENABLED } from '../constants/FeatureFlags';
+import { circleDisplay, type DisplayMember } from '../lib/circles/display';
 
 export interface ChatPreview {
   // A conversation row is either a plan (event) chat or a circle chat.
@@ -20,6 +21,9 @@ export interface ChatPreview {
   is_past: boolean;
   ticket_url: string | null;
   member_avatars: string[];
+  // A DM (unnamed 2-person circle): the row shows the counterpart's face, not a
+  // circle monogram. Undefined for plans and real circles.
+  is_dm?: boolean;
 }
 
 /**
@@ -65,6 +69,8 @@ async function fetchCircleChats(userId: string): Promise<ChatPreview[]> {
 
   const senderNameMap: Record<string, string> = {};
   const avatarMap: Record<string, string[]> = {};
+  // Full per-circle roster (for DM vs circle title + the DM counterpart's face).
+  const membersByCircle: Record<string, DisplayMember[]> = {};
   (memberRows ?? []).forEach((r: any) => {
     const profile = r.profiles_public as any;
     const name = profile?.first_name_display;
@@ -73,6 +79,14 @@ async function fetchCircleChats(userId: string): Promise<ChatPreview[]> {
     if (url && r.circle_id) {
       if (!avatarMap[r.circle_id]) avatarMap[r.circle_id] = [];
       if (avatarMap[r.circle_id].length < 4) avatarMap[r.circle_id].push(url);
+    }
+    if (r.circle_id) {
+      if (!membersByCircle[r.circle_id]) membersByCircle[r.circle_id] = [];
+      membersByCircle[r.circle_id].push({
+        user_id: r.user_id,
+        name: name ?? null,
+        avatar_url: url ?? null,
+      });
     }
   });
 
@@ -92,12 +106,15 @@ async function fetchCircleChats(userId: string): Promise<ChatPreview[]> {
     .filter(Boolean)
     .map((circle: any): ChatPreview => {
       const lastMsg = lastMsgMap[circle.id];
+      const disp = circleDisplay(circle.name, membersByCircle[circle.id] ?? [], userId);
       return {
         kind: 'circle',
         conversationId: circle.id,
-        title: circle.name,
+        title: disp.title,
         category: null,
-        image_url: null,
+        // DM rows render the counterpart's face; real circles use the monogram.
+        image_url: disp.isDm ? disp.otherAvatar : null,
+        is_dm: disp.isDm,
         start_time: circle.created_at,
         member_count: realCounts[circle.id] ?? 0,
         ticket_url: null,

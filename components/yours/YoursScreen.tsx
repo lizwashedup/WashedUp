@@ -4,7 +4,7 @@
  * Only mounted when YOURS_PAGE_ENABLED is true.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, ActionSheetIOS, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Plus } from 'lucide-react-native';
@@ -12,7 +12,9 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { SPACING } from '../../constants/YoursDesign';
 import { GROUPS_ENABLED } from '../../constants/FeatureFlags';
+import { COPY } from './state/constants';
 import { useAuthUserId } from './state/useAuthUserId';
+import { useGetOrCreateDm } from '../../hooks/useGetOrCreateDm';
 import { useYoursGrid } from '../../hooks/useYoursGrid';
 import { useIncomingRequests } from '../../hooks/useIncomingRequests';
 import { usePlanHistoryBacklog } from '../../hooks/usePlanHistoryBacklog';
@@ -65,6 +67,43 @@ export default function YoursScreen() {
   const { data: requests = [] } = useIncomingRequests(userId);
   const { data: backlog = [] } = usePlanHistoryBacklog(userId);
   const { ensureReferralCode } = useReferral();
+  const getOrCreateDm = useGetOrCreateDm();
+
+  // Long-press a face: with circles on, offer "Message" (open the 1:1 DM) or
+  // "Start a circle with {name}" (create flow pre-seeded with them). With the
+  // flag off, fall back to the original behavior (open their keep page).
+  const handleLongPressPerson = (p: YoursGridPerson) => {
+    if (!GROUPS_ENABLED) {
+      router.push(`/person/${p.user_id}` as never);
+      return;
+    }
+    if (getOrCreateDm.isPending) return; // guard a double-tap mid-open
+    const personName = p.first_name_display?.trim() || p.handle?.trim() || 'them';
+    const openDm = () =>
+      getOrCreateDm.mutate(p.user_id, {
+        onSuccess: (circleId) => router.push(`/(tabs)/chats/circle/${circleId}` as never),
+        onError: () => Alert.alert('', COPY.keepMessageError),
+      });
+    const startCircle = () => router.push(`/circle/new?seed=${p.user_id}` as never);
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [COPY.dmMessagePerson(personName), COPY.dmStartCircle(personName), COPY.circlePlusCancel],
+          cancelButtonIndex: 2,
+        },
+        (i) => {
+          if (i === 0) openDm();
+          else if (i === 1) startCircle();
+        },
+      );
+    } else {
+      Alert.alert(personName, undefined, [
+        { text: COPY.dmMessagePerson(personName), onPress: openDm },
+        { text: COPY.dmStartCircle(personName), onPress: startCircle },
+        { text: COPY.circlePlusCancel, style: 'cancel' },
+      ]);
+    }
+  };
 
   const [tab, setTab] = useState<YoursTab>('people');
   const [query, setQuery] = useState('');
@@ -177,9 +216,7 @@ export default function YoursScreen() {
               onPressPerson={(p: YoursGridPerson) =>
                 router.push(`/person/${p.user_id}` as never)
               }
-              onLongPressPerson={(p: YoursGridPerson) =>
-                router.push(`/person/${p.user_id}` as never)
-              }
+              onLongPressPerson={handleLongPressPerson}
               onPressPill={(p: YoursGridPerson) =>
                 p.upcoming_event_id &&
                 router.push(`/plan/${p.upcoming_event_id}` as never)

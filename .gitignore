@@ -46,3 +46,6 @@ GoogleService-Info.plist
 # generated native folders
 /ios
 /android
+
+# editor swap files
+*.swp

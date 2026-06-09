@@ -116,9 +116,10 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
       style={[styles.row, hasUnread && styles.rowUnread, chat.is_past && styles.rowPast]}
     >
       <View style={styles.avatarContainer}>
-        {chat.kind === 'circle' ? (
-          // Circle rows use the same monogram cover as the Yours > Circles
-          // directory, not the w-logo plan placeholder.
+        {chat.kind === 'circle' && !chat.is_dm ? (
+          // Real circle rows use the same monogram cover as the Yours > Circles
+          // directory, not the w-logo plan placeholder. (DMs fall through to the
+          // image branch to show the counterpart's face.)
           <CircleCover name={chat.title} coverUrl={null} />
         ) : chat.image_url ? (
           <Image

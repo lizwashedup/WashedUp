@@ -18,12 +18,15 @@ import { GROUPS_ENABLED } from '../../../../constants/FeatureFlags';
 import Colors from '../../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../../constants/Typography';
 import { COPY } from '../../../../components/yours/state/constants';
+import { useAuthUserId } from '../../../../components/yours/state/useAuthUserId';
 import { useCircle } from '../../../../hooks/useCircle';
+import { circleDisplay } from '../../../../lib/circles/display';
 import ChatThread, { ChatThreadMember } from '../../../../components/chat/ChatThread';
 import AddPeopleSheet from '../../../../components/circles/AddPeopleSheet';
 
 function CircleChatScreenInner({ circleId }: { circleId: string }) {
   const router = useRouter();
+  const { data: myUserId } = useAuthUserId();
   const { data, isError } = useCircle(circleId);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -33,6 +36,23 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
     avatar_url: m.profile_photo_url,
   }));
   const memberIds = data?.members.map((m) => m.user_id) ?? [];
+
+  // A DM is an unnamed 2-person circle: render the counterpart (name + "View
+  // {name}" -> their keep page) instead of "View circle". A grown DM (3+) and a
+  // named circle both render as a circle. Gate on myUserId too: without it, both
+  // members survive the self-filter and a DM would briefly mis-render as a
+  // 2-person "unnamed circle" until auth resolves.
+  const disp = data && myUserId
+    ? circleDisplay(
+        data.circle.name,
+        data.members.map((m) => ({
+          user_id: m.user_id,
+          name: m.first_name_display,
+          avatar_url: m.profile_photo_url,
+        })),
+        myUserId,
+      )
+    : null;
 
   // The "+" header menu: add people now, or make a plan (placeholder this build).
   const openPlusMenu = () => {
@@ -75,11 +95,15 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
       <ChatThread
         kind="circle"
         id={circleId}
-        title={data?.circle.name ?? '...'}
-        subtitle={data ? COPY.circleHomeMembers(members.length) : null}
+        title={disp?.title ?? '...'}
+        subtitle={data && disp && !disp.isDm ? COPY.circleHomeMembers(members.length) : null}
         members={members}
-        viewContextLabel={COPY.circleViewButton}
-        onViewContext={() => router.push(`/circle/${circleId}` as any)}
+        viewContextLabel={disp?.isDm ? COPY.dmViewPerson(disp.title) : COPY.circleViewButton}
+        onViewContext={() =>
+          disp?.isDm && disp.otherUserId
+            ? router.push(`/person/${disp.otherUserId}` as any)
+            : router.push(`/circle/${circleId}` as any)
+        }
         headerMenu={{ type: 'plus', onPress: openPlusMenu }}
         emptyText={COPY.circleChatStart}
       />

@@ -23,6 +23,7 @@ import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 import { useMyCircles } from '../../../hooks/useMyCircles';
 import { useCircleSuggestions, useSetSuggestionStatus } from '../../../hooks/useCircleSuggestions';
+import { isDmCircle } from '../../../lib/circles/display';
 import type { MyCircle, CircleSuggestion } from '../../../lib/circles/types';
 import CircleRow from './CircleRow';
 import CirclesEmptyState from './CirclesEmptyState';
@@ -65,8 +66,10 @@ export default function CirclesDirectory({
   onAddPeople: () => void;
 }) {
   const router = useRouter();
-  const { data: circles = [], isLoading, isError, refetch, isRefetching } =
+  const { data: rawCircles = [], isLoading, isError, refetch, isRefetching } =
     useMyCircles(userId);
+  // DMs are unnamed 2-person circles; they live in Chats, not this directory.
+  const circles = rawCircles.filter((c) => !isDmCircle(c.name, c.member_count));
   // Suggestions degrade quietly: if they fail to load the directory still works.
   const { data: suggestions = [] } = useCircleSuggestions(userId);
   const setSuggestionStatus = useSetSuggestionStatus(userId);

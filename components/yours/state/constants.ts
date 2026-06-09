@@ -281,11 +281,20 @@ export const COPY = {
   keepStatPlans: 'plans together',
   keepStatAlbums: 'albums shared',
   keepStatComingUp: 'coming up',
-  // Actions. Ping only shows when there is an upcoming shared plan to ping
-  // about (ping_person is event-anchored). Invite always shows.
+  // Keep-page actions. "Message" (low-pressure, gold slot the old "ping"
+  // vacated) always shows; "Make a plan for you two" (terracotta, do-it-now)
+  // is the former "invite to a plan".
+  keepMessage: 'Message',
+  keepMakePlan: 'Make a plan for you two',
+  keepMessageError: "Couldn't open this chat just now. Try again.",
+  // Legacy ping copy (still used by PingSheet / PingInline elsewhere).
   keepPing: 'ping',
   keepInvite: 'invite to a plan',
   keepPingSent: (name: string) => `${name} knows about it.`,
+  // Long-press a face in People: message them, or start a circle with them.
+  dmMessagePerson: (name: string) => `Message ${name}`,
+  dmStartCircle: (name: string) => `Start a circle with ${name}`,
+  dmViewPerson: (name: string) => `View ${name}`,
   // Section labels.
   keepComingUpTogether: 'coming up together',
   keepStorySoFar: 'your story so far',
