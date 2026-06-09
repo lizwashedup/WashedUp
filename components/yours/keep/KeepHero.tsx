@@ -94,6 +94,7 @@ export default function KeepHero({
   albumsCount,
   comingUpCount,
   sinceDate,
+  hideStats = false,
 }: {
   myName: string | null;
   myPhoto: string | null;
@@ -103,6 +104,8 @@ export default function KeepHero({
   albumsCount: number;
   comingUpCount: number;
   sinceDate: string | null;
+  /** Suppress the 0/0/0 stat row before there is any shared history. */
+  hideStats?: boolean;
 }) {
   const name = theirName ?? 'them';
   const since = fmtSince(sinceDate);
@@ -127,11 +130,13 @@ export default function KeepHero({
         </Text>
       )}
 
-      <View style={styles.stats}>
-        <Stat value={plansCount} label={COPY.keepStatPlans} />
-        <Stat value={albumsCount} label={COPY.keepStatAlbums} />
-        <Stat value={comingUpCount} label={COPY.keepStatComingUp} />
-      </View>
+      {!hideStats && (
+        <View style={styles.stats}>
+          <Stat value={plansCount} label={COPY.keepStatPlans} />
+          <Stat value={albumsCount} label={COPY.keepStatAlbums} />
+          <Stat value={comingUpCount} label={COPY.keepStatComingUp} />
+        </View>
+      )}
     </View>
   );
 }

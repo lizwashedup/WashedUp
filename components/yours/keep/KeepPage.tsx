@@ -168,6 +168,13 @@ export default function KeepPage({
     );
   }
 
+  // Connected, but nothing shared yet: a warm "this is where it begins" empty
+  // state instead of a 0/0/0 stat row + the "quietly building" closing.
+  const isEmpty =
+    (card.shared_count ?? 0) === 0 &&
+    (card.adventures?.length ?? 0) === 0 &&
+    (card.upcoming?.length ?? 0) === 0;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <TopBar onMore={openMore} />
@@ -184,6 +191,7 @@ export default function KeepPage({
           albumsCount={card.adventures?.length ?? 0}
           comingUpCount={card.upcoming?.length ?? 0}
           sinceDate={card.since_date}
+          hideStats={isEmpty}
         />
 
         <View style={styles.actions}>
@@ -234,15 +242,26 @@ export default function KeepPage({
           </View>
         )}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>{COPY.keepStorySoFar}</Text>
-          <StoryTimeline
-            adventures={card.adventures ?? []}
-            theirName={card.first_name_display}
-          />
-        </View>
+        {isEmpty ? (
+          <View style={styles.emptyBlock}>
+            <Text style={styles.emptyHeadline}>{COPY.keepEmptyHeadline(name)}</Text>
+            <Pressable onPress={onInvite} hitSlop={8} accessibilityRole="button">
+              <Text style={styles.emptyAction}>{COPY.keepEmptyAction}</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>{COPY.keepStorySoFar}</Text>
+              <StoryTimeline
+                adventures={card.adventures ?? []}
+                theirName={card.first_name_display}
+              />
+            </View>
 
-        <Text style={styles.closing}>{COPY.keepClosing}</Text>
+            <Text style={styles.closing}>{COPY.keepClosing}</Text>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -324,6 +343,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 32,
     paddingHorizontal: 24,
+  },
+  emptyBlock: { alignItems: 'center', marginTop: 40, paddingHorizontal: 32, gap: 14 },
+  emptyHeadline: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.displaySM,
+    color: Colors.secondary,
+    textAlign: 'center',
+  },
+  emptyAction: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
   },
 
   primaryBtn: {
