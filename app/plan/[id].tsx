@@ -42,7 +42,12 @@ import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
 import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
-import CirclePlanCoordination from '../../components/circles/plan/CirclePlanCoordination';
+// Lazy so a circle component's module-scope code (its StyleSheet) is never
+// evaluated for non-circle users on this universally-reachable shipped screen.
+// It only renders behind GROUPS_ENABLED && isCirclePlan (see below).
+const CirclePlanCoordination = React.lazy(
+  () => import('../../components/circles/plan/CirclePlanCoordination'),
+);
 import { COPY } from '../../components/yours/state/constants';
 import PingAfterPlanModal from '../../components/yours/ping/PingAfterPlanModal';
 import Colors from '../../constants/Colors';
@@ -1714,13 +1719,15 @@ export default function PlanDetailScreen() {
         {/* Circle-plan coordination: Start a chat / Open it up. The component
             renders only for a circle member viewing a circle_only plan. */}
         {GROUPS_ENABLED && isCirclePlan && id && (
-          <CirclePlanCoordination
-            eventId={id}
-            circleName={circleName}
-            visibility={circleCtx?.circle_visibility}
-            hasOwnChat={circleCtx?.has_own_chat}
-            viewerIsMember={circleViewerIsMember}
-          />
+          <React.Suspense fallback={null}>
+            <CirclePlanCoordination
+              eventId={id}
+              circleName={circleName}
+              visibility={circleCtx?.circle_visibility}
+              hasOwnChat={circleCtx?.has_own_chat}
+              viewerIsMember={circleViewerIsMember}
+            />
+          </React.Suspense>
         )}
       </ScrollView>
 
