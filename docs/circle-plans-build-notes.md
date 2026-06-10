@@ -1,6 +1,21 @@
 # Circle-aware plans — build notes & assumptions (autonomous overnight build, 2026-06-09)
 
-Branch: `feature/yours-page-rebuild`. All gated behind `GROUPS_ENABLED` / `YOURS_PAGE_ENABLED` (OFF in prod). Migrations are **held** (review-only, not applied). Plan: `~/.claude/plans/curried-crafting-glade.md`.
+Branch: `feature/yours-page-rebuild`. All gated behind `GROUPS_ENABLED` / `YOURS_PAGE_ENABLED` (OFF in prod). Plan: `~/.claude/plans/curried-crafting-glade.md`.
+
+## ✅ PROD APPLY — 2026-06-09 (all 4 migrations LIVE on prod `upstjumasqblszevlgik`)
+Applied in order with explicit go-ahead after Liz's reviewer diffed #4 line-by-line against the live function:
+1. `circle_aware_plans_1_events_columns` — self-test passed.
+2. `circle_aware_plans_2_join_rpcs` — passed (`get_circle_plan_context` smoke-call returned `is_circle_plan=false`).
+3. `circle_aware_plans_3_create_circle_plan` — passed (open + just-us create smoke-calls succeeded + rolled back; `session_replication_role=replica` suppressed the notify-plan-posted admin alert).
+4. `circle_aware_plans_4_get_filtered_feed` — passed.
+
+**#4 equivalence gate (the only live-read change) — proven byte-identical before vs after:**
+- user `0b25aedf…`: 29 rows, sig `ea2af9dcc78190ad74a7a599eb42e26e` (before) == (after)
+- user `23493185…`: 27 rows, sig `2dc2116a2dcc195ae7b56ddf0a452a77` (before) == (after)
+- Liz's reviewer's independent tamper-proof baseline (`e311d430…`, 2 other users) also held.
+- Drift-immune backstop: `count(events WHERE circle_id IS NOT NULL) = 0` → every event takes the normal-plan branches; feed mathematically unchanged for all real users. All 5 circle RPCs present + SECURITY DEFINER. No circle plan ever created before #4 was live → no leak window.
+
+**Still OFF in prod:** `EXPO_PUBLIC_GROUPS_ENABLED` stays unset in prod/EAS. Remaining ship gauntlet: sim screenshots, real Android device pass, catch the worktree up to main, delete test data. Backend live + proven safe; not the finish line.
 
 ## Verified prod facts (read-only grounding, project upstjumasqblszevlgik)
 - Circles DB layer is **already LIVE on prod**: tables `circles`, `circle_members`, `circle_suggestions`, `circle_briefs`, `circle_listener_state`; RPCs `create_circle`, `get_circle`, `get_my_circles`, `get_or_create_dm`, `is_circle_member`, `is_circle_admin`, `join_circle_atomic`, `leave_circle`, `invite_to_circle`, `update_circle`; `messages.circle_id` + `chat_reads`/`event_id` polymorphic. Only the gated client + these 4 new migrations are outstanding.
