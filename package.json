@@ -9,7 +9,10 @@
     "build:android": "npx expo prebuild --clean && npx expo run:android",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "ota:guard": "bash scripts/ota-guard.sh",
+    "ota:ios": "bash scripts/publish-ota.sh ios",
+    "ota:android": "bash scripts/publish-ota.sh android"
   },
   "dependencies": {
     "@expo-google-fonts/cormorant-garamond": "^0.4.1",
