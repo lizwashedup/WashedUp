@@ -91,7 +91,7 @@ BEGIN
   -- Never downgrade the creator's 'host' role on a re-join.
   UPDATE public.event_members
   SET status = 'joined',
-      role = CASE WHEN role = 'host' THEN 'host' ELSE 'guest' END,
+      role = CASE WHEN role = 'host' THEN 'host'::member_role ELSE 'guest'::member_role END,
       age_at_join    = COALESCE(p_age_at_join, age_at_join),
       gender_at_join = COALESCE(p_gender_at_join, gender_at_join)
   WHERE event_id = p_event_id AND user_id = p_user_id;

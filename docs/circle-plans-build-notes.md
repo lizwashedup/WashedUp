@@ -15,7 +15,22 @@ Applied in order with explicit go-ahead after Liz's reviewer diffed #4 line-by-l
 - Liz's reviewer's independent tamper-proof baseline (`e311d430…`, 2 other users) also held.
 - Drift-immune backstop: `count(events WHERE circle_id IS NOT NULL) = 0` → every event takes the normal-plan branches; feed mathematically unchanged for all real users. All 5 circle RPCs present + SECURITY DEFINER. No circle plan ever created before #4 was live → no leak window.
 
-**Still OFF in prod:** `EXPO_PUBLIC_GROUPS_ENABLED` stays unset in prod/EAS. Remaining ship gauntlet: sim screenshots, real Android device pass, catch the worktree up to main, delete test data. Backend live + proven safe; not the finish line.
+**Still OFF in prod:** `EXPO_PUBLIC_GROUPS_ENABLED` stays unset in prod/EAS. Remaining ship gauntlet: real Android device pass, catch the worktree up to main. Backend live + proven safe; not the finish line.
+
+## LIVE SIM VERIFICATION 2026-06-09 (caught a real bug)
+Drove the iOS sim (against prod, `GROUPS_ENABLED=true` locally) end to end. Test plans created as Liz on the unnamed "Marlowe, Sage" circle (`b26c43f5…`) via the real `create_circle_plan`, then **all test data deleted** (verified `circle_plans_left=0`, `announcements_left=0`; feed equivalence restored).
+
+**🐞 Bug found + fixed live (would have shipped):** `join_circle_plan_atomic`'s re-join UPDATE assigned a TEXT CASE (`'host'/'guest'`) into `event_members.role`, a `member_role` ENUM → `42804` on **every** join. Introduced by the audit fix that preserves the creator's `host` role; missed because the #2 self-test only existence-checked the RPC. Fixed by casting the CASE arms `::member_role`; re-applied to prod (`circle_aware_plans_2b_join_role_cast_fix`, mirrored in `20260609141000_…`); self-test now actually **invokes** the join (insert + re-join paths). Re-verified joins return `joined`.
+
+**Functional proof on live prod (all passed):**
+- `create_circle_plan`: open (has_own_chat=true, cap 4) + just-us whole (has_own_chat=false) — creator auto-joined, member_count=1, sync trigger correct.
+- Member intro-bypass: Marlowe→open, Sage→just-us both `joined` (members uncapped).
+- Stranger paths (rolled back): circle_only → `not_eligible`; open under cap → `joined`.
+- `release_circle_plan`: just-us → `open`, `has_own_chat=true`, `stranger_cap=4`.
+
+**Screenshots in `docs/circle-plans-shots/`:** `04`/`05` composer (Just-us + Open stepper), `11` circle-chat announcements ("Liz started a plan: …" x2), `12` noticeboard COMING UP with `from a circle` + `private to circle` tags, `13` plan detail with Start-a-chat + Open-it-up coordination, `14` Open-it-up confirm (verbatim explain copy), `15` after release (coordination correctly gone, plan now open).
+
+**Minor polish noted (not blocking):** plan-detail header still shows normal "N spots left / Larger group" for a circle plan (cosmetic; capacity is stranger_cap); "Open Chat" shows on a has_own_chat=false plan; coordination copy falls back to "your circle" for an unnamed circle (could use the display name). Member-join-bypass and stranger-cap are proven via SQL (need a second logged-in account to screenshot).
 
 ## Verified prod facts (read-only grounding, project upstjumasqblszevlgik)
 - Circles DB layer is **already LIVE on prod**: tables `circles`, `circle_members`, `circle_suggestions`, `circle_briefs`, `circle_listener_state`; RPCs `create_circle`, `get_circle`, `get_my_circles`, `get_or_create_dm`, `is_circle_member`, `is_circle_admin`, `join_circle_atomic`, `leave_circle`, `invite_to_circle`, `update_circle`; `messages.circle_id` + `chat_reads`/`event_id` polymorphic. Only the gated client + these 4 new migrations are outstanding.
