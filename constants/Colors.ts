@@ -125,6 +125,7 @@ const brand = {
   surfaceTranslucent: 'rgba(255,255,255,0.96)', // surface @ 96% — input bg over hero imagery
   whiteSoft: 'rgba(255,255,255,0.86)',          // white @ 86% — animated subline text on success-state bg (verify-code)
   goldBadgeSoft: 'rgba(197,165,90,0.18)',       // gold @ 18% — success badge background (verify-code)
+  circleBadgeGoldTint: 'rgba(197,165,90,0.15)', // gold #C5A55A @ 15%: "from a circle" badge bg (badge spec; decorative tint only, never on text)
 
   // ── Yours page rebuild ───────────────────────────────────────────────────
   // Activity-ring family. terracotta is the primary; the 75/50 mid states

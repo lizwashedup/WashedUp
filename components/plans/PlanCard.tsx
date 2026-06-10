@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { Users } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -93,6 +94,10 @@ function formatDateTimeForCard(dateString: string): string {
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// Leading "circle of people" glyph on the "from a circle" provenance badge
+// (badge spec: terracotta line icon, ~12pt).
+const CIRCLE_BADGE_GLYPH = 12;
 
 export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, onCreatorPress, isPast = false }) => {
   const router = useRouter();
@@ -350,14 +355,25 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               <Text style={styles.happeningNowPillText}>happening now</Text>
             </View>
           )}
-          {isOpenCircle && (
+          {/* Badge A (provenance): always present on a circle plan, in both
+              privacy states, per the badge spec. */}
+          {isCirclePlan && (
             <View style={styles.fromCircleBadge}>
+              <Users size={CIRCLE_BADGE_GLYPH} color={Colors.terracotta} strokeWidth={1.75} />
               <Text style={styles.fromCircleBadgeText}>{COPY.circlePlanFromBadge}</Text>
             </View>
           )}
+          {/* Badge B (privacy state): one of the two, mutually exclusive. */}
           {isJustUsCircle && (
             <View style={styles.privateCircleTag}>
               <Text style={styles.privateCircleTagText}>{COPY.circlePlanPrivateTag}</Text>
+            </View>
+          )}
+          {isOpenCircle && plan.stranger_cap != null && (
+            <View style={styles.seatsCircleTag}>
+              <Text style={styles.seatsCircleTagText}>
+                {COPY.circlePlanSeatsWelcome(plan.stranger_cap)}
+              </Text>
             </View>
           )}
           {isFeatured ? (
@@ -675,21 +691,25 @@ const styles = StyleSheet.create({
     color: Colors.birthdayPink,
     letterSpacing: 0.2,
   },
-  // "from a circle": soft gold-tinted badge (decorative bg only; text stays
-  // warm-dark, never gold, per the palette rule).
+  // Badge A "from a circle": soft gold-tinted pill with a leading terracotta
+  // circle-of-people glyph (badge spec). Gold is the decorative bg only; the
+  // label stays warm-dark in DM Sans medium, never gold, per the palette rule.
   fromCircleBadge: {
-    backgroundColor: Colors.goldenAmberTint15,
-    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.circleBadgeGoldTint,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
   },
   fromCircleBadgeText: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: Fonts.sansMedium,
     fontSize: 10,
     color: Colors.darkWarm,
     letterSpacing: 0.2,
   },
-  // "private to circle": quiet neutral tag for a Just-us plan.
+  // Badge B "private to circle": quiet neutral tag for a Just-us plan.
   privateCircleTag: {
     backgroundColor: Colors.dividerWarm,
     paddingHorizontal: 10,
@@ -697,6 +717,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   privateCircleTagText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 10,
+    color: Colors.secondary,
+    letterSpacing: 0.2,
+  },
+  // Badge B "up to N others welcome": seats tag for an opened-up plan. Softly
+  // terracotta-tinted (open door, never scarcity styling), secondary-text label.
+  seatsCircleTag: {
+    backgroundColor: Colors.brandSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  seatsCircleTagText: {
     fontFamily: Fonts.sansMedium,
     fontSize: 10,
     color: Colors.secondary,

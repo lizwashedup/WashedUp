@@ -362,6 +362,10 @@ export const COPY = {
   circlePlanJoinLine: "Join if you're around.",
   circlePlanFromBadge: 'from a circle',
   circlePlanPrivateTag: 'private to circle',
+  // Badge B seats line on an opened-up circle plan card. N = stranger_cap (2-7).
+  // "up to N others welcome", never "N spots left": an open door, not scarcity.
+  circlePlanSeatsWelcome: (n: number) =>
+    `up to ${n} ${n === 1 ? 'other' : 'others'} welcome`,
   circlePlanOpenStatus: (inCount: number, total: number, cap: number) =>
     `${inCount} of ${total} in. Up to ${cap} others welcome.`,
   // Start-a-chat affordance (whole-circle just-us plan with no chat yet).
