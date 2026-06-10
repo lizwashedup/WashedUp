@@ -50,6 +50,14 @@ module.exports = {
     }),
     updates: {
       url: 'https://u.expo.dev/9584097f-8f32-4fce-ae36-e87c1ffd50cc',
+      // Wait up to 8s at the native splash for a newer bundle before falling
+      // back to the cached one. Default is 0, which boots the cached (possibly
+      // broken) bundle immediately and only applies a fix on the NEXT launch —
+      // a trap for users frozen on launch, who force-quit before the
+      // background download finishes and never receive the fix. With this, a
+      // launch on a weak/old bundle pulls and applies the fix in-place.
+      // NOTE: native config — only takes effect in a new build, not over OTA.
+      fallbackToCacheTimeout: 8000,
     },
     runtimeVersion: {
       policy: 'appVersion',
