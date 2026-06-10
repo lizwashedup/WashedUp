@@ -11,7 +11,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { CalendarDays } from 'lucide-react-native';
+import { CalendarDays, Pencil } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { CIRCLE_HOME, TYPE } from '../../constants/YoursDesign';
@@ -58,12 +58,16 @@ export default function CircleNoticeboard({
   payload,
   displayName,
   onAddPeople,
+  onNameCircle,
 }: {
   payload: CirclePayload;
   // Resolved title (member names for an unnamed/DM-grown circle); falls back to
   // the stored name. Keeps the hero from ever showing a blank name.
   displayName?: string;
   onAddPeople?: () => void;
+  // Set only when the viewer can name an unnamed circle (admin of a grown DM):
+  // renders the "Name this circle" affordance under the member count.
+  onNameCircle?: () => void;
 }) {
   const { circle, members } = payload;
   const router = useRouter();
@@ -86,6 +90,17 @@ export default function CircleNoticeboard({
         <Text style={styles.memberCount}>{COPY.circleHomeMembers(members.length)}</Text>
         {!!circle.description?.trim() && (
           <Text style={styles.description}>{circle.description.trim()}</Text>
+        )}
+        {!!onNameCircle && (
+          <Pressable
+            onPress={onNameCircle}
+            style={({ pressed }) => [styles.nameCircle, pressed && styles.nameCirclePressed]}
+            accessibilityRole="button"
+            accessibilityLabel={COPY.circleNameThis}
+          >
+            <Pencil size={CIRCLE_HOME.nameIcon} color={Colors.terracotta} strokeWidth={1.75} />
+            <Text style={styles.nameCircleText}>{COPY.circleNameThis}</Text>
+          </Pressable>
         )}
       </View>
 
@@ -156,6 +171,23 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     textAlign: 'center',
     marginTop: 10,
+  },
+  nameCircle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+  },
+  nameCirclePressed: { opacity: 0.85 },
+  nameCircleText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
   },
   section: { marginBottom: CIRCLE_HOME.sectionGapV },
   sectionLabel: {

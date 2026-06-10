@@ -28,6 +28,7 @@ import { circleDisplay } from '../../lib/circles/display';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import CircleNoticeboard from '../../components/circles/CircleNoticeboard';
 import AddPeopleSheet from '../../components/circles/AddPeopleSheet';
+import NameCircleSheet from '../../components/circles/NameCircleSheet';
 
 function CircleDetail({ circleId }: { circleId: string }) {
   const router = useRouter();
@@ -37,6 +38,7 @@ function CircleDetail({ circleId }: { circleId: string }) {
 
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [nameOpen, setNameOpen] = useState(false);
 
   // Unnamed circles (DMs grown to a circle, name='') render by member names, not
   // blank. circleDisplay gives "Marlowe, Sage" for 3+ and the counterpart for 2.
@@ -53,6 +55,14 @@ function CircleDetail({ circleId }: { circleId: string }) {
     : null;
   const title = display?.title ?? data?.circle.name ?? '';
   const memberIds = data?.members.map((m) => m.user_id) ?? [];
+
+  // An unnamed circle (a DM grown to 3+ people) reads as its member names until
+  // someone gives it an identity. Only an admin can rename (update_circle is
+  // admin-gated), and a 2-person DM is intentionally left unnamed, so the "Name
+  // this circle" front door shows only to an admin of an unnamed 3+ circle.
+  const myRole = data?.members.find((m) => m.user_id === userId)?.role;
+  const isUnnamed = !(data?.circle.name ?? '').trim();
+  const canName = !!data && isUnnamed && !display?.isDm && myRole === 'admin';
 
   const doLeave = () => {
     if (leaveCircle.isPending) return;
@@ -113,7 +123,19 @@ function CircleDetail({ circleId }: { circleId: string }) {
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-          <CircleNoticeboard payload={data} displayName={title} onAddPeople={() => setAddOpen(true)} />
+          <CircleNoticeboard
+            payload={data}
+            displayName={title}
+            onAddPeople={() => setAddOpen(true)}
+            onNameCircle={
+              canName
+                ? () => {
+                    hapticSelection();
+                    setNameOpen(true);
+                  }
+                : undefined
+            }
+          />
         </ScrollView>
       )}
 
@@ -122,6 +144,13 @@ function CircleDetail({ circleId }: { circleId: string }) {
         circleId={circleId}
         existingMemberIds={memberIds}
         onClose={() => setAddOpen(false)}
+      />
+
+      <NameCircleSheet
+        visible={nameOpen}
+        circleId={circleId}
+        userId={userId}
+        onClose={() => setNameOpen(false)}
       />
 
       <BrandedAlert

@@ -241,6 +241,14 @@ export const COPY = {
   circleAddEmptyTitle: 'Everyone you know is already here.',
   circleAddEmptySub: 'Add more people on the People tab first, then add them here.',
   circleAddError: "Couldn't add them just now. Try again.",
+  // Name a promoted/unnamed circle. A DM that grew a third person becomes an
+  // unnamed circle (it reads as the member names); this is the front door to
+  // give it an identity. Admin-only (backend update_circle is admin-gated).
+  circleNameThis: 'Name this circle',
+  circleNameSheetTitle: 'Name this circle',
+  circleNameSheetSub: 'Give it a name so it reads as a circle, not a list of names.',
+  circleNameSheetSave: 'Save the name',
+  circleNameSheetError: "Couldn't save the name just now. Try again.",
 
   // ── Create-circle flow (3 steps) ────────────────────────────────────────
   circleCreateTitle: 'New circle',

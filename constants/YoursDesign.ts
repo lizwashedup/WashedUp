@@ -186,6 +186,7 @@ export const CIRCLE_HOME = {
   roomDashWidth: 1.5,      // The Room reserved-slot dashed border width
   roomIcon: 20,            // Glyph in The Room slot
   emptyPlanIcon: 22,
+  nameIcon: 13,            // Pencil glyph on the "Name this circle" affordance
 } as const;
 
 // (CIRCLE_CHAT tokens were retired with the standalone circle chat; circles
