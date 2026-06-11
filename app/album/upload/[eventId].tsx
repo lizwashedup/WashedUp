@@ -19,14 +19,16 @@ import { enqueueAlbumUploadBatch, AlbumUploadInput } from '../../../lib/uploadAl
 const PHOTO_CAP = 20;
 const VIDEO_CAP = 6;
 const MAX_VIDEO_SEC = 60;
-// Hard cap on video file size, matched to the album-media bucket's server-side
-// file_size_limit (100 MB, raised from the project-global 50 MB on 2026-06-11).
-// Keeping client and server equal means an oversize clip is rejected at pick time
-// with the graceful "over N MB" message instead of failing silently at upload.
-// 100 MB covers most <=60s H.264 clips; it is also safe for the current
-// in-memory read path. Streaming upload via expo-file-system (v1.1) is what
-// lifts this toward the full HEVC-4K range.
-const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+// Hard cap on video file size. The album-media bucket's server-side
+// file_size_limit is 100 MB (raised from the project-global 50 MB on
+// 2026-06-11); the client cap sits deliberately BELOW it at 75 MB. The whole
+// file is read into the JS heap on the current in-memory upload path, so a
+// clip approaching the bucket ceiling can OOM low-end Android. 75 MB keeps
+// that headroom. An oversize clip is still rejected at pick time with the
+// graceful "over N MB" message instead of failing at upload. Streaming upload
+// via expo-file-system (v1.1) is what lets this rise back toward the bucket
+// limit (and beyond) safely.
+const MAX_VIDEO_BYTES = 75 * 1024 * 1024;
 const VIDEO_LIMIT_LABEL =
   MAX_VIDEO_SEC % 60 === 0
     ? `${MAX_VIDEO_SEC / 60} min max`
