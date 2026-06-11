@@ -23,6 +23,8 @@ export interface SharePlanModalProps {
   slug?: string | null;
   genderLabel?: string;
   variant: 'posted' | 'joined';
+  /** Non-blocking heads-up when some on-post invites could not be delivered. */
+  inviteWarning?: boolean;
 }
 
 export function SharePlanModal({
@@ -33,6 +35,7 @@ export function SharePlanModal({
   slug,
   genderLabel,
   variant,
+  inviteWarning,
 }: SharePlanModalProps) {
   const insets = useSafeAreaInsets();
   const shareUrl = slug ? `https://washedup.app/plans/${slug}` : planId ? `https://washedup.app/e/${planId}` : 'https://washedup.app';
@@ -79,6 +82,12 @@ export function SharePlanModal({
           </View>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>
+
+          {inviteWarning && (
+            <Text style={styles.inviteWarning}>
+              We couldn&apos;t reach everyone you invited. They&apos;ll still see this plan in the feed.
+            </Text>
+          )}
 
           <View style={styles.previewCard}>
             <Text style={styles.previewText}>{shareText}</Text>
@@ -142,6 +151,15 @@ const styles = StyleSheet.create({
     color: Colors.warmGray,
     marginTop: 4,
     textAlign: 'center',
+  },
+  inviteWarning: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
+    textAlign: 'center',
+    marginTop: 12,
+    paddingHorizontal: 8,
+    lineHeight: 19,
   },
   previewCard: {
     backgroundColor: Colors.parchment,

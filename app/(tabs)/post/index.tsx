@@ -726,6 +726,9 @@ export default function PostScreen() {
   // Submit
   const [loading, setLoading] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
+  // Set when an on-post invite delivery rejects; shows a non-blocking note in
+  // the share modal. Reset at the start of each post's invite step.
+  const [inviteDeliveryFailed, setInviteDeliveryFailed] = useState(false);
   const [pingPlanId, setPingPlanId] = useState<string | null>(null);
   const pendingNavRef = useRef<(() => void) | null>(null);
   const [firstPlanCelebrationVisible, setFirstPlanCelebrationVisible] = useState(false);
@@ -1048,11 +1051,20 @@ export default function PostScreen() {
 
         // INVITE PEOPLE (flag-on): deliver the standard invite to every chip
         // (your-people + want-in alike) via the single shared path. Fire-and-
-        // forget; a delivery hiccup must not roll back the post.
+        // forget; a delivery hiccup must not roll back the post. On failure we
+        // surface a non-blocking heads-up inside the share modal (which is the
+        // post-creation surface that's actually on screen) so the creator isn't
+        // left assuming everyone was reached.
+        setInviteDeliveryFailed(false);
         if (YOURS_PAGE_ENABLED && invited.length > 0) {
           invitePeopleToPlan.mutate(
             { eventId: insertedEvent.id, recipientIds: invited.map((c) => c.user_id) },
-            { onError: (e) => console.warn('[post] invite_people_to_plan failed:', e) },
+            {
+              onError: (e) => {
+                console.warn('[post] invite_people_to_plan failed:', e);
+                setInviteDeliveryFailed(true);
+              },
+            },
           );
           setInvited([]);
         }
@@ -1803,6 +1815,7 @@ export default function PostScreen() {
         slug={null}
         genderLabel={postedGenderLabel}
         variant="posted"
+        inviteWarning={inviteDeliveryFailed}
       />
 
       {YOURS_PAGE_ENABLED && (
