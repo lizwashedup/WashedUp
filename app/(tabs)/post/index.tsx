@@ -1428,7 +1428,7 @@ export default function PostScreen() {
 
           {/* ── Group size ── */}
           <View style={styles.field}>
-            <Text style={styles.label}>Group size</Text>
+            <Text style={styles.label}>How many</Text>
             <View style={styles.stepperRow}>
               <TouchableOpacity
                 style={[styles.stepperBtn, groupSize <= (MIN_GROUP - 1) && styles.stepperBtnDisabled]}
