@@ -222,6 +222,9 @@ export const COPY = {
   circleLoadError: "This circle didn't load.",
   // Circle chat (the shared chat surface) + its header.
   circleChatStart: 'This is the beginning. Say something to get it going.',
+  // Chat plan card (a system message carrying ref_event_id). Live cards reuse
+  // circlePlanJoinLine; a dangling/wrapped ref renders this quiet inert line.
+  chatPlanWrapped: 'This plan has wrapped.',
   // Header "View circle" button (opens the circle detail page).
   circleViewButton: 'View circle',
   // Header "+" menu: add people now, or make a plan (placeholder this build).

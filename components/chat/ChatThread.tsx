@@ -42,6 +42,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import type { AnchorRect } from '../menu/MenuCard';
 import SunriseIcon from '../yours/icons/SunriseIcon';
+import ChatPlanCard from './ChatPlanCard';
 import { openUrl } from '../../lib/url';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../hooks/useChat';
@@ -265,6 +266,15 @@ interface BubbleProps {
 
 const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
   if (message.message_type === 'system') {
+    // A system message carrying a plan reference renders as the compact plan card
+    // (invite delivery), not as system text.
+    if (message.ref_event_id) {
+      return (
+        <View style={bubbleStyles.systemRow}>
+          <ChatPlanCard eventId={message.ref_event_id} />
+        </View>
+      );
+    }
     let displayContent = message.content;
     if (contextTitle) {
       displayContent = displayContent

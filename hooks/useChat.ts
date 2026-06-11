@@ -31,6 +31,9 @@ export interface ChatMessage {
   duration_seconds?: number | null;
   created_at: string;
   reply_to_message_id?: string | null;
+  // A system message carrying ref_event_id renders as a compact plan card
+  // (delivered by invite_person_to_plan / invite_people_to_plan).
+  ref_event_id?: string | null;
   reply_to?: ReplyTo | null;
   reactions?: MessageReaction[];
   sender?: {
@@ -178,7 +181,7 @@ export function useChat(key: ConversationKey) {
       // Event path selects the ORIGINAL columns only (no circle_id) so it stays
       // byte-identical to before and works against prod, which has no circle_id
       // column until the Circles migration is applied. Only the circle path adds it.
-      const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id${kind === 'circle' ? ', circle_id' : ''}`;
+      const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id${kind === 'circle' ? ', circle_id' : ''}`;
       const [{ data }, { data: { user } }] = await Promise.all([
         supabase
           .from('messages')
