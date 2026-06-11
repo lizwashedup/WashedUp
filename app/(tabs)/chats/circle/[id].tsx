@@ -25,6 +25,7 @@ import ChatThread, { ChatThreadMember } from '../../../../components/chat/ChatTh
 import AddPeopleSheet from '../../../../components/circles/AddPeopleSheet';
 import CirclePlanComposer from '../../../../components/circles/plan/CirclePlanComposer';
 import MenuCard, { type AnchorRect } from '../../../../components/menu/MenuCard';
+import { buildComposerWithPerson } from '../../../../lib/composerLink';
 import { CalendarPlus, Users } from 'lucide-react-native';
 
 function CircleChatScreenInner({ circleId }: { circleId: string }) {
@@ -156,7 +157,14 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
             icon: CalendarPlus,
             label: COPY.menuMakePlan,
             subtitle: COPY.menuMakePlanSub,
-            onPress: () => setPlanOpen(true),
+            // From a DM: open the composer with the counterpart pre-attached as a
+            // removable invite chip (a normal plan + invite), not the circle-plan
+            // composer. Decided 2026-06-10 (Liz owns; sanity-check live).
+            onPress: () => {
+              if (disp?.otherUserId) {
+                router.push(buildComposerWithPerson(disp.otherUserId, disp.title, disp.otherAvatar) as never);
+              }
+            },
           },
           {
             key: 'circle',

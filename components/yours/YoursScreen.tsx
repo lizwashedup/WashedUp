@@ -35,6 +35,7 @@ import PeopleSearchBar from './search/PeopleSearchBar';
 import PeopleSearchResults from './search/PeopleSearchResults';
 import CirclesDirectory from './circles/CirclesDirectory';
 import MenuCard, { type AnchorRect } from '../menu/MenuCard';
+import { buildComposerWithPerson } from '../../lib/composerLink';
 import type { YoursGridPerson } from '../../lib/yours/types';
 
 /**
@@ -335,9 +336,14 @@ export default function YoursScreen() {
                   icon: CalendarPlus,
                   label: COPY.menuMakePlan,
                   subtitle: COPY.menuMakePlanSub,
-                  // Current plan-creation behavior; upgrades to the "Plan with
-                  // {Name}" destination sheet when that item ships.
-                  onPress: () => router.push('/(tabs)/post' as never),
+                  // Open the composer with this person pre-attached as a removable
+                  // invite chip (the locked rule: a plan from a person is never one
+                  // they're not on). Never the generic /post dump.
+                  onPress: () => router.push(buildComposerWithPerson(
+                    menu.person.user_id,
+                    menu.person.first_name_display,
+                    menu.person.profile_photo_url,
+                  ) as never),
                 },
                 {
                   key: 'circle',
