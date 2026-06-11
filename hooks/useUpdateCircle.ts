@@ -18,6 +18,8 @@ import { circleKeys } from '../lib/circles/keys';
 export interface UpdateCircleIdentity {
   name: string;
   description: string | null;
+  /** Optional cover (already uploaded to circle-covers); points cover_upload_id. */
+  coverUploadId?: string | null;
 }
 
 export function useUpdateCircle(
@@ -26,11 +28,12 @@ export function useUpdateCircle(
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ name, description }: UpdateCircleIdentity): Promise<void> => {
+    mutationFn: async ({ name, description, coverUploadId }: UpdateCircleIdentity): Promise<void> => {
       const { error } = await supabase.rpc('update_circle', {
         p_circle_id: circleId,
         p_name: name,
         p_description: description,
+        p_cover_upload_id: coverUploadId ?? null,
       });
       if (error) throw error;
     },

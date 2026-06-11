@@ -26,6 +26,8 @@ export interface CreateCircleArgs {
   invitePolicy: CircleInvitePolicy;
   /** Members to promote to admin when invitePolicy === 'chosen'. */
   adminUserIds: string[];
+  /** Optional cover photo (compressed base64); uploaded after the circle exists. */
+  coverBase64?: string | null;
 }
 
 /**

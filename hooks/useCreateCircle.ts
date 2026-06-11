@@ -7,8 +7,10 @@
  * is the fresh creator-admin, so it's authorized. Returns the new circle id.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import { supabase } from '../lib/supabase';
 import { logError } from '../lib/logger';
+import { uploadBase64ToStorage } from '../lib/uploadPhoto';
 import { circleKeys } from '../lib/circles/keys';
 import type { CreateCircleArgs } from '../lib/circles/types';
 
@@ -45,6 +47,28 @@ export function useCreateCircle(userId: string | null | undefined) {
         }
       } catch (e) {
         logError(e, 'useCreateCircle.applyPolicy');
+      }
+
+      // Optional cover photo: upload to circle-covers (admin-gated; the caller is
+      // the fresh admin) and point cover_upload_id at it. Best-effort, like the
+      // policy step: a cover failure must never report "create failed".
+      if (args.coverBase64) {
+        try {
+          const coverUploadId = Crypto.randomUUID();
+          await uploadBase64ToStorage(
+            'circle-covers',
+            `${circleId}/${coverUploadId}`,
+            args.coverBase64,
+            { upsert: true },
+          );
+          const { error: e } = await supabase.rpc('update_circle', {
+            p_circle_id: circleId,
+            p_cover_upload_id: coverUploadId,
+          });
+          if (e) throw e;
+        } catch (e) {
+          logError(e, 'useCreateCircle.cover');
+        }
       }
 
       return circleId;

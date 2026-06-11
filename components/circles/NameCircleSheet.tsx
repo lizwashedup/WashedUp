@@ -22,12 +22,15 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X } from 'lucide-react-native';
+import { X, ImagePlus } from 'lucide-react-native';
+import * as Crypto from 'expo-crypto';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { CIRCLE_CREATE } from '../../constants/YoursDesign';
 import { COPY } from '../yours/state/constants';
 import { useUpdateCircle } from '../../hooks/useUpdateCircle';
+import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
+import { pickCoverPhoto } from '../../lib/circles/pickCover';
 import CircleCover from '../yours/circles/CircleCover';
 
 export default function NameCircleSheet({
@@ -47,26 +50,47 @@ export default function NameCircleSheet({
   const update = useUpdateCircle(circleId, userId);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [coverBase64, setCoverBase64] = useState<string | null>(null);
+  const [coverPreviewUri, setCoverPreviewUri] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const canSave = name.trim().length > 0 && !update.isPending;
+  const busy = update.isPending || saving;
+  const canSave = name.trim().length > 0 && !busy;
 
-  const close = () => {
+  const reset = () => {
     setName('');
     setDescription('');
-    onClose();
+    setCoverBase64(null);
+    setCoverPreviewUri(null);
+  };
+  const close = () => { reset(); onClose(); };
+
+  const onPickCover = async () => {
+    const picked = await pickCoverPhoto();
+    if (picked) {
+      setCoverBase64(picked.base64);
+      setCoverPreviewUri(picked.uri);
+    }
   };
 
-  const save = () => {
-    if (!canSave) return;
+  const save = async () => {
+    if (name.trim().length === 0 || busy) return;
+    let coverUploadId: string | undefined;
+    if (coverBase64) {
+      setSaving(true);
+      try {
+        coverUploadId = Crypto.randomUUID();
+        await uploadBase64ToStorage('circle-covers', `${circleId}/${coverUploadId}`, coverBase64, { upsert: true });
+      } catch {
+        coverUploadId = undefined; // cover failed; still save name + description
+      } finally {
+        setSaving(false);
+      }
+    }
     update.mutate(
-      { name: name.trim(), description: description.trim() || null },
+      { name: name.trim(), description: description.trim() || null, coverUploadId },
       {
-        onSuccess: () => {
-          setName('');
-          setDescription('');
-          onNamed?.();
-          onClose();
-        },
+        onSuccess: () => { reset(); onNamed?.(); onClose(); },
         onError: () => Alert.alert(COPY.circleNameSheetError),
       },
     );
@@ -97,11 +121,23 @@ export default function NameCircleSheet({
           <View style={styles.coverWrap}>
             <CircleCover
               name={name}
-              coverUrl={null}
+              coverUrl={coverPreviewUri}
               size={CIRCLE_CREATE.coverPreview}
               radius={CIRCLE_CREATE.coverPreviewRadius}
               monogramSize={CIRCLE_CREATE.coverMonogram}
             />
+            <Pressable
+              onPress={onPickCover}
+              android_ripple={{ color: Colors.border }}
+              style={styles.coverBtn}
+              accessibilityRole="button"
+              accessibilityLabel={coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
+            >
+              <ImagePlus size={16} color={Colors.terracotta} strokeWidth={1.75} />
+              <Text style={styles.coverBtnText}>
+                {coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
+              </Text>
+            </Pressable>
           </View>
 
           <TextInput
@@ -127,12 +163,13 @@ export default function NameCircleSheet({
           <Pressable
             onPress={save}
             disabled={!canSave}
-            style={({ pressed }) => [styles.cta, !canSave && styles.ctaDisabled, pressed && styles.pressed]}
+            android_ripple={{ color: Colors.border }}
+            style={[styles.cta, !canSave && styles.ctaDisabled]}
             accessibilityRole="button"
             accessibilityState={{ disabled: !canSave }}
             accessibilityLabel={COPY.circleNameSheetSave}
           >
-            {update.isPending ? (
+            {busy ? (
               <ActivityIndicator color={Colors.white} />
             ) : (
               <Text style={styles.ctaLabel}>{COPY.circleNameSheetSave}</Text>
@@ -170,6 +207,18 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   coverWrap: { alignItems: 'center', marginVertical: 12 },
+  coverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+  },
+  coverBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   field: {
     backgroundColor: Colors.inputBg,
     borderRadius: CIRCLE_CREATE.fieldRadius,

@@ -1,11 +1,12 @@
 /**
- * IdentityStep - step 1 of the create-circle flow: name (required) + an
- * optional description, with a live monogram cover preview. Cover-photo upload
- * is deferred (the cover_upload_id origin is undefined in v1; circles use the
- * monogram cover), so there is no photo picker here yet.
+ * IdentityStep - the Name step of the create-circle flow: a live serif monogram
+ * preview (or the picked cover), name (required), optional description, and an
+ * optional "Add a cover photo" affordance. The cover is skippable and never
+ * blocks Next; it uploads after the circle exists (useCreateCircle).
  */
 import React from 'react';
-import { ScrollView, View, Text, TextInput, StyleSheet } from 'react-native';
+import { ScrollView, View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { ImagePlus } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { CIRCLE_CREATE } from '../../../constants/YoursDesign';
@@ -15,13 +16,17 @@ import CircleCover from '../../yours/circles/CircleCover';
 export default function IdentityStep({
   name,
   description,
+  coverPreviewUri,
   onName,
   onDescription,
+  onPickCover,
 }: {
   name: string;
   description: string;
+  coverPreviewUri: string | null;
   onName: (t: string) => void;
   onDescription: (t: string) => void;
+  onPickCover: () => void;
 }) {
   return (
     <ScrollView
@@ -32,11 +37,24 @@ export default function IdentityStep({
       <View style={styles.coverWrap}>
         <CircleCover
           name={name}
-          coverUrl={null}
+          coverUrl={coverPreviewUri}
           size={CIRCLE_CREATE.coverPreview}
           radius={CIRCLE_CREATE.coverPreviewRadius}
           monogramSize={CIRCLE_CREATE.coverMonogram}
         />
+        <Pressable
+          onPress={onPickCover}
+          android_ripple={{ color: Colors.border }}
+          style={styles.coverBtn}
+          accessibilityRole="button"
+          accessibilityLabel={coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
+        >
+          <ImagePlus size={16} color={Colors.terracotta} strokeWidth={1.75} />
+          <Text style={styles.coverBtnText}>
+            {coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
+          </Text>
+        </Pressable>
+        {!coverPreviewUri && <Text style={styles.coverSub}>{COPY.circleCoverSub}</Text>}
       </View>
       <Text style={styles.title}>{COPY.circleStep1Title}</Text>
       <TextInput
@@ -65,6 +83,26 @@ export default function IdentityStep({
 const styles = StyleSheet.create({
   wrap: { padding: 20, alignItems: 'stretch' },
   coverWrap: { alignItems: 'center', marginBottom: 20 },
+  coverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+  },
+  coverBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  coverSub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.tertiary,
+    textAlign: 'center',
+    marginTop: 8,
+    maxWidth: 260,
+  },
   title: {
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displaySM,

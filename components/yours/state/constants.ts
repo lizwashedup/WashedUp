@@ -282,6 +282,10 @@ export const COPY = {
   circleStep1Title: 'Name your circle',
   circleNamePlaceholder: 'Circle name',
   circleDescPlaceholder: 'What brings you together? (optional)',
+  // Optional cover photo (identity ladder). Skippable, never blocks Next.
+  circleCoverAdd: 'Add a cover photo',
+  circleCoverChange: 'Change cover photo',
+  circleCoverSub: 'Or let it use a photo from your first plan together.',
   // Step 2, people.
   circleStep2Title: "Who's in it",
   circleStep2Sub: 'Pick from your people. A circle is three or more.',

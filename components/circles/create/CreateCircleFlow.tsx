@@ -28,6 +28,7 @@ import { hapticSelection } from '../../../lib/haptics';
 import { useAuthUserId } from '../../yours/state/useAuthUserId';
 import { useYoursGrid } from '../../../hooks/useYoursGrid';
 import { useCreateCircle } from '../../../hooks/useCreateCircle';
+import { pickCoverPhoto } from '../../../lib/circles/pickCover';
 import { useSetSuggestionStatus } from '../../../hooks/useCircleSuggestions';
 import type { CircleInvitePolicy } from '../../../lib/circles/types';
 import IdentityStep from './IdentityStep';
@@ -51,7 +52,17 @@ export default function CreateCircleFlow() {
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [coverBase64, setCoverBase64] = useState<string | null>(null);
+  const [coverPreviewUri, setCoverPreviewUri] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const onPickCover = async () => {
+    const picked = await pickCoverPhoto();
+    if (picked) {
+      setCoverBase64(picked.base64);
+      setCoverPreviewUri(picked.uri);
+    }
+  };
 
   // Apply a suggestion seed ONCE the grid has loaded, intersected with it: only
   // people actually in your grid get pre-selected, so every selected person is
@@ -125,6 +136,7 @@ export default function CreateCircleFlow() {
         memberUserIds: Array.from(selected),
         invitePolicy: policy,
         adminUserIds: policy === 'chosen' ? Array.from(adminIds) : [],
+        coverBase64,
       },
       {
         onSuccess: (circleId) => {
@@ -182,8 +194,10 @@ export default function CreateCircleFlow() {
             <IdentityStep
               name={name}
               description={description}
+              coverPreviewUri={coverPreviewUri}
               onName={setName}
               onDescription={setDescription}
+              onPickCover={onPickCover}
             />
           )}
           {step === 3 && (
