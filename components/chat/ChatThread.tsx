@@ -40,6 +40,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import type { AnchorRect } from '../menu/MenuCard';
 import { openUrl } from '../../lib/url';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../hooks/useChat';
@@ -83,7 +84,8 @@ export interface ChatThreadMember {
 // needs no callback; 'plus' supplies its own handler.
 export type ChatThreadHeaderMenu =
   | { type: 'report' }
-  | { type: 'plus'; onPress: () => void };
+  // onPress receives the + button's measured window rect so a menu can bloom from it.
+  | { type: 'plus'; onPress: (anchor: AnchorRect) => void };
 
 export interface ChatThreadProps {
   kind: 'event' | 'circle';
@@ -767,6 +769,15 @@ export default function ChatThread(props: ChatThreadProps) {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [overlayMessage, setOverlayMessage] = useState<{ message: ChatMessage; isOwn: boolean } | null>(null);
   const listRef = useRef<FlatList>(null);
+  // Measured so the "+" header menu (DMs) can bloom from the button.
+  const plusBtnRef = useRef<View>(null);
+  const openPlusFromButton = useCallback(() => {
+    if (props.headerMenu.type !== 'plus') return;
+    const onPress = props.headerMenu.onPress;
+    plusBtnRef.current?.measureInWindow((x, y, width, height) =>
+      onPress({ x, y, width, height }),
+    );
+  }, [props.headerMenu]);
   const { messages, loading, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, refetch } = useChat({ kind: props.kind, id });
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
@@ -1617,7 +1628,8 @@ export default function ChatThread(props: ChatThreadProps) {
 
           {props.headerMenu.type === 'plus' ? (
             <TouchableOpacity
-              onPress={props.headerMenu.onPress}
+              ref={plusBtnRef}
+              onPress={openPlusFromButton}
               style={chatStyles.ellipsisBtn}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               accessibilityRole="button"

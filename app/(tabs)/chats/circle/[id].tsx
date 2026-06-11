@@ -24,6 +24,8 @@ import { circleDisplay } from '../../../../lib/circles/display';
 import ChatThread, { ChatThreadMember } from '../../../../components/chat/ChatThread';
 import AddPeopleSheet from '../../../../components/circles/AddPeopleSheet';
 import CirclePlanComposer from '../../../../components/circles/plan/CirclePlanComposer';
+import MenuCard, { type AnchorRect } from '../../../../components/menu/MenuCard';
+import { CalendarPlus, Users } from 'lucide-react-native';
 
 function CircleChatScreenInner({ circleId }: { circleId: string }) {
   const router = useRouter();
@@ -31,6 +33,8 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
   const { data, isError } = useCircle(circleId);
   const [addOpen, setAddOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<AnchorRect | null>(null);
 
   const members: ChatThreadMember[] = (data?.members ?? []).map((m) => ({
     id: m.user_id,
@@ -56,8 +60,16 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
       )
     : null;
 
-  // The "+" header menu: add people now, or make a plan.
-  const openPlusMenu = () => {
+  // The "+" header menu. In a DM (2-person) it blooms the shared MenuCard from
+  // the + button (Make a plan, Start a circle). Circle chats (3+) keep the
+  // native menu this pass (out of scope per spec). "Add people now" retires:
+  // in a DM, pulling more people in IS Start a circle (grows it into a circle).
+  const openPlusMenu = (anchor: AnchorRect) => {
+    if (disp?.isDm) {
+      setMenuAnchor(anchor);
+      setMenuOpen(true);
+      return;
+    }
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
@@ -132,6 +144,30 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
             router.push(`/plan/${result.event_id}` as any);
           }
         }}
+      />
+      <MenuCard
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        anchor={menuAnchor}
+        placement="top-right"
+        rows={[
+          {
+            key: 'plan',
+            icon: CalendarPlus,
+            label: COPY.menuMakePlan,
+            subtitle: COPY.menuMakePlanSub,
+            onPress: () => setPlanOpen(true),
+          },
+          {
+            key: 'circle',
+            icon: Users,
+            label: COPY.menuStartCircle,
+            subtitle: COPY.menuStartCircleSub,
+            // Pulling more people into a DM grows it into a circle (the old
+            // "Add people now", relabelled per the consistency rule).
+            onPress: () => setAddOpen(true),
+          },
+        ]}
       />
     </>
   );
