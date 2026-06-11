@@ -145,6 +145,7 @@ export const COPY = {
   surveyAddPrompt: 'You did something together. They might be your people.',
   surveyAddButton: 'Add them',
   surveySkip: 'Skip',
+  surveyNotNow: 'Not now',
 
   albumOpenFailed: "This album didn't open. Try again in a moment.",
   albumRetry: 'Try again',

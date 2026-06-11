@@ -24,9 +24,10 @@ import { supabase } from '../../../lib/supabase';
 import { hapticSelection, hapticSuccess } from '../../../lib/haptics';
 import YoursAvatar from '../primitives/YoursAvatar';
 import { COPY } from '../state/constants';
-import type {
-  SurveyPlan,
-  SurveyMember,
+import {
+  markPostPlanSurveyHandled,
+  type SurveyPlan,
+  type SurveyMember,
 } from '../../PostPlanSurvey';
 
 type Step = 'how' | 'who' | 'add' | 'done';
@@ -57,6 +58,12 @@ export default function SurveyV2({
   const [busy, setBusy] = useState(false);
 
   const close = () => {
+    // Suppress locally on EVERY exit, regardless of whether a plan_feedback
+    // row was written (offline, error, or a plain back-out). The server RPC
+    // only stops re-prompting once a row exists; without this an exit that
+    // didn't write one re-blocks on every cold start (the 2026-05-18 lockout).
+    // Mirrors LegacyPostPlanSurvey.finish(). Stopgap until survey v3.
+    void markPostPlanSurveyHandled(plan.id);
     setStep('how');
     onComplete();
   };
@@ -278,6 +285,19 @@ export default function SurveyV2({
             </Pressable>
           </View>
         )}
+
+        {/* Always-available escape on every step, never disabled, so a broken
+            or uncompletable survey can never trap the user (the 2026-05-18
+            lockout). close() also suppresses locally. Stopgap until survey v3. */}
+        <Pressable
+          style={styles.escape}
+          onPress={close}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={COPY.surveyNotNow}
+        >
+          <Text style={styles.escapeText}>{COPY.surveyNotNow}</Text>
+        </Pressable>
       </SafeAreaView>
     </Modal>
   );
@@ -383,6 +403,18 @@ const styles = StyleSheet.create({
   },
   skip: { alignItems: 'center', paddingVertical: 12 },
   skipText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.tertiary,
+  },
+  escape: {
+    position: 'absolute',
+    top: 12,
+    right: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  escapeText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
     color: Colors.tertiary,

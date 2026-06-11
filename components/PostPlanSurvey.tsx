@@ -67,7 +67,7 @@ export async function isPostPlanSurveyHandled(eventId: string): Promise<boolean>
   }
 }
 
-async function markPostPlanSurveyHandled(eventId: string): Promise<void> {
+export async function markPostPlanSurveyHandled(eventId: string): Promise<void> {
   try {
     const raw = await AsyncStorage.getItem(POST_PLAN_SURVEY_HANDLED_KEY);
     let ids: string[] = [];
