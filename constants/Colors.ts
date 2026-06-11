@@ -126,6 +126,7 @@ const brand = {
   whiteSoft: 'rgba(255,255,255,0.86)',          // white @ 86% — animated subline text on success-state bg (verify-code)
   goldBadgeSoft: 'rgba(197,165,90,0.18)',       // gold @ 18% — success badge background (verify-code)
   circleBadgeGoldTint: 'rgba(197,165,90,0.15)', // gold #C5A55A @ 15%: "from a circle" badge bg (badge spec; decorative tint only, never on text)
+  scrimSepia: 'rgba(58,42,30,0.30)',            // warm sepia scrim behind the anchored MenuCard (never system gray-black)
 
   // ── Yours page rebuild ───────────────────────────────────────────────────
   // Activity-ring family. terracotta is the primary; the 75/50 mid states

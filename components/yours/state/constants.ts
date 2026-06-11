@@ -311,9 +311,23 @@ export const COPY = {
   keepInvite: 'invite to a plan',
   keepPingSent: (name: string) => `${name} knows about it.`,
   // Long-press a face in People: message them, or start a circle with them.
+  // (dmMessagePerson/dmStartCircle predate the MenuCard and are now unused;
+  // dmViewPerson is still the circle-chat "View {name}" button label.)
   dmMessagePerson: (name: string) => `Message ${name}`,
   dmStartCircle: (name: string) => `Start a circle with ${name}`,
   dmViewPerson: (name: string) => `View ${name}`,
+  // ── Unified MenuCard rows (locked copy, shared by the People long-press and
+  // the DM chat "+" menu so an action reads identically on every surface). No
+  // name in the label: on People the ringed face is the header. No forbidden
+  // words, no em dashes. Source: people-menu-and-keep-page-copy.md.
+  menuMessage: 'Message',
+  menuMessageSub: 'Open your chat',
+  menuMakePlan: 'Make a plan',
+  menuMakePlanSub: 'Plan something together',
+  menuStartCircle: 'Start a circle',
+  menuStartCircleSub: 'Pull a few more people in',
+  menuViewProfile: 'View profile',
+  menuViewProfileSub: "See what they're up to",
   // Section labels.
   keepComingUpTogether: 'coming up together',
   keepStorySoFar: 'your story so far',
