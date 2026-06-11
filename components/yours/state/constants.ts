@@ -328,7 +328,7 @@ export const COPY = {
   // vacated) always shows; "Make a plan for you two" (terracotta, do-it-now)
   // is the former "invite to a plan".
   keepMessage: 'Message',
-  keepMakePlan: 'Make a plan for you two',
+  keepMakePlan: 'Make a plan',
   keepMessageError: "Couldn't open this chat just now. Try again.",
   // Legacy ping copy (still used by PingSheet / PingInline elsewhere).
   keepPing: 'ping',

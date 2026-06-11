@@ -15,6 +15,7 @@ import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
+import { buildComposerWithPerson } from '../../../lib/composerLink';
 import { useProfileCard } from '../../../hooks/useProfileCard';
 import { useMyFace } from '../../../hooks/useMyFace';
 import { useGetOrCreateDm } from '../../../hooks/useGetOrCreateDm';
@@ -114,10 +115,13 @@ export default function KeepPage({
   };
 
   const onInvite = () => {
+    if (!card) return;
     hapticSelection();
-    // Mirrors the profile sheet: routes to plans. A picker pre-attached to
-    // this person is a follow-up.
-    router.push('/(tabs)/plans' as never);
+    // Locked rule: a make-a-plan action from a person NEVER lands anywhere they
+    // are not attached. Open the composer with them pre-attached as a chip.
+    router.push(
+      buildComposerWithPerson(card.user_id, card.first_name_display, card.profile_photo_url) as never,
+    );
   };
 
   if (isLoading || !card) {
