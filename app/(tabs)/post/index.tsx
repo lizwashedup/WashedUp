@@ -287,7 +287,10 @@ export default function PostScreen() {
   const [peoplePickerOpen, setPeoplePickerOpen] = useState(false);
   // Locally-hidden want-in ids so a dismissed row vanishes instantly (undo restores).
   const [hiddenWantIn, setHiddenWantIn] = useState<Set<string>>(new Set());
-  const [inviteToast, setInviteToast] = useState<{ userId: string; name: string } | null>(null);
+  // A QUEUE, not a single slot: rapid double-dismiss must keep every undo
+  // reachable. Each entry shows in turn (the Toast is keyed by userId so its
+  // auto-dismiss timer re-arms per entry); undo always acts on the head.
+  const [toastQueue, setToastQueue] = useState<{ userId: string; name: string }[]>([]);
 
   // WANT-IN ONLY (reactance fix): the app shows rows only for people who raised a
   // hand. Your-people are NOT volunteered as named rows; they come in via the
@@ -338,16 +341,25 @@ export default function PostScreen() {
     hapticLight();
     setHiddenWantIn((prev) => new Set(prev).add(s.user_id));
     dismissSuggestion.mutate(s.user_id);
-    setInviteToast({ userId: s.user_id, name: s.name });
+    setToastQueue((prev) =>
+      prev.some((t) => t.userId === s.user_id)
+        ? prev
+        : [...prev, { userId: s.user_id, name: s.name }]);
   }, [dismissSuggestion]);
 
+  // Undo acts on the head (the entry currently shown), then advances the queue.
   const onUndoDismiss = useCallback(() => {
-    if (!inviteToast) return;
-    const id = inviteToast.userId;
-    undoDismissSuggestion.mutate(id);
-    setHiddenWantIn((prev) => { const next = new Set(prev); next.delete(id); return next; });
-    setInviteToast(null);
-  }, [inviteToast, undoDismissSuggestion]);
+    const head = toastQueue[0];
+    if (!head) return;
+    undoDismissSuggestion.mutate(head.userId);
+    setHiddenWantIn((p) => { const next = new Set(p); next.delete(head.userId); return next; });
+    setToastQueue((prev) => prev.slice(1));
+  }, [toastQueue, undoDismissSuggestion]);
+
+  // Auto-dismiss (or the user letting it time out): drop the head, reveal next.
+  const onToastDismiss = useCallback(() => {
+    setToastQueue((prev) => prev.slice(1));
+  }, []);
 
   const genderOptions = useMemo(() => {
     const opts: { label: string; value: GenderPreference }[] = [
@@ -2111,11 +2123,12 @@ export default function PostScreen() {
       />
 
       <Toast
-        visible={!!inviteToast}
+        key={toastQueue[0]?.userId}
+        visible={toastQueue.length > 0}
         message={COPY.inviteDismissToast}
         actionLabel={COPY.inviteUndo}
         onAction={onUndoDismiss}
-        onDismiss={() => setInviteToast(null)}
+        onDismiss={onToastDismiss}
       />
 
       <PeoplePickerSheet
