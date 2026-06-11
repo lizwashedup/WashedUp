@@ -118,11 +118,13 @@ Always reference Fonts.* from `constants/Typography.ts`. Do not add new font fam
 - Never use #D97746, #A84B2A, #E8955A, or any other orange variant — only #B5522E
 
 ### Documented exceptions
-The "gold is decorative only" rule has two intentional exceptions where gold *is* applied to a tappable surface. Both are tied to a specific psychological framing — gold signals "warm, optional, no pressure," in deliberate contrast to terracotta's "do this now."
+The "gold is decorative only" rule has several intentional exceptions where gold *is* applied to a tappable surface. Each is tied to a specific psychological framing — gold signals "warm, optional, no pressure," in deliberate contrast to terracotta's "do this now."
 
 - **Phone-auth OTP success state** uses #C5A55A intentionally (success affirmation, not a CTA).
 - **"I'd go next time" interest signal button** (Next Time! feature, plan detail screen) uses #D4BF82 as a filled button. Reasoning: terracotta is reserved for primary CTAs ("I'm going," "Post It") that say "act now." Gold says "this is a low-pressure, optional micro-commitment." Treating this button as a primary terracotta CTA would over-weight what is by design a foot-in-the-door signal, not an action. The button after-tap state (checkmark + "[Creator] knows you're interested") also uses gold for the same reason.
 - **"Message" button on the "you & [name]" keep page** (Yours / People) uses #D4BF82 as a filled button (asphalt text), sitting next to the terracotta-fill "Make a plan for you two." Same framing as the Next Time button: Message is the low-pressure warm nudge ("just say hi") versus the plan button's "do this now." Making Message a terracotta CTA would over-weight a deliberately soft action and flatten the warm/act-now contrast the keep page depends on. (This replaces the former gold "ping" button, retired when DMs landed; PingSheet/PingInline elsewhere are unaffected.)
+- **"Invite" pill in the composer's INVITE PEOPLE section** (Post, `InvitePeopleSection`) uses the gold accent as a filled pill (asphalt text). It invites someone who already raised a hand (a want-in signal), so it is responsive and low-pressure, not a primary action: terracotta stays reserved for the composer's "Post It" CTA. Making each Invite pill terracotta would compete with that one true CTA and over-weight a soft, optional gesture.
+- **"Make the first plan." nudge on an empty circle** (`CircleNoticeboard`, COMING UP empty state) uses the gold accent as a filled pill (asphalt text). It is a gentle invitation to start, not a demand; the circle page's real action row already carries the terracotta "post a plan" CTA above it. Gold keeps the empty-state nudge warm and skippable rather than nagging.
 
 Do not extend this exception to additional buttons without writing it here first.
 

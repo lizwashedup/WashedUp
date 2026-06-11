@@ -5,7 +5,7 @@
  * onAction (the caller decides whether to also dismiss).
  */
 import React, { useEffect } from 'react';
-import { Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
@@ -59,7 +59,10 @@ export function Toast({ visible, message, actionLabel, onAction, onDismiss }: Pr
     <Animated.View
       style={[
         styles.container,
-        Platform.OS === 'android' && { bottom: 90 + insets.bottom },
+        // Lift above the home indicator / nav bar on BOTH platforms. iOS was
+        // previously left at the flat bottom:90, so the toast could overlap the
+        // composer's invite controls on inset devices.
+        { bottom: 90 + insets.bottom },
         animStyle,
       ]}
     >

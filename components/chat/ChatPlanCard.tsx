@@ -12,17 +12,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { COPY } from '../yours/state/constants';
 import { useEventCard } from '../../hooks/useEventCard';
-
-function formatWhen(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const date = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    return `${date}, ${time}`;
-  } catch {
-    return '';
-  }
-}
+import { formatPlanWhenLA } from '../../lib/planTime';
 
 export default function ChatPlanCard({ eventId }: { eventId: string }) {
   const { data, isLoading } = useEventCard(eventId);
@@ -48,7 +38,7 @@ export default function ChatPlanCard({ eventId }: { eventId: string }) {
       accessibilityRole="button"
       accessibilityLabel={data.title}
     >
-      <Text style={styles.when}>{formatWhen(data.start_time)}</Text>
+      <Text style={styles.when}>{formatPlanWhenLA(data.start_time)}</Text>
       <Text style={styles.title} numberOfLines={2}>{data.title}</Text>
       <Text style={styles.joinLine}>{COPY.circlePlanJoinLine}</Text>
     </Pressable>

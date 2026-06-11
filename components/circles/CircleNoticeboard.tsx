@@ -21,15 +21,9 @@ import { COPY } from '../yours/state/constants';
 import type { CirclePayload } from '../../lib/circles/types';
 import { useCirclePlans, CirclePlanRow } from '../../hooks/useCirclePlans';
 import { buildCircleCoverUrl } from '../../lib/circles/coverUrl';
+import { formatPlanWhenLA } from '../../lib/planTime';
 import CircleCover from '../yours/circles/CircleCover';
 import CircleMembersRow from './CircleMembersRow';
-
-function formatPlanWhen(iso: string): string {
-  const d = new Date(iso);
-  const date = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  return `${date}, ${time}`;
-}
 
 function PlanRow({ plan, onPress }: { plan: CirclePlanRow; onPress: () => void }) {
   const isOpen = plan.circle_visibility === 'open';
@@ -39,7 +33,7 @@ function PlanRow({ plan, onPress }: { plan: CirclePlanRow; onPress: () => void }
       <View style={styles.planRowBody}>
         <Text style={styles.planTitle} numberOfLines={1}>{plan.title}</Text>
         <Text style={styles.planMeta} numberOfLines={1}>
-          {formatPlanWhen(plan.start_time)}
+          {formatPlanWhenLA(plan.start_time)}
           {plan.location_text ? `, ${plan.location_text}` : ''}
         </Text>
       </View>
@@ -319,9 +313,9 @@ const styles = StyleSheet.create({
   planTitle: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   planMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 3 },
   openTag: { backgroundColor: Colors.goldenAmberTint15, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  openTagText: { fontFamily: Fonts.sansBold, fontSize: 10, color: Colors.darkWarm, letterSpacing: 0.2 },
+  openTagText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.darkWarm, letterSpacing: 0.2 },
   privTag: { backgroundColor: Colors.dividerWarm, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  privTagText: { fontFamily: Fonts.sansMedium, fontSize: 10, color: Colors.secondary, letterSpacing: 0.2 },
+  privTagText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.secondary, letterSpacing: 0.2 },
   planEmptyTitle: {
     fontFamily: Fonts.sansSemibold,
     fontSize: FontSizes.bodyMD,

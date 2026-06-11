@@ -7,7 +7,8 @@
  * the duo-people glyph is no longer the face of any circle.
  */
 import React from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 import { CIRCLE } from '../../../constants/YoursDesign';
@@ -48,6 +49,8 @@ export default function CircleCover({
       <Image
         source={{ uri: coverUrl }}
         style={[styles.cover, box]}
+        contentFit="cover"
+        cachePolicy="memory-disk"
         accessibilityIgnoresInvertColors
       />
     );

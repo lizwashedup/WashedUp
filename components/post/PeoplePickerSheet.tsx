@@ -7,8 +7,9 @@
  */
 import React, { useMemo, useState } from 'react';
 import {
-  View, Text, Image, Modal, Pressable, FlatList, ActivityIndicator, StyleSheet,
+  View, Text, Modal, Pressable, FlatList, ActivityIndicator, StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -39,7 +40,7 @@ function PickRow({ person, selected, onToggle }: { person: YoursGridPerson; sele
       accessibilityLabel={name}
     >
       {person.profile_photo_url ? (
-        <Image source={{ uri: person.profile_photo_url }} style={styles.avatar} />
+        <Image source={{ uri: person.profile_photo_url }} style={styles.avatar} contentFit="cover" cachePolicy="memory-disk" />
       ) : (
         <View style={[styles.avatar, styles.avatarFallback]}>
           <Text style={styles.initial}>{name[0]?.toUpperCase() ?? '?'}</Text>

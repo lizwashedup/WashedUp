@@ -23,6 +23,7 @@ import {
   usePeopleConnectionMutations,
   friendlyConnectionError,
 } from '../../../hooks/usePeopleConnectionMutations';
+import { BrandedAlert } from '../../BrandedAlert';
 import KeepHero from './KeepHero';
 import StoryTimeline from './StoryTimeline';
 
@@ -75,6 +76,7 @@ export default function KeepPage({
   const getOrCreateDm = useGetOrCreateDm();
   const [messagePressed, setMessagePressed] = useState(false);
   const [planPressed, setPlanPressed] = useState(false);
+  const [removeConfirmVisible, setRemoveConfirmVisible] = useState(false);
 
   const name = card?.first_name_display ?? 'them';
 
@@ -89,18 +91,10 @@ export default function KeepPage({
       {
         text: COPY.profileRemove,
         style: 'destructive',
-        onPress: () =>
-          Alert.alert('', COPY.removeConfirm, [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: COPY.profileRemove,
-              style: 'destructive',
-              onPress: () => {
-                remove.mutate(card.user_id);
-                router.back();
-              },
-            },
-          ]),
+        // Confirm via BrandedAlert (not a nested native Alert): on Android the
+        // native dialog reorders Cancel/destructive unpredictably, a footgun on
+        // an irreversible action. The outer menu stays a native action sheet.
+        onPress: () => setRemoveConfirmVisible(true),
       },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -273,6 +267,24 @@ export default function KeepPage({
           </>
         )}
       </ScrollView>
+
+      <BrandedAlert
+        visible={removeConfirmVisible}
+        title={COPY.profileRemove}
+        message={COPY.removeConfirm}
+        buttons={[
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: () => {
+              remove.mutate(card.user_id);
+              router.back();
+            },
+          },
+        ]}
+        onClose={() => setRemoveConfirmVisible(false)}
+      />
     </SafeAreaView>
   );
 }

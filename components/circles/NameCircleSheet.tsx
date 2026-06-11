@@ -18,7 +18,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
   StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +27,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { CIRCLE_CREATE } from '../../constants/YoursDesign';
 import { COPY } from '../yours/state/constants';
+import { BrandedAlert } from '../BrandedAlert';
 import { useUpdateCircle } from '../../hooks/useUpdateCircle';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { pickCoverPhoto } from '../../lib/circles/pickCover';
@@ -53,6 +53,7 @@ export default function NameCircleSheet({
   const [coverBase64, setCoverBase64] = useState<string | null>(null);
   const [coverPreviewUri, setCoverPreviewUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [errorVisible, setErrorVisible] = useState(false);
 
   const busy = update.isPending || saving;
   const canSave = name.trim().length > 0 && !busy;
@@ -91,12 +92,13 @@ export default function NameCircleSheet({
       { name: name.trim(), description: description.trim() || null, coverUploadId },
       {
         onSuccess: () => { reset(); onNamed?.(); onClose(); },
-        onError: () => Alert.alert(COPY.circleNameSheetError),
+        onError: () => setErrorVisible(true),
       },
     );
   };
 
   return (
+    <>
     <Modal
       visible={visible}
       transparent
@@ -178,6 +180,12 @@ export default function NameCircleSheet({
         </View>
       </KeyboardAvoidingView>
     </Modal>
+    <BrandedAlert
+      visible={errorVisible}
+      title={COPY.circleNameSheetError}
+      onClose={() => setErrorVisible(false)}
+    />
+    </>
   );
 }
 
