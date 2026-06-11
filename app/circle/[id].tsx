@@ -29,6 +29,7 @@ import { BrandedAlert } from '../../components/BrandedAlert';
 import CircleNoticeboard from '../../components/circles/CircleNoticeboard';
 import AddPeopleSheet from '../../components/circles/AddPeopleSheet';
 import NameCircleSheet from '../../components/circles/NameCircleSheet';
+import CirclePlanComposer from '../../components/circles/plan/CirclePlanComposer';
 
 function CircleDetail({ circleId }: { circleId: string }) {
   const router = useRouter();
@@ -39,6 +40,7 @@ function CircleDetail({ circleId }: { circleId: string }) {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [nameOpen, setNameOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
 
   // Unnamed circles (DMs grown to a circle, name='') render by member names, not
   // blank. circleDisplay gives "Marlowe, Sage" for 3+ and the counterpart for 2.
@@ -127,6 +129,8 @@ function CircleDetail({ circleId }: { circleId: string }) {
             payload={data}
             displayName={title}
             onAddPeople={() => setAddOpen(true)}
+            onPostPlan={() => setPlanOpen(true)}
+            onOpenChat={() => router.push(`/(tabs)/chats/circle/${circleId}` as never)}
             onNameCircle={
               canName
                 ? () => {
@@ -151,6 +155,22 @@ function CircleDetail({ circleId }: { circleId: string }) {
         circleId={circleId}
         userId={userId}
         onClose={() => setNameOpen(false)}
+      />
+
+      <CirclePlanComposer
+        visible={planOpen}
+        onClose={() => setPlanOpen(false)}
+        circleId={circleId}
+        circleName={title}
+        members={(data?.members ?? []).map((m) => ({
+          user_id: m.user_id,
+          first_name_display: m.first_name_display,
+          profile_photo_url: m.profile_photo_url,
+        }))}
+        isDm={!!display?.isDm}
+        onPosted={(result) => {
+          if (result.has_own_chat) router.push(`/plan/${result.event_id}` as never);
+        }}
       />
 
       <BrandedAlert

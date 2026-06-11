@@ -203,6 +203,11 @@ export const COPY = {
   circlePlansLabel: 'coming up',
   circlePlansEmpty: 'No plans on the calendar yet.',
   circlePlansEmptySub: 'When the circle makes a plan, it shows up here.',
+  // Circle page action row (unconditional) + the first-plan nudge.
+  circleActionPost: 'post a plan',
+  circleActionChat: 'open chat',
+  circleActionInvite: 'invite',
+  circleMakeFirstPlan: 'Make the first plan.',
   // Recently-together section (hidden until there is history).
   circleRecentLabel: 'recently together',
   // The Room: a reserved, opt-in planner. UI only this release, no logic.

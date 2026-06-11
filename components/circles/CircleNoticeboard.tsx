@@ -1,26 +1,28 @@
 /**
- * CircleNoticeboard - the people + plans + details surface of a circle home.
- * A pure content block (no scroll container of its own) so the circle home can
- * render it directly now, and later drop it in as the header above the
- * persistent circle chat (the "stacked" surface).
+ * CircleNoticeboard - the circle page (toward the circles design study):
+ * identity hero (cover photo when set, else serif monogram tile), an
+ * UNCONDITIONAL action row (post a plan / open chat / invite), the members row,
+ * and "coming up" plans with a "Make the first plan." nudge when empty.
  *
- * v1 state: `pinned_plan` is null and `recent_together` is empty (the RPC
- * returns them as stable extension points), so the plans slot shows its empty
- * treatment and the recently-together section is hidden until there is history.
+ * Data-gated and deferred to a backend follow-up (see tracker): the pinned-plan
+ * capacity line "{filled} of {size} in", the living cover (auto from latest plan
+ * album), and RECENT TOGETHER all need circle-detail fields that get_circle does
+ * not return yet. Manual covers DO work here via buildCircleCoverUrl.
  */
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { CalendarDays, Pencil } from 'lucide-react-native';
+import { CalendarDays, CalendarPlus, MessageCircle, UserPlus, Pencil } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { CIRCLE_HOME, TYPE } from '../../constants/YoursDesign';
 import { COPY } from '../yours/state/constants';
 import type { CirclePayload } from '../../lib/circles/types';
 import { useCirclePlans, CirclePlanRow } from '../../hooks/useCirclePlans';
+import { buildCircleCoverUrl } from '../../lib/circles/coverUrl';
 import CircleCover from '../yours/circles/CircleCover';
 import CircleMembersRow from './CircleMembersRow';
-import TheRoomSlot from './TheRoomSlot';
 
 function formatPlanWhen(iso: string): string {
   const d = new Date(iso);
@@ -54,39 +56,72 @@ function SectionLabel({ children }: { children: string }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
+function ActionButton({
+  icon: Icon, label, primary, onPress,
+}: {
+  icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+  label: string;
+  primary?: boolean;
+  onPress?: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      android_ripple={{ color: Colors.border }}
+      style={[styles.actionBtn, primary && styles.actionPrimary]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Icon size={18} color={primary ? Colors.white : Colors.terracotta} strokeWidth={1.75} />
+      <Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export default function CircleNoticeboard({
   payload,
   displayName,
   onAddPeople,
   onNameCircle,
+  onPostPlan,
+  onOpenChat,
 }: {
   payload: CirclePayload;
-  // Resolved title (member names for an unnamed/DM-grown circle); falls back to
-  // the stored name. Keeps the hero from ever showing a blank name.
   displayName?: string;
   onAddPeople?: () => void;
-  // Set only when the viewer can name an unnamed circle (admin of a grown DM):
-  // renders the "Name this circle" affordance under the member count.
   onNameCircle?: () => void;
+  onPostPlan?: () => void;
+  onOpenChat?: () => void;
 }) {
   const { circle, members } = payload;
   const router = useRouter();
   const { data: plans = [] } = useCirclePlans(circle.id);
+  const title = displayName?.trim() || circle.name;
+  const coverUrl = buildCircleCoverUrl(circle.id, circle.cover_upload_id);
 
   return (
     <View style={styles.wrap}>
-      {/* Identity hero */}
-      <View style={styles.hero}>
-        <CircleCover
-          name={displayName?.trim() || circle.name}
-          coverUrl={null}
-          size={CIRCLE_HOME.coverHero}
-          radius={CIRCLE_HOME.coverHeroRadius}
-          monogramSize={CIRCLE_HOME.coverMonogram}
-        />
-        <Text style={styles.name} numberOfLines={2}>
-          {displayName?.trim() || circle.name}
-        </Text>
+      {/* Identity hero: cover photo when set, else serif monogram tile. */}
+      {coverUrl ? (
+        <View style={styles.coverHero}>
+          <Image source={{ uri: coverUrl }} style={styles.coverImg} contentFit="cover" />
+          <View style={styles.coverScrim} />
+          <Text style={styles.coverName} numberOfLines={2}>{title}</Text>
+        </View>
+      ) : (
+        <View style={styles.hero}>
+          <CircleCover
+            name={title}
+            coverUrl={null}
+            size={CIRCLE_HOME.coverHero}
+            radius={CIRCLE_HOME.coverHeroRadius}
+            monogramSize={CIRCLE_HOME.coverMonogram}
+          />
+          <Text style={styles.name} numberOfLines={2}>{title}</Text>
+        </View>
+      )}
+
+      <View style={styles.metaWrap}>
         <Text style={styles.memberCount}>{COPY.circleHomeMembers(members.length)}</Text>
         {!!circle.description?.trim() && (
           <Text style={styles.description}>{circle.description.trim()}</Text>
@@ -94,7 +129,8 @@ export default function CircleNoticeboard({
         {!!onNameCircle && (
           <Pressable
             onPress={onNameCircle}
-            style={({ pressed }) => [styles.nameCircle, pressed && styles.nameCirclePressed]}
+            android_ripple={{ color: Colors.border }}
+            style={styles.nameCircle}
             accessibilityRole="button"
             accessibilityLabel={COPY.circleNameThis}
           >
@@ -102,6 +138,13 @@ export default function CircleNoticeboard({
             <Text style={styles.nameCircleText}>{COPY.circleNameThis}</Text>
           </Pressable>
         )}
+      </View>
+
+      {/* Action row: the only way to make a plan / open chat / invite from here. */}
+      <View style={styles.actionRow}>
+        <ActionButton icon={CalendarPlus} label={COPY.circleActionPost} primary onPress={onPostPlan} />
+        <ActionButton icon={MessageCircle} label={COPY.circleActionChat} onPress={onOpenChat} />
+        <ActionButton icon={UserPlus} label={COPY.circleActionInvite} onPress={onAddPeople} />
       </View>
 
       {/* Members */}
@@ -115,15 +158,16 @@ export default function CircleNoticeboard({
         <SectionLabel>{COPY.circlePlansLabel}</SectionLabel>
         {plans.length === 0 ? (
           <View style={styles.planEmpty}>
-            <CalendarDays
-              size={CIRCLE_HOME.emptyPlanIcon}
-              color={Colors.iconMuted}
-              strokeWidth={1.75}
-            />
-            <View style={styles.planEmptyBody}>
-              <Text style={styles.planEmptyTitle}>{COPY.circlePlansEmpty}</Text>
-              <Text style={styles.planEmptySub}>{COPY.circlePlansEmptySub}</Text>
-            </View>
+            <Text style={styles.planEmptyTitle}>{COPY.circlePlansEmpty}</Text>
+            <Pressable
+              onPress={onPostPlan}
+              android_ripple={{ color: Colors.border }}
+              style={styles.makeFirstPlan}
+              accessibilityRole="button"
+              accessibilityLabel={COPY.circleMakeFirstPlan}
+            >
+              <Text style={styles.makeFirstPlanText}>{COPY.circleMakeFirstPlan}</Text>
+            </Pressable>
           </View>
         ) : (
           <View style={styles.planList}>
@@ -134,13 +178,7 @@ export default function CircleNoticeboard({
         )}
       </View>
 
-      {/* Recently-together lands with Step 10 (co-attendance), when
-          recent_together is actually populated. */}
-
-      {/* The Room (reserved, UI only) */}
-      <View style={styles.section}>
-        <TheRoomSlot />
-      </View>
+      {/* RECENT TOGETHER + pinned-plan capacity: deferred (data-gated; see header). */}
     </View>
   );
 }
@@ -150,7 +188,23 @@ const styles = StyleSheet.create({
   hero: {
     alignItems: 'center',
     paddingHorizontal: CIRCLE_HOME.sectionPadH,
-    marginBottom: CIRCLE_HOME.sectionGapV,
+    marginBottom: 12,
+  },
+  coverHero: {
+    height: 180,
+    marginBottom: 12,
+    justifyContent: 'flex-end',
+  },
+  coverImg: { ...StyleSheet.absoluteFillObject },
+  coverScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.overlayDark55,
+  },
+  coverName: {
+    ...TYPE.heroDisplay,
+    color: Colors.creamHigh,
+    paddingHorizontal: CIRCLE_HOME.sectionPadH,
+    paddingBottom: 12,
   },
   name: {
     ...TYPE.heroDisplay,
@@ -158,11 +212,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 12,
   },
+  metaWrap: {
+    alignItems: 'center',
+    paddingHorizontal: CIRCLE_HOME.sectionPadH,
+    marginBottom: CIRCLE_HOME.sectionGapV,
+  },
   memberCount: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
-    marginTop: 4,
   },
   description: {
     fontFamily: Fonts.sans,
@@ -183,12 +241,32 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
   },
-  nameCirclePressed: { opacity: 0.85 },
   nameCircleText: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
   },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: CIRCLE_HOME.sectionPadH,
+    marginBottom: CIRCLE_HOME.sectionGapV,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    backgroundColor: Colors.cardBg,
+  },
+  actionPrimary: { backgroundColor: Colors.terracotta },
+  actionText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  actionPrimaryText: { color: Colors.white },
   section: { marginBottom: CIRCLE_HOME.sectionGapV },
   sectionLabel: {
     fontFamily: Fonts.sansBold,
@@ -200,8 +278,6 @@ const styles = StyleSheet.create({
     marginHorizontal: CIRCLE_HOME.sectionPadH,
   },
   planEmpty: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginHorizontal: CIRCLE_HOME.sectionPadH,
     paddingVertical: CIRCLE_HOME.slotPadV,
     paddingHorizontal: CIRCLE_HOME.slotPadH,
@@ -209,7 +285,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cardBg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
+    alignItems: 'flex-start',
+    gap: 10,
   },
+  makeFirstPlan: {
+    backgroundColor: Colors.goldAccent,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  makeFirstPlanText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   planList: { marginHorizontal: CIRCLE_HOME.sectionPadH, gap: 8 },
   planRow: {
     flexDirection: 'row',
@@ -229,16 +314,9 @@ const styles = StyleSheet.create({
   openTagText: { fontFamily: Fonts.sansBold, fontSize: 10, color: Colors.darkWarm, letterSpacing: 0.2 },
   privTag: { backgroundColor: Colors.dividerWarm, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   privTagText: { fontFamily: Fonts.sansMedium, fontSize: 10, color: Colors.secondary, letterSpacing: 0.2 },
-  planEmptyBody: { flex: 1, marginLeft: 12 },
   planEmptyTitle: {
     fontFamily: Fonts.sansSemibold,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
-  },
-  planEmptySub: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.secondary,
-    marginTop: 3,
   },
 });
