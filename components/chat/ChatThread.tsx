@@ -33,7 +33,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 let Clipboard: typeof import('expo-clipboard') | null = null;
 try { Clipboard = require('expo-clipboard'); } catch {}
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
+import Animated, { FadeIn, useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -41,6 +41,7 @@ import { supabase } from '../../lib/supabase';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import type { AnchorRect } from '../menu/MenuCard';
+import SunriseIcon from '../yours/icons/SunriseIcon';
 import { openUrl } from '../../lib/url';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../hooks/useChat';
@@ -1788,7 +1789,11 @@ export default function ChatThread(props: ChatThreadProps) {
             }}
             ListEmptyComponent={
               <View style={chatStyles.emptyState}>
-                <Text style={chatStyles.emptyEmoji}>{'\uD83D\uDC4B'}</Text>
+                {/* Line-drawn sunrise mark (no emoji, ever): a beginning, gold,
+                    fading in. Same family as the Yours tab sunrise glyph. */}
+                <Animated.View entering={FadeIn.duration(400)} style={chatStyles.emptyMark}>
+                  <SunriseIcon size={36} color={Colors.gold} strokeWidth={1.75} />
+                </Animated.View>
                 <Text style={chatStyles.emptyText}>{props.emptyText ?? 'Say hi to everyone!'}</Text>
               </View>
             }
@@ -2418,8 +2423,7 @@ const chatStyles = StyleSheet.create({
       ? [{ scaleY: -1 }, { scaleX: -1 }]
       : [{ scaleY: -1 }],
   },
-  emptyEmoji: {
-    fontSize: 40,
+  emptyMark: {
     marginBottom: 12,
   },
   emptyText: {
