@@ -4,7 +4,7 @@
  * optional "Add a cover photo" affordance. The cover is skippable and never
  * blocks Next; it uploads after the circle exists (useCreateCircle).
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { ScrollView, View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { ImagePlus } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
@@ -28,6 +28,7 @@ export default function IdentityStep({
   onDescription: (t: string) => void;
   onPickCover: () => void;
 }) {
+  const [coverPressed, setCoverPressed] = useState(false);
   return (
     <ScrollView
       contentContainerStyle={styles.wrap}
@@ -44,8 +45,10 @@ export default function IdentityStep({
         />
         <Pressable
           onPress={onPickCover}
+          onPressIn={() => setCoverPressed(true)}
+          onPressOut={() => setCoverPressed(false)}
           android_ripple={{ color: Colors.border }}
-          style={styles.coverBtn}
+          style={[styles.coverBtn, coverPressed && styles.coverBtnPressed]}
           accessibilityRole="button"
           accessibilityLabel={coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
         >
@@ -94,6 +97,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
   },
+  coverBtnPressed: { opacity: 0.7 },
   coverBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   coverSub: {
     fontFamily: Fonts.sans,

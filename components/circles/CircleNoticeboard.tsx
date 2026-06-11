@@ -9,7 +9,7 @@
  * album), and RECENT TOGETHER all need circle-detail fields that get_circle does
  * not return yet. Manual covers DO work here via buildCircleCoverUrl.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -64,11 +64,14 @@ function ActionButton({
   primary?: boolean;
   onPress?: () => void;
 }) {
+  const [pressed, setPressed] = useState(false);
   return (
     <Pressable
       onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
       android_ripple={{ color: Colors.border }}
-      style={[styles.actionBtn, primary && styles.actionPrimary]}
+      style={[styles.actionBtn, primary && styles.actionPrimary, pressed && styles.actionBtnPressed]}
       accessibilityRole="button"
       accessibilityLabel={label}
     >
@@ -98,6 +101,7 @@ export default function CircleNoticeboard({
   const { data: plans = [] } = useCirclePlans(circle.id);
   const title = displayName?.trim() || circle.name;
   const coverUrl = buildCircleCoverUrl(circle.id, circle.cover_upload_id);
+  const [firstPlanPressed, setFirstPlanPressed] = useState(false);
 
   return (
     <View style={styles.wrap}>
@@ -161,8 +165,10 @@ export default function CircleNoticeboard({
             <Text style={styles.planEmptyTitle}>{COPY.circlePlansEmpty}</Text>
             <Pressable
               onPress={onPostPlan}
+              onPressIn={() => setFirstPlanPressed(true)}
+              onPressOut={() => setFirstPlanPressed(false)}
               android_ripple={{ color: Colors.border }}
-              style={styles.makeFirstPlan}
+              style={[styles.makeFirstPlan, firstPlanPressed && styles.makeFirstPlanPressed]}
               accessibilityRole="button"
               accessibilityLabel={COPY.circleMakeFirstPlan}
             >
@@ -265,6 +271,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cardBg,
   },
   actionPrimary: { backgroundColor: Colors.terracotta },
+  actionBtnPressed: { opacity: 0.7 },
   actionText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   actionPrimaryText: { color: Colors.white },
   section: { marginBottom: CIRCLE_HOME.sectionGapV },
@@ -294,6 +301,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 9,
   },
+  makeFirstPlanPressed: { opacity: 0.8 },
   makeFirstPlanText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   planList: { marginHorizontal: CIRCLE_HOME.sectionPadH, gap: 8 },
   planRow: {

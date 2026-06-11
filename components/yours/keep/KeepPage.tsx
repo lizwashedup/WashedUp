@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -73,6 +73,8 @@ export default function KeepPage({
   const { sendRequest, remove, setVisibility } =
     usePeopleConnectionMutations(userId);
   const getOrCreateDm = useGetOrCreateDm();
+  const [messagePressed, setMessagePressed] = useState(false);
+  const [planPressed, setPlanPressed] = useState(false);
 
   const name = card?.first_name_display ?? 'them';
 
@@ -200,8 +202,10 @@ export default function KeepPage({
 
         <View style={styles.actions}>
           <Pressable
-            style={[styles.actionBtn, styles.actionGold, getOrCreateDm.isPending && styles.actionDisabled]}
+            style={[styles.actionBtn, styles.actionGold, messagePressed && styles.actionPressed, getOrCreateDm.isPending && styles.actionDisabled]}
             onPress={onMessage}
+            onPressIn={() => setMessagePressed(true)}
+            onPressOut={() => setMessagePressed(false)}
             disabled={getOrCreateDm.isPending}
             accessibilityRole="button"
             accessibilityState={{ disabled: getOrCreateDm.isPending }}
@@ -217,8 +221,10 @@ export default function KeepPage({
             )}
           </Pressable>
           <Pressable
-            style={[styles.actionBtn, styles.actionPrimary]}
+            style={[styles.actionBtn, styles.actionPrimary, planPressed && styles.actionPressed]}
             onPress={onInvite}
+            onPressIn={() => setPlanPressed(true)}
+            onPressOut={() => setPlanPressed(false)}
             accessibilityRole="button"
             accessibilityLabel={COPY.keepMakePlan}
           >
@@ -301,6 +307,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   actionDisabled: { opacity: 0.55 },
+  actionPressed: { opacity: 0.8 },
   actionPrimary: { backgroundColor: Colors.terracotta },
   actionPrimaryText: {
     fontFamily: Fonts.sansBold,

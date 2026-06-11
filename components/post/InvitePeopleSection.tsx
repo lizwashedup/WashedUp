@@ -12,7 +12,7 @@
  *     names of people who did NOT opt in; the user pulls the list). Reactance fix,
  *     composer-invite-section-spec.md "Suggestions list" (amended 2026-06-10).
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { X, UserPlus } from 'lucide-react-native';
@@ -41,6 +41,30 @@ const SUGGESTION_CAP = 6;
 
 function initial(name: string): string {
   return (name.trim()[0] ?? '?').toUpperCase();
+}
+
+// Gold invite pill, extracted so each row's pill carries its own pressed state
+// (it renders inside a .map, so a shared hook won't do). iOS gets the opacity
+// dim; Android keeps the ripple.
+function InvitePill({ label, accessibilityLabel, onPress }: {
+  label: string;
+  accessibilityLabel: string;
+  onPress: () => void;
+}) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      android_ripple={{ color: Colors.border }}
+      style={[styles.invitePill, pressed && styles.invitePillPressed]}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <Text style={styles.invitePillText}>{label}</Text>
+    </Pressable>
+  );
 }
 
 function Avatar({ name, photo, size }: { name: string; photo: string | null; size: number }) {
@@ -75,6 +99,7 @@ export default function InvitePeopleSection({
 }) {
   const visible = showAll ? suggestions : suggestions.slice(0, SUGGESTION_CAP);
   const hasMore = suggestions.length > SUGGESTION_CAP;
+  const [addPressed, setAddPressed] = useState(false);
 
   return (
     <View style={styles.section}>
@@ -125,15 +150,11 @@ export default function InvitePeopleSection({
               <X size={16} color={Colors.tertiary} strokeWidth={2} />
             </Pressable>
           )}
-          <Pressable
-            onPress={() => onInvite(s)}
-            android_ripple={{ color: Colors.border }}
-            style={styles.invitePill}
-            accessibilityRole="button"
+          <InvitePill
+            label={COPY.invitePill}
             accessibilityLabel={`${COPY.invitePill} ${s.name}`}
-          >
-            <Text style={styles.invitePillText}>{COPY.invitePill}</Text>
-          </Pressable>
+            onPress={() => onInvite(s)}
+          />
         </View>
       ))}
 
@@ -147,8 +168,10 @@ export default function InvitePeopleSection({
           of people who did not opt in. */}
       <Pressable
         onPress={onAddFromPeople}
+        onPressIn={() => setAddPressed(true)}
+        onPressOut={() => setAddPressed(false)}
         android_ripple={{ color: Colors.border }}
-        style={styles.addFromPeople}
+        style={[styles.addFromPeople, addPressed && styles.addFromPeoplePressed]}
         accessibilityRole="button"
         accessibilityLabel={COPY.inviteAddFromPeople}
       >
@@ -219,6 +242,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 7,
   },
+  invitePillPressed: { opacity: 0.8 },
   invitePillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   seeMore: { paddingVertical: 10, alignItems: 'center' },
   seeMoreText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },

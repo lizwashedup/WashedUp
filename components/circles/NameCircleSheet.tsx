@@ -106,7 +106,7 @@ export default function NameCircleSheet({
     >
       <KeyboardAvoidingView
         style={styles.backdrop}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <Pressable style={styles.backdropTap} onPress={close} accessibilityLabel={COPY.circlePlusCancel} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
