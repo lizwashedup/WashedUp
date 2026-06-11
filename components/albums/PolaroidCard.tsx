@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -36,6 +36,7 @@ export const PolaroidCard = React.memo<PolaroidCardProps>(({
   index, cardWidth, title, dateText, attendeeSummary, coverUri, cacheKey, onPress, onLongPress,
 }) => {
   const rotateDeg = useMemo(() => `${pickTilt(index)}deg`, [index]);
+  const [pressed, setPressed] = useState(false);
 
   return (
     <View style={[styles.cell, { width: cardWidth }]}>
@@ -43,7 +44,9 @@ export const PolaroidCard = React.memo<PolaroidCardProps>(({
         onPress={onPress}
         onLongPress={onLongPress}
         delayLongPress={300}
-        style={({ pressed }) => [
+        onPressIn={() => setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        style={[
           styles.outer,
           { transform: [{ rotate: rotateDeg }] },
           pressed && styles.pressed,

@@ -89,6 +89,7 @@ export default function AddPeopleSheet({
   const { data: people = [], isLoading } = useYoursGrid(userId);
   const invite = useInviteToCircle(circleId, userId);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [ctaPressed, setCtaPressed] = useState(false);
 
   // Only people not already in the circle can be added.
   const addable = useMemo(() => {
@@ -169,11 +170,13 @@ export default function AddPeopleSheet({
           {addable.length > 0 && (
             <Pressable
               onPress={confirm}
+              onPressIn={() => setCtaPressed(true)}
+              onPressOut={() => setCtaPressed(false)}
               disabled={selected.size === 0 || invite.isPending}
-              style={({ pressed }) => [
+              style={[
                 styles.cta,
                 (selected.size === 0 || invite.isPending) && styles.ctaDisabled,
-                pressed && styles.pressed,
+                ctaPressed && styles.pressed,
               ]}
               accessibilityRole="button"
               accessibilityState={{ disabled: selected.size === 0 || invite.isPending }}

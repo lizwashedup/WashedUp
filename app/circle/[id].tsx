@@ -38,6 +38,7 @@ function CircleDetail({ circleId }: { circleId: string }) {
   const leaveCircle = useLeaveCircle(userId);
 
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [retryPressed, setRetryPressed] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [nameOpen, setNameOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
@@ -116,7 +117,9 @@ function CircleDetail({ circleId }: { circleId: string }) {
           <Text style={styles.errorText}>{COPY.circleLoadError}</Text>
           <Pressable
             onPress={() => refetch()}
-            style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+            onPressIn={() => setRetryPressed(true)}
+            onPressOut={() => setRetryPressed(false)}
+            style={[styles.retry, retryPressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel={COPY.circlesRetry}
           >

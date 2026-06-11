@@ -4,7 +4,7 @@
  * two picks (you make three). If you have no people yet, this points at the
  * prerequisite instead.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Image, FlatList, Pressable, StyleSheet } from 'react-native';
 import { Check, UserPlus } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
@@ -63,6 +63,7 @@ export default function PeopleStep({
   onToggle: (id: string) => void;
   onAddPeople: () => void;
 }) {
+  const [ctaPressed, setCtaPressed] = useState(false);
   if (people.length === 0) {
     return (
       <View style={styles.emptyWrap}>
@@ -73,7 +74,9 @@ export default function PeopleStep({
         <Text style={styles.emptySub}>{COPY.circleNoPeopleSub}</Text>
         <Pressable
           onPress={onAddPeople}
-          style={({ pressed }) => [styles.emptyCta, pressed && styles.pressed]}
+          onPressIn={() => setCtaPressed(true)}
+          onPressOut={() => setCtaPressed(false)}
+          style={[styles.emptyCta, ctaPressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={COPY.circleNoPeopleCta}
         >

@@ -6,7 +6,7 @@
  *
  * Gated by GROUPS_ENABLED upstream (the Circles tab only mounts when on).
  */
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,7 @@ export default function CirclesDirectory({
   onAddPeople: () => void;
 }) {
   const router = useRouter();
+  const [retryPressed, setRetryPressed] = useState(false);
   const { data: rawCircles = [], isLoading, isError, refetch, isRefetching } =
     useMyCircles(userId);
   // DMs are unnamed 2-person circles; they live in Chats, not this directory.
@@ -93,7 +94,9 @@ export default function CirclesDirectory({
         <Text style={styles.errorText}>{COPY.circlesError}</Text>
         <Pressable
           onPress={() => refetch()}
-          style={({ pressed }) => [styles.retry, pressed && styles.rowPressed]}
+          onPressIn={() => setRetryPressed(true)}
+          onPressOut={() => setRetryPressed(false)}
+          style={[styles.retry, retryPressed && styles.rowPressed]}
           accessibilityRole="button"
           accessibilityLabel={COPY.circlesRetry}
         >

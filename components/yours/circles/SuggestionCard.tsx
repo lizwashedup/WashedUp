@@ -4,7 +4,7 @@
  * left accent is decorative; the CTA is a normal terracotta action). Dismiss is
  * a quiet "Not now".
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 import { X } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
@@ -38,6 +38,7 @@ export default function SuggestionCard({
   const people = suggestion.people ?? []; // defensive: never crash the tab if the RPC omits it
   const faces = people.slice(0, CIRCLE_SUGGEST.maxFaces);
   const subject = oxford([COPY.circleSuggestYou, ...people.map(nameOf)]);
+  const [startPressed, setStartPressed] = useState(false);
 
   return (
     <View style={styles.card}>
@@ -73,7 +74,9 @@ export default function SuggestionCard({
             hapticSelection();
             onStart(suggestion);
           }}
-          style={({ pressed }) => [styles.start, pressed && styles.pressed]}
+          onPressIn={() => setStartPressed(true)}
+          onPressOut={() => setStartPressed(false)}
+          style={[styles.start, startPressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={COPY.circleSuggestStart}
         >
