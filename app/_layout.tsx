@@ -247,6 +247,24 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const [showPushPrimer, setShowPushPrimer] = useState(false);
   const pushPrimerCheckedRef = useRef(false);
 
+  // ── Root-modal sequencer ──────────────────────────────────────────────────
+  // RN can only safely present ONE modal at a time. Closing one modal used to
+  // let the next mount in the same beat (survey close -> review-ask mount),
+  // presenting a modal while the previous was still dismissing, the iOS "present
+  // while a presentation is in progress" crash. It armed exactly when a user
+  // went on 2+ plans (the review-ask threshold), so multiple pending surveys
+  // surfaced it. modalLocked holds every lower-precedence modal off for one
+  // handoff window after a close, so the closing modal fully unmounts before
+  // the next mounts. Precedence (explicit): survey > review > album > mark >
+  // pushPrimer, enforced by the render gates below. One modal at a time, ever.
+  const MODAL_HANDOFF_MS = 400;
+  const [modalLocked, setModalLocked] = useState(false);
+  const handoffModal = (close: () => void) => {
+    close();
+    setModalLocked(true);
+    setTimeout(() => setModalLocked(false), MODAL_HANDOFF_MS);
+  };
+
   // Reset survey/review state when user changes (sign out + sign in as different user)
   useEffect(() => {
     if (authedUserId && authedUserId !== prevUserIdRef.current) {
@@ -280,8 +298,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         if (!data) return;
 
         const payload = data as {
-          plan: { id: string; title: string; image_url: string | null };
-          members: Array<{ id: string; first_name_display: string | null; profile_photo_url: string | null }>;
+          plan: {
+            id: string;
+            title: string;
+            image_url: string | null;
+            circle_id: string | null;
+            is_featured: boolean;
+            any_stranger_joined: boolean;
+          };
+          members: Array<{
+            id: string;
+            first_name_display: string | null;
+            profile_photo_url: string | null;
+            is_stranger: boolean;
+            keep_state: SurveyMember['keep_state'];
+          }>;
         };
 
         // On-device suppression backstop. The RPC only stops returning a
@@ -294,8 +325,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           id: payload.plan.id,
           title: payload.plan.title,
           image_url: payload.plan.image_url ?? null,
+          circle_id: payload.plan.circle_id ?? null,
+          is_featured: !!payload.plan.is_featured,
+          any_stranger_joined: !!payload.plan.any_stranger_joined,
         });
-        setSurveyMembers(payload.members ?? []);
+        setSurveyMembers(
+          (payload.members ?? []).map((m) => ({
+            id: m.id,
+            first_name_display: m.first_name_display,
+            profile_photo_url: m.profile_photo_url,
+            is_stranger: !!m.is_stranger,
+            keep_state: m.keep_state ?? 'none',
+          })),
+        );
       } catch (e) { logError(e, 'layout.surveyCheck'); }
       finally { setSurveyCheckDone(true); }
     })();
@@ -335,18 +377,18 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
         if ((count ?? 0) < 2) return;
 
-        // Check feedback: at least one thumbs_up OR zero rows at all
-        const { data: feedback } = await supabase
-          .from('plan_feedback')
-          .select('rating')
-          .eq('user_id', authedUserId)
-          .limit(10);
+        // Eligibility (a real thumbs_up, OR no real feedback yet) is decided
+        // server-side so the sentinel rows (comment='sentinel') are excluded
+        // with the correct IS DISTINCT FROM semantics PostgREST can't express.
+        const { data: eligible, error: eligErr } = await supabase.rpc(
+          'get_review_ask_eligibility',
+        );
+        if (eligErr) {
+          console.warn('[WashedUp] review eligibility RPC failed:', eligErr.message);
+          return;
+        }
 
-        const rows = feedback ?? [];
-        const hasThumbsUp = rows.some((r: any) => r.rating === 'thumbs_up');
-        const hasNoFeedback = rows.length === 0;
-
-        if (hasThumbsUp || hasNoFeedback) {
+        if (eligible === true) {
           reviewAskShownRef.current = true;
           setShowReviewAsk(true);
         }
@@ -822,29 +864,33 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
       )}
+      {/* Root modals, in precedence order, mutually exclusive and serialized by
+          the sequencer (modalLocked) so exactly one is ever mounted. survey is
+          top precedence; each lower one waits for the higher decisions
+          (reviewCheckDone) and for the one-frame handoff after a close. */}
       {surveyPlan && authedUserId && (
         <PostPlanSurvey
           visible={!!surveyPlan}
           plan={surveyPlan}
           members={surveyMembers}
           userId={authedUserId}
-          onComplete={() => setSurveyPlan(null)}
+          onComplete={() => handoffModal(() => setSurveyPlan(null))}
         />
       )}
-      {showReviewAsk && !surveyPlan && (
+      {showReviewAsk && !surveyPlan && !modalLocked && (
         <AppStoreReviewAsk
-          visible={showReviewAsk && !surveyPlan}
-          onClose={() => setShowReviewAsk(false)}
+          visible={showReviewAsk && !surveyPlan && !modalLocked}
+          onClose={() => handoffModal(() => setShowReviewAsk(false))}
         />
       )}
-      {authedUserId && !surveyPlan && !showReviewAsk && (
+      {authedUserId && reviewCheckDone && !surveyPlan && !showReviewAsk && !modalLocked && (
         <AlbumUploadPromptModal userId={authedUserId} />
       )}
       <KeyboardDoneBar />
-      {authedUserId && surveyCheckDone && !surveyPlan && !showReviewAsk && (
+      {authedUserId && surveyCheckDone && reviewCheckDone && !surveyPlan && !showReviewAsk && !modalLocked && (
         <MarkEarnedModal userId={authedUserId} />
       )}
-      {showPushPrimer && authedUserId && !surveyPlan && !showReviewAsk && (
+      {showPushPrimer && authedUserId && !surveyPlan && !showReviewAsk && !modalLocked && (
         <PushPrimerModal
           visible={showPushPrimer}
           onEnable={async () => {

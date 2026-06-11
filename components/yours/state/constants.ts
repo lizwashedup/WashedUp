@@ -146,6 +146,11 @@ export const COPY = {
   surveyAddButton: 'Add them',
   surveySkip: 'Skip',
   surveyNotNow: 'Not now',
+  // Handshake feedback. The verb conjugates: one person "is", several "are".
+  surveyConnectedOne: (name: string) => `${name} is in your people now.`,
+  surveyConnectedMany: (names: string) => `${names} are in your people now.`,
+  surveyRequested: "Request sent. They'll see it.",
+  surveyCouldntReach: "Couldn't reach everyone.",
 
   albumOpenFailed: "This album didn't open. Try again in a moment.",
   albumRetry: 'Try again',
