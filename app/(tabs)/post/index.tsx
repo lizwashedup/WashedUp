@@ -44,6 +44,14 @@ import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { checkContent } from '../../../lib/contentFilter';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
+import { COPY } from '../../../components/yours/state/constants';
+import { useAuthUserId } from '../../../components/yours/state/useAuthUserId';
+import { useYoursGrid } from '../../../hooks/useYoursGrid';
+import { useInviteInterestSignals } from '../../../hooks/useInviteInterestSignals';
+import { useDismissSuggestion } from '../../../hooks/useDismissSuggestion';
+import { useInvitePeopleToPlan } from '../../../hooks/useInvitePeopleToPlan';
+import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../../components/post/InvitePeopleSection';
+import { Toast } from '../../../components/Toast';
 
 // Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
 // Falls back to the hard-coded key so autocomplete works in preview/CI builds
@@ -246,6 +254,9 @@ export default function PostScreen() {
   const [interestShowAll, setInterestShowAll] = useState(false);
 
   useEffect(() => {
+    // Legacy "People who want in" path, flag-off only. With YOURS_PAGE_ENABLED on,
+    // the INVITE PEOPLE section replaces this and uses get_invite_interest_signals.
+    if (YOURS_PAGE_ENABLED) return;
     (async () => {
       const { data, error } = await supabase.rpc('get_creator_interest_signals');
       if (error || !data) return;
@@ -263,6 +274,79 @@ export default function PostScreen() {
       return next;
     });
   }, []);
+
+  // ── INVITE PEOPLE section (YOURS_PAGE_ENABLED). Invited chips + merged
+  // suggestions (want-in ranked first, then your people), dismiss/undo, and
+  // invite-on-post via invite_people_to_plan. ───────────────────────────────
+  const { data: composerUserId } = useAuthUserId();
+  const { data: yoursPeople = [] } = useYoursGrid(YOURS_PAGE_ENABLED ? composerUserId : null);
+  const { data: wantInSignals = [] } = useInviteInterestSignals(YOURS_PAGE_ENABLED ? composerUserId : null);
+  const { dismiss: dismissSuggestion, undo: undoDismissSuggestion } = useDismissSuggestion(composerUserId);
+  const invitePeopleToPlan = useInvitePeopleToPlan();
+  const [invited, setInvited] = useState<InviteChip[]>([]);
+  const [inviteShowAll, setInviteShowAll] = useState(false);
+  // Locally-hidden want-in ids so a dismissed row vanishes instantly (undo restores).
+  const [hiddenWantIn, setHiddenWantIn] = useState<Set<string>>(new Set());
+  const [inviteToast, setInviteToast] = useState<{ userId: string; name: string } | null>(null);
+
+  const inviteSuggestions = useMemo<InviteSuggestion[]>(() => {
+    if (!YOURS_PAGE_ENABLED) return [];
+    const invitedIds = new Set(invited.map((c) => c.user_id));
+    const seen = new Set<string>();
+    const out: InviteSuggestion[] = [];
+    // Want-in first (recency order from the RPC), carrying provenance.
+    for (const s of wantInSignals) {
+      const id = s.interested_user_id;
+      if (invitedIds.has(id) || hiddenWantIn.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        user_id: id,
+        name: s.interested_name?.trim() || 'Someone',
+        photo: s.interested_photo_url,
+        provenance: COPY.inviteProvenance(s.origin_event_title?.trim() || 'a plan'),
+        isWantIn: true,
+      });
+    }
+    // Then your people (excluding anyone already surfaced/invited).
+    for (const p of yoursPeople) {
+      if (invitedIds.has(p.user_id) || seen.has(p.user_id)) continue;
+      seen.add(p.user_id);
+      out.push({
+        user_id: p.user_id,
+        name: p.first_name_display?.trim() || p.handle?.trim() || 'Someone',
+        photo: p.profile_photo_url,
+        isWantIn: false,
+      });
+    }
+    return out;
+  }, [invited, wantInSignals, yoursPeople, hiddenWantIn]);
+
+  const onInviteSuggestion = useCallback((s: InviteSuggestion) => {
+    hapticLight();
+    setInvited((prev) => prev.some((c) => c.user_id === s.user_id)
+      ? prev
+      : [...prev, { user_id: s.user_id, name: s.name, photo: s.photo }]);
+  }, []);
+
+  const onRemoveChip = useCallback((userId: string) => {
+    hapticLight();
+    setInvited((prev) => prev.filter((c) => c.user_id !== userId));
+  }, []);
+
+  const onDismissSuggestion = useCallback((s: InviteSuggestion) => {
+    hapticLight();
+    setHiddenWantIn((prev) => new Set(prev).add(s.user_id));
+    dismissSuggestion.mutate(s.user_id);
+    setInviteToast({ userId: s.user_id, name: s.name });
+  }, [dismissSuggestion]);
+
+  const onUndoDismiss = useCallback(() => {
+    if (!inviteToast) return;
+    const id = inviteToast.userId;
+    undoDismissSuggestion.mutate(id);
+    setHiddenWantIn((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    setInviteToast(null);
+  }, [inviteToast, undoDismissSuggestion]);
 
   const genderOptions = useMemo(() => {
     const opts: { label: string; value: GenderPreference }[] = [
@@ -318,8 +402,28 @@ export default function PostScreen() {
     prefillGroupSize?: string;
     prefillTicketsUrl?: string;
     duplicatedFromEventId?: string;
+    // Arriving from a person (long-press menu / keep page / profile): pre-attach
+    // them as a removable invite chip (the locked auto-attach rule).
+    prefillInvitePersonId?: string;
+    prefillInvitePersonName?: string;
+    prefillInvitePersonPhoto?: string;
   }>();
   const [exploreEventId, setExploreEventId] = useState<string | null>(null);
+
+  // Seed the pre-attached invite chip once when arriving from a person. Consumed
+  // via a ref so removing the chip doesn't re-add it on the next render.
+  const inviteSeedRef = useRef(false);
+  useEffect(() => {
+    if (!YOURS_PAGE_ENABLED || inviteSeedRef.current) return;
+    const id = params.prefillInvitePersonId;
+    if (!id) return;
+    inviteSeedRef.current = true;
+    setInvited((prev) => prev.some((c) => c.user_id === id) ? prev : [...prev, {
+      user_id: id,
+      name: params.prefillInvitePersonName?.trim() || 'Someone',
+      photo: params.prefillInvitePersonPhoto || null,
+    }]);
+  }, [params.prefillInvitePersonId]);
 
   useEffect(() => {
     if (params.prefillTitle && !title) {
@@ -928,6 +1032,17 @@ export default function PostScreen() {
           // Clear so a back-nav + re-post doesn't double-fire.
           setInterestChoices(new Map());
         }
+
+        // INVITE PEOPLE (flag-on): deliver the standard invite to every chip
+        // (your-people + want-in alike) via the single shared path. Fire-and-
+        // forget; a delivery hiccup must not roll back the post.
+        if (YOURS_PAGE_ENABLED && invited.length > 0) {
+          invitePeopleToPlan.mutate(
+            { eventId: insertedEvent.id, recipientIds: invited.map((c) => c.user_id) },
+            { onError: (e) => console.warn('[post] invite_people_to_plan failed:', e) },
+          );
+          setInvited([]);
+        }
       }
 
       hapticSuccess();
@@ -988,6 +1103,9 @@ export default function PostScreen() {
         prefillLocation: undefined,
         prefillCategory: undefined,
         duplicatedFromEventId: undefined,
+        prefillInvitePersonId: undefined,
+        prefillInvitePersonName: undefined,
+        prefillInvitePersonPhoto: undefined,
       } as any);
     } catch (e: unknown) {
       const rawMsg = e && typeof e === 'object' && 'message' in e
@@ -1462,10 +1580,25 @@ export default function PostScreen() {
             <Text style={styles.stepperHint}>including you</Text>
           </View>
 
-          {/* Next Time! — "People who want in" — surfaces past interest signals
-              for this creator, lets them invite or skip per row. Choices are
-              replayed via act_on_interest after the event is successfully posted. */}
-          {interestSignals.length > 0 && (
+          {/* INVITE PEOPLE (YOURS_PAGE_ENABLED): your people + want-in suggestions,
+              merged, with a removable pre-attached chips row. Replaces the legacy
+              "People who want in" section below. Delivery is invite_people_to_plan
+              on post. */}
+          {YOURS_PAGE_ENABLED && (
+            <InvitePeopleSection
+              invited={invited}
+              suggestions={inviteSuggestions}
+              showAll={inviteShowAll}
+              onToggleShowAll={() => setInviteShowAll(true)}
+              onInvite={onInviteSuggestion}
+              onRemoveChip={onRemoveChip}
+              onDismiss={onDismissSuggestion}
+            />
+          )}
+
+          {/* Legacy "People who want in" (flag-off only): surfaces past interest
+              signals, invite/skip per row, replayed via act_on_interest on post. */}
+          {!YOURS_PAGE_ENABLED && interestSignals.length > 0 && (
             <View style={styles.interestSection}>
               <TouchableOpacity
                 style={styles.interestHeaderRow}
@@ -1973,6 +2106,14 @@ export default function PostScreen() {
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
+      />
+
+      <Toast
+        visible={!!inviteToast}
+        message={COPY.inviteDismissToast}
+        actionLabel={COPY.inviteUndo}
+        onAction={onUndoDismiss}
+        onDismiss={() => setInviteToast(null)}
       />
     </SafeAreaView>
   );

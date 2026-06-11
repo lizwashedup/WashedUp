@@ -12,4 +12,5 @@ export const yoursKeys = {
   requests: (userId: string) => ['yours', 'requests', userId] as const,
   profileCard: (userId: string, targetId: string) =>
     ['yours', 'profile-card', userId, targetId] as const,
+  inviteSignals: (userId: string) => ['yours', 'invite-signals', userId] as const,
 };

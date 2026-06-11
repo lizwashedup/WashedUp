@@ -225,6 +225,15 @@ export const COPY = {
   // Chat plan card (a system message carrying ref_event_id). Live cards reuse
   // circlePlanJoinLine; a dangling/wrapped ref renders this quiet inert line.
   chatPlanWrapped: 'This plan has wrapped.',
+  // ── Composer INVITE PEOPLE section (composer-invite-section-spec.md) ───────
+  // Header uses the uppercase label style, so the source stays sentence case.
+  inviteSectionHeader: 'Invite people',
+  inviteSectionSub: 'From your people, and anyone who raised a hand.',
+  inviteProvenance: (title: string) => `said they'd go next time · ${title}`,
+  invitePill: 'Invite',
+  inviteSeeMore: 'See more',
+  inviteDismissToast: "Removed. They'll show up again if they raise a hand.",
+  inviteUndo: 'Undo',
   // Header "View circle" button (opens the circle detail page).
   circleViewButton: 'View circle',
   // Header "+" menu: add people now, or make a plan (placeholder this build).
