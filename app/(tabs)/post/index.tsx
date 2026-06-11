@@ -46,7 +46,7 @@ import { checkContent } from '../../../lib/contentFilter';
 import { BrandedAlert, BrandedAlertButton } from '../../../components/BrandedAlert';
 import { COPY } from '../../../components/yours/state/constants';
 import { useAuthUserId } from '../../../components/yours/state/useAuthUserId';
-import { useYoursGrid } from '../../../hooks/useYoursGrid';
+import PeoplePickerSheet, { type PickedPerson } from '../../../components/post/PeoplePickerSheet';
 import { useInviteInterestSignals } from '../../../hooks/useInviteInterestSignals';
 import { useDismissSuggestion } from '../../../hooks/useDismissSuggestion';
 import { useInvitePeopleToPlan } from '../../../hooks/useInvitePeopleToPlan';
@@ -275,26 +275,28 @@ export default function PostScreen() {
     });
   }, []);
 
-  // ── INVITE PEOPLE section (YOURS_PAGE_ENABLED). Invited chips + merged
-  // suggestions (want-in ranked first, then your people), dismiss/undo, and
-  // invite-on-post via invite_people_to_plan. ───────────────────────────────
+  // ── INVITE PEOPLE section (YOURS_PAGE_ENABLED). Invited chips + want-in
+  // suggestion rows; your-people come in via the "+ Add from your people" picker
+  // (reactance fix). dismiss/undo + invite-on-post via invite_people_to_plan. ──
   const { data: composerUserId } = useAuthUserId();
-  const { data: yoursPeople = [] } = useYoursGrid(YOURS_PAGE_ENABLED ? composerUserId : null);
   const { data: wantInSignals = [] } = useInviteInterestSignals(YOURS_PAGE_ENABLED ? composerUserId : null);
   const { dismiss: dismissSuggestion, undo: undoDismissSuggestion } = useDismissSuggestion(composerUserId);
   const invitePeopleToPlan = useInvitePeopleToPlan();
   const [invited, setInvited] = useState<InviteChip[]>([]);
   const [inviteShowAll, setInviteShowAll] = useState(false);
+  const [peoplePickerOpen, setPeoplePickerOpen] = useState(false);
   // Locally-hidden want-in ids so a dismissed row vanishes instantly (undo restores).
   const [hiddenWantIn, setHiddenWantIn] = useState<Set<string>>(new Set());
   const [inviteToast, setInviteToast] = useState<{ userId: string; name: string } | null>(null);
 
+  // WANT-IN ONLY (reactance fix): the app shows rows only for people who raised a
+  // hand. Your-people are NOT volunteered as named rows; they come in via the
+  // "+ Add from your people" picker (pull, not push).
   const inviteSuggestions = useMemo<InviteSuggestion[]>(() => {
     if (!YOURS_PAGE_ENABLED) return [];
     const invitedIds = new Set(invited.map((c) => c.user_id));
     const seen = new Set<string>();
     const out: InviteSuggestion[] = [];
-    // Want-in first (recency order from the RPC), carrying provenance.
     for (const s of wantInSignals) {
       const id = s.interested_user_id;
       if (invitedIds.has(id) || hiddenWantIn.has(id) || seen.has(id)) continue;
@@ -307,19 +309,8 @@ export default function PostScreen() {
         isWantIn: true,
       });
     }
-    // Then your people (excluding anyone already surfaced/invited).
-    for (const p of yoursPeople) {
-      if (invitedIds.has(p.user_id) || seen.has(p.user_id)) continue;
-      seen.add(p.user_id);
-      out.push({
-        user_id: p.user_id,
-        name: p.first_name_display?.trim() || p.handle?.trim() || 'Someone',
-        photo: p.profile_photo_url,
-        isWantIn: false,
-      });
-    }
     return out;
-  }, [invited, wantInSignals, yoursPeople, hiddenWantIn]);
+  }, [invited, wantInSignals, hiddenWantIn]);
 
   const onInviteSuggestion = useCallback((s: InviteSuggestion) => {
     hapticLight();
@@ -331,6 +322,16 @@ export default function PostScreen() {
   const onRemoveChip = useCallback((userId: string) => {
     hapticLight();
     setInvited((prev) => prev.filter((c) => c.user_id !== userId));
+  }, []);
+
+  // "+ Add from your people" picker -> add each picked person as a chip.
+  const onPickedFromPeople = useCallback((picked: PickedPerson[]) => {
+    if (picked.length === 0) return;
+    hapticLight();
+    setInvited((prev) => {
+      const have = new Set(prev.map((c) => c.user_id));
+      return [...prev, ...picked.filter((p) => !have.has(p.user_id))];
+    });
   }, []);
 
   const onDismissSuggestion = useCallback((s: InviteSuggestion) => {
@@ -1593,6 +1594,7 @@ export default function PostScreen() {
               onInvite={onInviteSuggestion}
               onRemoveChip={onRemoveChip}
               onDismiss={onDismissSuggestion}
+              onAddFromPeople={() => setPeoplePickerOpen(true)}
             />
           )}
 
@@ -2114,6 +2116,13 @@ export default function PostScreen() {
         actionLabel={COPY.inviteUndo}
         onAction={onUndoDismiss}
         onDismiss={() => setInviteToast(null)}
+      />
+
+      <PeoplePickerSheet
+        visible={peoplePickerOpen}
+        excludeIds={invited.map((c) => c.user_id)}
+        onClose={() => setPeoplePickerOpen(false)}
+        onConfirm={onPickedFromPeople}
       />
     </SafeAreaView>
   );

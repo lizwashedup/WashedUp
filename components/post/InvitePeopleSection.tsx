@@ -5,15 +5,17 @@
  * undo + invite-on-post wiring. This renders:
  *   - header + sub-line (always, as the invite entry point)
  *   - a removable chips row of people already on the plan
- *   - a suggestions list (want-in ranked first, carrying provenance; your-people
- *     plain), each with a gold Invite pill; want-in rows also a quiet dismiss x
- *   - "See more" past the first 6; empty (no chips AND no suggestions) shows just
- *     the header + sub.
+ *   - want-in suggestion rows ONLY (they raised a hand, so showing them is
+ *     responsive): provenance, gold Invite pill, quiet dismiss x. "See more"
+ *     past the first 6.
+ *   - a neutral "+ Add from your people" affordance (the app never volunteers
+ *     names of people who did NOT opt in; the user pulls the list). Reactance fix,
+ *     composer-invite-section-spec.md "Suggestions list" (amended 2026-06-10).
  */
 import React from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
-import { X } from 'lucide-react-native';
+import { X, UserPlus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { COPY } from '../yours/state/constants';
@@ -60,6 +62,7 @@ export default function InvitePeopleSection({
   onInvite,
   onRemoveChip,
   onDismiss,
+  onAddFromPeople,
 }: {
   invited: InviteChip[];
   suggestions: InviteSuggestion[];
@@ -68,6 +71,7 @@ export default function InvitePeopleSection({
   onInvite: (s: InviteSuggestion) => void;
   onRemoveChip: (userId: string) => void;
   onDismiss: (s: InviteSuggestion) => void;
+  onAddFromPeople: () => void;
 }) {
   const visible = showAll ? suggestions : suggestions.slice(0, SUGGESTION_CAP);
   const hasMore = suggestions.length > SUGGESTION_CAP;
@@ -138,6 +142,19 @@ export default function InvitePeopleSection({
           <Text style={styles.seeMoreText}>{COPY.inviteSeeMore}</Text>
         </Pressable>
       )}
+
+      {/* Pull, not push: the user summons their people; the app never lists names
+          of people who did not opt in. */}
+      <Pressable
+        onPress={onAddFromPeople}
+        android_ripple={{ color: Colors.border }}
+        style={styles.addFromPeople}
+        accessibilityRole="button"
+        accessibilityLabel={COPY.inviteAddFromPeople}
+      >
+        <UserPlus size={18} color={Colors.terracotta} strokeWidth={1.75} />
+        <Text style={styles.addFromPeopleText}>{COPY.inviteAddFromPeople}</Text>
+      </Pressable>
     </View>
   );
 }
@@ -205,4 +222,13 @@ const styles = StyleSheet.create({
   invitePillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   seeMore: { paddingVertical: 10, alignItems: 'center' },
   seeMoreText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  addFromPeople: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  addFromPeoplePressed: { opacity: 0.7 },
+  addFromPeopleText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
 });

@@ -232,6 +232,13 @@ export const COPY = {
   inviteProvenance: (title: string) => `said they'd go next time · ${title}`,
   invitePill: 'Invite',
   inviteSeeMore: 'See more',
+  // Neutral pull affordance for your-people (the app never lists their names
+  // proactively; reactance fix). Opens the people picker.
+  inviteAddFromPeople: '+ Add from your people',
+  peoplePickerTitle: 'Add from your people',
+  peoplePickerConfirm: (n: number) => (n === 1 ? 'Add 1 person' : `Add ${n} people`),
+  peoplePickerEmptyTitle: 'No people to add.',
+  peoplePickerEmptySub: 'Everyone you know is already on this plan.',
   inviteDismissToast: "Removed. They'll show up again if they raise a hand.",
   inviteUndo: 'Undo',
   // Header "View circle" button (opens the circle detail page).
