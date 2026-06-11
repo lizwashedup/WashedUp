@@ -2,15 +2,12 @@
  * CircleCover - a circle's identity thumbnail.
  *
  * A rounded square (not a round avatar) so a circle never reads as a person's
- * face. When a cover photo exists it fills the tile; otherwise a warm
- * terracotta-tinted square shows the circle's monogram in Cormorant italic.
- *
- * Cover-photo resolution (cover_upload_id -> URL) lands with the create flow
- * (Step 8); until then coverUrl is null everywhere and the monogram shows.
+ * face. Identity ladder (circle-identity-design-spec.md): cover photo > serif
+ * monogram tile > a quiet cream tile when there is no name yet. NEVER an icon:
+ * the duo-people glyph is no longer the face of any circle.
  */
 import React from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
-import { Users } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 import { CIRCLE } from '../../../constants/YoursDesign';
@@ -57,15 +54,20 @@ export default function CircleCover({
   }
 
   const monogram = monogramOf(name);
+  // No name yet: a quiet cream tile, no glyph (identity accumulates; it is never
+  // a generic icon).
   return (
     <View
-      style={[styles.cover, styles.placeholder, tone === 'gold' && styles.gold, box]}
+      style={[
+        styles.cover,
+        styles.placeholder,
+        monogram ? (tone === 'gold' && styles.gold) : styles.empty,
+        box,
+      ]}
     >
       {monogram ? (
         <Text style={[styles.monogram, { fontSize: monogramSize }]}>{monogram}</Text>
-      ) : (
-        <Users size={monogramSize} color={Colors.terracotta} strokeWidth={1.75} />
-      )}
+      ) : null}
     </View>
   );
 }
@@ -80,6 +82,9 @@ const styles = StyleSheet.create({
   },
   gold: {
     backgroundColor: Colors.goldBadgeSoft,
+  },
+  empty: {
+    backgroundColor: Colors.cream,
   },
   monogram: {
     fontFamily: Fonts.displayItalic,

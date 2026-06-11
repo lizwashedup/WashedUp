@@ -17,7 +17,7 @@ import {
   Platform,
   StyleSheet,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, X } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
@@ -39,6 +39,7 @@ const MIN_OTHERS = 2; // creator + 2 = a circle of three
 
 export default function CreateCircleFlow() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   // Seeded from a co-attendance suggestion: pre-select those people and mark
   // the suggestion converted once the circle is made.
   const { seed, suggestion } = useLocalSearchParams<{ seed?: string; suggestion?: string }>();
@@ -101,8 +102,9 @@ export default function CreateCircleFlow() {
     });
   };
 
+  // Reordered flow: 1 = Who's in it (people), 2 = Name, 3 = Who can add people.
   const canAdvance =
-    step === 1 ? name.trim().length > 0 : step === 2 ? selected.size >= MIN_OTHERS : true;
+    step === 1 ? selected.size >= MIN_OTHERS : step === 2 ? name.trim().length > 0 : true;
 
   const onBack = () => {
     if (step > 1) setStep(step - 1);
@@ -131,7 +133,9 @@ export default function CreateCircleFlow() {
           if (typeof suggestion === 'string' && suggestion) {
             setSuggestionStatus.mutate({ id: suggestion, status: 'converted' });
           }
-          router.replace(`/(tabs)/chats/circle/${circleId}` as never);
+          // Land on the circle PAGE (not the chat): it carries the action row
+          // and the "Make the first plan." nudge for this peak-intent moment.
+          router.replace(`/circle/${circleId}` as never);
         },
         onError: () => Alert.alert(COPY.circleCreateError),
       },
@@ -164,14 +168,6 @@ export default function CreateCircleFlow() {
       >
         <View style={styles.flex}>
           {step === 1 && (
-            <IdentityStep
-              name={name}
-              description={description}
-              onName={setName}
-              onDescription={setDescription}
-            />
-          )}
-          {step === 2 && (
             <PeopleStep
               people={people}
               selected={selected}
@@ -180,6 +176,14 @@ export default function CreateCircleFlow() {
               // people, so this is a rare exit. Close the wizard back to the
               // directory, where the add-people paths live.
               onAddPeople={() => router.back()}
+            />
+          )}
+          {step === 2 && (
+            <IdentityStep
+              name={name}
+              description={description}
+              onName={setName}
+              onDescription={setDescription}
             />
           )}
           {step === 3 && (
@@ -193,8 +197,8 @@ export default function CreateCircleFlow() {
           )}
         </View>
 
-        <View style={styles.footer}>
-          {step === 2 && selected.size > 0 && selected.size < MIN_OTHERS && (
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
+          {step === 1 && selected.size > 0 && selected.size < MIN_OTHERS && (
             <Text style={styles.hint}>{COPY.circleStep2NeedMore}</Text>
           )}
           <Pressable
