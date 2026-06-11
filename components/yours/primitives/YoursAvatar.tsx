@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
@@ -16,6 +16,7 @@ import ActivityRing from './ActivityRing';
 import { RING_FRACTION, ANIM } from '../state/constants';
 import { useReduceMotion } from '../a11y/useReduceMotion';
 import type { RingBucket } from '../../../lib/yours/types';
+import type { AnchorRect } from '../../menu/MenuCard';
 
 interface YoursAvatarProps {
   name: string | null;
@@ -26,7 +27,8 @@ interface YoursAvatarProps {
   /** Play the one-time ghost -> real "light up" sequence. */
   lightUp?: boolean;
   onPress?: () => void;
-  onLongPress?: () => void;
+  /** Receives the avatar's measured window rect so a menu can bloom from the face. */
+  onLongPress?: (rect: AnchorRect) => void;
 }
 
 function initials(name: string | null): string {
@@ -44,6 +46,7 @@ function YoursAvatar({
   onLongPress,
 }: YoursAvatarProps) {
   const reduceMotion = useReduceMotion();
+  const pressRef = useRef<View>(null);
   const scale = useSharedValue(1);
   const photoOpacity = useSharedValue(ghost && !lightUp ? 0 : ghost ? 0 : 1);
   const ghostOpacity = useSharedValue(ghost ? 1 : 0);
@@ -88,10 +91,19 @@ function YoursAvatar({
 
   const showGhostBase = ghost && !lightUp;
 
+  // Measure the face in window coords so the long-press menu can bloom from it.
+  const handleLongPress = () => {
+    if (!onLongPress) return;
+    pressRef.current?.measureInWindow((x, y, width, height) =>
+      onLongPress({ x, y, width, height }),
+    );
+  };
+
   return (
     <Pressable
+      ref={pressRef}
       onPress={onPress}
-      onLongPress={onLongPress}
+      onLongPress={onLongPress ? handleLongPress : undefined}
       accessibilityRole="button"
       accessibilityLabel={name ?? 'Person'}
       hitSlop={6}

@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, Dimensions } from 'react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import YoursAvatar from '../primitives/YoursAvatar';
+import type { AnchorRect } from '../../menu/MenuCard';
 import type { YoursGridPerson } from '../../../lib/yours/types';
 
 const AVATAR = 72;
@@ -26,7 +27,7 @@ function AvatarGridCell({
   person: YoursGridPerson;
   lightUp?: boolean;
   onPress: () => void;
-  onLongPress: () => void;
+  onLongPress: (rect: AnchorRect) => void;
   onPressPill: () => void;
 }) {
   const hasPill = !!person.upcoming_title && !!person.upcoming_start;

@@ -4,10 +4,10 @@
  * Only mounted when YOURS_PAGE_ENABLED is true.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, ActionSheetIOS, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Plus } from 'lucide-react-native';
+import { Plus, MessageCircle, CalendarPlus, Users, User } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { SPACING } from '../../constants/YoursDesign';
@@ -34,6 +34,7 @@ import RequestStack from './requests/RequestStack';
 import PeopleSearchBar from './search/PeopleSearchBar';
 import PeopleSearchResults from './search/PeopleSearchResults';
 import CirclesDirectory from './circles/CirclesDirectory';
+import MenuCard, { type AnchorRect } from '../menu/MenuCard';
 import type { YoursGridPerson } from '../../lib/yours/types';
 
 /**
@@ -69,40 +70,27 @@ export default function YoursScreen() {
   const { ensureReferralCode } = useReferral();
   const getOrCreateDm = useGetOrCreateDm();
 
-  // Long-press a face: with circles on, offer "Message" (open the 1:1 DM) or
-  // "Start a circle with {name}" (create flow pre-seeded with them). With the
-  // flag off, fall back to the original behavior (open their keep page).
-  const handleLongPressPerson = (p: YoursGridPerson) => {
+  // Long-press a face: bloom the shared MenuCard from the avatar (Message, Make
+  // a plan, Start a circle, then a divider and the passive View profile). With
+  // circles off, fall back to the original behavior (open their keep page).
+  const [menu, setMenu] = useState<{ person: YoursGridPerson; anchor: AnchorRect } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const handleLongPressPerson = (p: YoursGridPerson, anchor: AnchorRect) => {
     if (!GROUPS_ENABLED) {
       router.push(`/person/${p.user_id}` as never);
       return;
     }
+    setMenu({ person: p, anchor });
+    setMenuOpen(true);
+  };
+
+  const openDm = (p: YoursGridPerson) => {
     if (getOrCreateDm.isPending) return; // guard a double-tap mid-open
-    const personName = p.first_name_display?.trim() || p.handle?.trim() || 'them';
-    const openDm = () =>
-      getOrCreateDm.mutate(p.user_id, {
-        onSuccess: (circleId) => router.push(`/(tabs)/chats/circle/${circleId}` as never),
-        onError: () => Alert.alert('', COPY.keepMessageError),
-      });
-    const startCircle = () => router.push(`/circle/new?seed=${p.user_id}` as never);
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: [COPY.dmMessagePerson(personName), COPY.dmStartCircle(personName), COPY.circlePlusCancel],
-          cancelButtonIndex: 2,
-        },
-        (i) => {
-          if (i === 0) openDm();
-          else if (i === 1) startCircle();
-        },
-      );
-    } else {
-      Alert.alert(personName, undefined, [
-        { text: COPY.dmMessagePerson(personName), onPress: openDm },
-        { text: COPY.dmStartCircle(personName), onPress: startCircle },
-        { text: COPY.circlePlusCancel, style: 'cancel' },
-      ]);
-    }
+    getOrCreateDm.mutate(p.user_id, {
+      onSuccess: (circleId) => router.push(`/(tabs)/chats/circle/${circleId}` as never),
+      onError: () => Alert.alert('', COPY.keepMessageError),
+    });
   };
 
   const [tab, setTab] = useState<YoursTab>('people');
@@ -321,6 +309,57 @@ export default function YoursScreen() {
           targetId={profileTarget}
         />
       )}
+
+      <MenuCard
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        anchor={menu?.anchor ?? null}
+        placement="avatar"
+        anchorAvatar={
+          menu
+            ? { name: menu.person.first_name_display, photoUrl: menu.person.profile_photo_url }
+            : undefined
+        }
+        rows={
+          menu
+            ? [
+                {
+                  key: 'message',
+                  icon: MessageCircle,
+                  label: COPY.menuMessage,
+                  subtitle: COPY.menuMessageSub,
+                  onPress: () => openDm(menu.person),
+                },
+                {
+                  key: 'plan',
+                  icon: CalendarPlus,
+                  label: COPY.menuMakePlan,
+                  subtitle: COPY.menuMakePlanSub,
+                  // Current plan-creation behavior; upgrades to the "Plan with
+                  // {Name}" destination sheet when that item ships.
+                  onPress: () => router.push('/(tabs)/post' as never),
+                },
+                {
+                  key: 'circle',
+                  icon: Users,
+                  label: COPY.menuStartCircle,
+                  subtitle: COPY.menuStartCircleSub,
+                  onPress: () => router.push(`/circle/new?seed=${menu.person.user_id}` as never),
+                },
+                {
+                  key: 'profile',
+                  icon: User,
+                  label: COPY.menuViewProfile,
+                  subtitle: COPY.menuViewProfileSub,
+                  muted: true,
+                  dividerBefore: true,
+                  // Routes to the keep page until the dedicated profile page ships.
+                  onPress: () => router.push(`/person/${menu.person.user_id}` as never),
+                },
+              ]
+            : []
+        }
+      />
     </SafeAreaView>
   );
 }

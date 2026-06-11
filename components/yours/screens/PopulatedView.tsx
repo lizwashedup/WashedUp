@@ -4,6 +4,7 @@ import { AlbumsGrid } from '../../albums/AlbumsGrid';
 import AvatarGrid from '../grid/AvatarGrid';
 import RequestBanner from '../requests/RequestBanner';
 import type { YoursTab } from '../header/YoursTabs';
+import type { AnchorRect } from '../../menu/MenuCard';
 import type { YoursGridPerson } from '../../../lib/yours/types';
 
 /** Populated state body. Header + tabs are sticky in YoursScreen. */
@@ -27,7 +28,7 @@ export default function PopulatedView({
   onAdd: () => void;
   onOpenRequests: () => void;
   onPressPerson: (p: YoursGridPerson) => void;
-  onLongPressPerson: (p: YoursGridPerson) => void;
+  onLongPressPerson: (p: YoursGridPerson, rect: AnchorRect) => void;
   onPressPill: (p: YoursGridPerson) => void;
 }) {
   if (activeTab === 'albums') {

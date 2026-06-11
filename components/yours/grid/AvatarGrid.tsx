@@ -2,6 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import { FlatList, StyleSheet } from 'react-native';
 import AvatarGridCell from './AvatarGridCell';
 import AddGridCell from './AddGridCell';
+import type { AnchorRect } from '../../menu/MenuCard';
 import type { YoursGridPerson } from '../../../lib/yours/types';
 
 /** First grid slot is the in-page "add" affordance, then the people. */
@@ -30,7 +31,7 @@ export default function AvatarGrid({
   header?: React.ReactElement | null;
   onAdd: () => void;
   onPressPerson: (p: YoursGridPerson) => void;
-  onLongPressPerson: (p: YoursGridPerson) => void;
+  onLongPressPerson: (p: YoursGridPerson, rect: AnchorRect) => void;
   onPressPill: (p: YoursGridPerson) => void;
 }) {
   const data = useMemo<GridItem[]>(() => [ADD_ITEM, ...people], [people]);
@@ -44,7 +45,7 @@ export default function AvatarGrid({
           person={item}
           lightUp={lightUpIds.has(item.user_id)}
           onPress={() => onPressPerson(item)}
-          onLongPress={() => onLongPressPerson(item)}
+          onLongPress={(rect) => onLongPressPerson(item, rect)}
           onPressPill={() => onPressPill(item)}
         />
       ),

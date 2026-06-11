@@ -71,6 +71,52 @@ function estCardHeight(rows: MenuRow[]): number {
   );
 }
 
+/**
+ * One menu row. A dedicated component so each row owns its press state: a
+ * Pressable *function* style does not apply reliably inside this Modal, so we
+ * drive the warmTint press tint from local state with a plain array style.
+ */
+function MenuRowItem({
+  row,
+  index,
+  onClose,
+}: {
+  row: MenuRow;
+  index: number;
+  onClose: () => void;
+}) {
+  const [pressed, setPressed] = useState(false);
+  const Icon = row.icon;
+  return (
+    <Animated.View entering={FadeInUp.duration(150).delay(index * 30)}>
+      <Pressable
+        onPress={() => {
+          onClose();
+          row.onPress();
+        }}
+        onPressIn={() => setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        style={[styles.row, pressed && styles.rowPressed]}
+        android_ripple={{ color: Colors.warmTint }}
+        accessibilityRole="button"
+        accessibilityLabel={`${row.label}. ${row.subtitle}.`}
+      >
+        <View style={styles.iconBox}>
+          <Icon size={ICON} color={row.muted ? Colors.secondary : Colors.terracotta} strokeWidth={1.75} />
+        </View>
+        <View style={styles.rowText}>
+          <Text style={[styles.rowLabel, row.muted && styles.rowLabelMuted]} numberOfLines={1}>
+            {row.label}
+          </Text>
+          <Text style={styles.rowSub} numberOfLines={1}>
+            {row.subtitle}
+          </Text>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export default function MenuCard({
   visible,
   onClose,
@@ -185,35 +231,12 @@ export default function MenuCard({
         style={[styles.card, cardPos, clipStyle, cardStyle]}
         accessibilityViewIsModal
       >
-        {rows.map((row, i) => {
-          const Icon = row.icon;
-          return (
-            <React.Fragment key={row.key}>
-              {row.dividerBefore && <View style={styles.divider} />}
-              <Animated.View entering={FadeInUp.duration(150).delay(i * 30)}>
-                <Pressable
-                  onPress={() => {
-                    onClose();
-                    row.onPress();
-                  }}
-                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${row.label}. ${row.subtitle}.`}
-                >
-                  <Icon size={ICON} color={row.muted ? Colors.secondary : Colors.terracotta} strokeWidth={1.75} />
-                  <View style={styles.rowText}>
-                    <Text style={[styles.rowLabel, row.muted && styles.rowLabelMuted]} numberOfLines={1}>
-                      {row.label}
-                    </Text>
-                    <Text style={styles.rowSub} numberOfLines={1}>
-                      {row.subtitle}
-                    </Text>
-                  </View>
-                </Pressable>
-              </Animated.View>
-            </React.Fragment>
-          );
-        })}
+        {rows.map((row, i) => (
+          <React.Fragment key={row.key}>
+            {row.dividerBefore && <View style={styles.divider} />}
+            <MenuRowItem row={row} index={i} onClose={onClose} />
+          </React.Fragment>
+        ))}
       </Animated.View>
     </Modal>
   );
@@ -237,10 +260,10 @@ const styles = StyleSheet.create({
     minHeight: ROW_H,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
     paddingHorizontal: 16,
   },
   rowPressed: { backgroundColor: Colors.warmTint },
+  iconBox: { width: ICON, height: ICON, marginRight: 14, alignItems: 'center', justifyContent: 'center' },
   rowText: { flex: 1, minWidth: 0 },
   rowLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
   rowLabelMuted: { color: Colors.secondary },
