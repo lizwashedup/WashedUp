@@ -50,6 +50,7 @@ import { supabase } from '../../../lib/supabase';
 import { hapticSelection, hapticSuccess } from '../../../lib/haptics';
 import { YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { useReduceMotion } from '../a11y/useReduceMotion';
+import YoursAvatar from '../primitives/YoursAvatar';
 import { COPY } from '../state/constants';
 import {
   markPostPlanSurveyHandled,
@@ -401,7 +402,21 @@ export default function PostPlanSurveyV3({
                   showComment={showComment}
                 />
               )}
-              {step === 'who' && <StepStub label="Who made it" />}
+              {step === 'who' && (
+                <StepWho
+                  list={whoMadeItList}
+                  noShows={noShows}
+                  onToggle={(id) => {
+                    hapticSelection();
+                    setNoShows((s) => {
+                      const n = new Set(s);
+                      if (n.has(id)) n.delete(id);
+                      else n.add(id);
+                      return n;
+                    });
+                  }}
+                />
+              )}
               {step === 'keep' && <StepStub label="Keep these people" />}
             </Animated.ScrollView>
 
@@ -628,6 +643,49 @@ function StepHow({
         />
         <Text style={styles.commentHint}>{COPY.surveyBadHelper}</Text>
       </Animated.View>
+    </View>
+  );
+}
+
+// ─── Step 2: Who made it? (explicit two-state rows) ─────────────────────────
+function StepWho({
+  list,
+  noShows,
+  onToggle,
+}: {
+  list: SurveyMember[];
+  noShows: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <View>
+      <Text style={styles.whoHelper}>{COPY.surveyWhoHelper}</Text>
+      <View style={styles.attendList}>
+        {list.map((m) => {
+          const out = noShows.has(m.id);
+          const name = m.first_name_display ?? 'Someone';
+          return (
+            <Pressable
+              key={m.id}
+              style={styles.attendRow}
+              onPress={() => onToggle(m.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: !out }}
+              accessibilityLabel={`${name}, ${out ? COPY.surveyDidntMakeIt : COPY.surveyMadeIt}`}
+            >
+              <YoursAvatar name={m.first_name_display} photoUrl={m.profile_photo_url} size={44} bucket="none" />
+              <Text style={[styles.attendName, out && styles.attendNameOut]} numberOfLines={1}>
+                {name}
+              </Text>
+              <View style={[styles.tag, out ? styles.tagMissed : styles.tagMade]}>
+                <Text style={[styles.tagText, out ? styles.tagTextMissed : styles.tagTextMade]}>
+                  {out ? COPY.surveyDidntMakeIt : COPY.surveyMadeIt}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -880,6 +938,43 @@ const styles = StyleSheet.create({
     color: Colors.tertiary,
     marginTop: 6,
   },
+
+  // ── Step 2 attendance rows ──
+  whoHelper: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    lineHeight: 19,
+    marginBottom: 14,
+  },
+  attendList: { gap: 2 },
+  attendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  attendName: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  attendNameOut: { color: Colors.tertiary, textDecorationLine: 'line-through' },
+  tag: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1.5,
+  },
+  tagMade: { borderColor: Colors.gold, backgroundColor: Colors.goldBadgeSoft },
+  tagMissed: { borderColor: Colors.border, backgroundColor: Colors.cardBg },
+  tagText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM },
+  tagTextMade: { color: Colors.gold },
+  tagTextMissed: { color: Colors.tertiary, textDecorationLine: 'line-through' },
 
   // ── Stubs ──
   stub: { flex: 1, alignItems: 'center', justifyContent: 'center' },
