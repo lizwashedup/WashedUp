@@ -25,6 +25,42 @@ export function getTodayInLA(): { y: number; m: number; d: number } {
   return { y: get('year'), m: get('month') - 1, d: get('day') };
 }
 
+// Minutes east of UTC for the America/Los_Angeles zone at a given instant
+// (-420 during PDT, -480 during PST). Derived from Intl so it always tracks the
+// real DST rules without a tz library.
+function laOffsetForInstant(date: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  const asUTC = Date.UTC(
+    Number(m.year), Number(m.month) - 1, Number(m.day),
+    Number(m.hour) % 24, Number(m.minute), Number(m.second),
+  );
+  return (asUTC - date.getTime()) / 60000;
+}
+
+// Combine LA wall-clock fields (what the calendar + time picker show) with the
+// LA UTC offset for THAT date, yielding the correct absolute instant regardless
+// of the device timezone. Plans live on an LA clock: "11pm" must mean 11pm in
+// Los Angeles whether the phone is set to LA or New York.
+export function laWallTimeToUTC(
+  year: number, month0: number, day: number, hour24: number, minute: number,
+): Date {
+  const wallAsUTC = Date.UTC(year, month0, day, hour24, minute);
+  // First pass: correct by the offset at the naive instant. Re-check the offset
+  // at the corrected instant so a wall time sitting right on a DST boundary
+  // (the spring-forward gap / fall-back overlap) still resolves correctly.
+  const off1 = laOffsetForInstant(new Date(wallAsUTC));
+  let utc = wallAsUTC - off1 * 60000;
+  const off2 = laOffsetForInstant(new Date(utc));
+  if (off2 !== off1) utc = wallAsUTC - off2 * 60000;
+  return new Date(utc);
+}
+
 export function isBeforeTodayLA(y: number, m: number, d: number): boolean {
   const t = getTodayInLA();
   if (y !== t.y) return y < t.y;

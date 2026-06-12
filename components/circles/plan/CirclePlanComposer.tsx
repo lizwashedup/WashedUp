@@ -35,7 +35,7 @@ import { type CalendarDay } from '../../calendar/WashedUpCalendar';
 import CollapsibleCalendar from '../../composer/CollapsibleCalendar';
 import TimePicker from '../../composer/TimePicker';
 import InlineNudge from '../../composer/InlineNudge';
-import { getTodayInLA } from '../../../lib/laDate';
+import { getTodayInLA, laWallTimeToUTC } from '../../../lib/laDate';
 import {
   useCreateCirclePlan,
   CreateCirclePlanResult,
@@ -132,11 +132,10 @@ export default function CirclePlanComposer({
   })();
 
   const buildStartTime = (): Date => {
-    const base = new Date(date.year, date.month, date.day);
     let h = hour % 12;
     if (period === 'PM') h += 12;
-    base.setHours(h, parseInt(minute, 10), 0, 0);
-    return base;
+    // Pin to the LA wall clock, not the device's local zone (see laDate).
+    return laWallTimeToUTC(date.year, date.month, date.day, h, parseInt(minute, 10));
   };
 
   const onPost = async () => {

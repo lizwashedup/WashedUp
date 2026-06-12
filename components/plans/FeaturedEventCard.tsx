@@ -47,12 +47,16 @@ interface FeaturedEventCardProps {
 
 function formatDateTimeForCard(dateString: string): string {
   const d = new Date(dateString);
+  // Plans live on an LA clock: render the stored instant in LA regardless of the
+  // device timezone (mirrors laWallTimeToUTC on the write side).
   const dateStr = d.toLocaleDateString('en-US', {
+    timeZone: 'America/Los_Angeles',
     weekday: 'short',
     month: 'short',
     day: 'numeric',
   });
   const timeStr = d.toLocaleTimeString('en-US', {
+    timeZone: 'America/Los_Angeles',
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,

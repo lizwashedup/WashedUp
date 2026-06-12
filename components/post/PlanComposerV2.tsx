@@ -46,7 +46,7 @@ import { supabase } from '../../lib/supabase';
 import { checkContent } from '../../lib/contentFilter';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
-import { MONTHS, getTodayInLA } from '../../lib/laDate';
+import { MONTHS, getTodayInLA, laWallTimeToUTC } from '../../lib/laDate';
 import {
   NEIGHBORHOOD_OPTIONS,
   NEIGHBORHOOD_OTHER,
@@ -94,7 +94,8 @@ function buildDatetime(
   let h = hour;
   if (period === 'PM' && h !== 12) h += 12;
   if (period === 'AM' && h === 12) h = 0;
-  return new Date(year, month, day, h, parseInt(minute, 10));
+  // Pin to the LA wall clock, not the device's local zone (see laDate).
+  return laWallTimeToUTC(year, month, day, h, parseInt(minute, 10));
 }
 
 function ageRangesToMinMax(ranges: AgeRange[]): { min: number | null; max: number | null } {
