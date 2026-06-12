@@ -302,6 +302,16 @@ export default function PostPlanSurveyV3({
     [others, noShows],
   );
 
+  // Step-3 footer label: the button speaks the name when exactly one is picked.
+  const addSelectedNames = keepCandidates
+    .filter((m) => addSel.has(m.id))
+    .map((m) => m.first_name_display ?? 'them');
+  const addSelectedCount = addSelectedNames.length;
+  const addLabel =
+    addSelectedCount === 1
+      ? COPY.surveyAddOne(addSelectedNames[0])
+      : COPY.surveyAddButton;
+
   // THE HANDSHAKE. One atomic server RPC per person; the client never branches
   // the relationship logic itself. blocked (a race) raises and is a silent skip.
   const submitAdd = async () => {
@@ -417,28 +427,52 @@ export default function PostPlanSurveyV3({
                   }}
                 />
               )}
-              {step === 'keep' && <StepStub label="Keep these people" />}
+              {step === 'keep' && (
+                <StepKeep
+                  candidates={keepCandidates}
+                  selected={addSel}
+                  onToggle={(id) => {
+                    hapticSelection();
+                    setAddSel((s) => {
+                      const n = new Set(s);
+                      if (n.has(id)) n.delete(id);
+                      else n.add(id);
+                      return n;
+                    });
+                  }}
+                />
+              )}
             </Animated.ScrollView>
 
-            {/* Footer: Continue + the always-live escape. */}
-            <Footer
-              primaryLabel={COPY.surveyContinue}
-              primaryActive={step !== 'how' || rating != null}
-              busy={busy}
-              onPrimary={() => {
-                if (step === 'how') {
-                  if (rating == null) return;
-                  if (rating !== 'thumbs_down') commitFeedback(rating, null);
-                  else commitFeedback('thumbs_down', comment.trim() || null);
-                  afterRating();
-                } else if (step === 'who') {
-                  goToKeepOrClose(noShows);
-                } else {
-                  void submitAdd();
-                }
-              }}
-              onEscape={exit}
-            />
+            {/* Footer. Steps 1-2: a single Continue. Step 3: equal-weight Add /
+                Skip (fill vs ghost only). "Not now" stays present on all steps. */}
+            {step === 'keep' ? (
+              <KeepFooter
+                addLabel={addLabel}
+                canAdd={addSelectedCount > 0}
+                busy={busy}
+                onAdd={() => void submitAdd()}
+                onSkip={exit}
+                onEscape={exit}
+              />
+            ) : (
+              <Footer
+                primaryLabel={COPY.surveyContinue}
+                primaryActive={step !== 'how' || rating != null}
+                busy={busy}
+                onPrimary={() => {
+                  if (step === 'how') {
+                    if (rating == null) return;
+                    if (rating !== 'thumbs_down') commitFeedback(rating, null);
+                    else commitFeedback('thumbs_down', comment.trim() || null);
+                    afterRating();
+                  } else {
+                    goToKeepOrClose(noShows);
+                  }
+                }}
+                onEscape={exit}
+              />
+            )}
           </Animated.View>
 
           {result && (
@@ -690,10 +724,86 @@ function StepWho({
   );
 }
 
-function StepStub({ label }: { label: string }) {
+// ─── Step 3: Keep these people (pre-selected avatar chips) ──────────────────
+function StepKeep({
+  candidates,
+  selected,
+  onToggle,
+}: {
+  candidates: SurveyMember[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}) {
   return (
-    <View style={styles.stub}>
-      <Text style={styles.stubText}>{label}</Text>
+    <View>
+      <Text style={styles.keepHeadline}>{COPY.surveyAddPrompt}</Text>
+      <View style={styles.chipWrap}>
+        {candidates.map((m) => {
+          const on = selected.has(m.id);
+          return (
+            <Pressable
+              key={m.id}
+              style={[styles.chip, on ? styles.chipOn : styles.chipOff]}
+              onPress={() => onToggle(m.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+            >
+              <YoursAvatar name={m.first_name_display} photoUrl={m.profile_photo_url} size={28} bucket="none" />
+              <Text style={styles.chipName} numberOfLines={1}>
+                {m.first_name_display ?? ''}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+// ─── Step 3 footer: equal-weight Add / Skip + the always-live escape ────────
+function KeepFooter({
+  addLabel,
+  canAdd,
+  busy,
+  onAdd,
+  onSkip,
+  onEscape,
+}: {
+  addLabel: string;
+  canAdd: boolean;
+  busy: boolean;
+  onAdd: () => void;
+  onSkip: () => void;
+  onEscape: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.footer, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
+      <View style={styles.keepRow}>
+        <Pressable
+          style={[styles.keepBtn, styles.keepBtnFill, !canAdd && styles.primaryOff]}
+          disabled={!canAdd || busy}
+          onPress={onAdd}
+        >
+          {busy ? (
+            <ActivityIndicator color={Colors.white} />
+          ) : (
+            <Text style={styles.keepBtnFillText}>{addLabel}</Text>
+          )}
+        </Pressable>
+        <Pressable style={[styles.keepBtn, styles.keepBtnGhost]} onPress={onSkip}>
+          <Text style={styles.keepBtnGhostText}>{COPY.surveySkip}</Text>
+        </Pressable>
+      </View>
+      <Pressable
+        style={styles.escape}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel={COPY.surveyNotNow}
+        onPress={onEscape}
+      >
+        <Text style={styles.escapeText}>{COPY.surveyNotNow}</Text>
+      </Pressable>
     </View>
   );
 }
@@ -976,12 +1086,53 @@ const styles = StyleSheet.create({
   tagTextMade: { color: Colors.gold },
   tagTextMissed: { color: Colors.tertiary, textDecorationLine: 'line-through' },
 
-  // ── Stubs ──
-  stub: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  stubText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.tertiary,
+  // ── Step 3 keep chips ──
+  keepHeadline: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.displayMD,
+    color: Colors.asphalt,
+    lineHeight: 28,
+    marginBottom: 18,
+  },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 7,
+    paddingLeft: 7,
+    paddingRight: 14,
+    borderRadius: 24,
+    borderWidth: 1.5,
+  },
+  chipOn: { borderColor: Colors.terracotta, backgroundColor: Colors.goldBadgeSoft },
+  chipOff: { borderColor: Colors.border, backgroundColor: Colors.cardBg, opacity: 0.5 },
+  chipName: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+  },
+
+  // ── Step 3 footer (equal-weight Add / Skip) ──
+  keepRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  keepBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  keepBtnFill: { backgroundColor: Colors.terracotta },
+  keepBtnFillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.white,
+  },
+  keepBtnGhost: { borderWidth: 1.5, borderColor: Colors.border },
+  keepBtnGhostText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
   },
 
   // ── Outcome overlay ──
