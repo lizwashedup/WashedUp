@@ -32,7 +32,16 @@ const RECENT_THUMB = 84;
 const RECENT_THUMB_RADIUS = 12;
 const RECENT_THUMB_GAP = 8;
 
-function PlanRow({ plan, onPress }: { plan: CirclePlanRow; onPress: () => void }) {
+function PlanRow({
+  plan,
+  capacity,
+  onPress,
+}: {
+  plan: CirclePlanRow;
+  // Present only on the next (pinned) plan, where get_circle gives the counts.
+  capacity?: { filled: number; size: number };
+  onPress: () => void;
+}) {
   const isOpen = plan.circle_visibility === 'open';
   return (
     <Pressable style={styles.planRow} onPress={onPress}>
@@ -43,9 +52,19 @@ function PlanRow({ plan, onPress }: { plan: CirclePlanRow; onPress: () => void }
           {formatPlanWhenLA(plan.start_time)}
           {plan.location_text ? `, ${plan.location_text}` : ''}
         </Text>
+        {capacity && (
+          <Text style={styles.planCapacity} numberOfLines={1}>
+            {COPY.circlePlanCapacity(capacity.filled, capacity.size)}
+          </Text>
+        )}
       </View>
+      {/* "up to N others welcome" only on opened-up plans; just-us stays private. */}
       {isOpen ? (
-        <View style={styles.openTag}><Text style={styles.openTagText}>{COPY.circlePlanFromBadge}</Text></View>
+        plan.stranger_cap != null && (
+          <View style={styles.openTag}>
+            <Text style={styles.openTagText}>{COPY.circlePlanSeatsWelcome(plan.stranger_cap)}</Text>
+          </View>
+        )
       ) : (
         <View style={styles.privTag}><Text style={styles.privTagText}>{COPY.circlePlanPrivateTag}</Text></View>
       )}
@@ -101,6 +120,9 @@ export default function CircleNoticeboard({
   const router = useRouter();
   const { data: plans = [] } = useCirclePlans(circle.id);
   const title = displayName?.trim() || circle.name;
+  // The next upcoming plan carries the capacity counts (get_circle.pinned_plan);
+  // matched into the list by id so only that row shows "{filled} of {size} in".
+  const pinned = payload.pinned_plan;
 
   // Sign every recent-together photo once; the strip and the living cover both
   // read from this map (album-media is private, so paths need signed URLs).
@@ -189,7 +211,16 @@ export default function CircleNoticeboard({
         ) : (
           <View style={styles.planList}>
             {plans.map((p) => (
-              <PlanRow key={p.id} plan={p} onPress={() => router.push(`/plan/${p.id}` as never)} />
+              <PlanRow
+                key={p.id}
+                plan={p}
+                capacity={
+                  pinned && pinned.id === p.id
+                    ? { filled: pinned.circle_in_count, size: pinned.circle_size }
+                    : undefined
+                }
+                onPress={() => router.push(`/plan/${p.id}` as never)}
+              />
             ))}
           </View>
         )}
@@ -359,6 +390,7 @@ const styles = StyleSheet.create({
   planRowBody: { flex: 1, minWidth: 0 },
   planTitle: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   planMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 3 },
+  planCapacity: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, marginTop: 3 },
   openTag: { backgroundColor: Colors.goldenAmberTint15, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   openTagText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.darkWarm, letterSpacing: 0.2 },
   privTag: { backgroundColor: Colors.dividerWarm, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },

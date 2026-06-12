@@ -417,6 +417,11 @@ export const COPY = {
   // "up to N others welcome", never "N spots left": an open door, not scarcity.
   circlePlanSeatsWelcome: (n: number) =>
     `up to ${n} ${n === 1 ? 'other' : 'others'} welcome`,
+  // Badge B capacity line: how many of the circle are already in. Pairs with the
+  // seats-welcome line on an opened-up plan; warm-dark, never scarcity styling.
+  circlePlanCapacity: (filled: number, size: number) => `${filled} of ${size} in`,
+  // Pip on an opened-up circle plan that is live in the public feed.
+  circlePlanOpenToFeed: 'open to the feed',
   circlePlanOpenStatus: (inCount: number, total: number, cap: number) =>
     `${inCount} of ${total} in. Up to ${cap} others welcome.`,
   // Start-a-chat affordance (whole-circle just-us plan with no chat yet).

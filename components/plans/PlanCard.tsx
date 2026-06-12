@@ -57,6 +57,11 @@ interface PlanCardProps {
     circle_id?: string | null;
     circle_visibility?: 'circle_only' | 'open' | null;
     stranger_cap?: number | null;
+    // Capacity for the Badge B "{filled} of {size} in" line on opened-up circle
+    // plans (from get_filtered_feed, batch 2). circle_size = joined members,
+    // circle_in_count = members already on the plan.
+    circle_size?: number | null;
+    circle_in_count?: number | null;
     creator: {
       id?: string;
       first_name_display: string;
@@ -369,11 +374,26 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               <Text style={styles.privateCircleTagText}>{COPY.circlePlanPrivateTag}</Text>
             </View>
           )}
+          {/* Opened-up Badge B: capacity . seats welcome . open-to-feed pip. A
+              circle plan in the feed is always live/open. */}
+          {isOpenCircle && plan.circle_size != null && plan.circle_in_count != null && (
+            <View style={styles.capacityCircleTag}>
+              <Text style={styles.capacityCircleTagText}>
+                {COPY.circlePlanCapacity(plan.circle_in_count, plan.circle_size)}
+              </Text>
+            </View>
+          )}
           {isOpenCircle && plan.stranger_cap != null && (
             <View style={styles.seatsCircleTag}>
               <Text style={styles.seatsCircleTagText}>
                 {COPY.circlePlanSeatsWelcome(plan.stranger_cap)}
               </Text>
+            </View>
+          )}
+          {isOpenCircle && (
+            <View style={styles.openToFeedPip}>
+              <View style={styles.openToFeedDot} />
+              <Text style={styles.openToFeedText}>{COPY.circlePlanOpenToFeed}</Text>
             </View>
           )}
           {isFeatured ? (
@@ -731,6 +751,40 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   seatsCircleTagText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 10,
+    color: Colors.secondary,
+    letterSpacing: 0.2,
+  },
+  // Badge B "{filled} of {size} in": capacity tag, terracotta-tinted with warm-dark
+  // text (a touch stronger than the secondary-text seats line beside it).
+  capacityCircleTag: {
+    backgroundColor: Colors.brandSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  capacityCircleTagText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 10,
+    color: Colors.darkWarm,
+    letterSpacing: 0.2,
+  },
+  // "open to the feed" pip: a small terracotta dot + secondary label, signalling
+  // an opened-up circle plan went public. No pill background, lightest of the row.
+  openToFeedPip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+  },
+  openToFeedDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: Colors.terracotta,
+  },
+  openToFeedText: {
     fontFamily: Fonts.sansMedium,
     fontSize: 10,
     color: Colors.secondary,

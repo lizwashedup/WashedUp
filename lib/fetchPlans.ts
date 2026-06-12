@@ -50,6 +50,10 @@ export interface Plan {
   circle_id?: string | null;
   circle_visibility?: 'circle_only' | 'open' | null;
   stranger_cap?: number | null;
+  // Capacity for the card's "{filled} of {size} in" line. Returned directly by
+  // get_filtered_feed (batch 2), null on non-circle rows.
+  circle_size?: number | null;
+  circle_in_count?: number | null;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -80,6 +84,8 @@ function mapRowToPlan(item: any): Plan {
     featured_type: (item.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
     cluster_root_id: item.cluster_root_id ?? null,
     allow_duplicate: item.allow_duplicate ?? true,
+    circle_size: item.circle_size ?? null,
+    circle_in_count: item.circle_in_count ?? null,
     creator: (item.creator_user_id ?? item.host_id)
       ? {
           id: item.creator_user_id ?? item.host_id,
