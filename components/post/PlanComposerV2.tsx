@@ -64,6 +64,7 @@ import EditorialTitleField from '../composer/EditorialTitleField';
 import CategoryChips from '../composer/CategoryChips';
 import CollapsibleCalendar from '../composer/CollapsibleCalendar';
 import TimePicker, { displayTime } from '../composer/TimePicker';
+import InlineNudge from '../composer/InlineNudge';
 import PlacePicker, { type PlaceValue } from '../composer/place/PlacePicker';
 import PostConfirmation from '../composer/PostConfirmation';
 import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../components/post/InvitePeopleSection';
@@ -618,6 +619,7 @@ export default function PlanComposerV2() {
             selected={timeSelected}
             onChange={(h, m, p) => { setTimeHour(h); setTimeMinute(m); setTimePeriod(p); setTimeSelected(true); }}
           />
+          {activeQuick === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
         </View>
 
         {/* WHERE */}

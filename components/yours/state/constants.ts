@@ -404,6 +404,10 @@ export const COPY = {
   // Inherited single-gender pill.
   circlePlanGenderWomen: 'Shown to women only',
   circlePlanGenderMen: 'Shown to men only',
+  // Tonight expectation nudge (Tier 3, both composers; shown when date = today).
+  // Steers toward the behavior that fills a same-day plan; never mentions size.
+  composerTonightNudge:
+    'tonight plans move fast. post early, and invite your people directly to get the first yes.',
   // Audience binary (locked verbatim; "pick people" is cut, audience is the binary).
   circlePlanAudienceCircleOnly: (circle: string) => `${circle} only`,
   circlePlanAudienceCircleOnlySub: 'Stays here. Only the circle sees it.',

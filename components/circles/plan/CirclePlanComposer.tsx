@@ -34,6 +34,7 @@ import BottomSheet from '../../yours/primitives/BottomSheet';
 import { type CalendarDay } from '../../calendar/WashedUpCalendar';
 import CollapsibleCalendar from '../../composer/CollapsibleCalendar';
 import TimePicker from '../../composer/TimePicker';
+import InlineNudge from '../../composer/InlineNudge';
 import { getTodayInLA } from '../../../lib/laDate';
 import {
   useCreateCirclePlan,
@@ -236,6 +237,7 @@ export default function CirclePlanComposer({
             selected
             onChange={(h, m, p) => { setHour(h); setMinute(m); setPeriod(p); }}
           />
+          {activeQuick === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
         </View>
 
         {/* WHO IS THIS FOR - the audience binary. "Pick people" is cut. */}
