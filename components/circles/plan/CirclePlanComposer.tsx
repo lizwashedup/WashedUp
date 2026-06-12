@@ -18,7 +18,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  Pressable,
+  TouchableOpacity,
   ScrollView,
   StyleSheet,
 } from 'react-native';
@@ -227,13 +227,14 @@ export default function CirclePlanComposer({
           {(['tonight', 'tomorrow'] as const).map((k) => {
             const on = activeQuick === k;
             return (
-              <Pressable
+              <TouchableOpacity
                 key={k}
+                activeOpacity={0.7}
                 onPress={() => selectQuick(k)}
                 style={[styles.quickChip, on && styles.quickChipOn]}
               >
                 <Text style={[styles.quickChipText, on && styles.quickChipTextOn]}>{k}</Text>
-              </Pressable>
+              </TouchableOpacity>
             );
           })}
         </View>
@@ -255,7 +256,8 @@ export default function CirclePlanComposer({
         <Text style={styles.sectionLabel}>{COPY.circlePlanWhoLabel}</Text>
 
         {/* Circle only */}
-        <Pressable
+        <TouchableOpacity
+          activeOpacity={0.85}
           onPress={() => { hapticSelection(); setVisibilityOpen(false); }}
           style={[styles.audCard, !visibilityOpen && styles.audCardOn]}
         >
@@ -268,10 +270,11 @@ export default function CirclePlanComposer({
               {!visibilityOpen ? <Animated.View entering={ZoomIn.springify().mass(0.5).damping(24).stiffness(500)} style={styles.radioDot} /> : null}
             </View>
           </View>
-        </Pressable>
+        </TouchableOpacity>
 
         {/* Open to others (+ stranger stepper reveal + capacity truth) */}
-        <Pressable
+        <TouchableOpacity
+          activeOpacity={0.85}
           onPress={() => { hapticSelection(); setVisibilityOpen(true); }}
           style={[styles.audCard, visibilityOpen && styles.audCardOn]}
         >
@@ -292,21 +295,23 @@ export default function CirclePlanComposer({
             >
               <Text style={styles.stepperRevealLabel}>{COPY.circlePlanSpotsForOthers}</Text>
               <View style={styles.stepperInline}>
-                <Pressable
+                <TouchableOpacity
+                  activeOpacity={0.7}
                   onPress={() => setStrangerCap((c) => Math.max(STRANGER_MIN, c - 1))}
                   disabled={strangerCap <= STRANGER_MIN}
                   style={[styles.stepperBtn, strangerCap <= STRANGER_MIN && styles.stepperBtnOff]}
                 >
                   <Minus size={16} color={strangerCap <= STRANGER_MIN ? Colors.tertiary : Colors.terracotta} strokeWidth={2.5} />
-                </Pressable>
+                </TouchableOpacity>
                 <Text style={styles.stepperValue}>{strangerCap}</Text>
-                <Pressable
+                <TouchableOpacity
+                  activeOpacity={0.7}
                   onPress={() => setStrangerCap((c) => Math.min(STRANGER_MAX, c + 1))}
                   disabled={strangerCap >= STRANGER_MAX}
                   style={[styles.stepperBtn, strangerCap >= STRANGER_MAX && styles.stepperBtnOff]}
                 >
                   <Plus size={16} color={strangerCap >= STRANGER_MAX ? Colors.tertiary : Colors.terracotta} strokeWidth={2.5} />
-                </Pressable>
+                </TouchableOpacity>
                 <Text style={styles.stepperRange}>{COPY.circlePlanStrangerRange}</Text>
               </View>
               <View style={styles.capacityTruthPill}>
@@ -316,11 +321,12 @@ export default function CirclePlanComposer({
               </View>
             </Animated.View>
           ) : null}
-        </Pressable>
+        </TouchableOpacity>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Pressable
+        <TouchableOpacity
+          activeOpacity={0.85}
           onPress={onPost}
           disabled={postDisabled}
           style={[styles.postBtn, postDisabled && styles.postBtnDisabled]}
@@ -328,7 +334,7 @@ export default function CirclePlanComposer({
           <Text style={styles.postBtnText}>
             {visibilityOpen ? COPY.circlePlanPostToFeed : COPY.circlePlanPostToCircle(circleName)}
           </Text>
-        </Pressable>
+        </TouchableOpacity>
       </ScrollView>
     </BottomSheet>
   );
