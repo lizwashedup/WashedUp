@@ -292,6 +292,9 @@ export const COPY = {
   circleCoverAdd: 'Add a cover photo',
   circleCoverChange: 'Change cover photo',
   circleCoverSub: 'Or let it use a photo from your first plan together.',
+  // Clears a manual cover so the living cover (latest plan photo) resumes, or the
+  // monogram if there are no shared photos yet.
+  circleCoverRemove: 'Remove cover',
   // Step 2, people.
   circleStep2Title: "Who's in it",
   circleStep2Sub: 'Pick from your people. A circle is three or more.',

@@ -107,13 +107,47 @@ export interface CircleMember {
 }
 
 /**
+ * The next upcoming circle plan, as embedded in `get_circle().pinned_plan`
+ * (backend batch 3). `circle_size` is the joined-member count; `circle_in_count`
+ * is how many of those members are already on the plan. Together they drive the
+ * "{filled} of {size} in" capacity line. Note: the payload carries no
+ * visibility / stranger_cap, so the open-plan "up to N others welcome" line is
+ * derived by matching this id against the useCirclePlans row.
+ */
+export interface PinnedPlan {
+  id: string;
+  title: string;
+  start_time: string;
+  image_url: string | null;
+  circle_size: number;
+  circle_in_count: number;
+}
+
+/**
+ * One recent shared photo, as embedded in `get_circle().recent_together`
+ * (backend batch 3, cap 9, newest first). `media_path` is an album-media storage
+ * path (needs a signed URL, see useSignedAlbumUrls). The newest row is the living
+ * cover source when no manual cover is set. NOTE: the shipped RPC returns
+ * individual photos, not plan-grouped "{title} · {n} photos" album rows.
+ */
+export interface RecentTogetherPhoto {
+  upload_id: string;
+  media_path: string;
+  content_type: string;
+  created_at: string;
+  user_id: string;
+  first_name_display: string | null;
+  profile_photo_url: string | null;
+}
+
+/**
  * The noticeboard payload from `get_circle()`. `pinned_plan` and
- * `recent_together` are stable extension points: the RPC returns them as
- * null / [] in v1 (wired in later steps), so the shape never has to change.
+ * `recent_together` are hydrated as of backend batch 3 (null / [] when the
+ * circle has no upcoming plan / no shared photos yet).
  */
 export interface CirclePayload {
   circle: CircleDetail;
   members: CircleMember[];
-  pinned_plan: unknown | null;
-  recent_together: unknown[];
+  pinned_plan: PinnedPlan | null;
+  recent_together: RecentTogetherPhoto[];
 }

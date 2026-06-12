@@ -20,6 +20,12 @@ export interface UpdateCircleIdentity {
   description: string | null;
   /** Optional cover (already uploaded to circle-covers); points cover_upload_id. */
   coverUploadId?: string | null;
+  /**
+   * Clear the manual cover. update_circle COALESCEs p_cover_upload_id, so a null
+   * can't clear it; p_clear_cover is the only path. Ignored when a new cover is
+   * also supplied (the new cover wins).
+   */
+  clearCover?: boolean;
 }
 
 export function useUpdateCircle(
@@ -28,12 +34,13 @@ export function useUpdateCircle(
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ name, description, coverUploadId }: UpdateCircleIdentity): Promise<void> => {
+    mutationFn: async ({ name, description, coverUploadId, clearCover }: UpdateCircleIdentity): Promise<void> => {
       const { error } = await supabase.rpc('update_circle', {
         p_circle_id: circleId,
         p_name: name,
         p_description: description,
         p_cover_upload_id: coverUploadId ?? null,
+        p_clear_cover: clearCover === true && !coverUploadId,
       });
       if (error) throw error;
     },

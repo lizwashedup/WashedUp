@@ -4,10 +4,10 @@
  * UNCONDITIONAL action row (post a plan / open chat / invite), the members row,
  * and "coming up" plans with a "Make the first plan." nudge when empty.
  *
- * Data-gated and deferred to a backend follow-up (see tracker): the pinned-plan
- * capacity line "{filled} of {size} in", the living cover (auto from latest plan
- * album), and RECENT TOGETHER all need circle-detail fields that get_circle does
- * not return yet. Manual covers DO work here via buildCircleCoverUrl.
+ * The cover follows the identity ladder: a manual cover (buildCircleCoverUrl) >
+ * the living cover (the newest get_circle().recent_together photo, signed) >
+ * the serif monogram tile. RECENT TOGETHER and the pinned-plan capacity line
+ * land in their own passes.
  */
 import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
@@ -20,6 +20,7 @@ import { CIRCLE_HOME, TYPE } from '../../constants/YoursDesign';
 import { COPY } from '../yours/state/constants';
 import type { CirclePayload } from '../../lib/circles/types';
 import { useCirclePlans, CirclePlanRow } from '../../hooks/useCirclePlans';
+import { useSignedAlbumUrls } from '../../hooks/useSignedAlbumUrls';
 import { buildCircleCoverUrl } from '../../lib/circles/coverUrl';
 import { formatPlanWhenLA } from '../../lib/planTime';
 import CircleCover from '../yours/circles/CircleCover';
@@ -94,7 +95,14 @@ export default function CircleNoticeboard({
   const router = useRouter();
   const { data: plans = [] } = useCirclePlans(circle.id);
   const title = displayName?.trim() || circle.name;
-  const coverUrl = buildCircleCoverUrl(circle.id, circle.cover_upload_id);
+
+  // Identity ladder: a manual cover wins; with none, the living cover is the
+  // newest shared photo from a circle plan album (signed, since album-media is
+  // private); with neither, CircleCover falls to the serif monogram.
+  const manualCoverUrl = buildCircleCoverUrl(circle.id, circle.cover_upload_id);
+  const livingPath = manualCoverUrl ? null : payload.recent_together[0]?.media_path ?? null;
+  const { data: signed = {} } = useSignedAlbumUrls(livingPath ? [livingPath] : []);
+  const coverUrl = manualCoverUrl ?? (livingPath ? signed[livingPath] ?? null : null);
   const [firstPlanPressed, setFirstPlanPressed] = useState(false);
 
   return (

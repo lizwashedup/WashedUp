@@ -157,6 +157,7 @@ function CircleDetail({ circleId }: { circleId: string }) {
         visible={nameOpen}
         circleId={circleId}
         userId={userId}
+        currentCoverUploadId={data?.circle.cover_upload_id ?? null}
         onClose={() => setNameOpen(false)}
       />
 

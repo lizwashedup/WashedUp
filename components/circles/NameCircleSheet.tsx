@@ -31,18 +31,22 @@ import { BrandedAlert } from '../BrandedAlert';
 import { useUpdateCircle } from '../../hooks/useUpdateCircle';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { pickCoverPhoto } from '../../lib/circles/pickCover';
+import { buildCircleCoverUrl } from '../../lib/circles/coverUrl';
 import CircleCover from '../yours/circles/CircleCover';
 
 export default function NameCircleSheet({
   visible,
   circleId,
   userId,
+  currentCoverUploadId,
   onClose,
   onNamed,
 }: {
   visible: boolean;
   circleId: string;
   userId: string | null | undefined;
+  /** The circle's existing manual cover, if any; enables "Remove cover". */
+  currentCoverUploadId?: string | null;
   onClose: () => void;
   onNamed?: () => void;
 }) {
@@ -52,17 +56,27 @@ export default function NameCircleSheet({
   const [description, setDescription] = useState('');
   const [coverBase64, setCoverBase64] = useState<string | null>(null);
   const [coverPreviewUri, setCoverPreviewUri] = useState<string | null>(null);
+  const [removeCover, setRemoveCover] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorVisible, setErrorVisible] = useState(false);
 
   const busy = update.isPending || saving;
   const canSave = name.trim().length > 0 && !busy;
 
+  const currentCoverUrl = buildCircleCoverUrl(circleId, currentCoverUploadId);
+  // Show the existing cover in the preview unless the user picked a new one or
+  // staged its removal. A staged removal drops the preview to the monogram.
+  const previewCoverUrl = coverPreviewUri ?? (removeCover ? null : currentCoverUrl);
+  // "Remove cover" applies to a saved manual cover only (a not-yet-saved pick is
+  // cleared by re-picking). Hidden once removal is staged or a new cover is picked.
+  const showRemoveCover = !!currentCoverUrl && !coverPreviewUri && !removeCover;
+
   const reset = () => {
     setName('');
     setDescription('');
     setCoverBase64(null);
     setCoverPreviewUri(null);
+    setRemoveCover(false);
   };
   const close = () => { reset(); onClose(); };
 
@@ -71,6 +85,7 @@ export default function NameCircleSheet({
     if (picked) {
       setCoverBase64(picked.base64);
       setCoverPreviewUri(picked.uri);
+      setRemoveCover(false);
     }
   };
 
@@ -89,7 +104,7 @@ export default function NameCircleSheet({
       }
     }
     update.mutate(
-      { name: name.trim(), description: description.trim() || null, coverUploadId },
+      { name: name.trim(), description: description.trim() || null, coverUploadId, clearCover: removeCover },
       {
         onSuccess: () => { reset(); onNamed?.(); onClose(); },
         onError: () => setErrorVisible(true),
@@ -123,7 +138,7 @@ export default function NameCircleSheet({
           <View style={styles.coverWrap}>
             <CircleCover
               name={name}
-              coverUrl={coverPreviewUri}
+              coverUrl={previewCoverUrl}
               size={CIRCLE_CREATE.coverPreview}
               radius={CIRCLE_CREATE.coverPreviewRadius}
               monogramSize={CIRCLE_CREATE.coverMonogram}
@@ -133,13 +148,24 @@ export default function NameCircleSheet({
               android_ripple={{ color: Colors.border }}
               style={styles.coverBtn}
               accessibilityRole="button"
-              accessibilityLabel={coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
+              accessibilityLabel={previewCoverUrl ? COPY.circleCoverChange : COPY.circleCoverAdd}
             >
               <ImagePlus size={16} color={Colors.terracotta} strokeWidth={1.75} />
               <Text style={styles.coverBtnText}>
-                {coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
+                {previewCoverUrl ? COPY.circleCoverChange : COPY.circleCoverAdd}
               </Text>
             </Pressable>
+            {showRemoveCover && (
+              <Pressable
+                onPress={() => setRemoveCover(true)}
+                hitSlop={8}
+                style={styles.removeCoverBtn}
+                accessibilityRole="button"
+                accessibilityLabel={COPY.circleCoverRemove}
+              >
+                <Text style={styles.removeCoverText}>{COPY.circleCoverRemove}</Text>
+              </Pressable>
+            )}
           </View>
 
           <TextInput
@@ -227,6 +253,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.terracotta,
   },
   coverBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  removeCoverBtn: { marginTop: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  removeCoverText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
   field: {
     backgroundColor: Colors.inputBg,
     borderRadius: CIRCLE_CREATE.fieldRadius,
