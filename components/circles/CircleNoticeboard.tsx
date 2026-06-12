@@ -6,11 +6,12 @@
  *
  * The cover follows the identity ladder: a manual cover (buildCircleCoverUrl) >
  * the living cover (the newest get_circle().recent_together photo, signed) >
- * the serif monogram tile. RECENT TOGETHER and the pinned-plan capacity line
- * land in their own passes.
+ * the serif monogram tile. RECENTLY TOGETHER shows the circle's recent shared
+ * plan-album photos as a strip. The pinned-plan capacity line lands in its
+ * own pass.
  */
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { CalendarDays, CalendarPlus, MessageCircle, UserPlus, Pencil } from 'lucide-react-native';
@@ -25,6 +26,11 @@ import { buildCircleCoverUrl } from '../../lib/circles/coverUrl';
 import { formatPlanWhenLA } from '../../lib/planTime';
 import CircleCover from '../yours/circles/CircleCover';
 import CircleMembersRow from './CircleMembersRow';
+
+// Recently-together photo strip dimensions (named, no inline math in styles).
+const RECENT_THUMB = 84;
+const RECENT_THUMB_RADIUS = 12;
+const RECENT_THUMB_GAP = 8;
 
 function PlanRow({ plan, onPress }: { plan: CirclePlanRow; onPress: () => void }) {
   const isOpen = plan.circle_visibility === 'open';
@@ -96,12 +102,15 @@ export default function CircleNoticeboard({
   const { data: plans = [] } = useCirclePlans(circle.id);
   const title = displayName?.trim() || circle.name;
 
+  // Sign every recent-together photo once; the strip and the living cover both
+  // read from this map (album-media is private, so paths need signed URLs).
+  const recentPhotos = payload.recent_together;
+  const { data: signed = {} } = useSignedAlbumUrls(recentPhotos.map((p) => p.media_path));
+
   // Identity ladder: a manual cover wins; with none, the living cover is the
-  // newest shared photo from a circle plan album (signed, since album-media is
-  // private); with neither, CircleCover falls to the serif monogram.
+  // newest shared photo; with neither, CircleCover falls to the serif monogram.
   const manualCoverUrl = buildCircleCoverUrl(circle.id, circle.cover_upload_id);
-  const livingPath = manualCoverUrl ? null : payload.recent_together[0]?.media_path ?? null;
-  const { data: signed = {} } = useSignedAlbumUrls(livingPath ? [livingPath] : []);
+  const livingPath = manualCoverUrl ? null : recentPhotos[0]?.media_path ?? null;
   const coverUrl = manualCoverUrl ?? (livingPath ? signed[livingPath] ?? null : null);
   const [firstPlanPressed, setFirstPlanPressed] = useState(false);
 
@@ -186,7 +195,37 @@ export default function CircleNoticeboard({
         )}
       </View>
 
-      {/* RECENT TOGETHER + pinned-plan capacity: deferred (data-gated; see header). */}
+      {/* Recently together: the circle's recent shared plan-album photos. */}
+      {recentPhotos.length > 0 && (
+        <View style={styles.section}>
+          <SectionLabel>{COPY.circleRecentLabel}</SectionLabel>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.recentRow}
+          >
+            {recentPhotos.map((photo) => {
+              const uri = signed[photo.media_path];
+              return (
+                <View key={photo.upload_id} style={styles.recentThumb}>
+                  {uri ? (
+                    <Image
+                      source={{ uri }}
+                      style={styles.recentImg}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                    />
+                  ) : (
+                    <View style={[styles.recentImg, styles.recentSkeleton]} />
+                  )}
+                </View>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Pinned-plan capacity line lands in its own pass. */}
     </View>
   );
 }
@@ -329,4 +368,20 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
   },
+  recentRow: {
+    paddingHorizontal: CIRCLE_HOME.sectionPadH,
+    gap: RECENT_THUMB_GAP,
+  },
+  recentThumb: {
+    width: RECENT_THUMB,
+    height: RECENT_THUMB,
+    borderRadius: RECENT_THUMB_RADIUS,
+    overflow: 'hidden',
+  },
+  recentImg: {
+    width: RECENT_THUMB,
+    height: RECENT_THUMB,
+    borderRadius: RECENT_THUMB_RADIUS,
+  },
+  recentSkeleton: { backgroundColor: Colors.dividerWarm },
 });
