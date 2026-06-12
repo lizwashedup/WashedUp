@@ -31,10 +31,13 @@ import {
   View,
   Text,
   Pressable,
+  TextInput,
+  Keyboard,
   StyleSheet,
   Animated,
   Dimensions,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
 import {
@@ -68,7 +71,7 @@ export interface HandshakeResult {
 
 // ─── Sheet geometry + motion (the composer/calendar-expand spring family) ───
 const SCREEN_H = Dimensions.get('window').height;
-const HALF_H = Math.round(SCREEN_H * 0.58); // step 1: half, plan card visible
+const HALF_H = Math.round(SCREEN_H * 0.66); // step 1: half, plan card visible
 const TALL_H = Math.round(SCREEN_H * 0.9); // steps 2-3: the people moment
 const SPRING_IN = { mass: 1, stiffness: 280, damping: 26 };
 const SPRING_OUT = { mass: 1, stiffness: 320, damping: 30 };
@@ -138,6 +141,28 @@ export default function PostPlanSurveyV3({
   const backdrop = useRef(new Animated.Value(0)).current;
   const sheetHeight = useRef(new Animated.Value(HALF_H)).current;
   const grownRef = useRef(false);
+
+  // Keyboard lift. Step 1's optional comment box would sit under the keyboard on
+  // the half sheet; lift the whole sheet by the keyboard height while editing.
+  const kb = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = Keyboard.addListener(showEvt, (e) => {
+      Animated.timing(kb, {
+        toValue: -e.endCoordinates.height,
+        duration: 220,
+        useNativeDriver: false,
+      }).start();
+    });
+    const onHide = Keyboard.addListener(hideEvt, () => {
+      Animated.timing(kb, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+    });
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, [kb]);
 
   // Enter.
   useEffect(() => {
@@ -342,7 +367,10 @@ export default function PostPlanSurveyV3({
 
           {/* The grow-sheet. */}
           <Animated.View
-            style={[styles.sheet, { height: sheetHeight, transform: [{ translateY }] }]}
+            style={[
+              styles.sheet,
+              { height: sheetHeight, transform: [{ translateY: Animated.add(translateY, kb) }] },
+            ]}
           >
             <View style={styles.handle} />
             <SheetHeader
@@ -353,18 +381,29 @@ export default function PostPlanSurveyV3({
             />
 
             {/* Bodies land in checkpoints 2-4. */}
-            <View style={styles.body}>
+            <Animated.ScrollView
+              style={styles.body}
+              contentContainerStyle={styles.bodyContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
               {step === 'how' && (
-                <StepHowPlaceholder
-                  onPick={(r) => {
-                    setRating(r);
-                  }}
+                <StepHow
                   selected={rating}
+                  onPick={(r) => {
+                    hapticSelection();
+                    setRating(r);
+                    setShowComment(r === 'thumbs_down');
+                    if (r !== 'thumbs_down') Keyboard.dismiss();
+                  }}
+                  comment={comment}
+                  setComment={setComment}
+                  showComment={showComment}
                 />
               )}
               {step === 'who' && <StepStub label="Who made it" />}
               {step === 'keep' && <StepStub label="Keep these people" />}
-            </View>
+            </Animated.ScrollView>
 
             {/* Footer: Continue + the always-live escape. */}
             <Footer
@@ -511,14 +550,38 @@ function Footer({
   );
 }
 
-// ─── Temporary step placeholders (replaced in checkpoints 2-4) ──────────────
-function StepHowPlaceholder({
-  onPick,
+// ─── Step 1: How was it? (pills + optional "Not great" comment reveal) ───────
+const COMMENT_REVEAL_H = 134;
+
+function StepHow({
   selected,
+  onPick,
+  comment,
+  setComment,
+  showComment,
 }: {
-  onPick: (r: Rating) => void;
   selected: Rating | null;
+  onPick: (r: Rating) => void;
+  comment: string;
+  setComment: (s: string) => void;
+  showComment: boolean;
 }) {
+  const reduceMotion = useReduceMotion();
+  const reveal = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (reduceMotion) {
+      reveal.setValue(showComment ? 1 : 0);
+      return;
+    }
+    Animated.spring(reveal, {
+      toValue: showComment ? 1 : 0,
+      mass: 1,
+      stiffness: 280,
+      damping: 30,
+      useNativeDriver: false,
+    }).start();
+  }, [showComment, reduceMotion, reveal]);
+
   const pills: Array<{ r: Rating; label: string }> = [
     { r: 'thumbs_up', label: COPY.surveyGood },
     { r: 'fine', label: COPY.surveyFine },
@@ -532,17 +595,39 @@ function StepHowPlaceholder({
           <Pressable
             key={p.r}
             style={[styles.pill, on && styles.pillOn]}
-            onPress={() => {
-              hapticSelection();
-              onPick(p.r);
-            }}
+            onPress={() => onPick(p.r)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
           >
-            <Text style={[styles.pillText, on && styles.pillTextOn]}>
-              {p.label}
-            </Text>
+            <Text style={[styles.pillText, on && styles.pillTextOn]}>{p.label}</Text>
           </Pressable>
         );
       })}
+
+      {/* "Not great" reveals an optional, never-required comment box. */}
+      <Animated.View
+        style={[
+          styles.commentReveal,
+          {
+            height: reveal.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, COMMENT_REVEAL_H],
+            }),
+            opacity: reveal,
+          },
+        ]}
+      >
+        <Text style={styles.commentLabel}>{COPY.surveyBadFollowup}</Text>
+        <TextInput
+          value={comment}
+          onChangeText={setComment}
+          placeholder=""
+          style={styles.commentInput}
+          multiline
+          editable={showComment}
+        />
+        <Text style={styles.commentHint}>{COPY.surveyBadHelper}</Text>
+      </Animated.View>
     </View>
   );
 }
@@ -718,7 +803,8 @@ const styles = StyleSheet.create({
   },
 
   // ── Body + footer ──
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 18 },
+  body: { flex: 1 },
+  bodyContent: { paddingHorizontal: 24, paddingTop: 18, paddingBottom: 8, flexGrow: 1 },
   footer: {
     paddingHorizontal: 24,
     paddingTop: 8,
@@ -761,6 +847,39 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
   },
   pillTextOn: { color: Colors.cream },
+
+  // ── Step 1 comment reveal ──
+  commentReveal: {
+    overflow: 'hidden',
+    marginTop: 6,
+    justifyContent: 'flex-start',
+  },
+  commentLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: Colors.secondary,
+    marginBottom: 8,
+  },
+  commentInput: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 12,
+    minHeight: 72,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+    textAlignVertical: 'top',
+  },
+  commentHint: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.tertiary,
+    marginTop: 6,
+  },
 
   // ── Stubs ──
   stub: { flex: 1, alignItems: 'center', justifyContent: 'center' },
