@@ -25,7 +25,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -275,7 +275,24 @@ export default function PostPlanSurveyV3({
 
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={exit}>
-      <SafeAreaView style={styles.container}>
+      {/* SafeAreaProvider inside the Modal so insets are non-zero: an RN Modal is
+          a separate native window with no provider, so a bare SafeAreaView would
+          render the always-available escape (and the title) under the notch /
+          dynamic island. Rail 1 requires the escape to stay reachable. */}
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.container}>
+        {/* Rail 1: escape on EVERY step, never disabled, never network-gated.
+            A flow header (not absolute) so it always sits below the inset. */}
+        <View style={styles.header}>
+          <Pressable
+            onPress={exit}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={COPY.surveyNotNow}
+          >
+            <Text style={styles.escapeText}>{COPY.surveyNotNow}</Text>
+          </Pressable>
+        </View>
         {step === 'how' && (
           <View style={styles.body}>
             <Text style={styles.planTitle}>{plan.title}</Text>
@@ -400,17 +417,6 @@ export default function PostPlanSurveyV3({
           </View>
         )}
 
-        {/* Rail 1: escape on EVERY step, never disabled, never network-gated. */}
-        <Pressable
-          style={styles.escape}
-          onPress={exit}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel={COPY.surveyNotNow}
-        >
-          <Text style={styles.escapeText}>{COPY.surveyNotNow}</Text>
-        </Pressable>
-
         {/* Handshake feedback. In-Modal overlay (NOT a nested RN Modal, which is
             the known iOS present-while-presenting bug). Celebration when someone
             became mutual; otherwise a quiet auto-dismissing line. */}
@@ -438,14 +444,16 @@ export default function PostPlanSurveyV3({
             </Text>
           </Animated.View>
         )}
-      </SafeAreaView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 40, gap: 14 },
+  header: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 2 },
+  body: { flex: 1, paddingHorizontal: 24, paddingTop: 16, gap: 14 },
   stretch: { alignSelf: 'stretch' },
   planTitle: {
     fontFamily: Fonts.displayItalic,
@@ -496,8 +504,7 @@ const styles = StyleSheet.create({
   nextText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
   skip: { alignItems: 'center', paddingVertical: 12 },
   skipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.tertiary },
-  escape: { position: 'absolute', top: 12, right: 20, paddingVertical: 6, paddingHorizontal: 4 },
-  escapeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.tertiary },
+  escapeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.tertiary, paddingVertical: 6, paddingHorizontal: 4 },
   // ── Handshake celebration (in-Modal overlay) ──
   scrim: {
     ...StyleSheet.absoluteFillObject,
