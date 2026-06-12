@@ -26,6 +26,7 @@ import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { invalidateAuthProfile } from '../../../hooks/useProfile';
 import { supabase } from '../../../lib/supabase';
+import { getUserBounded } from '../../../lib/authGate';
 import { friendlyError } from '../../../lib/friendlyError';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
@@ -146,8 +147,13 @@ export default function OnboardingPhotoScreen() {
     hapticLight();
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { user, resolved } = await getUserBounded();
       if (!user) {
+        if (!resolved) {
+          // Transient (timeout/network): do NOT sign out a valid session.
+          setAlertInfo({ title: 'something went wrong', message: "couldn't reach the server. try again." });
+          return;
+        }
         setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
         supabase.auth.signOut();
         return;

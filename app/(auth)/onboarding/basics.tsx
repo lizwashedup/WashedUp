@@ -19,6 +19,7 @@ import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
+import { getUserBounded } from '../../../lib/authGate';
 import { unauthedRoute } from '../../../lib/authRouting';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import Colors from '../../../constants/Colors';
@@ -191,9 +192,14 @@ export default function OnboardingBasicsScreen() {
     setSaveError(null);
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { user, resolved } = await getUserBounded();
       if (!user) {
         setLoading(false);
+        if (!resolved) {
+          // Transient (timeout/network): do NOT sign out a valid session.
+          setSaveError("couldn't reach the server. try again.");
+          return;
+        }
         setSaveError('session expired. signing you out…');
         setTimeout(() => supabase.auth.signOut(), 1500);
         return;

@@ -20,6 +20,7 @@ import { router } from 'expo-router';
 import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
+import { getUserBounded } from '../../../lib/authGate';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
@@ -86,10 +87,16 @@ export default function OnboardingReferralScreen() {
     hapticLight();
     setLoading(true);
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { user, resolved } = await getUserBounded();
       if (!user) {
+        if (!resolved) {
+          // Transient (timeout/network): do NOT sign out a valid session.
+          setAlertInfo({
+            title: 'something went wrong',
+            message: "couldn't reach the server. try again.",
+          });
+          return;
+        }
         setAlertInfo({
           title: 'session expired',
           message: 'please sign in again.',
