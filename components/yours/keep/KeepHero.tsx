@@ -130,11 +130,15 @@ export default function KeepHero({
         </Text>
       )}
 
-      {!hideStats && (
+      {/* Anti-zero (per-stat): the whole row hides before there is any history
+          (hideStats), and once there is, each individual zero stat is dropped
+          rather than rendered as a "0" ("2 plans together · 1 album", never
+          "0 coming up"). */}
+      {!hideStats && (plansCount > 0 || albumsCount > 0 || comingUpCount > 0) && (
         <View style={styles.stats}>
-          <Stat value={plansCount} label={COPY.keepStatPlans} />
-          <Stat value={albumsCount} label={COPY.keepStatAlbums} />
-          <Stat value={comingUpCount} label={COPY.keepStatComingUp} />
+          {plansCount > 0 && <Stat value={plansCount} label={COPY.keepStatPlans} />}
+          {albumsCount > 0 && <Stat value={albumsCount} label={COPY.keepStatAlbums} />}
+          {comingUpCount > 0 && <Stat value={comingUpCount} label={COPY.keepStatComingUp} />}
         </View>
       )}
     </View>
