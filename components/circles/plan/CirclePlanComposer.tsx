@@ -35,6 +35,7 @@ import { type CalendarDay } from '../../calendar/WashedUpCalendar';
 import CollapsibleCalendar from '../../composer/CollapsibleCalendar';
 import TimePicker from '../../composer/TimePicker';
 import InlineNudge from '../../composer/InlineNudge';
+import { useNudgeArbiter, NUDGE_PLACE_BASE, NUDGE_PLACE_WARM } from '../../composer/nudgeArbiter';
 import { getTodayInLA, laWallTimeToUTC } from '../../../lib/laDate';
 import {
   useCreateCirclePlan,
@@ -131,6 +132,15 @@ export default function CirclePlanComposer({
     return null;
   })();
 
+  // Single owner of the one visible gold line. No recovery nudge here (post
+  // failures show the inline error), so the arbiter just picks between the two
+  // Tier-3 nudges: most recently triggered wins.
+  const nudge = useNudgeArbiter({
+    recoveryActive: false,
+    tonightEligible: activeQuick === 'tonight',
+    placeSkipEligible: !where.trim(),
+  });
+
   const buildStartTime = (): Date => {
     let h = hour % 12;
     if (period === 'PM') h += 12;
@@ -205,8 +215,10 @@ export default function CirclePlanComposer({
           <PlacePicker
             value={where.trim() ? { name: where.trim(), lat: null, lng: null, neighborhood: null } : null}
             onChange={(v: PlaceValue | null) => setWhere(v?.name ?? '')}
-            openToOthers={visibilityOpen}
           />
+          {nudge === 'placeSkip' ? (
+            <InlineNudge text={visibilityOpen ? NUDGE_PLACE_WARM : NUDGE_PLACE_BASE} />
+          ) : null}
         </View>
 
         {/* When */}
@@ -236,7 +248,7 @@ export default function CirclePlanComposer({
             selected
             onChange={(h, m, p) => { setHour(h); setMinute(m); setPeriod(p); }}
           />
-          {activeQuick === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
+          {nudge === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
         </View>
 
         {/* WHO IS THIS FOR - the audience binary. "Pick people" is cut. */}

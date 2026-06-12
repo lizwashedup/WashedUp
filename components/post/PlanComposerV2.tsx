@@ -65,6 +65,7 @@ import CategoryChips from '../composer/CategoryChips';
 import CollapsibleCalendar from '../composer/CollapsibleCalendar';
 import TimePicker, { displayTime } from '../composer/TimePicker';
 import InlineNudge from '../composer/InlineNudge';
+import { useNudgeArbiter, NUDGE_PLACE_BASE } from '../composer/nudgeArbiter';
 import PlacePicker, { type PlaceValue } from '../composer/place/PlacePicker';
 import PostConfirmation from '../composer/PostConfirmation';
 import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../components/post/InvitePeopleSection';
@@ -387,6 +388,13 @@ export default function PlanComposerV2() {
     if (v?.neighborhood) setNeighborhood(v.neighborhood);
   };
 
+  // Single owner of the one visible gold line (recovery > most-recent Tier-3).
+  const nudge = useNudgeArbiter({
+    recoveryActive: recoveryNudge,
+    tonightEligible: activeQuick === 'tonight',
+    placeSkipEligible: place == null,
+  });
+
   const whenSummary = dateSelected
     ? `${MONTHS[dateMonth]} ${dateDay}${timeSelected ? ` · ${displayTime(timeHour, timeMinute, timePeriod).toLowerCase()}` : ''}`
     : 'add a day';
@@ -620,13 +628,14 @@ export default function PlanComposerV2() {
             selected={timeSelected}
             onChange={(h, m, p) => { setTimeHour(h); setTimeMinute(m); setTimePeriod(p); setTimeSelected(true); }}
           />
-          {activeQuick === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
+          {nudge === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
         </View>
 
         {/* WHERE */}
         <View style={styles.section}>
           <Text style={styles.label}>where</Text>
           <PlacePicker value={place} onChange={onPlaceChange} />
+          {nudge === 'placeSkip' ? <InlineNudge text={NUDGE_PLACE_BASE} /> : null}
         </View>
 
         {/* HOW MANY (existing semantics, new skin) */}
@@ -772,7 +781,7 @@ export default function PlanComposerV2() {
 
       {/* Sticky live post bar */}
       <View style={[styles.postBar, { paddingBottom: sheetBottomPad }]}>
-        {recoveryNudge ? (
+        {nudge === 'recovery' ? (
           <TouchableOpacity style={styles.recoveryNudge} onPress={() => setRecoveryNudge(false)} activeOpacity={0.8}>
             <View style={styles.recoveryDot} />
             <Text style={styles.recoveryText}>that didn't go through. your plan is here. tap post to try again.</Text>

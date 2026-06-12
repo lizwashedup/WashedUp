@@ -34,15 +34,9 @@ export interface PlaceValue {
   neighborhood: string | null;
 }
 
-const NUDGE_BASE = 'plans with a place get found more. you can always add one later.';
-const NUDGE_WARM =
-  'plans with a place get found more, and people are likelier to say yes. you can always add one later.';
-
 interface PlacePickerProps {
   value: PlaceValue | null;
   onChange: (v: PlaceValue | null) => void;
-  /** Circle "open to others": show the slightly warmer nudge. */
-  openToOthers?: boolean;
 }
 
 /** Google Static Maps preview with a terracotta marker. An image (no native
@@ -65,7 +59,7 @@ function milesBetween(aLat: number, aLng: number, bLat: number, bLng: number): n
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
 
-export default function PlacePicker({ value, onChange, openToOthers }: PlacePickerProps) {
+export default function PlacePicker({ value, onChange }: PlacePickerProps) {
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
   const [recents, setRecents] = useState<RecentPlace[]>([]);
@@ -166,16 +160,12 @@ export default function PlacePicker({ value, onChange, openToOthers }: PlacePick
           </View>
         </View>
       ) : (
-        <View>
-          <TouchableOpacity style={styles.searchField} onPress={() => setSearching(true)} activeOpacity={0.7}>
-            <Search size={15} color={Colors.secondary} strokeWidth={2} />
-            <Text style={styles.searchPlaceholder}>add a place (optional)</Text>
-          </TouchableOpacity>
-          <View style={styles.nudge}>
-            <View style={styles.nudgeDot} />
-            <Text style={styles.nudgeText}>{openToOthers ? NUDGE_WARM : NUDGE_BASE}</Text>
-          </View>
-        </View>
+        // Skipped: just the search field. The place-skip nudge is owned by the
+        // composer's nudge arbiter (at most one gold line shows), not here.
+        <TouchableOpacity style={styles.searchField} onPress={() => setSearching(true)} activeOpacity={0.7}>
+          <Search size={15} color={Colors.secondary} strokeWidth={2} />
+          <Text style={styles.searchPlaceholder}>add a place (optional)</Text>
+        </TouchableOpacity>
       )}
       {renderSearchModal()}
     </View>
@@ -272,13 +262,6 @@ const styles = StyleSheet.create({
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13,
   },
   searchPlaceholder: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.inkSoft },
-  nudge: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10,
-    backgroundColor: Colors.goldBadgeSoft, borderWidth: 1, borderColor: Colors.goldAccent,
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11,
-  },
-  nudgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.gold },
-  nudgeText: { flex: 1, fontFamily: Fonts.sans, fontSize: 13, lineHeight: 18, color: Colors.quoteText },
 
   // Chosen
   chosen: {
