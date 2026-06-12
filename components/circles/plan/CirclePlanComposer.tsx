@@ -18,7 +18,6 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   Pressable,
   ScrollView,
   Image,
@@ -40,6 +39,7 @@ import {
 } from '../../../hooks/useCreateCirclePlan';
 import EditorialTitleField from '../../composer/EditorialTitleField';
 import CategoryChips from '../../composer/CategoryChips';
+import PlacePicker, { type PlaceValue } from '../../composer/place/PlacePicker';
 import { type PlanCategory } from '../../../constants/Categories';
 
 interface ComposerMember {
@@ -201,15 +201,13 @@ export default function CirclePlanComposer({
 
         {/* Where */}
         <Text style={styles.fieldLabel}>{COPY.circlePlanWhereLabel}</Text>
-        <TextInput
-          style={styles.field}
-          value={where}
-          onChangeText={setWhere}
-          placeholder={COPY.circlePlanWherePlaceholder}
-          placeholderTextColor={Colors.inkSoft}
-          maxLength={120}
-          returnKeyType="next"
-        />
+        <View style={styles.whereWrap}>
+          <PlacePicker
+            value={where.trim() ? { name: where.trim(), lat: null, lng: null, neighborhood: null } : null}
+            onChange={(v: PlaceValue | null) => setWhere(v?.name ?? '')}
+            openToOthers={visibilityOpen}
+          />
+        </View>
 
         {/* When (date) */}
         <Text style={styles.fieldLabel}>{COPY.circlePlanWhenLabel}</Text>
@@ -410,6 +408,7 @@ const styles = StyleSheet.create({
     marginBottom: CIRCLE_PLAN.sectionGap,
   },
   categoryWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
+  whereWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
   calendarWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
   timeRow: {
     flexDirection: 'row',

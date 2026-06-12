@@ -63,6 +63,7 @@ import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
 import EditorialTitleField from '../composer/EditorialTitleField';
 import CategoryChips from '../composer/CategoryChips';
 import CollapsibleCalendar from '../composer/CollapsibleCalendar';
+import PlacePicker, { type PlaceValue } from '../composer/place/PlacePicker';
 import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../components/post/InvitePeopleSection';
 import PeoplePickerSheet, { type PickedPerson } from '../../components/post/PeoplePickerSheet';
 
@@ -374,6 +375,16 @@ export default function PlanComposerV2() {
     return null;
   }, [dateSelected, dateYear, dateMonth, dateDay]);
 
+  const place: PlaceValue | null = location.trim()
+    ? { name: location.trim(), lat: locationLat, lng: locationLng, neighborhood: neighborhood || null }
+    : null;
+  const onPlaceChange = (v: PlaceValue | null) => {
+    setLocation(v?.name ?? '');
+    setLocationLat(v?.lat ?? null);
+    setLocationLng(v?.lng ?? null);
+    if (v?.neighborhood) setNeighborhood(v.neighborhood);
+  };
+
   const whenSummary = dateSelected
     ? `${MONTHS[dateMonth]} ${dateDay}${timeSelected ? ` · ${displayTime(timeHour, timeMinute, timePeriod).toLowerCase()}` : ''}`
     : 'add a day';
@@ -596,12 +607,10 @@ export default function PlanComposerV2() {
           </TouchableOpacity>
         </View>
 
-        {/* WHERE (stub - picker lands in steps 3-4) */}
+        {/* WHERE */}
         <View style={styles.section}>
           <Text style={styles.label}>where</Text>
-          <View style={styles.placeStub}>
-            <Text style={styles.placeStubText}>add a place (optional)</Text>
-          </View>
+          <PlacePicker value={place} onChange={onPlaceChange} />
         </View>
 
         {/* HOW MANY (existing semantics, new skin) */}
@@ -929,14 +938,6 @@ const styles = StyleSheet.create({
   timePill: { backgroundColor: Colors.accentSubtle, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
   timePillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   timeChange: { fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.secondary, marginLeft: 'auto' },
-
-  // Place stub
-  placeStub: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13,
-  },
-  placeStubText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.inkSoft },
 
   // How many
   stepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 },
