@@ -27,7 +27,9 @@ import { COPY } from '../yours/state/constants';
 import { hapticSelection } from '../../lib/haptics';
 import { useAuthUserId } from '../yours/state/useAuthUserId';
 import { useYoursGrid } from '../../hooks/useYoursGrid';
+import { usePickerFilter } from '../../hooks/usePickerFilter';
 import { useInviteToCircle } from '../../hooks/useInviteToCircle';
+import PeopleSearchBar from '../yours/search/PeopleSearchBar';
 import type { YoursGridPerson } from '../../lib/yours/types';
 
 const AVATAR = 44;
@@ -97,6 +99,12 @@ export default function AddPeopleSheet({
     return people.filter((p) => !present.has(p.user_id));
   }, [people, existingMemberIds]);
 
+  // Search appears only past the threshold; selected people stay visible.
+  const { query, setQuery, showSearch, filtered } = usePickerFilter(
+    addable,
+    (p) => selected.has(p.user_id),
+  );
+
   const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -151,20 +159,24 @@ export default function AddPeopleSheet({
               <Text style={styles.emptySub}>{COPY.circleAddEmptySub}</Text>
             </View>
           ) : (
-            <FlatList
-              data={addable}
-              keyExtractor={(p) => p.user_id}
-              renderItem={({ item }) => (
-                <PickRow
-                  person={item}
-                  selected={selected.has(item.user_id)}
-                  onToggle={() => toggle(item.user_id)}
-                />
-              )}
-              style={styles.list}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-            />
+            <>
+              {showSearch && <PeopleSearchBar value={query} onChange={setQuery} />}
+              <FlatList
+                data={filtered}
+                keyExtractor={(p) => p.user_id}
+                renderItem={({ item }) => (
+                  <PickRow
+                    person={item}
+                    selected={selected.has(item.user_id)}
+                    onToggle={() => toggle(item.user_id)}
+                  />
+                )}
+                style={styles.list}
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              />
+            </>
           )}
 
           {addable.length > 0 && (

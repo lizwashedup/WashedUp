@@ -12,6 +12,8 @@ import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
 import { CIRCLE_CREATE, CIRCLE } from '../../../constants/YoursDesign';
 import { COPY } from '../../yours/state/constants';
 import { hapticSelection } from '../../../lib/haptics';
+import { usePickerFilter } from '../../../hooks/usePickerFilter';
+import PeopleSearchBar from '../../yours/search/PeopleSearchBar';
 import type { YoursGridPerson } from '../../../lib/yours/types';
 
 function PickRow({
@@ -64,6 +66,11 @@ export default function PeopleStep({
   onAddPeople: () => void;
 }) {
   const [ctaPressed, setCtaPressed] = useState(false);
+  // Search appears only past the threshold; selected people stay visible.
+  const { query, setQuery, showSearch, filtered } = usePickerFilter(
+    people,
+    (p) => selected.has(p.user_id),
+  );
   if (people.length === 0) {
     return (
       <View style={styles.emptyWrap}>
@@ -93,8 +100,9 @@ export default function PeopleStep({
       {selected.size > 0 && (
         <Text style={styles.count}>{COPY.circlePickedCount(selected.size)}</Text>
       )}
+      {showSearch && <PeopleSearchBar value={query} onChange={setQuery} />}
       <FlatList
-        data={people}
+        data={filtered}
         keyExtractor={(p) => p.user_id}
         renderItem={({ item }) => (
           <PickRow
@@ -105,6 +113,7 @@ export default function PeopleStep({
         )}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       />
     </View>
   );
