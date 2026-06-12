@@ -63,7 +63,9 @@ import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
 import EditorialTitleField from '../composer/EditorialTitleField';
 import CategoryChips from '../composer/CategoryChips';
 import CollapsibleCalendar from '../composer/CollapsibleCalendar';
+import TimePicker, { displayTime } from '../composer/TimePicker';
 import PlacePicker, { type PlaceValue } from '../composer/place/PlacePicker';
+import PostConfirmation from '../composer/PostConfirmation';
 import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../components/post/InvitePeopleSection';
 import PeoplePickerSheet, { type PickedPerson } from '../../components/post/PeoplePickerSheet';
 
@@ -74,17 +76,13 @@ type GenderPreference = 'mixed' | 'women_only' | 'men_only' | 'nonbinary_only';
 const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
 type AgeRange = (typeof AGE_RANGES)[number];
 
-const HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const MINUTE_OPTIONS = ['00', '15', '30', '45'];
-const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
-
 const MIN_GROUP = 3;
 const MAX_GROUP = 8;
 const MSG_MIN = 10;
 const MSG_LIMIT = 150;
 const DESC_LIMIT = 1000;
 
-type QuickKind = 'tonight' | 'tomorrow' | 'weekend';
+type QuickKind = 'tonight' | 'tomorrow';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -96,10 +94,6 @@ function buildDatetime(
   if (period === 'PM' && h !== 12) h += 12;
   if (period === 'AM' && h === 12) h = 0;
   return new Date(year, month, day, h, parseInt(minute, 10));
-}
-
-function displayTime(hour: number, minute: string, period: 'AM' | 'PM'): string {
-  return `${hour}:${minute} ${period}`;
 }
 
 function ageRangesToMinMax(ranges: AgeRange[]): { min: number | null; max: number | null } {
@@ -116,17 +110,12 @@ function ageRangesToMinMax(ranges: AgeRange[]): { min: number | null; max: numbe
   return { min, max };
 }
 
-/** Date (LA-local) for a quick chip. Tonight = today, tomorrow = +1, weekend
- *  = the upcoming Saturday (today if already the weekend). */
+/** Date (LA-local) for a quick chip. Tonight = today, tomorrow = +1. Both are
+ *  unambiguous one-tap paths; everything else uses the calendar row. */
 function quickDate(kind: QuickKind): { year: number; month: number; day: number } {
   const t = getTodayInLA();
   const base = new Date(t.y, t.m, t.d);
   if (kind === 'tomorrow') base.setDate(base.getDate() + 1);
-  if (kind === 'weekend') {
-    const dow = base.getDay(); // 0 Sun .. 6 Sat
-    const toSat = (6 - dow + 7) % 7; // 0 if already Sat
-    base.setDate(base.getDate() + toSat);
-  }
   return { year: base.getFullYear(), month: base.getMonth(), day: base.getDate() };
 }
 
@@ -180,10 +169,6 @@ export default function PlanComposerV2() {
   const [timeMinute, setTimeMinute] = useState('00');
   const [timePeriod, setTimePeriod] = useState<'AM' | 'PM'>('PM');
   const [timeSelected, setTimeSelected] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [tempHour, setTempHour] = useState(8);
-  const [tempMinute, setTempMinute] = useState('00');
-  const [tempPeriod, setTempPeriod] = useState<'AM' | 'PM'>('PM');
 
   // ── How many + audience ──
   const [groupSize, setGroupSize] = useState(6); // max_invites; UI shows groupSize+1 total
@@ -216,6 +201,30 @@ export default function PlanComposerV2() {
   const [postedPlanTitle, setPostedPlanTitle] = useState('');
   const [postedGenderLabel, setPostedGenderLabel] = useState<string | undefined>();
   const [inviteDeliveryFailed, setInviteDeliveryFailed] = useState(false);
+  // Optimistic post moment.
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [confirmIsFirst, setConfirmIsFirst] = useState(false);
+  const [confirmMeta, setConfirmMeta] = useState('');
+  const [confirmInvited, setConfirmInvited] = useState(false);
+  const [shareWanted, setShareWanted] = useState(false);
+  const [recoveryNudge, setRecoveryNudge] = useState(false);
+  const neverPostedRef = useRef(false);
+
+  // Has the creator seen the first-plan moment? Drives the elevated copy.
+  useEffect(() => {
+    AsyncStorage.getItem('hasSeenFirstPlanCelebration').then((v) => {
+      neverPostedRef.current = v === null;
+    });
+  }, []);
+
+  // "share it" before the insert resolves: open the share sheet once the id lands.
+  useEffect(() => {
+    if (shareWanted && postedPlanId) {
+      setShareWanted(false);
+      setConfirmVisible(false);
+      setShareModalVisible(true);
+    }
+  }, [shareWanted, postedPlanId]);
 
   // ── Prefill: pre-attached person from "Make a plan with {Name}" ──
   useEffect(() => {
@@ -344,14 +353,6 @@ export default function PlanComposerV2() {
     hapticLight();
     setDateMonth(d.month); setDateDay(d.day); setDateYear(d.year); setDateSelected(true);
   };
-  const openTimePicker = () => {
-    setTempHour(timeHour); setTempMinute(timeMinute); setTempPeriod(timePeriod); setShowTimePicker(true);
-  };
-  const confirmTime = () => {
-    hapticLight();
-    setTimeHour(tempHour); setTimeMinute(tempMinute); setTimePeriod(tempPeriod);
-    setTimeSelected(true); setShowTimePicker(false);
-  };
 
   const toggleAgeRange = (range: AgeRange) => {
     hapticSelection();
@@ -371,7 +372,6 @@ export default function PlanComposerV2() {
     const sel = { year: dateYear, month: dateMonth, day: dateDay };
     if (sameDay(sel, quickDate('tonight'))) return 'tonight';
     if (sameDay(sel, quickDate('tomorrow'))) return 'tomorrow';
-    if (sameDay(sel, quickDate('weekend'))) return 'weekend';
     return null;
   }, [dateSelected, dateYear, dateMonth, dateDay]);
 
@@ -394,9 +394,18 @@ export default function PlanComposerV2() {
 
   const canPost = title.trim().length > 0 && dateSelected && timeSelected && category !== null && !loading && !imageLoading;
 
-  // ── Submit (interim: pessimistic + SharePlanModal; step 6 = optimistic) ──
+  const resetForm = () => {
+    setTitle(''); setCategory(null); setImageUrl(null); setCreatorMessage('');
+    setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
+    setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
+    setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
+    setAllowDuplicate(true); setMoreOpen(false); setInvited([]);
+  };
+
+  // ── Submit (optimistic: the post moment shows instantly; the insert runs in
+  // the background and recovers quietly in gold on failure). ──
   const handleSubmit = async () => {
-    if (loading || imageLoading) return;
+    if (loading || imageLoading || confirmVisible) return;
     const missing: string[] = [];
     if (title.trim().length === 0) missing.push('Title');
     if (!dateSelected) missing.push('Day');
@@ -415,44 +424,65 @@ export default function PlanComposerV2() {
       setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
       return;
     }
+    const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
+    if (startTime <= new Date()) {
+      setAlertInfo({ title: 'Pick a future time', message: 'That time has already passed.' });
+      return;
+    }
 
-    hapticMedium();
-    setLoading(true);
+    // Snapshot everything the insert needs - the form resets immediately.
+    const ageBounds = ageRangesToMinMax(ageRanges);
+    const row = {
+      title: title.trim(),
+      start_time: startTime.toISOString(),
+      end_time: null as string | null,
+      drop_in: dropIn,
+      allow_duplicate: allowDuplicate,
+      location_text: location.trim() || null,
+      location_lat: locationLat,
+      location_lng: locationLng,
+      tickets_url: ticketUrl.trim() || null,
+      primary_vibe: category?.toLowerCase() ?? null,
+      gender_rule: genderPref,
+      target_age_min: ageBounds.min,
+      target_age_max: ageBounds.max,
+      description: description.trim() || null,
+      host_message: creatorMessage.trim().slice(0, MSG_LIMIT) || null,
+      max_invites: groupSize,
+      min_invites: MIN_GROUP,
+      status: 'forming',
+      city: 'Los Angeles',
+      image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
+      neighborhood: neighborhood.trim() || null,
+    };
+    const inviteIds = invited.map((c) => c.user_id);
+    const genderLabelSnap =
+      genderPref === 'women_only' ? 'Women only'
+        : genderPref === 'men_only' ? 'Men only'
+        : genderPref === 'nonbinary_only' ? 'Nonbinary only' : undefined;
+    const isFirst = neverPostedRef.current;
+
+    // Optimistic: show the moment instantly + one success haptic.
+    hapticSuccess();
+    setConfirmIsFirst(isFirst);
+    setConfirmMeta(summaryMeta);
+    setConfirmInvited(inviteIds.length > 0);
+    setPostedPlanTitle(row.title);
+    setPostedGenderLabel(genderLabelSnap);
+    setPostedPlanId(null);
+    setInviteDeliveryFailed(false);
+    setRecoveryNudge(false);
+    setConfirmVisible(true);
+    // The form is NOT reset yet: if the background insert fails we restore the
+    // composer with the data intact so the post can be retried.
+
+    // Background insert.
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setAlertInfo({ title: 'Error', message: 'Please sign in again.' }); setLoading(false); return; }
-      const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
-      if (startTime <= new Date()) {
-        setAlertInfo({ title: 'Pick a future time', message: 'That time has already passed.' });
-        setLoading(false); return;
-      }
-      const ageBounds = ageRangesToMinMax(ageRanges);
+      if (!user) throw new Error('auth');
       const { data: insertedEvent, error } = await supabase
         .from('events')
-        .insert({
-          title: title.trim(),
-          start_time: startTime.toISOString(),
-          end_time: null,
-          drop_in: dropIn,
-          allow_duplicate: allowDuplicate,
-          location_text: location.trim() || null,
-          location_lat: locationLat,
-          location_lng: locationLng,
-          tickets_url: ticketUrl.trim() || null,
-          primary_vibe: category?.toLowerCase() ?? null,
-          gender_rule: genderPref,
-          target_age_min: ageBounds.min,
-          target_age_max: ageBounds.max,
-          description: description.trim() || null,
-          host_message: creatorMessage.trim().slice(0, MSG_LIMIT) || null,
-          max_invites: groupSize,
-          min_invites: MIN_GROUP,
-          creator_user_id: user.id,
-          status: 'forming',
-          city: 'Los Angeles',
-          image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
-          neighborhood: neighborhood.trim() || null,
-        })
+        .insert({ ...row, creator_user_id: user.id })
         .select('id')
         .single();
       if (error) throw error;
@@ -468,44 +498,31 @@ export default function PlanComposerV2() {
           });
           if (retryErr) {
             await supabase.from('events').delete().eq('id', insertedEvent.id);
-            setAlertInfo({ title: 'Something went wrong', message: 'Could not create your plan. Please try again.' });
-            return;
+            throw new Error('member');
           }
         }
-        setInviteDeliveryFailed(false);
-        if (invited.length > 0) {
+        if (inviteIds.length > 0) {
           invitePeopleToPlan.mutate(
-            { eventId: insertedEvent.id, recipientIds: invited.map((c) => c.user_id) },
+            { eventId: insertedEvent.id, recipientIds: inviteIds },
             { onError: () => setInviteDeliveryFailed(true) },
           );
         }
       }
 
-      hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
       setPostedPlanId(insertedEvent?.id ?? null);
-      setPostedPlanTitle(title.trim());
-      setPostedGenderLabel(
-        genderPref === 'women_only' ? 'Women only'
-          : genderPref === 'men_only' ? 'Men only'
-          : genderPref === 'nonbinary_only' ? 'Nonbinary only' : undefined,
-      );
-      setShareModalVisible(true);
-      // Reset.
-      setTitle(''); setCategory(null); setImageUrl(null); setCreatorMessage('');
-      setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
-      setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
-      setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
-      setAllowDuplicate(true); setMoreOpen(false); setInvited([]);
-    } catch (e: unknown) {
-      const rawMsg = e && typeof e === 'object' && 'message' in e ? String((e as { message: string }).message) : '';
-      const msg = rawMsg.includes('events_host_message_length')
-        ? `Message must be at least ${MSG_MIN} characters.`
-        : rawMsg || 'Could not post your plan. Please try again.';
-      setAlertInfo({ title: 'Something went wrong', message: msg });
-    } finally {
-      setLoading(false);
+      if (isFirst) {
+        await AsyncStorage.setItem('hasSeenFirstPlanCelebration', '1');
+        neverPostedRef.current = false;
+      }
+      resetForm();
+    } catch {
+      // Quiet gold recovery: pull the moment, reopen the composer with the data
+      // intact and a gold nudge. No red, never a hard error dialog.
+      setConfirmVisible(false);
+      setShareWanted(false);
+      setRecoveryNudge(true);
     }
   };
 
@@ -579,7 +596,7 @@ export default function PlanComposerV2() {
         <View style={styles.section}>
           <Text style={styles.label}>when</Text>
           <View style={styles.quickRow}>
-            {(['tonight', 'tomorrow', 'weekend'] as QuickKind[]).map((k) => {
+            {(['tonight', 'tomorrow'] as QuickKind[]).map((k) => {
               const on = activeQuick === k;
               return (
                 <TouchableOpacity
@@ -588,23 +605,19 @@ export default function PlanComposerV2() {
                   onPress={() => selectQuick(k)}
                   style={[styles.quickChip, on && styles.quickChipOn]}
                 >
-                  <Text style={[styles.quickChipText, on && styles.quickChipTextOn]}>
-                    {k === 'weekend' ? 'this weekend' : k}
-                  </Text>
+                  <Text style={[styles.quickChipText, on && styles.quickChipTextOn]}>{k}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
           <CollapsibleCalendar selected={selectedDate} onSelect={selectDate} />
-          <TouchableOpacity style={styles.timeRowCard} onPress={openTimePicker} activeOpacity={0.7}>
-            <Text style={styles.timeLabel}>time</Text>
-            <View style={styles.timePill}>
-              <Text style={styles.timePillText}>
-                {timeSelected ? displayTime(timeHour, timeMinute, timePeriod) : 'set a time'}
-              </Text>
-            </View>
-            <Text style={styles.timeChange}>change</Text>
-          </TouchableOpacity>
+          <TimePicker
+            hour={timeHour}
+            minute={timeMinute}
+            period={timePeriod}
+            selected={timeSelected}
+            onChange={(h, m, p) => { setTimeHour(h); setTimeMinute(m); setTimePeriod(p); setTimeSelected(true); }}
+          />
         </View>
 
         {/* WHERE */}
@@ -756,6 +769,12 @@ export default function PlanComposerV2() {
 
       {/* Sticky live post bar */}
       <View style={[styles.postBar, { paddingBottom: sheetBottomPad }]}>
+        {recoveryNudge ? (
+          <TouchableOpacity style={styles.recoveryNudge} onPress={() => setRecoveryNudge(false)} activeOpacity={0.8}>
+            <View style={styles.recoveryDot} />
+            <Text style={styles.recoveryText}>that didn't go through. your plan is here. tap post to try again.</Text>
+          </TouchableOpacity>
+        ) : null}
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle} numberOfLines={1}>
             {title.trim() || 'your plan'}
@@ -771,41 +790,6 @@ export default function PlanComposerV2() {
           {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.postBtnText}>post the plan</Text>}
         </TouchableOpacity>
       </View>
-
-      {/* Time picker modal */}
-      <Modal visible={showTimePicker} transparent animationType="slide" onRequestClose={() => setShowTimePicker(false)} statusBarTranslucent>
-        <Pressable style={styles.modalOverlay} onPress={() => setShowTimePicker(false)}>
-          <Pressable style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>what time?</Text>
-            <View style={styles.timeColumns}>
-              <ScrollView showsVerticalScrollIndicator={false} style={styles.timeCol}>
-                {HOURS.map((h) => (
-                  <TouchableOpacity key={h} style={[styles.timeOpt, tempHour === h && styles.timeOptOn]} onPress={() => setTempHour(h)}>
-                    <Text style={[styles.timeOptText, tempHour === h && styles.timeOptTextOn]}>{h}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <ScrollView showsVerticalScrollIndicator={false} style={styles.timeCol}>
-                {MINUTE_OPTIONS.map((m) => (
-                  <TouchableOpacity key={m} style={[styles.timeOpt, tempMinute === m && styles.timeOptOn]} onPress={() => setTempMinute(m)}>
-                    <Text style={[styles.timeOptText, tempMinute === m && styles.timeOptTextOn]}>{m}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <View style={styles.timeCol}>
-                {PERIODS.map((p) => (
-                  <TouchableOpacity key={p} style={[styles.timeOpt, tempPeriod === p && styles.timeOptOn]} onPress={() => setTempPeriod(p)}>
-                    <Text style={[styles.timeOptText, tempPeriod === p && styles.timeOptTextOn]}>{p}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-            <TouchableOpacity style={styles.modalConfirm} onPress={confirmTime} activeOpacity={0.85}>
-              <Text style={styles.modalConfirmText}>set time</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {/* Neighborhood picker modal */}
       <Modal visible={showNeighborhoodPicker} transparent animationType="slide" onRequestClose={() => setShowNeighborhoodPicker(false)} statusBarTranslucent>
@@ -834,7 +818,28 @@ export default function PlanComposerV2() {
         onConfirm={onPickedFromPeople}
       />
 
-      {/* Interim post-success (step 6 swaps in the confirmation screen) */}
+      {/* The post moment (Tier-1, one per event). */}
+      <PostConfirmation
+        visible={confirmVisible}
+        isFirstPlan={confirmIsFirst}
+        planTitle={postedPlanTitle}
+        metaLine={confirmMeta}
+        invitedSomeone={confirmInvited}
+        onShare={() => {
+          if (postedPlanId) { setConfirmVisible(false); setShareModalVisible(true); }
+          else setShareWanted(true); // open the share sheet once the id lands
+        }}
+        onSeePlans={() => {
+          const id = postedPlanId;
+          setConfirmVisible(false);
+          setTimeout(() => {
+            if (id) router.push(`/plan/${id}` as any);
+            else router.replace('/(tabs)/plans');
+          }, 200);
+        }}
+      />
+
+      {/* "share it" opens the existing share content, on intent only. */}
       <SharePlanModal
         visible={shareModalVisible}
         onClose={() => {
@@ -994,6 +999,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cream, borderTopWidth: 1, borderTopColor: Colors.border,
     paddingHorizontal: 20, paddingTop: 12,
   },
+  recoveryNudge: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.goldBadgeSoft, borderWidth: 1, borderColor: Colors.goldAccent,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 10,
+  },
+  recoveryDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.gold },
+  recoveryText: { flex: 1, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18, color: Colors.quoteText },
   summaryCard: {
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
     paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12,

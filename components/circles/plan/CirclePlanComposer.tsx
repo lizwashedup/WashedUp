@@ -33,6 +33,7 @@ import { useAuthUserId } from '../../yours/state/useAuthUserId';
 import BottomSheet from '../../yours/primitives/BottomSheet';
 import { type CalendarDay } from '../../calendar/WashedUpCalendar';
 import CollapsibleCalendar from '../../composer/CollapsibleCalendar';
+import TimePicker from '../../composer/TimePicker';
 import { getTodayInLA } from '../../../lib/laDate';
 import {
   useCreateCirclePlan,
@@ -88,7 +89,7 @@ export default function CirclePlanComposer({
   const [where, setWhere] = useState('');
   const [date, setDate] = useState<CalendarDay>(todayCalendarDay);
   const [hour, setHour] = useState(7);
-  const [minute, setMinute] = useState<(typeof MINUTES)[number]>(0);
+  const [minute, setMinute] = useState('00');
   const [period, setPeriod] = useState<'AM' | 'PM'>('PM');
   const [visibilityOpen, setVisibilityOpen] = useState(false); // false = circle only
   const [strangerCap, setStrangerCap] = useState(STRANGER_DEFAULT);
@@ -100,7 +101,7 @@ export default function CirclePlanComposer({
     setWhere('');
     setDate(todayCalendarDay());
     setHour(7);
-    setMinute(0);
+    setMinute('00');
     setPeriod('PM');
     setVisibilityOpen(false);
     setStrangerCap(STRANGER_DEFAULT);
@@ -112,11 +113,28 @@ export default function CirclePlanComposer({
     onClose();
   };
 
+  const selectQuick = (k: 'tonight' | 'tomorrow') => {
+    hapticSelection();
+    const t = getTodayInLA();
+    const base = new Date(t.y, t.m, t.d);
+    if (k === 'tomorrow') base.setDate(base.getDate() + 1);
+    setDate({ year: base.getFullYear(), month: base.getMonth(), day: base.getDate() });
+  };
+
+  const activeQuick: 'tonight' | 'tomorrow' | null = (() => {
+    const t = getTodayInLA();
+    if (date.year === t.y && date.month === t.m && date.day === t.d) return 'tonight';
+    const tm = new Date(t.y, t.m, t.d);
+    tm.setDate(tm.getDate() + 1);
+    if (date.year === tm.getFullYear() && date.month === tm.getMonth() && date.day === tm.getDate()) return 'tomorrow';
+    return null;
+  })();
+
   const buildStartTime = (): Date => {
     const base = new Date(date.year, date.month, date.day);
     let h = hour % 12;
     if (period === 'PM') h += 12;
-    base.setHours(h, minute, 0, 0);
+    base.setHours(h, parseInt(minute, 10), 0, 0);
     return base;
   };
 
@@ -191,60 +209,33 @@ export default function CirclePlanComposer({
           />
         </View>
 
-        {/* When (date) */}
+        {/* When */}
         <Text style={styles.fieldLabel}>{COPY.circlePlanWhenLabel}</Text>
-        <View style={styles.calendarWrap}>
-          <CollapsibleCalendar selected={date} onSelect={setDate} />
-        </View>
-        <View style={styles.timeRow}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.timeChipsContent}
-          >
-            {Array.from({ length: 12 }, (_, k) => k + 1).map((h) => {
-              const on = h === hour;
-              return (
-                <Pressable
-                  key={h}
-                  onPress={() => setHour(h)}
-                  style={[styles.timeChip, on && styles.timeChipOn]}
-                >
-                  <Text style={[styles.timeChipText, on && styles.timeChipTextOn]}>{h}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-        <View style={styles.timeRow}>
-          {MINUTES.map((m) => {
-            const on = m === minute;
+        <View style={styles.quickRow}>
+          {(['tonight', 'tomorrow'] as const).map((k) => {
+            const on = activeQuick === k;
             return (
               <Pressable
-                key={m}
-                onPress={() => setMinute(m)}
-                style={[styles.timeChip, on && styles.timeChipOn]}
+                key={k}
+                onPress={() => selectQuick(k)}
+                style={[styles.quickChip, on && styles.quickChipOn]}
               >
-                <Text style={[styles.timeChipText, on && styles.timeChipTextOn]}>
-                  {m.toString().padStart(2, '0')}
-                </Text>
+                <Text style={[styles.quickChipText, on && styles.quickChipTextOn]}>{k}</Text>
               </Pressable>
             );
           })}
-          <View style={styles.periodGroup}>
-            {(['AM', 'PM'] as const).map((p) => {
-              const on = p === period;
-              return (
-                <Pressable
-                  key={p}
-                  onPress={() => setPeriod(p)}
-                  style={[styles.timeChip, on && styles.timeChipOn]}
-                >
-                  <Text style={[styles.timeChipText, on && styles.timeChipTextOn]}>{p}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+        </View>
+        <View style={styles.calendarWrap}>
+          <CollapsibleCalendar selected={date} onSelect={setDate} />
+        </View>
+        <View style={styles.timeWrap}>
+          <TimePicker
+            hour={hour}
+            minute={minute}
+            period={period}
+            selected
+            onChange={(h, m, p) => { setHour(h); setMinute(m); setPeriod(p); }}
+          />
         </View>
 
         {/* WHO IS THIS FOR - the audience binary. "Pick people" is cut. */}
@@ -360,7 +351,16 @@ const styles = StyleSheet.create({
   },
   categoryWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
   whereWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
-  calendarWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
+  calendarWrap: {},
+  timeWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
+  quickRow: { flexDirection: 'row', gap: 7, marginBottom: CIRCLE_PLAN.labelGap },
+  quickChip: {
+    paddingHorizontal: 13, paddingVertical: 7, borderRadius: 16,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
+  },
+  quickChipOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
+  quickChipText: { fontFamily: Fonts.sansSemibold, fontSize: 13, color: Colors.secondary },
+  quickChipTextOn: { color: Colors.white },
   timeRow: {
     flexDirection: 'row',
     alignItems: 'center',
