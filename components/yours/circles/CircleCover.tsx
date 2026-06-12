@@ -64,7 +64,7 @@ export default function CircleCover({
       style={[
         styles.cover,
         styles.placeholder,
-        monogram ? (tone === 'gold' && styles.gold) : styles.empty,
+        monogram ? (tone === 'gold' ? styles.gold : null) : styles.empty,
         box,
       ]}
     >
