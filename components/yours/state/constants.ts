@@ -287,7 +287,7 @@ export const COPY = {
   // Step 1, identity.
   circleStep1Title: 'Name your circle',
   circleNamePlaceholder: 'Circle name',
-  circleDescPlaceholder: 'What brings you together? (optional)',
+  circleDescPlaceholder: 'Sunday hikes, tacos after. That kind of thing.',
   // Optional cover photo (identity ladder). Skippable, never blocks Next.
   circleCoverAdd: 'Add a cover photo',
   circleCoverChange: 'Change cover photo',
