@@ -52,6 +52,8 @@ import { useDismissSuggestion } from '../../../hooks/useDismissSuggestion';
 import { useInvitePeopleToPlan } from '../../../hooks/useInvitePeopleToPlan';
 import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../../components/post/InvitePeopleSection';
 import { Toast } from '../../../components/Toast';
+import WashedUpCalendar, { type CalendarDay } from '../../../components/calendar/WashedUpCalendar';
+import { MONTHS } from '../../../lib/laDate';
 
 // Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
 // Falls back to the hard-coded key so autocomplete works in preview/CI builds
@@ -74,10 +76,6 @@ type GenderPreference = 'mixed' | 'women_only' | 'men_only' | 'nonbinary_only';
 const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
 type AgeRange = typeof AGE_RANGES[number];
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
 const HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const MINUTE_OPTIONS = ['00', '15', '30', '45'];
 const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
@@ -89,46 +87,8 @@ const MSG_LIMIT = 150;
 const DESC_LIMIT = 500;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getDaysInMonth(month: number, year: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
-
-// "Today" in America/Los_Angeles, returned as 0-indexed month + day-of-month +
-// year. Used so the calendar grid disables past days against the LA boundary
-// regardless of the device's timezone.
-function getTodayInLA(): { y: number; m: number; d: number } {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Los_Angeles',
-    year: 'numeric', month: 'numeric', day: 'numeric',
-  }).formatToParts(new Date());
-  const get = (k: 'year' | 'month' | 'day') =>
-    Number(parts.find((p) => p.type === k)!.value);
-  return { y: get('year'), m: get('month') - 1, d: get('day') };
-}
-
-function isBeforeTodayLA(y: number, m: number, d: number): boolean {
-  const t = getTodayInLA();
-  if (y !== t.y) return y < t.y;
-  if (m !== t.m) return m < t.m;
-  return d < t.d;
-}
-
-// Sunday-first month grid: rows of 7, leading/trailing nulls for cells that
-// don't belong to the displayed month.
-function buildMonthGrid(year: number, month: number): (number | null)[][] {
-  const firstWeekday = new Date(year, month, 1).getDay();
-  const days = getDaysInMonth(month, year);
-  const cells: (number | null)[] = [];
-  for (let i = 0; i < firstWeekday; i++) cells.push(null);
-  for (let d = 1; d <= days; d++) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
-  const rows: (number | null)[][] = [];
-  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
-  return rows;
-}
-
-const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+// LA-date helpers + the month grid now live in lib/laDate.ts (shared with
+// WashedUpCalendar). displayDate below still formats with the shared MONTHS.
 
 function buildDatetime(
   month: number, day: number, year: number,
@@ -686,12 +646,8 @@ export default function PostScreen() {
   const [dateYear, setDateYear] = useState(currentYear);
   const [dateSelected, setDateSelected] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  // Calendar view state — independent of the committed selection so the user
-  // can browse months without changing what's actually picked yet. Initialised
-  // from LA today so the first open lands on the right month regardless of
-  // device timezone.
-  const [viewMonth, setViewMonth] = useState(() => getTodayInLA().m);
-  const [viewYear, setViewYear] = useState(() => getTodayInLA().y);
+  // WashedUpCalendar owns its own browsing/view state; the composer only holds
+  // the committed selection (dateMonth/dateDay/dateYear/dateSelected).
 
   // Time
   const [timeHour, setTimeHour] = useState(8);
@@ -801,42 +757,18 @@ export default function PostScreen() {
   const locationText = locationRaw.trim() || location.trim() || '';
   const canSubmit = title.trim().length > 0 && dateSelected && timeSelected && category !== null && description.trim().length > 0 && creatorMessage.trim().length >= MSG_MIN && creatorMessage.trim().length <= MSG_LIMIT && !loading && !imageLoading;
 
-  // ─── Date picker (calendar grid) ─────────────────────────────────────────────
+  // ─── Date picker (WashedUpCalendar) ──────────────────────────────────────────
 
-  const openDatePicker = () => {
-    // Browse from the currently-selected month if there is one; otherwise
-    // start at this month in LA.
-    if (dateSelected) {
-      setViewMonth(dateMonth);
-      setViewYear(dateYear);
-    } else {
-      const t = getTodayInLA();
-      setViewMonth(t.m);
-      setViewYear(t.y);
-    }
-    setShowDatePicker(true);
-  };
+  const openDatePicker = () => setShowDatePicker(true);
 
-  const selectDate = (day: number) => {
-    setDateMonth(viewMonth);
-    setDateDay(day);
-    setDateYear(viewYear);
+  // WashedUpCalendar hands back the full {year, month, day}; commit it and close.
+  const selectDate = (d: CalendarDay) => {
+    setDateMonth(d.month);
+    setDateDay(d.day);
+    setDateYear(d.year);
     setDateSelected(true);
     setShowDatePicker(false);
     hapticLight();
-  };
-
-  const stepMonth = (delta: -1 | 1) => {
-    let m = viewMonth + delta;
-    let y = viewYear;
-    if (m < 0) { m = 11; y -= 1; }
-    if (m > 11) { m = 0; y += 1; }
-    // Clamp: never let the user view a month entirely before today in LA.
-    const t = getTodayInLA();
-    if (y < t.y || (y === t.y && m < t.m)) return;
-    setViewMonth(m);
-    setViewYear(y);
-    hapticSelection();
   };
 
   // ─── Time picker ─────────────────────────────────────────────────────────────
@@ -1883,91 +1815,11 @@ export default function PostScreen() {
             onPress={(e) => e.stopPropagation()}
           >
             <Text style={styles.modalTitle}>Select date</Text>
-
-            {/* Month nav */}
-            <View style={styles.calendarHeader}>
-              {(() => {
-                const t = getTodayInLA();
-                const onCurrentMonth = viewYear === t.y && viewMonth <= t.m;
-                return (
-                  <>
-                    <TouchableOpacity
-                      onPress={() => stepMonth(-1)}
-                      disabled={onCurrentMonth}
-                      style={styles.calendarNavBtn}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      accessibilityLabel="previous month"
-                    >
-                      <Ionicons
-                        name="chevron-back"
-                        size={22}
-                        color={onCurrentMonth ? Colors.textLight : Colors.asphalt}
-                      />
-                    </TouchableOpacity>
-                    <Text style={styles.calendarMonthLabel}>
-                      {MONTHS[viewMonth]} {viewYear}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => stepMonth(1)}
-                      style={styles.calendarNavBtn}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      accessibilityLabel="next month"
-                    >
-                      <Ionicons name="chevron-forward" size={22} color={Colors.asphalt} />
-                    </TouchableOpacity>
-                  </>
-                );
-              })()}
-            </View>
-
-            {/* Weekday header */}
-            <View style={styles.weekdayRow}>
-              {WEEKDAY_LABELS.map((label, i) => (
-                <Text key={i} style={styles.weekdayLabel}>{label}</Text>
-              ))}
-            </View>
-
-            {/* Grid */}
-            {buildMonthGrid(viewYear, viewMonth).map((row, ri) => (
-              <View key={ri} style={styles.calendarRow}>
-                {row.map((day, ci) => {
-                  if (day === null) {
-                    return <View key={ci} style={styles.calendarCell} />;
-                  }
-                  const isPast = isBeforeTodayLA(viewYear, viewMonth, day);
-                  const t = getTodayInLA();
-                  const isToday = viewYear === t.y && viewMonth === t.m && day === t.d;
-                  const isSelected =
-                    dateSelected && dateYear === viewYear && dateMonth === viewMonth && dateDay === day;
-                  return (
-                    <TouchableOpacity
-                      key={ci}
-                      style={[
-                        styles.calendarCell,
-                        isToday && !isSelected && styles.calendarCellToday,
-                        isSelected && styles.calendarCellSelected,
-                      ]}
-                      onPress={() => selectDate(day)}
-                      disabled={isPast}
-                      activeOpacity={0.75}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${MONTHS[viewMonth]} ${day}, ${viewYear}`}
-                      accessibilityState={{ disabled: isPast, selected: isSelected }}
-                    >
-                      <Text
-                        style={[
-                          styles.calendarCellText,
-                          isPast && styles.calendarCellTextDisabled,
-                          isSelected && styles.calendarCellTextSelected,
-                        ]}
-                      >
-                        {day}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            ))}
+            <WashedUpCalendar
+              mode="pick"
+              selected={dateSelected ? { year: dateYear, month: dateMonth, day: dateDay } : null}
+              onSelect={selectDate}
+            />
           </Pressable>
         </Pressable>
       </Modal>
@@ -2511,68 +2363,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   modalClearBtnText: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.textMedium },
-
-  calendarHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    paddingHorizontal: 4,
-  },
-  calendarMonthLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.displaySM,
-    color: Colors.asphalt,
-  },
-  calendarNavBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-  },
-  weekdayRow: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
-  weekdayLabel: {
-    flex: 1,
-    textAlign: 'center',
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textLight,
-    letterSpacing: 0.5,
-  },
-  calendarRow: {
-    flexDirection: 'row',
-    marginBottom: 4,
-  },
-  calendarCell: {
-    flex: 1,
-    aspectRatio: 1,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 2,
-    borderRadius: 12,
-  },
-  calendarCellToday: {
-    borderWidth: 1.5,
-    borderColor: Colors.terracotta,
-  },
-  calendarCellSelected: {
-    backgroundColor: Colors.terracotta,
-  },
-  calendarCellText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-  calendarCellTextDisabled: {
-    color: Colors.textLight,
-    opacity: 0.4,
-  },
-  calendarCellTextSelected: {
-    color: Colors.white,
-    fontFamily: Fonts.sansMedium,
-  },
 
   dropInRow: {
     flexDirection: 'row',

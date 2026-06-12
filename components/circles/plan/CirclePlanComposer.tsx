@@ -31,6 +31,8 @@ import { CIRCLE_PLAN } from '../../../constants/YoursDesign';
 import { COPY } from '../../yours/state/constants';
 import { useAuthUserId } from '../../yours/state/useAuthUserId';
 import BottomSheet from '../../yours/primitives/BottomSheet';
+import WashedUpCalendar, { type CalendarDay } from '../../calendar/WashedUpCalendar';
+import { getTodayInLA } from '../../../lib/laDate';
 import {
   useCreateCirclePlan,
   CreateCirclePlanResult,
@@ -58,27 +60,10 @@ const MINUTES = [0, 15, 30, 45] as const;
 const STRANGER_MIN = 2;
 const STRANGER_MAX = 7;
 const STRANGER_DEFAULT = 4;
-const DAY_COUNT = 14;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-interface DayOption {
-  date: Date;
-  label: string;
-}
-
-function buildDays(): DayOption[] {
-  const out: DayOption[] = [];
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  for (let i = 0; i < DAY_COUNT; i++) {
-    const d = new Date(start.getTime() + i * MS_PER_DAY);
-    let label: string;
-    if (i === 0) label = 'Today';
-    else if (i === 1) label = 'Tomorrow';
-    else label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    out.push({ date: d, label });
-  }
-  return out;
+function todayCalendarDay(): CalendarDay {
+  const t = getTodayInLA();
+  return { year: t.y, month: t.m, day: t.d };
 }
 
 function memberLabel(m: ComposerMember): string {
@@ -99,7 +84,7 @@ export default function CirclePlanComposer({
 
   const [title, setTitle] = useState('');
   const [where, setWhere] = useState('');
-  const [dayIdx, setDayIdx] = useState(0);
+  const [date, setDate] = useState<CalendarDay>(todayCalendarDay);
   const [hour, setHour] = useState(7);
   const [minute, setMinute] = useState<(typeof MINUTES)[number]>(0);
   const [period, setPeriod] = useState<'AM' | 'PM'>('PM');
@@ -109,7 +94,6 @@ export default function CirclePlanComposer({
   const [strangerCap, setStrangerCap] = useState(STRANGER_DEFAULT);
   const [error, setError] = useState<string | null>(null);
 
-  const days = useMemo(buildDays, []);
   const pickable = useMemo(
     () => members.filter((m) => m.user_id !== myUserId),
     [members, myUserId],
@@ -118,7 +102,7 @@ export default function CirclePlanComposer({
   const reset = () => {
     setTitle('');
     setWhere('');
-    setDayIdx(0);
+    setDate(todayCalendarDay());
     setHour(7);
     setMinute(0);
     setPeriod('PM');
@@ -144,7 +128,7 @@ export default function CirclePlanComposer({
   };
 
   const buildStartTime = (): Date => {
-    const base = new Date(days[dayIdx].date);
+    const base = new Date(date.year, date.month, date.day);
     let h = hour % 12;
     if (period === 'PM') h += 12;
     base.setHours(h, minute, 0, 0);
@@ -219,27 +203,11 @@ export default function CirclePlanComposer({
           returnKeyType="next"
         />
 
-        {/* When */}
+        {/* When (date) */}
         <Text style={styles.fieldLabel}>{COPY.circlePlanWhenLabel}</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.dayRow}
-          contentContainerStyle={styles.dayRowContent}
-        >
-          {days.map((d, i) => {
-            const on = i === dayIdx;
-            return (
-              <Pressable
-                key={i}
-                onPress={() => setDayIdx(i)}
-                style={[styles.dayChip, on && styles.dayChipOn]}
-              >
-                <Text style={[styles.dayChipText, on && styles.dayChipTextOn]}>{d.label}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        <View style={styles.calendarWrap}>
+          <WashedUpCalendar mode="pick" selected={date} onSelect={setDate} />
+        </View>
         <View style={styles.timeRow}>
           <ScrollView
             horizontal
@@ -433,17 +401,7 @@ const styles = StyleSheet.create({
     color: Colors.darkWarm,
     marginBottom: CIRCLE_PLAN.sectionGap,
   },
-  dayRow: { marginBottom: CIRCLE_PLAN.chipGap },
-  dayRowContent: { gap: CIRCLE_PLAN.chipGap, paddingRight: CIRCLE_PLAN.fieldPadH },
-  dayChip: {
-    paddingHorizontal: CIRCLE_PLAN.dayChipPadH,
-    paddingVertical: CIRCLE_PLAN.dayChipPadV,
-    borderRadius: CIRCLE_PLAN.chipRadius,
-    backgroundColor: Colors.inputBg,
-  },
-  dayChipOn: { backgroundColor: Colors.terracotta },
-  dayChipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
-  dayChipTextOn: { color: Colors.white, fontFamily: Fonts.sansBold },
+  calendarWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
   timeRow: {
     flexDirection: 'row',
     alignItems: 'center',
