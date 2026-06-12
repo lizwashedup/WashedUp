@@ -110,7 +110,7 @@ export default function MigrationGateScreen() {
             <Text style={styles.headlineItalic}>number</Text>
           </Text>
           <Text style={styles.subline}>
-            keeps your account safe + helps friends find you on washedup.
+            keeps your account safe + helps people find you on washedup.
           </Text>
 
           <View style={styles.timeline}>
