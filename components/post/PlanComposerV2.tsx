@@ -510,8 +510,12 @@ export default function PlanComposerV2() {
             event_id: insertedEvent.id, user_id: user.id, role: 'host', status: 'joined',
           });
           if (retryErr) {
-            await supabase.from('events').delete().eq('id', insertedEvent.id);
-            throw new Error('member');
+            // Best-effort rollback of the orphaned event. Error-check it: a
+            // failed delete leaves an event with no host member, so flag that
+            // case distinctly - both paths fall through to the quiet gold
+            // recovery below so the creator can simply retry.
+            const { error: rollbackErr } = await supabase.from('events').delete().eq('id', insertedEvent.id);
+            throw new Error(rollbackErr ? 'member_orphan' : 'member');
           }
         }
         if (inviteIds.length > 0) {
