@@ -142,6 +142,8 @@ const brand = {
   yoursShimmer: '#E8DDD0',                        // shimmer / ghost placeholder block
   yoursOverlay85: 'rgba(248,245,240,0.85)',      // parchment @ 85% — fresh-start overlay
   surveyScrim: 'rgba(44,24,16,0.42)',            // darkWarm @ 42%, warm dim behind the post-plan survey sheet (never system gray-black)
+  surveyChipFill: 'rgba(197,165,90,0.28)',       // gold #C5A55A @ 28%, the "added"/"made" fill on survey keep chips + attendance tag (reads filled, not outlined)
+  surveyQuietBg: '#F5EDDD',                       // creamWarm, light inline toast for quiet request-sent / failure lines (dark card stays exclusive to mutual celebrations)
 } as const;
 
 // ── Interest category accent colors (phone auth onboarding) ───────────────

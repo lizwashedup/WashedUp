@@ -161,7 +161,7 @@ export const COPY = {
   surveyConnectedMany: (names: string) =>
     `You both said yes. ${names} are in your people now.`,
   surveyRequested: "Request sent. They'll see it.",
-  surveyCouldntReach: "Couldn't reach everyone.",
+  surveyCouldntReach: "Couldn't add everyone just now.",
 
   albumOpenFailed: "This album didn't open. Try again in a moment.",
   albumRetry: 'Try again',

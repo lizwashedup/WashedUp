@@ -701,14 +701,14 @@ function StepWho({
           return (
             <Pressable
               key={m.id}
-              style={styles.attendRow}
+              style={[styles.attendRow, out && styles.attendRowOut]}
               onPress={() => onToggle(m.id)}
               accessibilityRole="button"
               accessibilityState={{ selected: !out }}
               accessibilityLabel={`${name}, ${out ? COPY.surveyDidntMakeIt : COPY.surveyMadeIt}`}
             >
               <YoursAvatar name={m.first_name_display} photoUrl={m.profile_photo_url} size={44} bucket="none" />
-              <Text style={[styles.attendName, out && styles.attendNameOut]} numberOfLines={1}>
+              <Text style={styles.attendName} numberOfLines={1}>
                 {name}
               </Text>
               <View style={[styles.tag, out ? styles.tagMissed : styles.tagMade]}>
@@ -1074,6 +1074,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  // "Didn't make it" = the whole row dims. The faded rows answer "who's out" at
+  // a glance; no strikethrough anywhere (striking "Didn't make it" double-negates).
+  attendRowOut: { opacity: 0.5 },
   attendName: {
     flex: 1,
     minWidth: 0,
@@ -1081,18 +1084,18 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
   },
-  attendNameOut: { color: Colors.tertiary, textDecorationLine: 'line-through' },
   tag: {
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 20,
     borderWidth: 1.5,
   },
-  tagMade: { borderColor: Colors.gold, backgroundColor: Colors.goldBadgeSoft },
-  tagMissed: { borderColor: Colors.border, backgroundColor: Colors.cardBg },
+  // Made = gold-tint FILL + ink text (reads filled). Missed = plain outline.
+  tagMade: { borderColor: Colors.gold, backgroundColor: Colors.surveyChipFill },
+  tagMissed: { borderColor: Colors.border, backgroundColor: 'transparent' },
   tagText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM },
-  tagTextMade: { color: Colors.gold },
-  tagTextMissed: { color: Colors.tertiary, textDecorationLine: 'line-through' },
+  tagTextMade: { color: Colors.asphalt },
+  tagTextMissed: { color: Colors.secondary },
 
   // ── Step 3 keep chips ──
   keepHeadline: {
@@ -1113,8 +1116,10 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1.5,
   },
-  chipOn: { borderColor: Colors.terracotta, backgroundColor: Colors.goldBadgeSoft },
-  chipOff: { borderColor: Colors.border, backgroundColor: Colors.cardBg, opacity: 0.5 },
+  // Selected reads ADDED: gold-tint fill + terracotta ring + full-color avatar/ink.
+  chipOn: { borderColor: Colors.terracotta, backgroundColor: Colors.surveyChipFill },
+  // Deselected is a ghost: no fill, faint border, avatar + text dimmed.
+  chipOff: { borderColor: Colors.border, backgroundColor: 'transparent', opacity: 0.45 },
   chipName: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodySM,
@@ -1182,11 +1187,15 @@ const styles = StyleSheet.create({
     color: Colors.tertiary,
     marginTop: 10,
   },
+  // Quiet variant (request-sent / failure, no mutual): a LIGHT cream/gold inline
+  // toast. The dark gold-rule card is reserved exclusively for mutual moments.
   quietLine: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: Colors.darkWarm,
+    backgroundColor: Colors.surveyQuietBg,
+    borderWidth: 1,
+    borderColor: Colors.goldAccent,
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 18,
@@ -1196,6 +1205,6 @@ const styles = StyleSheet.create({
   quietText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
-    color: Colors.white,
+    color: Colors.asphalt,
   },
 });
