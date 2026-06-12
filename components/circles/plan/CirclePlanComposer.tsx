@@ -22,7 +22,7 @@ import {
   ScrollView,
   StyleSheet,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { Minus, Plus } from 'lucide-react-native';
 import { hapticSelection } from '../../../lib/haptics';
 import Colors from '../../../constants/Colors';
@@ -173,7 +173,7 @@ export default function CirclePlanComposer({
   const postDisabled = createPlan.isPending || !title.trim();
 
   return (
-    <BottomSheet visible={visible} onClose={close} heightPct={CIRCLE_PLAN.sheetHeightPct}>
+    <BottomSheet visible={visible} onClose={close} heightPct={CIRCLE_PLAN.sheetHeightPct} springMotion>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -252,7 +252,7 @@ export default function CirclePlanComposer({
               <Text style={styles.audSub}>{COPY.circlePlanAudienceCircleOnlySub}</Text>
             </View>
             <View style={[styles.radio, !visibilityOpen && styles.radioOn]}>
-              {!visibilityOpen ? <View style={styles.radioDot} /> : null}
+              {!visibilityOpen ? <Animated.View entering={ZoomIn.springify().mass(0.5).damping(24).stiffness(500)} style={styles.radioDot} /> : null}
             </View>
           </View>
         </Pressable>
@@ -268,7 +268,7 @@ export default function CirclePlanComposer({
               <Text style={styles.audSub}>{COPY.circlePlanAudienceOpenSub(strangerCap)}</Text>
             </View>
             <View style={[styles.radio, visibilityOpen && styles.radioOn]}>
-              {visibilityOpen ? <View style={styles.radioDot} /> : null}
+              {visibilityOpen ? <Animated.View entering={ZoomIn.springify().mass(0.5).damping(24).stiffness(500)} style={styles.radioDot} /> : null}
             </View>
           </View>
 

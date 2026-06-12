@@ -22,6 +22,12 @@ interface BottomSheetProps {
   children: React.ReactNode;
   /** Fraction of screen height (0..1). Omit for content-sized. */
   heightPct?: number;
+  /**
+   * Opt-in: spring enter/dismiss per the composer design study (mass 1 /
+   * stiffness 280 / damping 26 in, snappier 320/30 out) instead of the default
+   * timing. Other consumers are untouched.
+   */
+  springMotion?: boolean;
 }
 
 /**
@@ -34,6 +40,7 @@ export default function BottomSheet({
   onClose,
   children,
   heightPct,
+  springMotion = false,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
   const reduceMotion = useReduceMotion();
@@ -50,11 +57,19 @@ export default function BottomSheet({
     translateY.setValue(SCREEN_HEIGHT);
     overlayOpacity.setValue(0);
     Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: 0,
-        duration: ANIM.sheetInMs,
-        useNativeDriver: true,
-      }),
+      springMotion
+        ? Animated.spring(translateY, {
+            toValue: 0,
+            mass: 1,
+            stiffness: 280,
+            damping: 26,
+            useNativeDriver: true,
+          })
+        : Animated.timing(translateY, {
+            toValue: 0,
+            duration: ANIM.sheetInMs,
+            useNativeDriver: true,
+          }),
       Animated.timing(overlayOpacity, {
         toValue: 1,
         duration: ANIM.sheetInMs,
@@ -69,11 +84,19 @@ export default function BottomSheet({
       return;
     }
     Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: SCREEN_HEIGHT,
-        duration: ANIM.sheetOutMs,
-        useNativeDriver: true,
-      }),
+      springMotion
+        ? Animated.spring(translateY, {
+            toValue: SCREEN_HEIGHT,
+            mass: 1,
+            stiffness: 320,
+            damping: 30,
+            useNativeDriver: true,
+          })
+        : Animated.timing(translateY, {
+            toValue: SCREEN_HEIGHT,
+            duration: ANIM.sheetOutMs,
+            useNativeDriver: true,
+          }),
       Animated.timing(overlayOpacity, {
         toValue: 0,
         duration: ANIM.sheetOutMs,

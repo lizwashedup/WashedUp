@@ -7,8 +7,15 @@
  * plans" is the quiet secondary. A user's first plan elevates the copy - the
  * separate FirstPlanCelebration is folded into this screen for V2.
  */
+import { useEffect } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  FadeInUp,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -38,14 +45,22 @@ export default function PostConfirmation({
     ? 'your plan is live. the people you invited have been notified.'
     : "your plan is live. now someone has to say yes.";
 
+  // The ring scales 0.6 -> 1 with the study's post-confirmation spring.
+  const ringScale = useSharedValue(0.6);
+  useEffect(() => {
+    if (visible) {
+      ringScale.value = 0.6;
+      ringScale.value = withSpring(1, { mass: 0.8, stiffness: 400, damping: 22 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+  const ringStyle = useAnimatedStyle(() => ({ transform: [{ scale: ringScale.value }] }));
+
   return (
     <Modal visible={visible} animationType="fade" transparent={false}>
       <View style={styles.screen}>
         <Animated.View entering={FadeIn.duration(220)} style={styles.center}>
-          <Animated.View
-            entering={FadeIn.duration(260)}
-            style={styles.ring}
-          >
+          <Animated.View style={[styles.ring, ringStyle]}>
             <ConfirmationMark size={30} />
           </Animated.View>
 
