@@ -141,6 +141,7 @@ const brand = {
   yoursGhostBg: '#E8DCC8',                       // Cream/Muted — ghost avatar fill
   yoursShimmer: '#E8DDD0',                        // shimmer / ghost placeholder block
   yoursOverlay85: 'rgba(248,245,240,0.85)',      // parchment @ 85% — fresh-start overlay
+  surveyScrim: 'rgba(44,24,16,0.42)',            // darkWarm @ 42%, warm dim behind the post-plan survey sheet (never system gray-black)
 } as const;
 
 // ── Interest category accent colors (phone auth onboarding) ───────────────

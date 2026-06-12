@@ -139,16 +139,27 @@ export const COPY = {
   surveyFine: 'It was fine',
   surveyBad: 'Not great',
   surveyBadFollowup: 'Want to tell us what happened?',
+  surveyBadHelper: 'Optional. Only you can see this.',
   surveyWhoMadeIt: 'Who made it?',
+  surveyWhoHelper: "Tap anyone who didn't show. Everyone else is marked as there.",
+  surveyMadeIt: 'Made it',
   surveyDidntMakeIt: "Didn't make it",
   surveyNext: 'Next',
+  surveyContinue: 'Continue',
   surveyAddPrompt: 'You did something together. They might be your people.',
   surveyAddButton: 'Add them',
+  surveyAddOne: (name: string) => `Add ${name}`,
   surveySkip: 'Skip',
   surveyNotNow: 'Not now',
-  // Handshake feedback. The verb conjugates: one person "is", several "are".
-  surveyConnectedOne: (name: string) => `${name} is in your people now.`,
-  surveyConnectedMany: (names: string) => `${names} are in your people now.`,
+  // Step counter. Small caps, terracotta, 13px floor (visual spec).
+  surveyStepCounter: (n: number, total: number) => `Step ${n} of ${total}`,
+  // Handshake celebration. Verbatim, locked (logic spec L38): the toast leads
+  // with the mutuality. The verb conjugates: one person "is", several "are".
+  surveyMutualEyebrow: 'Mutual connection',
+  surveyConnectedOne: (name: string) =>
+    `You both said yes. ${name} is in your people now.`,
+  surveyConnectedMany: (names: string) =>
+    `You both said yes. ${names} are in your people now.`,
   surveyRequested: "Request sent. They'll see it.",
   surveyCouldntReach: "Couldn't reach everyone.",
 

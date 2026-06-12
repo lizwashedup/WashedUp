@@ -7,6 +7,17 @@
  *   2. "Who made it?" (conditional)  -> no_show_reports
  *   3. "Keep these people" (only when YOURS_PAGE_ENABLED) -> the handshake
  *
+ * FORM FACTOR (survey-v3-visual-spec): a bottom sheet that GROWS with
+ * commitment. Step 1 enters at ~half height over the dimmed plan card (the card
+ * behind IS the context). Steps 2-3 spring-expand to tall (the people moment
+ * gets the full stage). The sheet never shrinks once grown. Backdrop dim, no
+ * tap-to-dismiss, no pan-to-dismiss; the only escape is the explicit "Not now".
+ *
+ * Spring family = the documented composer/calendar-expand family from
+ * primitives/BottomSheet (mass 1 / stiffness 280 / damping 26 in, 320/30 out).
+ * Driven JS-side (useNativeDriver:false) so the sheet HEIGHT can animate; the
+ * primitive isn't a drop-in (it dismisses on tap/pan and is fixed-height).
+ *
  * NON-NEGOTIABLE rails (2026-05-18 lockout): an escape on every step, never
  * network-gated; markPostPlanSurveyHandled on EVERY exit BEFORE any network
  * write; all plan_feedback writes through upsert_plan_feedback with COMPLETE
@@ -14,25 +25,28 @@
  *
  * No emoji, no em dashes, no forbidden words.
  */
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
   Text,
   Pressable,
-  TextInput,
   StyleSheet,
-  ScrollView,
+  Animated,
+  Dimensions,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import { Image } from 'expo-image';
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { supabase } from '../../../lib/supabase';
 import { hapticSelection, hapticSuccess } from '../../../lib/haptics';
 import { YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
-import YoursAvatar from '../primitives/YoursAvatar';
+import { useReduceMotion } from '../a11y/useReduceMotion';
 import { COPY } from '../state/constants';
 import {
   markPostPlanSurveyHandled,
@@ -44,13 +58,20 @@ import {
 type Step = 'how' | 'who' | 'keep';
 type Rating = 'thumbs_up' | 'thumbs_down' | 'fine';
 
-// The handshake result overlay. Celebration (gold card) only when someone
-// became a mutual connection; otherwise a quiet auto-dismissing line.
-interface HandshakeResult {
+// The handshake result overlay. Celebration (gold-ruled toast) only when
+// someone became a mutual connection; otherwise a quiet auto-dismissing line.
+export interface HandshakeResult {
   connectedNames: string[];
   requested: number;
   failed: boolean;
 }
+
+// ─── Sheet geometry + motion (the composer/calendar-expand spring family) ───
+const SCREEN_H = Dimensions.get('window').height;
+const HALF_H = Math.round(SCREEN_H * 0.58); // step 1: half, plan card visible
+const TALL_H = Math.round(SCREEN_H * 0.9); // steps 2-3: the people moment
+const SPRING_IN = { mass: 1, stiffness: 280, damping: 26 };
+const SPRING_OUT = { mass: 1, stiffness: 320, damping: 30 };
 
 // "A" / "A and B" / "A, B and C"
 function joinNames(names: string[]): string {
@@ -58,8 +79,6 @@ function joinNames(names: string[]): string {
   if (names.length === 2) return `${names[0]} and ${names[1]}`;
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
-
-const QUIET_AUTO_MS = 1500;
 
 // ─── Component ──────────────────────────────────────────────────────────────
 export default function PostPlanSurveyV3({
@@ -85,6 +104,20 @@ export default function PostPlanSurveyV3({
     return others;
   }, [others, plan.circle_id, plan.any_stranger_joined]);
 
+  // Whether a keep step will exist at all (pre-no-show estimate) drives the
+  // honest step counter. No-shows only ever SUBTRACT from this set.
+  const keepPossible =
+    YOURS_PAGE_ENABLED &&
+    others.some(
+      (m) => m.keep_state === 'incoming_pending' || m.keep_state === 'none',
+    );
+  const totalSteps = 1 + (showWhoMadeIt ? 1 : 0) + (keepPossible ? 1 : 0);
+  const stepIndex: Record<Step, number> = {
+    how: 1,
+    who: showWhoMadeIt ? 2 : 1,
+    keep: totalSteps,
+  };
+
   const [step, setStep] = useState<Step>('how');
   const [rating, setRating] = useState<Rating | null>(null);
   const [comment, setComment] = useState('');
@@ -97,11 +130,60 @@ export default function PostPlanSurveyV3({
   const wroteRef = useRef(false);
   const exitedRef = useRef(false);
 
+  // ── Grow-sheet motion. translateY: enter/exit. sheetHeight: monotonic grow
+  // from HALF to TALL on the first non-'how' step. Both JS-driven so height can
+  // animate; Reduce Motion snaps to final.
+  const reduceMotion = useReduceMotion();
+  const translateY = useRef(new Animated.Value(SCREEN_H)).current;
+  const backdrop = useRef(new Animated.Value(0)).current;
+  const sheetHeight = useRef(new Animated.Value(HALF_H)).current;
+  const grownRef = useRef(false);
+
+  // Enter.
+  useEffect(() => {
+    if (!visible) return;
+    if (reduceMotion) {
+      translateY.setValue(0);
+      backdrop.setValue(1);
+      return;
+    }
+    translateY.setValue(SCREEN_H);
+    backdrop.setValue(0);
+    Animated.parallel([
+      Animated.spring(translateY, {
+        toValue: 0,
+        ...SPRING_IN,
+        useNativeDriver: false,
+      }),
+      Animated.timing(backdrop, {
+        toValue: 1,
+        duration: 280,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [visible, reduceMotion]);
+
+  // Grow to tall the first time we leave step 1; never shrink back.
+  const growTall = () => {
+    if (grownRef.current) return;
+    grownRef.current = true;
+    if (reduceMotion) {
+      sheetHeight.setValue(TALL_H);
+      return;
+    }
+    Animated.spring(sheetHeight, {
+      toValue: TALL_H,
+      ...SPRING_IN,
+      useNativeDriver: false,
+    }).start();
+  };
+
   // ── The single exit. Rails 2 + 4: mark handled BEFORE any network write, then
   // close. A bare escape with no rating still records a distinct skip sentinel
   // (rating=null, comment='skipped', never 'fine'), fire-and-forget, so the
   // server stops re-offering even if local storage is later cleared. Writes are
-  // swallowed; a failure never traps the user.
+  // swallowed; a failure never traps the user. The close plays the slide-down
+  // first, then hands control back to the owner (onComplete).
   const exit = () => {
     if (exitedRef.current) return;
     exitedRef.current = true;
@@ -119,7 +201,22 @@ export default function PostPlanSurveyV3({
           () => {},
         );
     }
-    onComplete();
+    if (reduceMotion) {
+      onComplete();
+      return;
+    }
+    Animated.parallel([
+      Animated.spring(translateY, {
+        toValue: SCREEN_H,
+        ...SPRING_OUT,
+        useNativeDriver: false,
+      }),
+      Animated.timing(backdrop, {
+        toValue: 0,
+        duration: 220,
+        useNativeDriver: false,
+      }),
+    ]).start(() => onComplete());
   };
 
   // Rail 3: complete-state upsert (rating + comment together), fire-and-forget.
@@ -140,48 +237,11 @@ export default function PostPlanSurveyV3({
 
   const afterRating = () => {
     if (showWhoMadeIt) {
+      growTall();
       setStep('who');
     } else {
       goToKeepOrClose(new Set());
     }
-  };
-
-  const pick = (label: 'good' | 'fine' | 'bad') => {
-    hapticSelection();
-    if (label === 'bad') {
-      setRating('thumbs_down');
-      setShowComment(true);
-      return; // wait for optional comment + explicit Next
-    }
-    const r: Rating = label === 'good' ? 'thumbs_up' : 'fine';
-    setRating(r);
-    commitFeedback(r, null);
-    afterRating();
-  };
-
-  const submitBadComment = () => {
-    commitFeedback('thumbs_down', comment.trim() || null);
-    afterRating();
-  };
-
-  const submitWho = () => {
-    // no_show_reports is write-only and best-effort; never block on it.
-    if (noShows.size > 0) {
-      void supabase
-        .from('no_show_reports')
-        .insert(
-          Array.from(noShows).map((id) => ({
-            event_id: plan.id,
-            reporter_user_id: userId,
-            no_show_user_id: id,
-          })),
-        )
-        .then(
-          () => {},
-          () => {},
-        );
-    }
-    goToKeepOrClose(noShows);
   };
 
   // Step 3 gating: only with the people system on, and only when there is at
@@ -202,6 +262,7 @@ export default function PostPlanSurveyV3({
       return;
     }
     setAddSel(new Set(eligible.map((m) => m.id)));
+    growTall();
     setStep('keep');
   };
 
@@ -259,289 +320,508 @@ export default function PostPlanSurveyV3({
     }
     if (connectedNames.length > 0) hapticSuccess();
     setResult({ connectedNames, requested, failed });
-
-    // Quiet-only outcomes are non-blocking: a brief line, then close.
-    if (connectedNames.length === 0) {
-      setTimeout(exit, QUIET_AUTO_MS);
-    }
   };
 
-  const celebrationText =
-    result && result.connectedNames.length === 1
-      ? COPY.surveyConnectedOne(result.connectedNames[0])
-      : result
-        ? COPY.surveyConnectedMany(joinNames(result.connectedNames))
-        : '';
+  // ── Render ────────────────────────────────────────────────────────────────
+  const headerTitle =
+    step === 'how' ? COPY.surveyHow : step === 'who' ? COPY.surveyWhoMadeIt : null;
 
   return (
-    <Modal visible={visible} animationType="fade" onRequestClose={exit}>
-      {/* SafeAreaProvider inside the Modal so insets are non-zero: an RN Modal is
-          a separate native window with no provider, so a bare SafeAreaView would
-          render the always-available escape (and the title) under the notch /
-          dynamic island. Rail 1 requires the escape to stay reachable. */}
+    <Modal visible={visible} transparent statusBarTranslucent animationType="none" onRequestClose={exit}>
       <SafeAreaProvider>
-        <SafeAreaView style={styles.container}>
-        {/* Rail 1: escape on EVERY step, never disabled, never network-gated.
-            A flow header (not absolute) so it always sits below the inset. */}
-        <View style={styles.header}>
-          <Pressable
-            onPress={exit}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel={COPY.surveyNotNow}
+        <View style={styles.root}>
+          {/* Backdrop: warm dim. NO tap-to-dismiss (escapes are explicit). The
+              plan card sits behind the sheet as the "which plan" context. */}
+          <Animated.View style={[styles.backdrop, { opacity: backdrop }]} />
+          <Animated.View
+            style={[styles.planContext, { opacity: backdrop }]}
+            pointerEvents="none"
           >
-            <Text style={styles.escapeText}>{COPY.surveyNotNow}</Text>
-          </Pressable>
-        </View>
-        {step === 'how' && (
-          <View style={styles.body}>
-            <Text style={styles.planTitle}>{plan.title}</Text>
-            <Text style={styles.q}>{COPY.surveyHow}</Text>
-            <Pressable style={[styles.pill, styles.pillGood]} onPress={() => pick('good')}>
-              <Text style={styles.pillGoodText}>{COPY.surveyGood}</Text>
-            </Pressable>
-            <Pressable style={[styles.pill, styles.pillFine]} onPress={() => pick('fine')}>
-              <Text style={styles.pillFineText}>{COPY.surveyFine}</Text>
-            </Pressable>
-            <Pressable style={[styles.pill, styles.pillBad]} onPress={() => pick('bad')}>
-              <Text style={styles.pillBadText}>{COPY.surveyBad}</Text>
-            </Pressable>
-
-            {showComment && (
-              <View style={styles.commentWrap}>
-                <TextInput
-                  value={comment}
-                  onChangeText={setComment}
-                  placeholder={COPY.surveyBadFollowup}
-                  placeholderTextColor={Colors.tertiary}
-                  style={styles.comment}
-                  multiline
-                />
-                <Pressable style={styles.next} onPress={submitBadComment}>
-                  <Text style={styles.nextText}>{COPY.surveyNext}</Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
-        )}
-
-        {step === 'who' && (
-          <View style={styles.body}>
-            <Text style={styles.q}>{COPY.surveyWhoMadeIt}</Text>
-            <ScrollView style={styles.stretch}>
-              {whoMadeItList.map((m) => {
-                const out = noShows.has(m.id);
-                return (
-                  <Pressable
-                    key={m.id}
-                    style={styles.memberRow}
-                    onPress={() => {
-                      hapticSelection();
-                      setNoShows((s) => {
-                        const n = new Set(s);
-                        if (n.has(m.id)) n.delete(m.id);
-                        else n.add(m.id);
-                        return n;
-                      });
-                    }}
-                  >
-                    <View style={{ opacity: out ? 0.4 : 1 }}>
-                      <YoursAvatar
-                        name={m.first_name_display}
-                        photoUrl={m.profile_photo_url}
-                        size={44}
-                        bucket="none"
-                      />
-                    </View>
-                    <Text style={[styles.memberName, out && styles.memberNameOut]}>
-                      {m.first_name_display ?? 'Someone'}
-                    </Text>
-                    {out && <Text style={styles.didnt}>{COPY.surveyDidntMakeIt}</Text>}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            <Pressable style={styles.next} onPress={submitWho}>
-              <Text style={styles.nextText}>{COPY.surveyNext}</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {step === 'keep' && (
-          <View style={styles.body}>
-            <Text style={styles.q}>{COPY.surveyAddPrompt}</Text>
-            <ScrollView contentContainerStyle={styles.chipWrap}>
-              {keepCandidates.map((m) => {
-                const on = addSel.has(m.id);
-                return (
-                  <Pressable
-                    key={m.id}
-                    style={styles.chip}
-                    onPress={() => {
-                      hapticSelection();
-                      setAddSel((s) => {
-                        const n = new Set(s);
-                        if (n.has(m.id)) n.delete(m.id);
-                        else n.add(m.id);
-                        return n;
-                      });
-                    }}
-                  >
-                    <YoursAvatar
-                      name={m.first_name_display}
-                      photoUrl={m.profile_photo_url}
-                      size={56}
-                      bucket={on ? 'full' : 'none'}
-                    />
-                    <Text style={styles.chipName} numberOfLines={1}>
-                      {m.first_name_display ?? ''}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            <Pressable
-              style={[styles.next, addSel.size === 0 && styles.nextOff]}
-              disabled={busy || addSel.size === 0}
-              onPress={submitAdd}
-            >
-              {busy ? (
-                <ActivityIndicator color={Colors.white} />
-              ) : (
-                <Text style={styles.nextText}>{COPY.surveyAddButton}</Text>
-              )}
-            </Pressable>
-            <Pressable style={styles.skip} onPress={exit}>
-              <Text style={styles.skipText}>{COPY.surveySkip}</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* Handshake feedback. In-Modal overlay (NOT a nested RN Modal, which is
-            the known iOS present-while-presenting bug). Celebration when someone
-            became mutual; otherwise a quiet auto-dismissing line. */}
-        {result && result.connectedNames.length > 0 && (
-          <Pressable style={styles.scrim} onPress={exit}>
-            <Animated.View entering={FadeIn.duration(300)} style={styles.celebrateCard}>
-              <View style={styles.goldRule} />
-              <Text style={styles.celebrateText}>{celebrationText}</Text>
-              {result.requested > 0 && (
-                <Text style={styles.quietLine}>{COPY.surveyRequested}</Text>
-              )}
-              {result.failed && (
-                <Text style={styles.quietLine}>{COPY.surveyCouldntReach}</Text>
-              )}
-              <Pressable style={styles.gotIt} onPress={exit}>
-                <Text style={styles.gotItText}>Got it</Text>
-              </Pressable>
-            </Animated.View>
-          </Pressable>
-        )}
-        {result && result.connectedNames.length === 0 && (
-          <Animated.View entering={FadeIn.duration(200)} style={styles.quietToast}>
-            <Text style={styles.quietToastText}>
-              {result.requested > 0 ? COPY.surveyRequested : COPY.surveyCouldntReach}
-            </Text>
+            <PlanCardBehind plan={plan} wentCount={others.length + 1} />
           </Animated.View>
-        )}
-        </SafeAreaView>
+
+          {/* The grow-sheet. */}
+          <Animated.View
+            style={[styles.sheet, { height: sheetHeight, transform: [{ translateY }] }]}
+          >
+            <View style={styles.handle} />
+            <SheetHeader
+              eyebrow={plan.title}
+              title={headerTitle}
+              current={stepIndex[step]}
+              total={totalSteps}
+            />
+
+            {/* Bodies land in checkpoints 2-4. */}
+            <View style={styles.body}>
+              {step === 'how' && (
+                <StepHowPlaceholder
+                  onPick={(r) => {
+                    setRating(r);
+                  }}
+                  selected={rating}
+                />
+              )}
+              {step === 'who' && <StepStub label="Who made it" />}
+              {step === 'keep' && <StepStub label="Keep these people" />}
+            </View>
+
+            {/* Footer: Continue + the always-live escape. */}
+            <Footer
+              primaryLabel={COPY.surveyContinue}
+              primaryActive={step !== 'how' || rating != null}
+              busy={busy}
+              onPrimary={() => {
+                if (step === 'how') {
+                  if (rating == null) return;
+                  if (rating !== 'thumbs_down') commitFeedback(rating, null);
+                  else commitFeedback('thumbs_down', comment.trim() || null);
+                  afterRating();
+                } else if (step === 'who') {
+                  goToKeepOrClose(noShows);
+                } else {
+                  void submitAdd();
+                }
+              }}
+              onEscape={exit}
+            />
+          </Animated.View>
+
+          {result && (
+            <SurveyOutcomeOverlay result={result} onDismiss={exit} />
+          )}
+        </View>
       </SafeAreaProvider>
     </Modal>
   );
 }
 
+// ─── Plan card behind (the "which plan" context) ────────────────────────────
+function PlanCardBehind({
+  plan,
+  wentCount,
+}: {
+  plan: SurveyProps['plan'];
+  wentCount: number;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.cardBehindWrap, { paddingTop: insets.top + 12 }]}>
+      <Text style={styles.cardBehindEyebrow}>{COPY.wordmark}</Text>
+      <View style={styles.cardBehind}>
+        {plan.image_url ? (
+          <Image
+            source={{ uri: plan.image_url }}
+            style={styles.cardBehindImg}
+            contentFit="cover"
+          />
+        ) : (
+          <View style={[styles.cardBehindImg, styles.cardBehindImgFallback]} />
+        )}
+        <View style={styles.cardBehindBody}>
+          <Text style={styles.cardBehindTitle} numberOfLines={2}>
+            {plan.title}
+          </Text>
+          <Text style={styles.cardBehindMeta}>{wentCount} went</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── Sheet header (eyebrow + serif title + step indicator) ──────────────────
+function SheetHeader({
+  eyebrow,
+  title,
+  current,
+  total,
+}: {
+  eyebrow: string;
+  title: string | null;
+  current: number;
+  total: number;
+}) {
+  return (
+    <View style={styles.header}>
+      <Text style={styles.eyebrow} numberOfLines={1}>
+        {eyebrow}
+      </Text>
+      {title != null && <Text style={styles.title}>{title}</Text>}
+      <View style={styles.stepRow}>
+        {Array.from({ length: total }).map((_, i) => {
+          const n = i + 1;
+          const state = n < current ? 'done' : n === current ? 'on' : 'todo';
+          return (
+            <View
+              key={n}
+              style={[
+                styles.stepDot,
+                state === 'on' && styles.stepDotOn,
+                state === 'done' && styles.stepDotDone,
+              ]}
+            />
+          );
+        })}
+        <Text style={styles.stepCounter}>
+          {COPY.surveyStepCounter(current, total)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ─── Footer (Continue + Not now) ────────────────────────────────────────────
+function Footer({
+  primaryLabel,
+  primaryActive,
+  busy,
+  onPrimary,
+  onEscape,
+}: {
+  primaryLabel: string;
+  primaryActive: boolean;
+  busy: boolean;
+  onPrimary: () => void;
+  onEscape: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.footer, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
+      <Pressable
+        style={[styles.primary, !primaryActive && styles.primaryOff]}
+        disabled={!primaryActive || busy}
+        onPress={onPrimary}
+      >
+        {busy ? (
+          <ActivityIndicator color={Colors.white} />
+        ) : (
+          <Text style={styles.primaryText}>{primaryLabel}</Text>
+        )}
+      </Pressable>
+      <Pressable
+        style={styles.escape}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel={COPY.surveyNotNow}
+        onPress={onEscape}
+      >
+        <Text style={styles.escapeText}>{COPY.surveyNotNow}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+// ─── Temporary step placeholders (replaced in checkpoints 2-4) ──────────────
+function StepHowPlaceholder({
+  onPick,
+  selected,
+}: {
+  onPick: (r: Rating) => void;
+  selected: Rating | null;
+}) {
+  const pills: Array<{ r: Rating; label: string }> = [
+    { r: 'thumbs_up', label: COPY.surveyGood },
+    { r: 'fine', label: COPY.surveyFine },
+    { r: 'thumbs_down', label: COPY.surveyBad },
+  ];
+  return (
+    <View style={styles.pillCol}>
+      {pills.map((p) => {
+        const on = selected === p.r;
+        return (
+          <Pressable
+            key={p.r}
+            style={[styles.pill, on && styles.pillOn]}
+            onPress={() => {
+              hapticSelection();
+              onPick(p.r);
+            }}
+          >
+            <Text style={[styles.pillText, on && styles.pillTextOn]}>
+              {p.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function StepStub({ label }: { label: string }) {
+  return (
+    <View style={styles.stub}>
+      <Text style={styles.stubText}>{label}</Text>
+    </View>
+  );
+}
+
+// ─── Outcome overlay (celebration toast + quiet line) ───────────────────────
+// Owns its own enter motion + auto-dismiss timers; timers are cleared on
+// unmount (suspect-3 guard: no setState after the survey unmounts).
+const AUTO_DISMISS_MS = 3000;
+
+export function SurveyOutcomeOverlay({
+  result,
+  onDismiss,
+}: {
+  result: HandshakeResult;
+  onDismiss: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const reduceMotion = useReduceMotion();
+  const rise = useRef(new Animated.Value(reduceMotion ? 0 : 14)).current;
+  const opacity = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+  const mutual = result.connectedNames.length > 0;
+
+  useEffect(() => {
+    if (!reduceMotion) {
+      Animated.parallel([
+        Animated.spring(rise, { toValue: 0, ...SPRING_IN, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 240, useNativeDriver: true }),
+      ]).start();
+    }
+    const t = setTimeout(onDismiss, AUTO_DISMISS_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const text = mutual
+    ? result.connectedNames.length === 1
+      ? COPY.surveyConnectedOne(result.connectedNames[0])
+      : COPY.surveyConnectedMany(joinNames(result.connectedNames))
+    : result.requested > 0
+      ? COPY.surveyRequested
+      : COPY.surveyCouldntReach;
+
+  return (
+    <Pressable
+      style={[styles.overlay, { paddingBottom: Math.max(28, insets.bottom + 12) }]}
+      onPress={onDismiss}
+    >
+      {mutual ? (
+        <Animated.View
+          style={[styles.toast, { opacity, transform: [{ translateY: rise }] }]}
+        >
+          <View style={styles.toastRule} />
+          <View style={styles.toastInner}>
+            <Text style={styles.toastEyebrow}>{COPY.surveyMutualEyebrow}</Text>
+            <Text style={styles.toastTitle}>{text}</Text>
+            {result.requested > 0 && (
+              <Text style={styles.toastQuiet}>{COPY.surveyRequested}</Text>
+            )}
+            {result.failed && (
+              <Text style={styles.toastQuiet}>{COPY.surveyCouldntReach}</Text>
+            )}
+            <Text style={styles.toastDismiss}>Tap to dismiss</Text>
+          </View>
+        </Animated.View>
+      ) : (
+        <Animated.View style={[styles.quietLine, { opacity }]}>
+          <View style={styles.quietDot} />
+          <Text style={styles.quietText}>{text}</Text>
+        </Animated.View>
+      )}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
-  header: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 2 },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 16, gap: 14 },
-  stretch: { alignSelf: 'stretch' },
-  planTitle: {
+  root: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.surveyScrim },
+
+  // ── Plan card behind ──
+  planContext: { ...StyleSheet.absoluteFillObject },
+  cardBehindWrap: { paddingHorizontal: 20 },
+  cardBehindEyebrow: {
     fontFamily: Fonts.displayItalic,
     fontSize: FontSizes.displayLG,
     color: Colors.asphalt,
-    textAlign: 'center',
-  },
-  q: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.displaySM,
-    color: Colors.secondary,
-    textAlign: 'center',
     marginBottom: 12,
   },
-  pill: { height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  pillGood: { backgroundColor: Colors.terracotta },
-  pillGoodText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
-  pillFine: { backgroundColor: Colors.surface },
-  pillFineText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
-  pillBad: { backgroundColor: Colors.yoursGhostBg },
-  pillBadText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.secondary },
-  commentWrap: { marginTop: 16, gap: 12 },
-  comment: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    minHeight: 80,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-    textAlignVertical: 'top',
-  },
-  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
-  memberName: { flex: 1, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  memberNameOut: { color: Colors.tertiary, textDecorationLine: 'line-through' },
-  didnt: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.tertiary },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, justifyContent: 'center' },
-  chip: { width: 72, alignItems: 'center' },
-  chipName: { fontFamily: Fonts.sans, fontSize: FontSizes.micro, color: Colors.secondary, marginTop: 4 },
-  next: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  nextOff: { opacity: 0.4 },
-  nextText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
-  skip: { alignItems: 'center', paddingVertical: 12 },
-  skipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.tertiary },
-  escapeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.tertiary, paddingVertical: 6, paddingHorizontal: 4 },
-  // ── Handshake celebration (in-Modal overlay) ──
-  scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(44,24,16,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
-  celebrateCard: {
+  cardBehind: {
+    flexDirection: 'row',
+    gap: 12,
     backgroundColor: Colors.cardBg,
-    borderRadius: 20,
-    paddingVertical: 28,
-    paddingHorizontal: 24,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 12,
     alignItems: 'center',
-    alignSelf: 'stretch',
-    gap: 10,
   },
-  goldRule: { width: 40, height: 2, borderRadius: 1, backgroundColor: Colors.goldAccent, marginBottom: 6 },
-  celebrateText: {
-    fontFamily: Fonts.displayBold,
+  cardBehindImg: { width: 56, height: 56, borderRadius: 10 },
+  cardBehindImgFallback: { backgroundColor: Colors.yoursGhostBg },
+  cardBehindBody: { flex: 1, minWidth: 0 },
+  cardBehindTitle: {
+    fontFamily: Fonts.displayItalic,
     fontSize: FontSizes.displaySM,
     color: Colors.asphalt,
-    textAlign: 'center',
   },
-  quietLine: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, textAlign: 'center' },
-  gotIt: { marginTop: 10, paddingVertical: 8, paddingHorizontal: 20 },
-  gotItText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
-  quietToast: {
-    position: 'absolute',
-    left: 24,
-    right: 24,
-    bottom: 48,
+  cardBehindMeta: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    marginTop: 3,
+  },
+
+  // ── Sheet ──
+  sheet: {
+    backgroundColor: Colors.cream,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.iconMuted,
+    marginTop: 12,
+  },
+
+  // ── Header ──
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  eyebrow: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    color: Colors.tertiary,
+  },
+  title: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.displayLG,
+    color: Colors.asphalt,
+    marginTop: 4,
+  },
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  stepDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.border,
+  },
+  stepDotOn: { backgroundColor: Colors.terracotta },
+  stepDotDone: { backgroundColor: Colors.gold },
+  stepCounter: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: Colors.terracotta,
+    marginLeft: 6,
+  },
+
+  // ── Body + footer ──
+  body: { flex: 1, paddingHorizontal: 24, paddingTop: 18 },
+  footer: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+  },
+  primary: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  primaryOff: { opacity: 0.4 },
+  primaryText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.white,
+  },
+  escape: { alignItems: 'center', paddingVertical: 8 },
+  escapeText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.tertiary,
+  },
+
+  // ── Step 1 pills (checkpoint 2 refines) ──
+  pillCol: { gap: 10 },
+  pill: {
+    height: 56,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.cardBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillOn: { borderColor: Colors.terracotta, backgroundColor: Colors.terracotta },
+  pillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  pillTextOn: { color: Colors.cream },
+
+  // ── Stubs ──
+  stub: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  stubText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.tertiary,
+  },
+
+  // ── Outcome overlay ──
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+  },
+  toast: {
+    backgroundColor: Colors.darkWarm,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  toastRule: { height: 3, backgroundColor: Colors.gold },
+  toastInner: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
+  toastEyebrow: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+    color: Colors.gold,
+    marginBottom: 6,
+  },
+  toastTitle: {
+    fontFamily: Fonts.displayItalic,
+    fontSize: FontSizes.displaySM,
+    color: Colors.white,
+    lineHeight: 26,
+  },
+  toastQuiet: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.overlayWhite,
+    marginTop: 6,
+  },
+  toastDismiss: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.tertiary,
+    marginTop: 10,
+  },
+  quietLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     backgroundColor: Colors.darkWarm,
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 18,
-    alignItems: 'center',
   },
-  quietToastText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.white },
+  quietDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.gold },
+  quietText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.white,
+  },
 });
