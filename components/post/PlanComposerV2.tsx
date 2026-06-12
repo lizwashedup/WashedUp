@@ -486,7 +486,10 @@ export default function PlanComposerV2() {
     // The form is NOT reset yet: if the background insert fails we restore the
     // composer with the data intact so the post can be retried.
 
-    // Background insert.
+    // Background insert. `loading` tracks the real in-flight window so the post
+    // button's spinner is reachable and `canPost`'s !loading is a true second
+    // guard against a re-submit racing the insert (alongside confirmVisible).
+    setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('auth');
@@ -533,6 +536,8 @@ export default function PlanComposerV2() {
       setConfirmVisible(false);
       setShareWanted(false);
       setRecoveryNudge(true);
+    } finally {
+      setLoading(false);
     }
   };
 
