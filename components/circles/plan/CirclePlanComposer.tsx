@@ -95,7 +95,11 @@ export default function CirclePlanComposer({
   const [period, setPeriod] = useState<'AM' | 'PM'>('PM');
   const [visibilityOpen, setVisibilityOpen] = useState(false); // false = circle only
   const [strangerCap, setStrangerCap] = useState(STRANGER_DEFAULT);
-  const [error, setError] = useState<string | null>(null);
+  // Non-destructive feedback, gold never red (moments Tier 3/4). `hint` is a
+  // warm validation line shown on a blocked post attempt; `recoveryActive` is
+  // the Tier-4 soft recovery after a post failed (mirrors PlanComposerV2).
+  const [hint, setHint] = useState<string | null>(null);
+  const [recoveryActive, setRecoveryActive] = useState(false);
 
   const reset = () => {
     setTitle('');
@@ -107,7 +111,8 @@ export default function CirclePlanComposer({
     setPeriod('PM');
     setVisibilityOpen(false);
     setStrangerCap(STRANGER_DEFAULT);
-    setError(null);
+    setHint(null);
+    setRecoveryActive(false);
   };
 
   const close = () => {
@@ -132,11 +137,12 @@ export default function CirclePlanComposer({
     return null;
   })();
 
-  // Single owner of the one visible gold line. No recovery nudge here (post
-  // failures show the inline error), so the arbiter just picks between the two
-  // Tier-3 nudges: most recently triggered wins.
+  // Single owner of the one visible gold line. A Tier-4 recovery (a failed
+  // post) suppresses the Tier-3 nudges; otherwise the arbiter picks between the
+  // two Tier-3 nudges, most recently triggered wins. A validation `hint` (below)
+  // shares the same gold budget: when it shows, the ambient nudges hide too.
   const nudge = useNudgeArbiter({
-    recoveryActive: false,
+    recoveryActive,
     tonightEligible: activeQuick === 'tonight',
     placeSkipEligible: !where.trim(),
   });
@@ -149,14 +155,15 @@ export default function CirclePlanComposer({
   };
 
   const onPost = async () => {
-    setError(null);
+    setHint(null);
+    setRecoveryActive(false);
     if (!title.trim()) {
-      setError(COPY.circlePlanTitleRequired);
+      setHint(COPY.circlePlanTitleRequired);
       return;
     }
     const start = buildStartTime();
     if (start.getTime() <= Date.now()) {
-      setError(COPY.circlePlanWhenRequired);
+      setHint(COPY.circlePlanWhenRequired);
       return;
     }
     try {
@@ -176,7 +183,9 @@ export default function CirclePlanComposer({
       close();
       onPosted(result);
     } catch {
-      setError(COPY.circlePlanError);
+      // Tier-4 soft recovery: keep every field intact, no red, name the next
+      // step. The same shape PlanComposerV2 uses on a failed post.
+      setRecoveryActive(true);
     }
   };
 
@@ -216,7 +225,7 @@ export default function CirclePlanComposer({
             value={where.trim() ? { name: where.trim(), lat: null, lng: null, neighborhood: null } : null}
             onChange={(v: PlaceValue | null) => setWhere(v?.name ?? '')}
           />
-          {nudge === 'placeSkip' ? (
+          {nudge === 'placeSkip' && !hint ? (
             <InlineNudge text={visibilityOpen ? NUDGE_PLACE_WARM : NUDGE_PLACE_BASE} />
           ) : null}
         </View>
@@ -249,7 +258,7 @@ export default function CirclePlanComposer({
             selected
             onChange={(h, m, p) => { setHour(h); setMinute(m); setPeriod(p); }}
           />
-          {nudge === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
+          {nudge === 'tonight' && !hint ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
         </View>
 
         {/* WHO IS THIS FOR - the audience binary. "Pick people" is cut. */}
@@ -323,7 +332,20 @@ export default function CirclePlanComposer({
           ) : null}
         </TouchableOpacity>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {/* One gold line, never red. Tier-4 recovery (failed post, tap to
+            dismiss) wins; otherwise a Tier-3 validation hint. */}
+        {nudge === 'recovery' ? (
+          <TouchableOpacity
+            style={styles.recoveryNudge}
+            onPress={() => setRecoveryActive(false)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.recoveryDot} />
+            <Text style={styles.recoveryText}>{COPY.circlePlanRecovery}</Text>
+          </TouchableOpacity>
+        ) : hint ? (
+          <InlineNudge text={hint} />
+        ) : null}
 
         <TouchableOpacity
           activeOpacity={0.85}
@@ -475,7 +497,14 @@ const styles = StyleSheet.create({
   },
   stepperBtnOff: { borderColor: Colors.border },
   stepperValue: { fontFamily: Fonts.displayBold, fontSize: 24, color: Colors.darkWarm, minWidth: 28, textAlign: 'center' },
-  error: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorBrand, marginBottom: CIRCLE_PLAN.labelGap },
+  // Tier-4 soft recovery line, gold never red (mirrors PlanComposerV2).
+  recoveryNudge: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.goldBadgeSoft, borderWidth: 1, borderColor: Colors.goldAccent,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: CIRCLE_PLAN.labelGap,
+  },
+  recoveryDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.gold },
+  recoveryText: { flex: 1, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, lineHeight: 18, color: Colors.quoteText },
   postBtn: {
     height: CIRCLE_PLAN.postHeight,
     borderRadius: CIRCLE_PLAN.postRadius,

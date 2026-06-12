@@ -438,7 +438,9 @@ export const COPY = {
   circlePlanPost: 'Post the plan',
   circlePlanTitleRequired: 'Give the plan a name first.',
   circlePlanWhenRequired: 'Pick when it happens.',
-  circlePlanError: "Couldn't post the plan. Try again.",
+  // Tier-4 soft recovery after a failed post (gold, never red; names the next
+  // step and keeps the form intact). Mirrors PlanComposerV2's recovery line.
+  circlePlanRecovery: "that didn't go through. your plan is here. tap post to try again.",
   // Posted-card framing.
   circlePlanJoinLine: "Join if you're around.",
   circlePlanFromBadge: 'from a circle',
