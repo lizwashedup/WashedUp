@@ -45,30 +45,26 @@ export function onboardingDest(
 }
 
 /**
- * Top-level destination for a freshly-authed user. Layers a hard phone
- * gate on top of onboardingDest: ANY authed user without a verified
- * phone is routed to /migration-gate (when phone auth is enabled),
- * regardless of onboarding status or account age. There is no skip and
- * no snooze — a phone is mandatory to use the app. New users sign up
- * phone-first so they already have one; this targets the legacy
- * email/Apple/invited population that has none.
+ * Top-level destination for a freshly-authed user. Layers the phone gate on
+ * top of onboardingDest, but FAILS CLOSED: it routes to /migration-gate ONLY
+ * when `needs_phone_migration === true`, a definite server-truthed signal from
+ * the `needs_phone_migration()` RPC (an authed user with no confirmed phone on
+ * auth.users). Any other value (false / null / undefined, i.e. unknown / timeout
+ * / stale / RPC failure) routes to the normal destination and NEVER to the gate.
  *
- * `auth_phone` MUST be auth.users.phone (i.e. session.user.phone), not
- * profiles.phone_number. Supabase only writes auth.users.phone after a
- * successful verifyOtp, so it's the one column that means "this person
- * has a verified phone." profiles.phone_number is a denormalization —
- * legacy email/Apple users may have a non-null string there from old
- * signup forms, and brand-new phone signups land with phone_verified=false
- * because handle_new_user doesn't set it. Reading from auth.users.phone
- * avoids both traps.
+ * This replaces the old fail-OPEN check (`!auth_phone`, where auth_phone came from
+ * the possibly-stale `session.user.phone`): a phone-VERIFIED user whose JWT phone
+ * field read null on a slow/stale session was wrongly sent to the gate (incident
+ * 2026-06-11). The decision no longer reads the phone field at all; callers pass
+ * the RPC boolean (fetchNeedsPhoneMigration), which is `false` on any failure.
  */
 export function authedDest(args: {
   onboarding_status: string | null | undefined;
   referral_source: string | null | undefined;
-  auth_phone: string | null | undefined;
+  needs_phone_migration: boolean | null | undefined;
 }): string {
-  const { onboarding_status, referral_source, auth_phone } = args;
-  if (PHONE_AUTH_ENABLED && !auth_phone) {
+  const { onboarding_status, referral_source, needs_phone_migration } = args;
+  if (PHONE_AUTH_ENABLED && needs_phone_migration === true) {
     return '/migration-gate';
   }
   return onboardingDest(onboarding_status, referral_source);

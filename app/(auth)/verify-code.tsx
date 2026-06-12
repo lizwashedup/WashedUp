@@ -20,7 +20,7 @@ import { Fonts } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { formatDisplay, formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
-import { onboardingDest } from '../../lib/authRouting';
+import { authedDest } from '../../lib/authRouting';
 import { verifyCodeSelfRoutingRef, postAuthTransitionRef, wasOtpRecentlySent, markOtpSent } from '../../lib/navState';
 import { AUTH_PROFILE_KEY, type AuthProfile, invalidateAuthProfile } from '../../hooks/useProfile';
 import OtpInput, { type OtpInputHandle } from '../../components/auth/OtpInput';
@@ -211,11 +211,12 @@ export default function VerifyCodeScreen() {
           }
         }
 
-        // Decide destination after a brief celebratory hold. Migration and
-        // signup both resolve via onboardingDest: a 'complete' user lands on
-        // /(tabs)/plans, an onboarding-incomplete user (rare: legacy email
-        // account gated mid-onboarding) resumes at the correct step instead
-        // of flashing tabs then being bounced back by the tabs guard.
+        // Decide destination after a brief celebratory hold, single-sourced
+        // through authedDest (the same decision cold-start + the listener use).
+        // The user just verified a phone (migration) or logged in with one
+        // (sms), so they have a confirmed phone: needs_phone_migration is
+        // definitively false, and a 'complete' user lands on /(tabs)/plans while
+        // an onboarding-incomplete user resumes at the correct step.
         holdTimerRef.current = setTimeout(async () => {
           holdTimerRef.current = null;
           if (!verifiedUser) {
@@ -227,10 +228,11 @@ export default function VerifyCodeScreen() {
             .select('onboarding_status, referral_source')
             .eq('id', verifiedUser.id)
             .maybeSingle();
-          const next = onboardingDest(
-            profile?.onboarding_status,
-            profile?.referral_source,
-          );
+          const next = authedDest({
+            onboarding_status: profile?.onboarding_status,
+            referral_source: profile?.referral_source,
+            needs_phone_migration: false,
+          });
           router.replace(next as never);
         }, SUCCESS_HOLD_MS);
       } catch (e: unknown) {

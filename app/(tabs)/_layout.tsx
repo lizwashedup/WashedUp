@@ -10,6 +10,7 @@ import { Image } from 'expo-image';
 import { supabase } from '../../lib/supabase';
 import { UNREAD_CHATS_KEY } from '../../constants/QueryKeys';
 import { authedDest } from '../../lib/authRouting';
+import { fetchNeedsPhoneMigration } from '../../lib/authGate';
 import { getAuthProfile } from '../../hooks/useProfile';
 import { withTimeout } from '../../lib/withTimeout';
 import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
@@ -102,12 +103,15 @@ export default function TabLayout() {
         { data: { user: null } } as any,
       );
       if (!user || cancelled) return;
-      const profile = await withTimeout(getAuthProfile(queryClient, user.id), 4000, null);
+      const [profile, needsPhone] = await Promise.all([
+        withTimeout(getAuthProfile(queryClient, user.id), 4000, null),
+        fetchNeedsPhoneMigration(),
+      ]);
       if (!profile || cancelled) return;
       const dest = authedDest({
         onboarding_status: profile?.onboarding_status ?? null,
         referral_source: profile?.referral_source ?? null,
-        auth_phone: user.phone ?? null,
+        needs_phone_migration: needsPhone,
       });
       // Phone-gate enforcement belongs to app launch (checkAuth) and a
       // genuine fresh login (root listener), NOT a tab-mount guard that

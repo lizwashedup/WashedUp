@@ -43,6 +43,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { supabase } from '../lib/supabase';
 import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
+import { fetchNeedsPhoneMigration } from '../lib/authGate';
 import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
 import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt, authedUserIdRef } from '../lib/navState';
 import Colors from '../constants/Colors';
@@ -637,7 +638,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // independent of each other and the ban check is a single RPC,
         // so we save one network RTT vs sequential awaits. If the user
         // is banned we still sign them out before honoring the profile.
-        const fetchProfileWithRetry = async () => {
+        const fetchProfileWithRetry = async (): Promise<{ profile: any | null; transient: boolean }> => {
+          let transient = false;
           for (let attempt = 0; attempt < 2; attempt++) {
             const { data, error: e } = await withTimeout(
               supabase
@@ -648,18 +650,27 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
               4000,
               { data: null, error: { message: 'timeout' } } as any,
             );
-            if (!e && data) return data as any;
+            if (!e && data) return { profile: data as any, transient: false };
+            // PGRST116 = no row: a genuinely missing profile (not transient).
+            // Anything else (timeout / network) is transient and must NOT be
+            // treated as a signed-out user.
+            if (e && (e as any).code === 'PGRST116') return { profile: null, transient: false };
+            transient = true;
             if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
           }
-          return null;
+          return { profile: null, transient };
         };
-        const [isBanned, profileData] = await Promise.all([
+        const [isBanned, profileResult, needsPhone] = await Promise.all([
           // Fail-open on timeout: a flaky network must not freeze or log
           // out legit returning users. Bans stay enforced server-side
           // (check_banned_at_signup trigger + admin_ban_user RPC).
           withTimeout(isBannedAppleUser(session.user), 4000, false),
           fetchProfileWithRetry(),
+          // Definite server-truthed gate signal. Fails CLOSED (false) on any
+          // error/timeout, so a stale/slow session never gates a verified user.
+          fetchNeedsPhoneMigration(),
         ]);
+        const profileData = profileResult.profile;
 
         if (cancelled || isRecoveryRef.current) return;
 
@@ -676,6 +687,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         }
 
         if (!profileData) {
+          if (profileResult.transient) {
+            // Transient profile read failure (timeout/network), NOT a missing
+            // account. The session is valid: keep the user authed and route by
+            // the definite gate signal instead of bouncing them to the login
+            // screen (a false logout). The profile hydrates on the next fetch.
+            setAuthedUserId(session.user.id);
+            const dest = needsPhone ? '/migration-gate' : '/(tabs)/plans';
+            lastNavRef.current = { dest, ts: Date.now() };
+            router.replace(dest as any);
+            setTimeout(() => setAuthResolved(true), 80);
+            return;
+          }
+          // Genuinely no profile row: treat as unauthed.
           authedUserIdRef.current = null;
           const unauth = unauthedRoute();
           lastNavRef.current = { dest: unauth, ts: Date.now() };
@@ -688,32 +712,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // read the same profile without firing a duplicate Supabase select.
         seedAuthProfile(queryClient, session.user.id, profileData);
         setAuthedUserId(session.user.id);
-        // session.user.phone comes from the persisted JWT, which can
-        // predate a phone set on another device/session. Only when it's
-        // empty do we pay one extra RTT for the authoritative server
-        // value before deciding to gate — mirrors the (tabs) onboarding
-        // guard, and keeps the common already-has-phone path RTT-free.
-        let authPhone: string | null = session.user.phone ?? null;
-        if (!authPhone) {
-          // On timeout, keep the JWT's phone (null) and proceed — worst
-          // case the user hits the phone gate they can complete, never a
-          // frozen overlay.
-          const { data: { user: fresh } } = await withTimeout(
-            supabase.auth.getUser(),
-            3000,
-            { data: { user: null } } as any,
-          );
-          if (cancelled || isRecoveryRef.current) return;
-          authPhone = fresh?.phone ?? null;
-        }
         const dest = authedDest({
           onboarding_status: profileData.onboarding_status,
           referral_source: profileData.referral_source,
-          auth_phone: authPhone,
+          needs_phone_migration: needsPhone,
         });
         lastNavRef.current = { dest, ts: Date.now() };
-        // Navigate first, then lift the overlay — prevents a 1-frame flash
-        // where the splash is gone but the destination hasn't rendered yet.
+        // Navigate first, then lift the overlay (prevents a 1-frame flash
+        // where the splash is gone but the destination hasn't rendered yet).
         router.replace(dest as any);
         setTimeout(() => setAuthResolved(true), 80);
       } catch {
@@ -737,6 +743,25 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         return;
       }
       if (event === 'SIGNED_IN' && isRecoveryRef.current) return;
+      // Auto-correct anyone TRANSIENTLY gated: when a fresh token or updated
+      // user arrives and they are sitting on the migration gate but no longer
+      // need it, route them out. Never NEWLY gate on a refresh.
+      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        if (session?.user && pathnameRef.current === '/migration-gate') {
+          const stillNeeds = await fetchNeedsPhoneMigration();
+          if (!stillNeeds) {
+            const data = await withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null);
+            const dest = authedDest({
+              onboarding_status: data?.onboarding_status,
+              referral_source: data?.referral_source,
+              needs_phone_migration: false,
+            });
+            lastNavRef.current = { dest, ts: Date.now() };
+            router.replace(dest as any);
+          }
+        }
+        return;
+      }
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
 
       // Best-effort: consume a referral code captured while signed out
@@ -810,11 +835,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // Reuse the shared auth-profile cache (seeded by cold-start checkAuth)
         // so SIGNED_IN doesn't fire a duplicate select within the 60s stale
         // window. Falls back to a network fetch if the cache is empty/stale.
-        const data = await withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null);
+        const [data, needsPhone] = await Promise.all([
+          withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null),
+          fetchNeedsPhoneMigration(),
+        ]);
         const dest = authedDest({
           onboarding_status: data?.onboarding_status,
           referral_source: data?.referral_source,
-          auth_phone: session.user.phone ?? null,
+          needs_phone_migration: needsPhone,
         });
         const now = Date.now();
         // Genuine fresh login committed — claim the identity so any
