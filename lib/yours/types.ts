@@ -85,6 +85,37 @@ export interface ProfileCardAdventure {
   thumb_url: string | null;
 }
 
+/** get_person_profile upcoming row (viewer-visible, neighborhood-level place). */
+export interface PersonProfileUpcoming {
+  event_id: string;
+  title: string;
+  start_time: string;
+  neighborhood: string | null;
+}
+
+/** get_person_profile past row (date + title only). */
+export interface PersonProfilePast {
+  event_id: string;
+  title: string;
+  date: string;
+}
+
+/**
+ * get_person_profile payload (the individual profile page, "just {name}").
+ * The RPC returns a single jsonb object, or NULL for a non-mutual / blocked
+ * viewer (the page's not-found state). No albums (those are keep-page only).
+ */
+export interface PersonProfile {
+  user_id: string;
+  first_name_display: string | null;
+  profile_photo_url: string | null;
+  handle: string | null;
+  upcoming: PersonProfileUpcoming[];
+  upcoming_count: number;
+  past: PersonProfilePast[];
+  past_total: number;
+}
+
 /** get_profile_card row. upcoming/adventures/since_date null when minimal. */
 export interface ProfileCard {
   kind: ProfileCardKind;

@@ -359,8 +359,9 @@ export default function YoursScreen() {
                   subtitle: COPY.menuViewProfileSub,
                   muted: true,
                   dividerBefore: true,
-                  // Routes to the keep page until the dedicated profile page ships.
-                  onPress: () => router.push(`/person/${menu.person.user_id}` as never),
+                  // The dedicated individual profile page ("just {name}"),
+                  // distinct from the keep page at /person/[id].
+                  onPress: () => router.push(`/profile/${menu.person.user_id}` as never),
                 },
               ]
             : []

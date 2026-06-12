@@ -469,4 +469,30 @@ export const COPY = {
   // ── Keep-page empty state (you & [name], no shared history yet) ─────────
   keepEmptyHeadline: (name: string) => `This is where you and ${name} begins.`,
   keepEmptyAction: 'Make the first plan.',
+
+  // ── Individual profile page ("just {name}") ────────────────────────────
+  // The keep page's language, solo. Mutuals only (RPC-gated, server-side). No
+  // albums. Source: individual-profile-page-spec.md. The overflow reuses the
+  // shared menu rows where they already exist (menuMessage/menuMakePlan), so an
+  // action reads identically here and on the People long-press. No forbidden
+  // words, no em/en dashes.
+  // Overflow rows the keep page doesn't already cover:
+  profileRemoveSub: "They won't be told",
+  ppReport: 'Report or block',
+  ppReportSub: "We'll take it from here",
+  // Section header (lowercase; rendered uppercase). profileComingUp reused for
+  // the upcoming section.
+  ppStorySoFar: 'the story so far',
+  ppSeeMore: 'see more',
+  // Quiet cross-link down to the shared keep page (the two pages point at each
+  // other). The "&" is the ampersand glyph the spec calls for.
+  ppKeepLink: (name: string) => `you & ${name}`,
+  // Stats line, anti-zero: a zero stat is dropped, never rendered as "0".
+  ppStatPlans: (n: number) => `${n} ${n === 1 ? 'plan' : 'plans'}`,
+  ppStatComingUp: (n: number) => `${n} coming up`,
+  // Brand-new (mutual, nothing at all yet): fresh-start line + the action.
+  ppBrandNew: (name: string) => `${name}'s story here is just starting.`,
+  // Denied mid-session / severed / nonexistent: one quiet line, no error
+  // styling, no explanation (denied and nonexistent look identical).
+  ppNotFound: 'Nothing here.',
 } as const;
