@@ -404,6 +404,21 @@ export const COPY = {
   // Inherited single-gender pill.
   circlePlanGenderWomen: 'Shown to women only',
   circlePlanGenderMen: 'Shown to men only',
+  // Audience binary (locked verbatim; "pick people" is cut, audience is the binary).
+  circlePlanAudienceCircleOnly: (circle: string) => `${circle} only`,
+  circlePlanAudienceCircleOnlySub: 'Stays here. Only the circle sees it.',
+  circlePlanAudienceOpen: 'Open to others',
+  circlePlanAudienceOpenSub: (n: number) =>
+    `Posts to the Plans feed too. Up to ${n} ${n === 1 ? 'other' : 'others'} can join.`,
+  circlePlanSpotsForOthers: 'spots for others',
+  circlePlanStrangerRange: '2 to 7',
+  // Capacity truth: two numbers, never one cap. Circle members never count
+  // against the outside cap, so a 6-person circle with cap 3 never reads "full".
+  circlePlanCapacityTruth: (filled: number, n: number) =>
+    `${filled} in the circle · up to ${n} ${n === 1 ? 'other' : 'others'} welcome`,
+  // Post button label reflects the audience choice.
+  circlePlanPostToCircle: (circle: string) => `post to ${circle}`,
+  circlePlanPostToFeed: 'post to circle + feed',
   // Primary action + errors.
   circlePlanPost: 'Post the plan',
   circlePlanTitleRequired: 'Give the plan a name first.',

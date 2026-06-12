@@ -26,6 +26,8 @@ export interface CreateCirclePlanArgs {
   memberUserIds?: string[] | null;
   locationText?: string | null;
   description?: string | null;
+  /** Category, lowercased -> events.primary_vibe (RPC param already exists). */
+  primaryVibe?: string | null;
 }
 
 export interface CreateCirclePlanResult {
@@ -48,6 +50,7 @@ export function useCreateCirclePlan() {
           args.memberUserIds && args.memberUserIds.length > 0 ? args.memberUserIds : null,
         p_location_text: args.locationText ?? null,
         p_description: args.description ?? null,
+        p_primary_vibe: args.primaryVibe ?? null,
       });
       if (error) throw error;
       return data as CreateCirclePlanResult;

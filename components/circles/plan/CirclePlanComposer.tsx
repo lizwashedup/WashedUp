@@ -14,16 +14,17 @@
  * Places autocomplete / lat-lng); gender is not set here (all circle plans are
  * mixed, matching the spec's "inherited, not set here").
  */
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   Pressable,
   ScrollView,
-  Image,
   StyleSheet,
 } from 'react-native';
-import { Check, Minus, Plus } from 'lucide-react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Minus, Plus } from 'lucide-react-native';
+import { hapticSelection } from '../../../lib/haptics';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { CIRCLE_PLAN } from '../../../constants/YoursDesign';
@@ -70,10 +71,6 @@ function todayCalendarDay(): CalendarDay {
   return { year: t.y, month: t.m, day: t.d };
 }
 
-function memberLabel(m: ComposerMember): string {
-  return m.first_name_display?.trim() || COPY.circleMemberFallback;
-}
-
 export default function CirclePlanComposer({
   visible,
   onClose,
@@ -93,16 +90,9 @@ export default function CirclePlanComposer({
   const [hour, setHour] = useState(7);
   const [minute, setMinute] = useState<(typeof MINUTES)[number]>(0);
   const [period, setPeriod] = useState<'AM' | 'PM'>('PM');
-  const [visibilityOpen, setVisibilityOpen] = useState(false); // false = Just us
-  const [pickMode, setPickMode] = useState(false); // false = everyone
-  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [visibilityOpen, setVisibilityOpen] = useState(false); // false = circle only
   const [strangerCap, setStrangerCap] = useState(STRANGER_DEFAULT);
   const [error, setError] = useState<string | null>(null);
-
-  const pickable = useMemo(
-    () => members.filter((m) => m.user_id !== myUserId),
-    [members, myUserId],
-  );
 
   const reset = () => {
     setTitle('');
@@ -113,8 +103,6 @@ export default function CirclePlanComposer({
     setMinute(0);
     setPeriod('PM');
     setVisibilityOpen(false);
-    setPickMode(false);
-    setPicked(new Set());
     setStrangerCap(STRANGER_DEFAULT);
     setError(null);
   };
@@ -122,15 +110,6 @@ export default function CirclePlanComposer({
   const close = () => {
     reset();
     onClose();
-  };
-
-  const togglePicked = (id: string) => {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   };
 
   const buildStartTime = (): Date => {
@@ -152,7 +131,6 @@ export default function CirclePlanComposer({
       setError(COPY.circlePlanWhenRequired);
       return;
     }
-    const subset = !visibilityOpen && pickMode ? Array.from(picked) : null;
     try {
       const result = await createPlan.mutateAsync({
         circleId,
@@ -160,8 +138,12 @@ export default function CirclePlanComposer({
         startTime: start.toISOString(),
         visibility: visibilityOpen ? 'open' : 'circle_only',
         strangerCap: visibilityOpen ? strangerCap : null,
-        memberUserIds: subset,
+        // "Pick people" is cut: the whole circle is always the audience. An open
+        // plan still gets its own chat (RPC: has_own_chat keys on visibility,
+        // not on member ids), so the chat-spawn machinery is unaffected.
+        memberUserIds: null,
         locationText: where.trim() || null,
+        primaryVibe: category?.toLowerCase() ?? null,
       });
       close();
       onPosted(result);
@@ -170,10 +152,7 @@ export default function CirclePlanComposer({
     }
   };
 
-  const postDisabled =
-    createPlan.isPending ||
-    !title.trim() ||
-    (!visibilityOpen && pickMode && picked.size === 0);
+  const postDisabled = createPlan.isPending || !title.trim();
 
   return (
     <BottomSheet visible={visible} onClose={close} heightPct={CIRCLE_PLAN.sheetHeightPct}>
@@ -183,7 +162,10 @@ export default function CirclePlanComposer({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>{COPY.circlePlanComposerTitle}</Text>
+        <View style={styles.sheetHeader}>
+          <Text style={styles.sheetEyebrow}>{circleName}</Text>
+          <Text style={styles.sheetTitle}>{COPY.circlePlanComposerTitle}</Text>
+        </View>
 
         {/* What */}
         <EditorialTitleField
@@ -265,114 +247,83 @@ export default function CirclePlanComposer({
           </View>
         </View>
 
-        {/* WHO IS THIS FOR */}
+        {/* WHO IS THIS FOR - the audience binary. "Pick people" is cut. */}
         <Text style={styles.sectionLabel}>{COPY.circlePlanWhoLabel}</Text>
 
+        {/* Circle only */}
         <Pressable
-          onPress={() => setVisibilityOpen(false)}
-          style={[styles.audienceCard, !visibilityOpen && styles.audienceCardOn]}
+          onPress={() => { hapticSelection(); setVisibilityOpen(false); }}
+          style={[styles.audCard, !visibilityOpen && styles.audCardOn]}
         >
-          <Text style={styles.audienceTitle}>{COPY.circlePlanJustUs}</Text>
-          <Text style={styles.audienceSub}>{COPY.circlePlanJustUsSub(circleName)}</Text>
+          <View style={styles.audTop}>
+            <View style={styles.audTextWrap}>
+              <Text style={styles.audName}>{COPY.circlePlanAudienceCircleOnly(circleName)}</Text>
+              <Text style={styles.audSub}>{COPY.circlePlanAudienceCircleOnlySub}</Text>
+            </View>
+            <View style={[styles.radio, !visibilityOpen && styles.radioOn]}>
+              {!visibilityOpen ? <View style={styles.radioDot} /> : null}
+            </View>
+          </View>
         </Pressable>
 
-        {/* Just-us recipients (hidden for a 2-person DM: "just us" is the pair) */}
-        {!visibilityOpen && !isDm && (
-          <View style={styles.recipientBlock}>
-            <View style={styles.chipRow}>
-              <Pressable
-                onPress={() => setPickMode(false)}
-                style={[styles.recipientChip, !pickMode && styles.recipientChipOn]}
-              >
-                <Text style={[styles.recipientChipText, !pickMode && styles.recipientChipTextOn]}>
-                  {COPY.circlePlanEveryone(circleName)}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setPickMode(true)}
-                style={[styles.recipientChipGhost, pickMode && styles.recipientChipOn]}
-              >
-                <Text style={[styles.recipientChipGhostText, pickMode && styles.recipientChipTextOn]}>
-                  {COPY.circlePlanPickPeople}
-                </Text>
-              </Pressable>
+        {/* Open to others (+ stranger stepper reveal + capacity truth) */}
+        <Pressable
+          onPress={() => { hapticSelection(); setVisibilityOpen(true); }}
+          style={[styles.audCard, visibilityOpen && styles.audCardOn]}
+        >
+          <View style={styles.audTop}>
+            <View style={styles.audTextWrap}>
+              <Text style={styles.audName}>{COPY.circlePlanAudienceOpen}</Text>
+              <Text style={styles.audSub}>{COPY.circlePlanAudienceOpenSub(strangerCap)}</Text>
             </View>
-            <Text style={styles.helper}>{COPY.circlePlanPickHelper}</Text>
+            <View style={[styles.radio, visibilityOpen && styles.radioOn]}>
+              {visibilityOpen ? <View style={styles.radioDot} /> : null}
+            </View>
+          </View>
 
-            {pickMode && (
-              <View style={styles.memberList}>
-                {pickable.map((m) => {
-                  const on = picked.has(m.user_id);
-                  return (
-                    <Pressable
-                      key={m.user_id}
-                      onPress={() => togglePicked(m.user_id)}
-                      style={styles.memberRow}
-                    >
-                      {m.profile_photo_url ? (
-                        <Image source={{ uri: m.profile_photo_url }} style={styles.memberAvatar} />
-                      ) : (
-                        <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
-                          <Text style={styles.memberInitial}>
-                            {memberLabel(m)[0]?.toUpperCase() ?? '?'}
-                          </Text>
-                        </View>
-                      )}
-                      <Text style={styles.memberName} numberOfLines={1}>
-                        {memberLabel(m)}
-                      </Text>
-                      <View style={[styles.memberCheck, on && styles.memberCheckOn]}>
-                        {on && <Check size={14} color={Colors.white} strokeWidth={3} />}
-                      </View>
-                    </Pressable>
-                  );
-                })}
+          {visibilityOpen ? (
+            <Animated.View
+              entering={FadeInDown.springify().mass(0.7).damping(28).stiffness(350)}
+              style={styles.stepperReveal}
+            >
+              <Text style={styles.stepperRevealLabel}>{COPY.circlePlanSpotsForOthers}</Text>
+              <View style={styles.stepperInline}>
+                <Pressable
+                  onPress={() => setStrangerCap((c) => Math.max(STRANGER_MIN, c - 1))}
+                  disabled={strangerCap <= STRANGER_MIN}
+                  style={[styles.stepperBtn, strangerCap <= STRANGER_MIN && styles.stepperBtnOff]}
+                >
+                  <Minus size={16} color={strangerCap <= STRANGER_MIN ? Colors.tertiary : Colors.terracotta} strokeWidth={2.5} />
+                </Pressable>
+                <Text style={styles.stepperValue}>{strangerCap}</Text>
+                <Pressable
+                  onPress={() => setStrangerCap((c) => Math.min(STRANGER_MAX, c + 1))}
+                  disabled={strangerCap >= STRANGER_MAX}
+                  style={[styles.stepperBtn, strangerCap >= STRANGER_MAX && styles.stepperBtnOff]}
+                >
+                  <Plus size={16} color={strangerCap >= STRANGER_MAX ? Colors.tertiary : Colors.terracotta} strokeWidth={2.5} />
+                </Pressable>
+                <Text style={styles.stepperRange}>{COPY.circlePlanStrangerRange}</Text>
               </View>
-            )}
-          </View>
-        )}
-
-        <Pressable
-          onPress={() => setVisibilityOpen(true)}
-          style={[styles.audienceCard, visibilityOpen && styles.audienceCardOn]}
-        >
-          <Text style={styles.audienceTitle}>{COPY.circlePlanOpenUp}</Text>
-          <Text style={styles.audienceSub}>{COPY.circlePlanOpenUpSub}</Text>
+              <View style={styles.capacityTruthPill}>
+                <Text style={styles.capacityTruthText}>
+                  {COPY.circlePlanCapacityTruth(members.length, strangerCap)}
+                </Text>
+              </View>
+            </Animated.View>
+          ) : null}
         </Pressable>
 
-        {/* Open-it-up stranger stepper */}
-        {visibilityOpen && (
-          <View style={styles.stepperBlock}>
-            <Text style={styles.stepperLabel}>{COPY.circlePlanStepperLabel}</Text>
-            <View style={styles.stepperRow}>
-              <Pressable
-                onPress={() => setStrangerCap((c) => Math.max(STRANGER_MIN, c - 1))}
-                disabled={strangerCap <= STRANGER_MIN}
-                style={[styles.stepperBtn, strangerCap <= STRANGER_MIN && styles.stepperBtnOff]}
-              >
-                <Minus size={18} color={strangerCap <= STRANGER_MIN ? Colors.tertiary : Colors.terracotta} strokeWidth={2.5} />
-              </Pressable>
-              <Text style={styles.stepperValue}>{strangerCap}</Text>
-              <Pressable
-                onPress={() => setStrangerCap((c) => Math.min(STRANGER_MAX, c + 1))}
-                disabled={strangerCap >= STRANGER_MAX}
-                style={[styles.stepperBtn, strangerCap >= STRANGER_MAX && styles.stepperBtnOff]}
-              >
-                <Plus size={18} color={strangerCap >= STRANGER_MAX ? Colors.tertiary : Colors.terracotta} strokeWidth={2.5} />
-              </Pressable>
-            </View>
-            <Text style={styles.helper}>{COPY.circlePlanStepperSub(circleName)}</Text>
-          </View>
-        )}
-
-        {error && <Text style={styles.error}>{error}</Text>}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable
           onPress={onPost}
           disabled={postDisabled}
           style={[styles.postBtn, postDisabled && styles.postBtnDisabled]}
         >
-          <Text style={styles.postBtnText}>{COPY.circlePlanPost}</Text>
+          <Text style={styles.postBtnText}>
+            {visibilityOpen ? COPY.circlePlanPostToFeed : COPY.circlePlanPostToCircle(circleName)}
+          </Text>
         </Pressable>
       </ScrollView>
     </BottomSheet>
@@ -516,4 +467,52 @@ const styles = StyleSheet.create({
   },
   postBtnDisabled: { opacity: 0.5 },
   postBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
+
+  // Sheet header (eyebrow = circle name)
+  sheetHeader: { marginBottom: CIRCLE_PLAN.sectionGap },
+  sheetEyebrow: {
+    fontFamily: Fonts.sansSemibold, fontSize: 13, letterSpacing: 1.3,
+    textTransform: 'uppercase', color: Colors.terracotta, marginBottom: 2,
+  },
+  sheetTitle: { fontFamily: Fonts.displayBold, fontSize: 26, color: Colors.darkWarm },
+
+  // Audience binary cards
+  audCard: {
+    borderRadius: CIRCLE_PLAN.cardRadius,
+    borderWidth: CIRCLE_PLAN.cardBorder,
+    borderColor: Colors.border,
+    backgroundColor: Colors.cardBg,
+    paddingVertical: CIRCLE_PLAN.cardPadV,
+    paddingHorizontal: CIRCLE_PLAN.cardPadH,
+    marginBottom: CIRCLE_PLAN.cardGap,
+  },
+  audCardOn: { borderColor: Colors.terracotta, backgroundColor: Colors.accentSubtle },
+  audTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  audTextWrap: { flex: 1, paddingRight: 12 },
+  audName: { fontFamily: Fonts.displayBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm, marginBottom: 3 },
+  audSub: { fontFamily: Fonts.sans, fontSize: 13, lineHeight: 18, color: Colors.secondary },
+  radio: {
+    width: 20, height: 20, borderRadius: 10, marginTop: 2,
+    borderWidth: 1.5, borderColor: Colors.borderWarm,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  radioOn: { borderColor: Colors.terracotta },
+  radioDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: Colors.terracotta },
+
+  // Stranger stepper reveal
+  stepperReveal: {
+    marginTop: 14, paddingTop: 14,
+    borderTopWidth: 1, borderTopColor: Colors.overlayWarm,
+  },
+  stepperRevealLabel: { fontFamily: Fonts.sansSemibold, fontSize: 13, color: Colors.secondary, marginBottom: 10 },
+  stepperInline: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  stepperRange: { fontFamily: Fonts.sans, fontSize: 13, color: Colors.tertiary, marginLeft: 4 },
+
+  // Capacity truth (gold-tinted pill + readable warm text)
+  capacityTruthPill: {
+    marginTop: 12, alignSelf: 'flex-start',
+    backgroundColor: Colors.goldBadgeSoft, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  capacityTruthText: { fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.quoteText },
 });
