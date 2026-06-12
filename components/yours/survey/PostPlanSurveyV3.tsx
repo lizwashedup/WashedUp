@@ -838,13 +838,16 @@ export function SurveyOutcomeOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const text = mutual
-    ? result.connectedNames.length === 1
+  const celebrationText =
+    result.connectedNames.length === 1
       ? COPY.surveyConnectedOne(result.connectedNames[0])
-      : COPY.surveyConnectedMany(joinNames(result.connectedNames))
-    : result.requested > 0
-      ? COPY.surveyRequested
-      : COPY.surveyCouldntReach;
+      : COPY.surveyConnectedMany(joinNames(result.connectedNames));
+
+  // Quiet lines, always stacked in order: request-sent, then the non-blocking
+  // failure note (a failure is appended, never an error state, never blocks).
+  const quietLines: string[] = [];
+  if (result.requested > 0) quietLines.push(COPY.surveyRequested);
+  if (result.failed) quietLines.push(COPY.surveyCouldntReach);
 
   return (
     <Pressable
@@ -858,20 +861,25 @@ export function SurveyOutcomeOverlay({
           <View style={styles.toastRule} />
           <View style={styles.toastInner}>
             <Text style={styles.toastEyebrow}>{COPY.surveyMutualEyebrow}</Text>
-            <Text style={styles.toastTitle}>{text}</Text>
-            {result.requested > 0 && (
-              <Text style={styles.toastQuiet}>{COPY.surveyRequested}</Text>
-            )}
-            {result.failed && (
-              <Text style={styles.toastQuiet}>{COPY.surveyCouldntReach}</Text>
-            )}
+            <Text style={styles.toastTitle}>{celebrationText}</Text>
+            {quietLines.map((line) => (
+              <Text key={line} style={styles.toastQuiet}>
+                {line}
+              </Text>
+            ))}
             <Text style={styles.toastDismiss}>Tap to dismiss</Text>
           </View>
         </Animated.View>
       ) : (
         <Animated.View style={[styles.quietLine, { opacity }]}>
           <View style={styles.quietDot} />
-          <Text style={styles.quietText}>{text}</Text>
+          <View style={styles.quietTextCol}>
+            {quietLines.map((line) => (
+              <Text key={line} style={styles.quietText}>
+                {line}
+              </Text>
+            ))}
+          </View>
         </Animated.View>
       )}
     </Pressable>
@@ -1184,6 +1192,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   quietDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.gold },
+  quietTextCol: { flex: 1, gap: 3 },
   quietText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
