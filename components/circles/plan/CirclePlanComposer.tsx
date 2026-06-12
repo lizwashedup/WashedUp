@@ -37,6 +37,9 @@ import {
   useCreateCirclePlan,
   CreateCirclePlanResult,
 } from '../../../hooks/useCreateCirclePlan';
+import EditorialTitleField from '../../composer/EditorialTitleField';
+import CategoryChips from '../../composer/CategoryChips';
+import { type PlanCategory } from '../../../constants/Categories';
 
 interface ComposerMember {
   user_id: string;
@@ -83,6 +86,7 @@ export default function CirclePlanComposer({
   const createPlan = useCreateCirclePlan();
 
   const [title, setTitle] = useState('');
+  const [category, setCategory] = useState<PlanCategory | null>(null);
   const [where, setWhere] = useState('');
   const [date, setDate] = useState<CalendarDay>(todayCalendarDay);
   const [hour, setHour] = useState(7);
@@ -101,6 +105,7 @@ export default function CirclePlanComposer({
 
   const reset = () => {
     setTitle('');
+    setCategory(null);
     setWhere('');
     setDate(todayCalendarDay());
     setHour(7);
@@ -180,16 +185,18 @@ export default function CirclePlanComposer({
         <Text style={styles.title}>{COPY.circlePlanComposerTitle}</Text>
 
         {/* What */}
-        <Text style={styles.fieldLabel}>{COPY.circlePlanWhatLabel}</Text>
-        <TextInput
-          style={styles.field}
+        <EditorialTitleField
           value={title}
           onChangeText={setTitle}
           placeholder={COPY.circlePlanWhatPlaceholder}
-          placeholderTextColor={Colors.tertiary}
+          label={COPY.circlePlanWhatLabel}
           maxLength={80}
-          returnKeyType="next"
         />
+
+        {/* Category */}
+        <View style={styles.categoryWrap}>
+          <CategoryChips selected={category} onSelect={setCategory} />
+        </View>
 
         {/* Where */}
         <Text style={styles.fieldLabel}>{COPY.circlePlanWhereLabel}</Text>
@@ -401,6 +408,7 @@ const styles = StyleSheet.create({
     color: Colors.darkWarm,
     marginBottom: CIRCLE_PLAN.sectionGap,
   },
+  categoryWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
   calendarWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
   timeRow: {
     flexDirection: 'row',
