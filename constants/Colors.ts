@@ -81,6 +81,7 @@ const brand = {
 
   // ── Q2 palette ───────────────────────────────────────────────────────────
   darkWarm: '#2C1810',       // Primary text (warm dark)
+  inkSoft: 'rgba(44,24,16,0.60)', // Softened dark ink - readable placeholders (darkWarm @60%), NOT pale grey; stays distinct from full-ink entered text
   secondary: '#78695C',      // Secondary text (dates, locations, metadata)
   tertiary: '#A09385',       // Tertiary text (muted labels, inactive tabs)
   iconMuted: '#C5C0B8',      // Muted icon color

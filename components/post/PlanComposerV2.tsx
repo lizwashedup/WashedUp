@@ -59,9 +59,10 @@ import { useDismissSuggestion } from '../../hooks/useDismissSuggestion';
 import { useInvitePeopleToPlan } from '../../hooks/useInvitePeopleToPlan';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
-import WashedUpCalendar, { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
+import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
 import EditorialTitleField from '../composer/EditorialTitleField';
 import CategoryChips from '../composer/CategoryChips';
+import CollapsibleCalendar from '../composer/CollapsibleCalendar';
 import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../components/post/InvitePeopleSection';
 import PeoplePickerSheet, { type PickedPerson } from '../../components/post/PeoplePickerSheet';
 
@@ -80,7 +81,7 @@ const MIN_GROUP = 3;
 const MAX_GROUP = 8;
 const MSG_MIN = 10;
 const MSG_LIMIT = 150;
-const DESC_LIMIT = 500;
+const DESC_LIMIT = 1000;
 
 type QuickKind = 'tonight' | 'tomorrow' | 'weekend';
 
@@ -522,7 +523,7 @@ export default function PlanComposerV2() {
       >
         {/* WHAT + photo */}
         <View style={styles.section}>
-          <EditorialTitleField value={title} onChangeText={setTitle} placeholder="what do you want to do?" />
+          <EditorialTitleField value={title} onChangeText={setTitle} placeholder="sunset hike at runyon" />
           <View style={styles.photoRow}>
             {imageUrl ? (
               <View style={styles.photoThumbWrap}>
@@ -551,13 +552,13 @@ export default function PlanComposerV2() {
 
         {/* YOUR MESSAGE (optional) */}
         <View style={styles.section}>
-          <Text style={styles.label}>your message</Text>
+          <Text style={styles.label}>your message<Text style={styles.labelOptional}> · optional</Text></Text>
           <TextInput
             style={styles.messageInput}
             value={creatorMessage}
             onChangeText={setCreatorMessage}
             placeholder="going up the back trail, golden hour pace, no rush..."
-            placeholderTextColor={Colors.tertiary}
+            placeholderTextColor={Colors.inkSoft}
             multiline
             maxLength={MSG_LIMIT}
           />
@@ -583,18 +584,16 @@ export default function PlanComposerV2() {
               );
             })}
           </View>
-          <View style={styles.calendarCard}>
-            <WashedUpCalendar mode="pick" selected={selectedDate} onSelect={selectDate} />
-            <TouchableOpacity style={styles.timeRow} onPress={openTimePicker} activeOpacity={0.7}>
-              <Text style={styles.timeLabel}>time</Text>
-              <View style={styles.timePill}>
-                <Text style={styles.timePillText}>
-                  {timeSelected ? displayTime(timeHour, timeMinute, timePeriod) : 'set a time'}
-                </Text>
-              </View>
-              <Text style={styles.timeChange}>change</Text>
-            </TouchableOpacity>
-          </View>
+          <CollapsibleCalendar selected={selectedDate} onSelect={selectDate} />
+          <TouchableOpacity style={styles.timeRowCard} onPress={openTimePicker} activeOpacity={0.7}>
+            <Text style={styles.timeLabel}>time</Text>
+            <View style={styles.timePill}>
+              <Text style={styles.timePillText}>
+                {timeSelected ? displayTime(timeHour, timeMinute, timePeriod) : 'set a time'}
+              </Text>
+            </View>
+            <Text style={styles.timeChange}>change</Text>
+          </TouchableOpacity>
         </View>
 
         {/* WHERE (stub - picker lands in steps 3-4) */}
@@ -692,13 +691,13 @@ export default function PlanComposerV2() {
           {moreOpen && (
             <View style={styles.moreBody}>
               {/* Ticket link */}
-              <Text style={styles.subLabel}>ticket link</Text>
+              <Text style={styles.subLabel}>ticket link<Text style={styles.labelOptional}> · optional</Text></Text>
               <TextInput
                 style={styles.textField}
                 value={ticketUrl}
                 onChangeText={setTicketUrl}
                 placeholder="https://"
-                placeholderTextColor={Colors.tertiary}
+                placeholderTextColor={Colors.inkSoft}
                 autoCapitalize="none"
                 keyboardType="url"
               />
@@ -717,7 +716,7 @@ export default function PlanComposerV2() {
                 value={description}
                 onChangeText={setDescription}
                 placeholder="anything else worth knowing"
-                placeholderTextColor={Colors.tertiary}
+                placeholderTextColor={Colors.inkSoft}
                 multiline
                 maxLength={DESC_LIMIT}
               />
@@ -876,12 +875,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   label: {
-    fontFamily: Fonts.sansBold, fontSize: 9, letterSpacing: 2,
-    textTransform: 'uppercase', color: Colors.tertiary, marginBottom: 10,
+    fontFamily: Fonts.sansSemibold, fontSize: 13, letterSpacing: 1.4,
+    textTransform: 'uppercase', color: Colors.terracotta, marginBottom: 10,
   },
   subLabel: {
-    fontFamily: Fonts.sansBold, fontSize: 9, letterSpacing: 1.6,
-    textTransform: 'uppercase', color: Colors.tertiary, marginBottom: 8, marginTop: 4,
+    fontFamily: Fonts.sansSemibold, fontSize: 13, letterSpacing: 1.2,
+    textTransform: 'uppercase', color: Colors.terracotta, marginBottom: 8, marginTop: 4,
+  },
+  labelOptional: {
+    fontFamily: Fonts.sansMedium, fontSize: 13, letterSpacing: 0,
+    textTransform: 'none', color: Colors.secondary,
   },
 
   // Photo
@@ -891,7 +894,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
     borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
   },
-  photoAddText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  photoAddText: { fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.secondary },
   photoThumbWrap: { width: 96, height: 60, borderRadius: 12, overflow: 'hidden' },
   photoThumb: { width: '100%', height: '100%' },
   photoThumbOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.overlayDark40 },
@@ -900,42 +903,40 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.overlayDark60,
   },
 
-  // Message
+  // Message (bounded field; the editorial underline is reserved for WHAT only)
   messageInput: {
-    fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm,
-    minHeight: 44, lineHeight: 20, textAlignVertical: 'top',
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 11,
+    fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.darkWarm,
+    minHeight: 64, lineHeight: 22, textAlignVertical: 'top',
   },
 
   // When
   quickRow: { flexDirection: 'row', gap: 7, marginBottom: 12 },
   quickChip: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+    paddingHorizontal: 13, paddingVertical: 7, borderRadius: 16,
     borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
   },
   quickChipOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
-  quickChipText: { fontFamily: Fonts.sansSemibold, fontSize: 11, color: Colors.secondary },
+  quickChipText: { fontFamily: Fonts.sansSemibold, fontSize: 13, color: Colors.secondary },
   quickChipTextOn: { color: Colors.white },
-  calendarCard: {
-    borderRadius: 16, borderWidth: 1, borderColor: Colors.border,
-    backgroundColor: Colors.white, overflow: 'hidden',
+  timeRowCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10,
+    paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
   },
-  timeRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderTopWidth: 1, borderTopColor: Colors.border,
-  },
-  timeLabel: { fontFamily: Fonts.sansSemibold, fontSize: 10, color: Colors.secondary, letterSpacing: 0.5 },
+  timeLabel: { fontFamily: Fonts.sansSemibold, fontSize: 13, color: Colors.secondary, letterSpacing: 0.4 },
   timePill: { backgroundColor: Colors.accentSubtle, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
-  timePillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  timeChange: { fontFamily: Fonts.sansMedium, fontSize: 11, color: Colors.tertiary, marginLeft: 'auto' },
+  timePillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  timeChange: { fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.secondary, marginLeft: 'auto' },
 
   // Place stub
   placeStub: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13,
   },
-  placeStubText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.tertiary, fontStyle: 'italic' },
+  placeStubText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.inkSoft },
 
   // How many
   stepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 },
@@ -947,8 +948,8 @@ const styles = StyleSheet.create({
   stepperBtnText: { fontFamily: Fonts.sans, fontSize: 22, color: Colors.darkWarm, lineHeight: 26 },
   stepperValue: { alignItems: 'center', minWidth: 80 },
   stepperValueNum: { fontFamily: Fonts.sansBold, fontSize: 22, color: Colors.darkWarm },
-  stepperValueSub: { fontFamily: Fonts.sans, fontSize: 11, color: Colors.secondary, marginTop: 2 },
-  stepperHint: { fontFamily: Fonts.sans, fontSize: 11, color: Colors.tertiary, textAlign: 'center', marginTop: 8 },
+  stepperValueSub: { fontFamily: Fonts.sans, fontSize: 13, color: Colors.secondary, marginTop: 2 },
+  stepperHint: { fontFamily: Fonts.sans, fontSize: 13, color: Colors.secondary, textAlign: 'center', marginTop: 8 },
 
   // Audience row
   audienceRow: { marginTop: 16 },
@@ -958,30 +959,30 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
   },
   smallPillOn: { backgroundColor: Colors.accentSubtle, borderColor: Colors.terracotta },
-  smallPillText: { fontFamily: Fonts.sansMedium, fontSize: 11, color: Colors.secondary },
+  smallPillText: { fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.secondary },
   smallPillTextOn: { color: Colors.terracotta },
 
   // More options
   moreToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  moreToggleText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  moreToggleText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.secondary },
   moreBody: { marginTop: 14, gap: 4 },
   textField: {
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14,
-    fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm,
+    paddingHorizontal: 14, paddingVertical: 11, marginBottom: 14,
+    fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.darkWarm,
   },
   textArea: { minHeight: 72, textAlignVertical: 'top' },
   selectField: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 14,
+    paddingHorizontal: 14, paddingVertical: 13, marginBottom: 14,
   },
-  selectFieldText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  selectFieldPlaceholder: { color: Colors.tertiary },
+  selectFieldText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
+  selectFieldPlaceholder: { color: Colors.inkSoft },
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
   toggleTextWrap: { flex: 1, paddingRight: 16 },
-  toggleTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  toggleSub: { fontFamily: Fonts.sans, fontSize: 11, color: Colors.tertiary, marginTop: 2 },
+  toggleTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  toggleSub: { fontFamily: Fonts.sans, fontSize: 13, color: Colors.secondary, marginTop: 2 },
   switchTrack: { width: 44, height: 26, borderRadius: 13, backgroundColor: Colors.borderWarm, padding: 3, justifyContent: 'center' },
   switchTrackOn: { backgroundColor: Colors.terracotta },
   switchThumb: { width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.white },
@@ -997,7 +998,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12,
   },
   summaryTitle: { fontFamily: Fonts.displayItalic, fontSize: 16, color: Colors.darkWarm },
-  summaryMeta: { fontFamily: Fonts.sans, fontSize: 11, color: Colors.secondary, marginTop: 2 },
+  summaryMeta: { fontFamily: Fonts.sans, fontSize: 13, color: Colors.secondary, marginTop: 2 },
   postBtn: {
     backgroundColor: Colors.terracotta, borderRadius: 14, paddingVertical: 15, alignItems: 'center',
     shadowColor: Colors.terracotta, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 },

@@ -31,7 +31,8 @@ import { CIRCLE_PLAN } from '../../../constants/YoursDesign';
 import { COPY } from '../../yours/state/constants';
 import { useAuthUserId } from '../../yours/state/useAuthUserId';
 import BottomSheet from '../../yours/primitives/BottomSheet';
-import WashedUpCalendar, { type CalendarDay } from '../../calendar/WashedUpCalendar';
+import { type CalendarDay } from '../../calendar/WashedUpCalendar';
+import CollapsibleCalendar from '../../composer/CollapsibleCalendar';
 import { getTodayInLA } from '../../../lib/laDate';
 import {
   useCreateCirclePlan,
@@ -205,7 +206,7 @@ export default function CirclePlanComposer({
           value={where}
           onChangeText={setWhere}
           placeholder={COPY.circlePlanWherePlaceholder}
-          placeholderTextColor={Colors.tertiary}
+          placeholderTextColor={Colors.inkSoft}
           maxLength={120}
           returnKeyType="next"
         />
@@ -213,7 +214,7 @@ export default function CirclePlanComposer({
         {/* When (date) */}
         <Text style={styles.fieldLabel}>{COPY.circlePlanWhenLabel}</Text>
         <View style={styles.calendarWrap}>
-          <WashedUpCalendar mode="pick" selected={date} onSelect={setDate} />
+          <CollapsibleCalendar selected={date} onSelect={setDate} />
         </View>
         <View style={styles.timeRow}>
           <ScrollView
@@ -390,10 +391,10 @@ const styles = StyleSheet.create({
     marginBottom: CIRCLE_PLAN.sectionGap,
   },
   fieldLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
+    fontFamily: Fonts.sansSemibold,
+    fontSize: 13,
     color: Colors.terracotta,
-    letterSpacing: 1.2,
+    letterSpacing: 1.3,
     textTransform: 'uppercase',
     marginBottom: CIRCLE_PLAN.labelGap,
   },
@@ -430,10 +431,10 @@ const styles = StyleSheet.create({
   timeChipTextOn: { color: Colors.white, fontFamily: Fonts.sansBold },
   periodGroup: { flexDirection: 'row', gap: CIRCLE_PLAN.chipGap, marginLeft: 'auto' },
   sectionLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
+    fontFamily: Fonts.sansSemibold,
+    fontSize: 13,
     color: Colors.terracotta,
-    letterSpacing: 1.5,
+    letterSpacing: 1.3,
     textTransform: 'uppercase',
     marginTop: CIRCLE_PLAN.chipGap,
     marginBottom: CIRCLE_PLAN.labelGap,

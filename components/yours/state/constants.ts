@@ -382,7 +382,7 @@ export const COPY = {
   // No em/en dashes. All copy verbatim from the locked spec.
   circlePlanComposerTitle: 'New plan',
   circlePlanWhatLabel: 'What',
-  circlePlanWhatPlaceholder: "What's the plan?",
+  circlePlanWhatPlaceholder: 'saturday morning hike...',
   circlePlanWhereLabel: 'Where',
   circlePlanWherePlaceholder: 'Add a place (optional)',
   circlePlanWhenLabel: 'When',

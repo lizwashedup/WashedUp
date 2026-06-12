@@ -33,7 +33,7 @@ export default function EditorialTitleField({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor={Colors.tertiary}
+        placeholderTextColor={Colors.inkSoft}
         maxLength={maxLength}
         autoFocus={autoFocus}
         returnKeyType="next"
@@ -48,11 +48,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   label: {
-    fontFamily: Fonts.sansBold,
-    fontSize: 9,
-    letterSpacing: 2,
+    fontFamily: Fonts.sansSemibold,
+    fontSize: 13,
+    letterSpacing: 1.4,
     textTransform: 'uppercase',
-    color: Colors.tertiary,
+    color: Colors.terracotta,
     marginBottom: 8,
   },
   input: {

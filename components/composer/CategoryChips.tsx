@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontFamily: Fonts.sansSemibold,
-    fontSize: 11,
+    fontSize: 13,
     color: Colors.secondary,
   },
   chipTextActive: {
