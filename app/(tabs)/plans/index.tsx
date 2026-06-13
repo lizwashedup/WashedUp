@@ -1582,9 +1582,7 @@ export default function PlansScreen() {
       ) : (
         <View style={{ flex: 1 }}>
           {myPlansLoading ? (
-            <View style={styles.centered}>
-              <ActivityIndicator size="large" color={TC} />
-            </View>
+            <SkeletonFeed />
           ) : myPlansSections.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>You haven't joined any plans yet.</Text>

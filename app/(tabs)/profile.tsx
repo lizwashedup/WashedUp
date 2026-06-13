@@ -32,6 +32,7 @@ import { friendlyError } from '../../lib/friendlyError';
 import { logError } from '../../lib/logger';
 import { PROFILE_PHOTO_KEY } from '../../constants/QueryKeys';
 import Colors from '../../constants/Colors';
+import { SkeletonProfile } from '../../components/SkeletonCard';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { checkContent } from '../../lib/contentFilter';
@@ -476,9 +477,7 @@ export default function ProfileScreen() {
     return (
       <>
         <SafeAreaView style={styles.container} edges={['top']}>
-          <View style={styles.centered}>
-            <ActivityIndicator size="large" color={Colors.terracotta} />
-          </View>
+          <SkeletonProfile />
         </SafeAreaView>
         <BrandedAlert
           visible={!!alertInfo}

@@ -12,11 +12,11 @@ import {
   Text,
   Pressable,
   FlatList,
-  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import Colors from '../../../constants/Colors';
+import { SkeletonCircles } from '../../SkeletonCard';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { COPY } from '../state/constants';
 import { useMyCircles } from '../../../hooks/useMyCircles';
@@ -81,11 +81,7 @@ export default function CirclesDirectory({
   );
 
   if (isLoading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color={Colors.terracotta} />
-      </View>
-    );
+    return <SkeletonCircles />;
   }
 
   if (isError) {

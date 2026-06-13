@@ -138,8 +138,72 @@ export function SkeletonPlanDetail() {
   );
 }
 
+export function SkeletonProfile() {
+  return (
+    <View style={styles.profile}>
+      {/* Avatar + name + handle */}
+      <ShimmerBlock width={96} height={96} borderRadius={48} style={{ marginBottom: 16 }} />
+      <ShimmerBlock width={160} height={20} borderRadius={8} style={{ marginBottom: 8 }} />
+      <ShimmerBlock width={100} height={12} borderRadius={6} style={{ marginBottom: 24 }} />
+      {/* Stats row */}
+      <View style={styles.profileStats}>
+        {[0, 1, 2].map((i) => (
+          <View key={i} style={{ alignItems: 'center', gap: 8 }}>
+            <ShimmerBlock width={36} height={20} borderRadius={6} />
+            <ShimmerBlock width={56} height={10} borderRadius={5} />
+          </View>
+        ))}
+      </View>
+      {/* Settings rows */}
+      <View style={{ alignSelf: 'stretch', marginTop: 28, gap: 14 }}>
+        {[0, 1, 2, 3].map((i) => (
+          <ShimmerBlock key={i} width="100%" height={44} borderRadius={12} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+export function SkeletonCircles() {
+  return (
+    <View style={styles.feed}>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={styles.circleCard}>
+          <ShimmerBlock width="55%" height={16} borderRadius={8} style={{ marginBottom: 12 }} />
+          {/* Overlapping member avatars */}
+          <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+            {[0, 1, 2, 3].map((j) => (
+              <ShimmerBlock
+                key={j}
+                width={32}
+                height={32}
+                borderRadius={16}
+                style={{ marginLeft: j === 0 ? 0 : -8 }}
+              />
+            ))}
+          </View>
+          <ShimmerBlock width="40%" height={10} borderRadius={5} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   feed: { paddingHorizontal: 20 },
+  profile: { alignItems: 'center', paddingTop: 32, paddingHorizontal: 24 },
+  profileStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignSelf: 'stretch',
+    paddingHorizontal: 24,
+  },
+  circleCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 14,
+  },
   detailFeed: {},
   card: {
     backgroundColor: '#FFFFFF',
