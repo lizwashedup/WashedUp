@@ -15,7 +15,7 @@ import { Users } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { hapticLight, hapticMedium } from '../../lib/haptics';
+import { hapticLight, hapticMedium, hapticSelection } from '../../lib/haptics';
 import { buildPlanShareContent } from '../../lib/sharePlan';
 import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
 import { isOptimisticPlanId } from '../../lib/optimisticPlans';
@@ -153,7 +153,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   const handleWishlist = useCallback(
     (e: any) => {
       e?.stopPropagation?.();
-      hapticLight();
+      hapticSelection(); // toggle save
       bookmarkScale.value = withSpring(1.3, {}, () => {
         bookmarkScale.value = withSpring(1);
       });

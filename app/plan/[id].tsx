@@ -1849,7 +1849,7 @@ export default function PlanDetailScreen() {
         ) : waitlistNotified ? (
           <TouchableOpacity
             style={styles.claimSpotButton}
-            onPress={() => { hapticSuccess(); setJoinModalVisible(true); }}
+            onPress={() => { hapticLight(); setJoinModalVisible(true); }}
             activeOpacity={0.85}
           >
             <Text style={styles.claimSpotText}>Claim Your Spot</Text>

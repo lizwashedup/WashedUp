@@ -11,7 +11,7 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { hapticLight, hapticMedium, hapticSelection } from '../../lib/haptics';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
@@ -74,7 +74,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
   const [cardAlert, setCardAlert] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const handleLongPress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticMedium(); // open context menu (matches PlanCard long-press)
     const creatorName = plan.creator?.first_name_display ?? 'Creator';
     const options = ['Report this plan', `Block ${creatorName}`, 'Cancel'];
     if (Platform.OS === 'ios') {
@@ -100,13 +100,13 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
 
   const handleWishlist = useCallback((e: any) => {
     e?.stopPropagation?.();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticSelection(); // toggle save
     onWishlist?.(plan.id, isWishlisted);
   }, [plan.id, isWishlisted, onWishlist]);
 
   const handleShare = useCallback((e: any) => {
     e?.stopPropagation?.();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight(); // open share sheet
     const share = buildPlanShareContent({
       id: plan.id,
       title: plan.title,
@@ -118,7 +118,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
   }, [plan.id, plan.title, plan.start_time, plan.location_text, plan.slug]);
 
   const handlePress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    hapticLight(); // open detail
     router.push(`/plan/${plan.id}`);
   }, [plan.id, router]);
 
