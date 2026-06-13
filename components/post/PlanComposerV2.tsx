@@ -599,6 +599,10 @@ export default function PlanComposerV2() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        // iOS: inset scroll content for the keyboard so the title/message inputs
+        // are never covered on shorter screens, with no jump. No-op on Android
+        // (handled by windowSoftInputMode) and when the input is already visible.
+        automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator={false}
       >
         {/* WHAT + photo */}
