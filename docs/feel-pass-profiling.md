@@ -53,6 +53,21 @@ prerequisites for FlashList to pay off. The chat list's inverted +
 `maintainVisibleContentPosition` + dynamic image-height combo is the trickiest
 migration; budget extra device verification there.
 
+## Virtualization decision (this session)
+
+The "FlashList where it pays" check concluded: do NOT migrate blind under hold-pushes.
+- The lists that would actually pay are the feed (`SectionList`) and the chat message
+  list (inverted + `maintainVisibleContentPosition` + dynamic image heights). Both are
+  the risky migrations the audit flags, and both need on-device before/after FPS to
+  justify them and to catch inverted/anchor regressions.
+- The simple lists don't pay or fight the layout: e.g. `AddPeopleSheet`'s people list
+  is `flexGrow: 0` (content-sized in a bottom sheet) and short; FlashList needs a
+  definite/bounded height and would break the sheet for no real gain.
+- Prerequisite: render-stabilization wins #1 (chat `renderItem`) and #2 (feed wishlist
+  handlers) must land first or FlashList won't deliver its benefit.
+- DONE this session instead: the expo-image sweep (6 avatar files), a pure perf win
+  with no layout risk. FlashList migrations are queued for the gauntlet, on-device.
+
 ## Gauntlet re-measure checklist (on device, production build)
 - [ ] Cold-start to interactive feed (production Hermes, no Metro).
 - [ ] JS + UI FPS scrolling a long feed (heavy account); Perf Monitor / Flipper.

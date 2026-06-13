@@ -6,7 +6,8 @@
  * 'chosen' maps to promote.
  */
 import React from 'react';
-import { ScrollView, View, Text, Image, Pressable, StyleSheet } from 'react-native';
+import { ScrollView, View, Text, Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { Check } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';

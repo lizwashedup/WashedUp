@@ -8,7 +8,8 @@
  * count stays right even though only a few faces are fetched.
  */
 import React from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { CIRCLE_DIR } from '../../../constants/YoursDesign';

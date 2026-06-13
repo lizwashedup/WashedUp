@@ -5,7 +5,8 @@
  * a quiet "Not now".
  */
 import React, { useState } from 'react';
-import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { X } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';

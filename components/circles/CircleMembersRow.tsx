@@ -3,7 +3,8 @@
  * (photo + first name). Read-only in v1; admin management lands in Step 8.
  */
 import React from 'react';
-import { View, Text, Image, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';

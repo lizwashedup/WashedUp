@@ -5,7 +5,8 @@
  * prerequisite instead.
  */
 import React, { useState } from 'react';
-import { View, Text, Image, FlatList, Pressable, StyleSheet } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { Check, UserPlus } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';

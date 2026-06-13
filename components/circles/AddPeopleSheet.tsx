@@ -11,7 +11,6 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   Modal,
   Pressable,
   FlatList,
@@ -19,6 +18,7 @@ import {
   Alert,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
