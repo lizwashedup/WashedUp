@@ -54,6 +54,27 @@ export default function PeopleSearchResults({
 
   const { sendRequest } = usePeopleConnectionMutations(userId);
 
+  // Optimistic add: flip the row to "Requested" the instant Add is tapped, before
+  // the request round-trips (parent-managed, same pattern as PlanHistoryBacklog).
+  // Roll back on error; a successful refetch sets the real connection_state.
+  const [requested, setRequested] = React.useState<Set<string>>(new Set());
+  const handleAdd = React.useCallback(
+    async (recipientId: string) => {
+      setRequested((s) => new Set(s).add(recipientId));
+      try {
+        await sendRequest.mutateAsync({ recipientId, context: 'handle_lookup' });
+      } catch (e) {
+        setRequested((s) => {
+          const n = new Set(s);
+          n.delete(recipientId);
+          return n;
+        });
+        Alert.alert('', friendlyConnectionError(e));
+      }
+    },
+    [sendRequest],
+  );
+
   if (local.length === 0 && remote.length === 0) {
     return (
       <View style={styles.empty}>
@@ -95,17 +116,12 @@ export default function PeopleSearchResults({
               name={r.first_name_display}
               photoUrl={r.profile_photo_url}
               sharedCount={r.shared_count}
-              state={r.connection_state}
-              onAdd={async () => {
-                try {
-                  await sendRequest.mutateAsync({
-                    recipientId: r.user_id,
-                    context: 'handle_lookup',
-                  });
-                } catch (e) {
-                  Alert.alert('', friendlyConnectionError(e));
-                }
-              }}
+              state={
+                requested.has(r.user_id) || r.connection_state === 'requested'
+                  ? 'requested'
+                  : r.connection_state
+              }
+              onAdd={() => handleAdd(r.user_id)}
               onPressPerson={() => onOpenMinimal(r.user_id)}
             />
           ))}

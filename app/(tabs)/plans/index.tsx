@@ -734,11 +734,27 @@ export default function PlansScreen() {
         await supabase.from('wishlists').insert({ user_id: userId, event_id: eventId });
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
+    // Optimistic: flip the saved state in the ['wishlists',userId] cache now so the
+    // bookmark fills/empties and persists instantly (the card's isWishlisted derives
+    // from this cache). Rolled back exactly on error; reconciled on settle.
+    onMutate: async ({ eventId, current }: { eventId: string; current: boolean }) => {
+      if (!userId) return { prev: undefined as string[] | undefined };
+      const key = ['wishlists', userId];
+      await queryClient.cancelQueries({ queryKey: key });
+      const prev = queryClient.getQueryData<string[]>(key);
+      queryClient.setQueryData<string[]>(key, (old = []) =>
+        current ? old.filter((id) => id !== eventId) : [...old, eventId],
+      );
+      return { prev };
     },
-    onError: () => {
+    onError: (_err, _vars, ctx) => {
       hapticError();
+      if (ctx?.prev !== undefined) {
+        queryClient.setQueryData(['wishlists', userId], ctx.prev);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
     },
   });
 

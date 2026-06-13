@@ -17,7 +17,8 @@ export default function PersonRow({
   name: string | null;
   photoUrl: string | null;
   sharedCount: number;
-  /** 'none' shows Add; 'requested' shows Requested; 'connected' hides CTA. */
+  /** 'none' shows Add; 'requested' shows Requested; 'connected' hides CTA.
+   * Callers flip this to 'requested' optimistically on tap (parent-managed). */
   state: 'none' | 'requested' | 'incoming' | 'connected';
   onAdd: () => void;
   onPressPerson: () => void;
