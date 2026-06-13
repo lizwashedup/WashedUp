@@ -46,6 +46,12 @@ import { checkContent } from '@/lib/contentFilter';
 import { BrandedAlert, BrandedAlertButton } from '@/components/BrandedAlert';
 import { COPY } from '@/components/yours/state/constants';
 import { useAuthUserId } from '@/components/yours/state/useAuthUserId';
+import type { MyFace } from '@/hooks/useMyFace';
+import {
+  buildOptimisticPlan,
+  prependOptimisticPlan,
+  type OptimisticHandle,
+} from '@/lib/optimisticPlans';
 import PeoplePickerSheet, { type PickedPerson } from '@/components/post/PeoplePickerSheet';
 import { useInviteInterestSignals } from '@/hooks/useInviteInterestSignals';
 import { useDismissSuggestion } from '@/hooks/useDismissSuggestion';
@@ -849,6 +855,10 @@ export default function LegacyComposer() {
     hapticMedium();
     setLoading(true);
 
+    // Real optimistic posting handle (see lib/optimisticPlans.ts). Declared here
+    // so both the member-orphan early-return and the catch can roll it back.
+    let optimistic: OptimisticHandle | null = null;
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -879,6 +889,45 @@ export default function LegacyComposer() {
       }
 
       const ageBounds = ageRangesToMinMax(ageRanges);
+
+      const optimisticNeighborhood = (neighborhood === NEIGHBORHOOD_OTHER
+        ? neighborhoodOther.trim()
+        : neighborhood.trim()) || null;
+
+      // Prepend the optimistic plan now (past every early-return validation, so
+      // we never leave a phantom). Committed to the real id after the host member
+      // row lands; rolled back on the orphan early-return and in the catch.
+      if (composerUserId) {
+        const face = queryClient.getQueryData<MyFace>(['yours', 'my-face', composerUserId]);
+        optimistic = prependOptimisticPlan(
+          queryClient,
+          composerUserId,
+          buildOptimisticPlan(
+            {
+              title: title.trim(),
+              start_time: startTime.toISOString(),
+              location_text: effectiveLocation || null,
+              location_lat: locationLat,
+              location_lng: locationLng,
+              image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
+              primary_vibe: category?.toLowerCase() ?? null,
+              gender_rule: genderPref,
+              max_invites: groupSize,
+              min_invites: MIN_GROUP,
+              neighborhood: optimisticNeighborhood,
+              status: 'forming',
+              host_message: creatorMessage.trim().slice(0, MSG_LIMIT) || null,
+              allow_duplicate: allowDuplicate,
+            },
+            composerUserId,
+            {
+              id: composerUserId,
+              first_name_display: face?.first_name_display ?? null,
+              profile_photo_url: face?.profile_photo_url ?? null,
+            },
+          ),
+        );
+      }
 
       const { data: insertedEvent, error } = await supabase
         .from('events')
@@ -934,6 +983,9 @@ export default function LegacyComposer() {
           if (retryErr) {
             // Roll back the event so it doesn't exist as an orphan with no members
             await supabase.from('events').delete().eq('id', insertedEvent.id);
+            // This path returns (not throws), so the catch's rollback won't run:
+            // remove the optimistic card here before the alert.
+            optimistic?.rollback();
             setAlertInfo({
               title: 'Something went wrong',
               message: 'Could not create your plan. Please try again.',
@@ -941,6 +993,10 @@ export default function LegacyComposer() {
             return;
           }
         }
+
+        // Event + host member rows both committed: swap the optimistic card's
+        // temp id for the real one so it's tappable and routes correctly.
+        optimistic?.commit(insertedEvent.id);
 
         // If this plan was created as a duplicate of another, notify the
         // original plan's waitlist users. Fire-and-forget - a notification
@@ -1062,6 +1118,8 @@ export default function LegacyComposer() {
         prefillInvitePersonPhoto: undefined,
       } as any);
     } catch (e: unknown) {
+      // Remove the optimistic card (restore the exact prior snapshot) before the alert.
+      optimistic?.rollback();
       const rawMsg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
         : '';
