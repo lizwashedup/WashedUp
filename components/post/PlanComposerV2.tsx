@@ -54,6 +54,12 @@ import {
 import { type PlanCategory } from '../../constants/Categories';
 import { COPY } from '../yours/state/constants';
 import { useAuthUserId } from '../yours/state/useAuthUserId';
+import type { MyFace } from '../../hooks/useMyFace';
+import {
+  buildOptimisticPlan,
+  prependOptimisticPlan,
+  type OptimisticHandle,
+} from '../../lib/optimisticPlans';
 import { useInviteInterestSignals } from '../../hooks/useInviteInterestSignals';
 import { useDismissSuggestion } from '../../hooks/useDismissSuggestion';
 import { useInvitePeopleToPlan } from '../../hooks/useInvitePeopleToPlan';
@@ -486,6 +492,25 @@ export default function PlanComposerV2() {
     // The form is NOT reset yet: if the background insert fails we restore the
     // composer with the data intact so the post can be retried.
 
+    // Real optimistic posting: prepend a server-shaped Plan to the feed +
+    // my-plans caches now, so the new plan is in those lists instantly (not after
+    // the post-insert refetch). Committed to the real id once the event + host
+    // member rows land; rolled back exactly on failure. composerUserId is the
+    // synchronous auth id; the keys require it (partial keys no-op for setQueryData).
+    let optimistic: OptimisticHandle | null = null;
+    if (composerUserId) {
+      const face = queryClient.getQueryData<MyFace>(['yours', 'my-face', composerUserId]);
+      optimistic = prependOptimisticPlan(
+        queryClient,
+        composerUserId,
+        buildOptimisticPlan(row, composerUserId, {
+          id: composerUserId,
+          first_name_display: face?.first_name_display ?? null,
+          profile_photo_url: face?.profile_photo_url ?? null,
+        }),
+      );
+    }
+
     // Background insert. `loading` tracks the real in-flight window so the post
     // button's spinner is reachable and `canPost`'s !loading is a true second
     // guard against a re-submit racing the insert (alongside confirmVisible).
@@ -518,6 +543,11 @@ export default function PlanComposerV2() {
             throw new Error(rollbackErr ? 'member_orphan' : 'member');
           }
         }
+        // Event + host member rows both committed: swap the optimistic card's
+        // temp id for the real one so it's tappable and routes correctly. Done
+        // only now (not right after the event insert) so an orphan rollback above
+        // still removes the card via the catch's rollback().
+        optimistic?.commit(insertedEvent.id);
         if (inviteIds.length > 0) {
           invitePeopleToPlan.mutate(
             { eventId: insertedEvent.id, recipientIds: inviteIds },
@@ -535,6 +565,9 @@ export default function PlanComposerV2() {
       }
       resetForm();
     } catch {
+      // Remove the optimistic card from feed + my-plans (restores the exact prior
+      // snapshot) before the recovery UX runs.
+      optimistic?.rollback();
       // Quiet gold recovery: pull the moment, reopen the composer with the data
       // intact and a gold nudge. No red, never a hard error dialog.
       setConfirmVisible(false);

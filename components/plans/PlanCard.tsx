@@ -18,6 +18,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight, hapticMedium } from '../../lib/haptics';
 import { buildPlanShareContent } from '../../lib/sharePlan';
 import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
+import { isOptimisticPlanId } from '../../lib/optimisticPlans';
 import { supabase } from '../../lib/supabase';
 import MarkIcon from '../marks/MarkIcons';
 import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
@@ -162,6 +163,10 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   );
 
   const handlePress = useCallback(() => {
+    // Optimistic posting: a just-prepended card carries a temporary id until the
+    // insert commits (sub-second). Don't navigate to /plan/optimistic-..., the
+    // detail screen has no such event yet. The id swaps to the real one on commit.
+    if (isOptimisticPlanId(plan.id)) return;
     hapticLight();
     if (plan.creator?.profile_photo_url) {
       Image.prefetch(plan.creator.profile_photo_url).catch(() => {});
