@@ -21,6 +21,7 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  TextInput,
 } from 'react-native';
 import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { Minus, Plus } from 'lucide-react-native';
@@ -89,6 +90,9 @@ export default function CirclePlanComposer({
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<PlanCategory | null>(null);
   const [where, setWhere] = useState('');
+  // Required only when the plan is opened to others (strangers lack the circle's
+  // built-in context); circle-only plans stay title-first.
+  const [description, setDescription] = useState('');
   const [date, setDate] = useState<CalendarDay>(todayCalendarDay);
   const [hour, setHour] = useState(7);
   const [minute, setMinute] = useState('00');
@@ -105,6 +109,7 @@ export default function CirclePlanComposer({
     setTitle('');
     setCategory(null);
     setWhere('');
+    setDescription('');
     setDate(todayCalendarDay());
     setHour(7);
     setMinute('00');
@@ -179,6 +184,7 @@ export default function CirclePlanComposer({
         memberUserIds: null,
         locationText: where.trim() || null,
         primaryVibe: category?.toLowerCase() ?? null,
+        description: visibilityOpen ? (description.trim() || null) : null,
       });
       close();
       onPosted(result);
@@ -189,7 +195,7 @@ export default function CirclePlanComposer({
     }
   };
 
-  const postDisabled = createPlan.isPending || !title.trim();
+  const postDisabled = createPlan.isPending || !title.trim() || (visibilityOpen && !description.trim());
 
   return (
     <BottomSheet visible={visible} onClose={close} heightPct={CIRCLE_PLAN.sheetHeightPct} springMotion>
@@ -332,6 +338,29 @@ export default function CirclePlanComposer({
           ) : null}
         </TouchableOpacity>
 
+        {/* DESCRIPTION (required once opened to others; strangers lack the
+            circle's built-in context). Hidden for circle-only plans. */}
+        {visibilityOpen ? (
+          <Animated.View
+            entering={FadeInDown.springify().mass(0.7).damping(28).stiffness(350)}
+            style={styles.descWrap}
+          >
+            <Text style={styles.fieldLabel}>{COPY.circlePlanDescriptionLabel}</Text>
+            <TextInput
+              style={styles.descInput}
+              value={description}
+              onChangeText={setDescription}
+              placeholder={COPY.circlePlanDescriptionPlaceholder}
+              placeholderTextColor={Colors.tertiary}
+              multiline
+              maxLength={1000}
+            />
+            {!description.trim() ? (
+              <InlineNudge text={COPY.circlePlanDescriptionRequired} />
+            ) : null}
+          </Animated.View>
+        ) : null}
+
         {/* One gold line, never red. Tier-4 recovery (failed post, tap to
             dismiss) wins; otherwise a Tier-3 validation hint. */}
         {nudge === 'recovery' ? (
@@ -392,6 +421,20 @@ const styles = StyleSheet.create({
   },
   categoryWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
   whereWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
+  descWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
+  descInput: {
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    minHeight: 72,
+    textAlignVertical: 'top',
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.darkWarm,
+  },
   calendarWrap: {},
   timeWrap: { marginBottom: CIRCLE_PLAN.sectionGap },
   quickRow: { flexDirection: 'row', gap: 7, marginBottom: CIRCLE_PLAN.labelGap },

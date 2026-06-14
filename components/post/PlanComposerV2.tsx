@@ -408,7 +408,7 @@ export default function PlanComposerV2() {
   const peopleSummary = invited.length > 0 ? invited.map((c) => c.name.toLowerCase()).join(', ') : `open to ${groupSize}`;
   const summaryMeta = [whenSummary, placeSummary, peopleSummary].join(' · ');
 
-  const canPost = title.trim().length > 0 && dateSelected && timeSelected && category !== null && !loading && !imageLoading;
+  const canPost = title.trim().length > 0 && dateSelected && timeSelected && category !== null && creatorMessage.trim().length >= MSG_MIN && description.trim().length > 0 && !loading && !imageLoading;
 
   const resetForm = () => {
     setTitle(''); setCategory(null); setImageUrl(null); setCreatorMessage('');
@@ -427,9 +427,10 @@ export default function PlanComposerV2() {
     if (!dateSelected) missing.push('Day');
     if (!timeSelected) missing.push('Time');
     if (category === null) missing.push('Category');
-    if (creatorMessage.trim().length > 0 && creatorMessage.trim().length < MSG_MIN) {
-      missing.push(`Your message (at least ${MSG_MIN} characters, or leave it blank)`);
+    if (creatorMessage.trim().length < MSG_MIN) {
+      missing.push(`Your message (at least ${MSG_MIN} characters)`);
     }
+    if (description.trim().length === 0) missing.push('Description');
     if (missing.length > 0) {
       setAlertInfo({ title: 'Almost there', message: `A couple things first:\n\n• ${missing.join('\n• ')}` });
       return;
@@ -634,9 +635,9 @@ export default function PlanComposerV2() {
           <CategoryChips selected={category} onSelect={setCategory} />
         </View>
 
-        {/* YOUR MESSAGE (optional) */}
+        {/* YOUR MESSAGE (required) */}
         <View style={styles.section}>
-          <Text style={styles.label}>your message<Text style={styles.labelOptional}> · optional</Text></Text>
+          <Text style={styles.label}>your message</Text>
           <TextInput
             style={styles.messageInput}
             value={creatorMessage}
@@ -646,6 +647,24 @@ export default function PlanComposerV2() {
             multiline
             maxLength={MSG_LIMIT}
           />
+          {title.trim().length > 0 && creatorMessage.trim().length < MSG_MIN
+            ? <InlineNudge text={COPY.composerMessageRequired} /> : null}
+        </View>
+
+        {/* DESCRIPTION (required; surfaced out of "more options") */}
+        <View style={styles.section}>
+          <Text style={styles.label}>description</Text>
+          <TextInput
+            style={[styles.textField, styles.textArea]}
+            value={description}
+            onChangeText={setDescription}
+            placeholder="anything else worth knowing"
+            placeholderTextColor={Colors.inkSoft}
+            multiline
+            maxLength={DESC_LIMIT}
+          />
+          {title.trim().length > 0 && description.trim().length === 0
+            ? <InlineNudge text={COPY.composerDescriptionRequired} /> : null}
         </View>
 
         {/* WHEN */}
@@ -789,17 +808,6 @@ export default function PlanComposerV2() {
                 </Text>
                 <ChevronDown size={16} color={Colors.tertiary} />
               </TouchableOpacity>
-              {/* Description */}
-              <Text style={styles.subLabel}>description</Text>
-              <TextInput
-                style={[styles.textField, styles.textArea]}
-                value={description}
-                onChangeText={setDescription}
-                placeholder="anything else worth knowing"
-                placeholderTextColor={Colors.inkSoft}
-                multiline
-                maxLength={DESC_LIMIT}
-              />
               {/* Drop-in toggle */}
               <TouchableOpacity style={styles.toggleRow} onPress={() => { hapticLight(); setDropIn((v) => !v); }} activeOpacity={0.7}>
                 <View style={styles.toggleTextWrap}>

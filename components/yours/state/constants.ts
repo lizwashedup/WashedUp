@@ -419,6 +419,15 @@ export const COPY = {
   // Steers toward the behavior that fills a same-day plan; never mentions size.
   composerTonightNudge:
     'tonight plans move fast. post early, and invite your people directly to get the first yes.',
+  // Required descriptive fields (launch quality: no bare-title plans). Warm, gold.
+  composerMessageRequired:
+    'add a short message so people know it is really you.',
+  composerDescriptionRequired:
+    'add a description so people know what to expect.',
+  circlePlanDescriptionRequired:
+    'this one is open to others. add a description so they know what to expect.',
+  circlePlanDescriptionLabel: 'description',
+  circlePlanDescriptionPlaceholder: 'what is the plan, who it is for, anything worth knowing',
   // Audience binary (locked verbatim; "pick people" is cut, audience is the binary).
   circlePlanAudienceCircleOnly: (circle: string) => `${circle} only`,
   circlePlanAudienceCircleOnlySub: 'Stays here. Only the circle sees it.',
