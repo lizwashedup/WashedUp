@@ -6,6 +6,16 @@ import { logError } from '../lib/logger';
 import { useQueryClient } from '@tanstack/react-query';
 import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
 
+// Monotonic optimistic-message id. Date.now() alone collides when two sends
+// land in the same millisecond (rapid consecutive sends); the realtime dedup
+// then collapsed the sender's own second message until its echo arrived. A
+// counter keeps every in-flight optimistic row distinct.
+let optimisticSeq = 0;
+function nextOptimisticId(): string {
+  optimisticSeq += 1;
+  return `optimistic-${Date.now()}-${optimisticSeq}`;
+}
+
 export interface MessageReaction {
   user_id: string;
   reaction: string;
@@ -133,17 +143,36 @@ export function useChat(key: ConversationKey) {
           const enriched = await attachSenders([newMsg]);
           if (!cancelledRef.current) {
             setMessages(prev => {
-              const deduped = prev.filter(m => !(m.id.startsWith('optimistic-') && m.user_id === newMsg.user_id));
-              if (deduped.some(m => m.id === enriched[0].id)) return deduped;
-              let msg = enriched[0];
+              const incoming = enriched[0];
+              // Already present as the real row (the insert response may have
+              // already swapped the optimistic id for this id).
+              if (prev.some(m => m.id === incoming.id)) return prev;
+              // Reconcile against exactly ONE matching optimistic row from this
+              // sender, not every in-flight optimistic message. Rapid
+              // consecutive sends each stay visible until their own echo lands;
+              // a blanket strip dropped the sender's second message.
+              const optIdx = prev.findIndex(m =>
+                m.id.startsWith('optimistic-') &&
+                m.user_id === incoming.user_id &&
+                (m.content ?? '') === (incoming.content ?? '') &&
+                (m.image_url ?? null) === (incoming.image_url ?? null) &&
+                (m.reply_to_message_id ?? null) === (incoming.reply_to_message_id ?? null),
+              );
+              let msg = incoming;
               // Resolve reply reference from existing messages
               if (msg.reply_to_message_id) {
-                const parent = deduped.find(m => m.id === msg.reply_to_message_id);
+                const parent = prev.find(m => m.id === msg.reply_to_message_id);
                 if (parent) {
                   msg = { ...msg, reply_to: { id: parent.id, content: parent.content, sender_name: parent.sender?.first_name ?? null } };
                 }
               }
-              return [...deduped, msg];
+              if (optIdx >= 0) {
+                // Swap in place so message order is preserved.
+                const next = prev.slice();
+                next[optIdx] = msg;
+                return next;
+              }
+              return [...prev, msg];
             });
           }
         },
@@ -360,7 +389,7 @@ export function useChat(key: ConversationKey) {
     if (!userId) return;
 
     // Optimistic insert — synchronous, appears immediately with zero lag
-    const optimisticId = `optimistic-${Date.now()}`;
+    const optimisticId = nextOptimisticId();
     // Build reply_to for optimistic display
     let replyTo: ReplyTo | null = null;
     if (replyToId) {
@@ -417,7 +446,7 @@ export function useChat(key: ConversationKey) {
     const content = JSON.stringify({ lat, lng, address });
 
     // Optimistic insert — synchronous, no async delay
-    const optimisticId = `optimistic-${Date.now()}`;
+    const optimisticId = nextOptimisticId();
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
       ...parentFields,
@@ -455,7 +484,7 @@ export function useChat(key: ConversationKey) {
 
     // Optimistic insert: the audio is already uploaded by the caller, so this
     // mirrors sendMessage/sendLocation: show immediately, reconcile the real id.
-    const optimisticId = `optimistic-${Date.now()}`;
+    const optimisticId = nextOptimisticId();
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
       ...parentFields,
