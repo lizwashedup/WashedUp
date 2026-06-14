@@ -15,6 +15,7 @@ import { getAuthProfile } from '../../hooks/useProfile';
 import { withTimeout } from '../../lib/withTimeout';
 import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
 import SunriseIcon from '../../components/yours/icons/SunriseIcon';
+import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
 
 function PostTabIcon() {
   return (
@@ -22,6 +23,20 @@ function PostTabIcon() {
       <Ionicons name="add" size={28} color={Colors.white} />
     </View>
   );
+}
+
+async function fetchPendingRequestsCount(): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+  const { data, error } = await supabase.rpc('get_incoming_people_requests', { p_user_id: user.id });
+  if (error || !Array.isArray(data)) return 0;
+  // Only count requests newer than the last time the user looked, so the badge
+  // clears on open and re-shows only for genuinely new requests.
+  const seen = await getRequestsSeenAt();
+  return data.filter((r: { requested_at?: string }) => {
+    const t = Date.parse(r?.requested_at ?? '');
+    return Number.isFinite(t) && t > seen;
+  }).length;
 }
 
 async function fetchHasPendingInvites(): Promise<boolean> {
@@ -147,6 +162,16 @@ export default function TabLayout() {
     refetchInterval: 120_000,
   });
 
+  // Pending people-requests count (Yours rebuild only). Drives the warm gold
+  // count badge on the Yours tab; cleared on open via markRequestsSeen.
+  const { data: pendingRequests = 0 } = useQuery({
+    queryKey: REQUESTS_BADGE_KEY,
+    queryFn: fetchPendingRequestsCount,
+    enabled: !!userId && YOURS_PAGE_ENABLED,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
   return (
     <Tabs
       screenOptions={{
@@ -216,6 +241,13 @@ export default function TabLayout() {
         options={{
           title: 'Your People',
           tabBarLabel: 'Yours',
+          // Warm gold count of people waiting to be added (a "loop", not an
+          // alarm: gold, never red). Clears on open via markRequestsSeen.
+          tabBarBadge:
+            YOURS_PAGE_ENABLED && pendingRequests > 0
+              ? (pendingRequests > 9 ? '9+' : pendingRequests)
+              : undefined,
+          tabBarBadgeStyle: { backgroundColor: Colors.goldAccent, color: Colors.asphalt },
           tabBarIcon: ({ color, focused }) => (
             <View>
               {YOURS_PAGE_ENABLED ? (
@@ -229,7 +261,9 @@ export default function TabLayout() {
               ) : (
                 <Ionicons name="people-outline" size={24} color={color} />
               )}
-              {hasPendingInvites && <View style={styles.inviteDot} />}
+              {/* Invite dot only when the requests badge is not already showing,
+                  so the two indicators never stack. */}
+              {hasPendingInvites && pendingRequests === 0 && <View style={styles.inviteDot} />}
             </View>
           ),
         }}

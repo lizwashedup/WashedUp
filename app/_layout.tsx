@@ -450,8 +450,12 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // no-op on the param; it's a marker for future scroll/analytics.
         const focusParam = type === 'interest_signal' ? '?focus=interest' : '';
         safePush(`/plan/${data.eventId}${focusParam}`);
+      } else if (type === 'people_request') {
+        // An incoming add-request: route to People and OPEN the accept stack
+        // directly (YoursScreen consumes ?openRequests=1). The notification is
+        // a pointer; it never accepts/declines/destroys the request.
+        safePush('/(tabs)/friends?openRequests=1&tab=people');
       } else if (
-        type === 'people_request' ||
         type === 'people_request_accepted' ||
         type === 'referral_joined'
       ) {

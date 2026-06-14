@@ -421,6 +421,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                         : handleNotifAction(notif.id, 'read');
                     }}
                   >
+                    {(notif.type === 'people_request' || notif.type === 'people_request_accepted') && (
+                      <View style={s.peopleAccent} />
+                    )}
                     {notif.sender_photo ? (
                       <Image source={{ uri: notif.sender_photo }} style={s.avatar} contentFit="cover" />
                     ) : (
@@ -507,6 +510,9 @@ const s = StyleSheet.create({
   cantGoBtn: { borderRadius: 14, paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'center' as const },
   cantGoText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textLight },
   notifRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5EDE0' },
+  // Warm gold left-accent so people-request rows read as the "someone wants to
+  // add you" loop (gold, never red), matching the requests banner.
+  peopleAccent: { width: 3, alignSelf: 'stretch', backgroundColor: Colors.goldenAmber, borderRadius: 2, marginRight: 8 },
   notifBody: { fontSize: 13, color: '#78695C', marginTop: 1, lineHeight: 18 },
   dismissText: { fontSize: 12, color: '#A09385', marginLeft: 8 },
   inviteActions: { flexDirection: 'row' as const, gap: 10, paddingBottom: 12, justifyContent: 'center' as const },

@@ -99,14 +99,18 @@ export default function SwipeableRequestCard({
         { name: 'magicTap', label: COPY.requestNotNow },
       ]}
     >
-      <YoursAvatar
-        name={req.first_name_display}
-        photoUrl={req.profile_photo_url}
-        size={96}
-        bucket="none"
-      />
+      <View style={styles.avatarRing}>
+        <YoursAvatar
+          name={req.first_name_display}
+          photoUrl={req.profile_photo_url}
+          size={96}
+          bucket="none"
+        />
+      </View>
       <Text style={styles.name}>{req.first_name_display ?? 'Someone'}</Text>
-      <Text style={styles.context}>{req.context_line}</Text>
+      <View style={styles.contextChip}>
+        <Text style={styles.context}>{req.context_line}</Text>
+      </View>
       <Pressable
         style={styles.addBtn}
         onPress={resolveAdd}
@@ -143,15 +147,29 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 6,
   },
+  // Warm gold ring so the request feels like an invitation, not a profile row.
+  avatarRing: {
+    padding: 4,
+    borderRadius: 60,
+    borderWidth: 2,
+    borderColor: Colors.goldenAmber,
+  },
   name: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.displaySM,
     color: Colors.asphalt,
   },
+  // "how you know them" reads as a soft gold chip, not loose body text.
+  contextChip: {
+    backgroundColor: Colors.goldenAmberTint15,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
   context: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.secondary,
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
     textAlign: 'center',
   },
   addBtn: {

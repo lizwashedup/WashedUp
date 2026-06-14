@@ -7,6 +7,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { markRequestsSeen, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
 import { Plus, MessageCircle, CalendarPlus, Users, User } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -99,6 +101,16 @@ export default function YoursScreen() {
   const [pathsOpen, setPathsOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
   const [profileTarget, setProfileTarget] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // Opening the Requests surface marks the loop "seen": clears the Yours tab
+  // count badge (independent of accept/decline) and re-shows only for a request
+  // that arrives later. Source of truth for the list stays the server.
+  useEffect(() => {
+    if (!requestsOpen) return;
+    markRequestsSeen();
+    queryClient.invalidateQueries({ queryKey: REQUESTS_BADGE_KEY });
+  }, [requestsOpen, queryClient]);
 
   // A people_request notification routes here with ?openRequests=1 so the
   // accept card stack opens directly instead of the user hunting for the
@@ -117,6 +129,12 @@ export default function YoursScreen() {
     if (tabParam === 'circles' && GROUPS_ENABLED) {
       tabConsumedRef.current = true;
       setTab('circles');
+      router.setParams({ tab: undefined } as never);
+    } else if (tabParam === 'people') {
+      // people_request notifications route here with ?tab=people so the user
+      // lands on People (not their last-used tab) where the requests live.
+      tabConsumedRef.current = true;
+      setTab('people');
       router.setParams({ tab: undefined } as never);
     }
   }, [tabParam]);
@@ -251,7 +269,9 @@ export default function YoursScreen() {
             )}
           </View>
 
-          {tab === 'people' && state !== 'populated' && requests.length > 0 && (
+          {/* Requests entry is reachable in ANY people state (was hidden once
+              populated, which stranded incoming requests). */}
+          {tab === 'people' && requests.length > 0 && (
             <RequestBanner
               count={requests.length}
               onPress={() => setRequestsOpen(true)}
