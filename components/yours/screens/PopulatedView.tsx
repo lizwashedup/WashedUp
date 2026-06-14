@@ -2,7 +2,6 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { AlbumsGrid } from '../../albums/AlbumsGrid';
 import AvatarGrid from '../grid/AvatarGrid';
-import RequestBanner from '../requests/RequestBanner';
 import type { YoursTab } from '../header/YoursTabs';
 import type { AnchorRect } from '../../menu/MenuCard';
 import type { YoursGridPerson } from '../../../lib/yours/types';
@@ -12,10 +11,8 @@ export default function PopulatedView({
   userId,
   activeTab,
   people,
-  requestCount,
   lightUpIds,
   onAdd,
-  onOpenRequests,
   onPressPerson,
   onLongPressPerson,
   onPressPill,
@@ -23,10 +20,8 @@ export default function PopulatedView({
   userId: string;
   activeTab: YoursTab;
   people: YoursGridPerson[];
-  requestCount: number;
   lightUpIds: Set<string>;
   onAdd: () => void;
-  onOpenRequests: () => void;
   onPressPerson: (p: YoursGridPerson) => void;
   onLongPressPerson: (p: YoursGridPerson, rect: AnchorRect) => void;
   onPressPill: (p: YoursGridPerson) => void;
@@ -43,9 +38,6 @@ export default function PopulatedView({
       people={people}
       lightUpIds={lightUpIds}
       onAdd={onAdd}
-      header={
-        <RequestBanner count={requestCount} onPress={onOpenRequests} />
-      }
       onPressPerson={onPressPerson}
       onLongPressPerson={onLongPressPerson}
       onPressPill={onPressPill}

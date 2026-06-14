@@ -1975,7 +1975,7 @@ export default function PlanDetailScreen() {
             </Text>
 
             <View style={joinStyles.infoBox}>
-              <Text style={joinStyles.infoTitle}>washedup groups are small on purpose.</Text>
+              <Text style={joinStyles.infoTitle}>washedup plans are small on purpose.</Text>
               <Text style={joinStyles.infoText}>You're not just a number.</Text>
               <Text style={joinStyles.infoText}>You're part of the plan.</Text>
             </View>

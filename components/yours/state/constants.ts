@@ -84,8 +84,16 @@ export const COPY = {
   requestBannerOne: 'Someone wants to add you',
   requestBannerMany: (n: number) => `${n} people want to add you`,
 
-  requestAdd: 'Add them',
+  requestAdd: 'Add back',
   requestNotNow: 'Not now',
+  // Per-request actions on the list. Decline is confirm-gated so a mis-tap
+  // can't silently drop a real person; the confirm step is scoped to one row.
+  requestDecline: 'Decline',
+  requestDeclineConfirmTitle: (name: string) => `Decline ${name}?`,
+  requestDeclineConfirmYes: 'Decline',
+  requestDeclineConfirmNo: 'Keep',
+  requestListTitle: 'Wants to add you',
+  requestListEmpty: "You're all caught up.",
   // SIM-EYEBALL #3: block prompt
   blockPromptTitle: (name: string) => `Block ${name}?`,
   blockPromptBlock: 'Block',

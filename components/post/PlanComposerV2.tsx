@@ -151,6 +151,7 @@ export default function PlanComposerV2() {
     prefillCategory?: string;
     prefillImageUrl?: string;
     prefillStartTime?: string;
+    prefillEndTime?: string;
     prefillEventDate?: string;
     prefillDropIn?: string;
     prefillAllowDuplicate?: string;
@@ -195,6 +196,12 @@ export default function PlanComposerV2() {
   const [timeMinute, setTimeMinute] = useState('00');
   const [timePeriod, setTimePeriod] = useState<'AM' | 'PM'>('PM');
   const [timeSelected, setTimeSelected] = useState(false);
+  // End time is optional (legacy parity). When set we compose end_time, rolling
+  // to the next day for an overnight plan; min 30 min after start.
+  const [endTimeHour, setEndTimeHour] = useState(9);
+  const [endTimeMinute, setEndTimeMinute] = useState('00');
+  const [endTimePeriod, setEndTimePeriod] = useState<'AM' | 'PM'>('PM');
+  const [endTimeSelected, setEndTimeSelected] = useState(false);
 
   // ── How many + audience ──
   const [groupSize, setGroupSize] = useState(6); // max_invites; UI shows groupSize+1 total
@@ -297,7 +304,9 @@ export default function PlanComposerV2() {
     }
     if (params.prefillGroupSize) {
       const n = parseInt(String(params.prefillGroupSize), 10);
-      if (!isNaN(n) && n > 0) setGroupSize(n);
+      // Clamp to the composer's own range so duplicating a featured/large plan
+      // can't seed max_invites above the 8-max capacity invariant.
+      if (!isNaN(n)) setGroupSize(Math.max(MIN_GROUP - 1, Math.min(MAX_GROUP - 1, n)));
     }
     if (params.prefillAgeRange) {
       const parsed = String(params.prefillAgeRange).split(',').map((s) => s.trim())
@@ -324,6 +333,20 @@ export default function PlanComposerV2() {
         const nearestMinute = MINUTE_OPTIONS.reduce((prev, curr) =>
           Math.abs(parseInt(curr) - minutes!) < Math.abs(parseInt(prev) - minutes!) ? curr : prev);
         setTimeHour(displayHour); setTimeMinute(nearestMinute); setTimePeriod(period); setTimeSelected(true);
+      }
+    }
+    // End time (optional): from end_time (ISO or HH:MM[:SS]); snap to picker.
+    if (params.prefillEndTime) {
+      const et = String(params.prefillEndTime);
+      let hours: number | null = null; let minutes: number | null = null;
+      if (et.includes('T')) { const d = new Date(et); if (!isNaN(d.getTime())) { hours = d.getHours(); minutes = d.getMinutes(); } }
+      else if (et.includes(':')) { const parts = et.split(':'); hours = parseInt(parts[0], 10); minutes = parseInt(parts[1] ?? '0', 10); }
+      if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
+        const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
+        let displayHour = hours % 12; if (displayHour === 0) displayHour = 12;
+        const nearestMinute = MINUTE_OPTIONS.reduce((prev, curr) =>
+          Math.abs(parseInt(curr) - minutes!) < Math.abs(parseInt(prev) - minutes!) ? curr : prev);
+        setEndTimeHour(displayHour); setEndTimeMinute(nearestMinute); setEndTimePeriod(period); setEndTimeSelected(true);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -490,6 +513,24 @@ export default function PlanComposerV2() {
     setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
     setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
     setAllowDuplicate(true); setMoreOpen(false); setInvited([]);
+    setEndTimeSelected(false);
+    // Clear every prefill/duplicate param after a successful post. Otherwise a
+    // "Post your own" leaves duplicatedFromEventId (and the rest) in route state,
+    // and the NEXT plan posted from this same screen is mis-tagged a duplicate -
+    // firing notify_waitlist_duplicate_plan at the previous plan's waitlist.
+    router.setParams({
+      prefillTitle: undefined, prefillInvitePersonId: undefined,
+      prefillInvitePersonName: undefined, prefillInvitePersonPhoto: undefined,
+      prefillDescription: undefined, prefillLocation: undefined,
+      prefillLocationLat: undefined, prefillLocationLng: undefined,
+      prefillNeighborhood: undefined, prefillCategory: undefined,
+      prefillImageUrl: undefined, prefillStartTime: undefined,
+      prefillEndTime: undefined, prefillEventDate: undefined,
+      prefillDropIn: undefined, prefillAllowDuplicate: undefined,
+      prefillAgeRange: undefined, prefillGenderPref: undefined,
+      prefillGroupSize: undefined, prefillTicketsUrl: undefined,
+      duplicatedFromEventId: undefined,
+    } as never);
   };
 
   // ── Submit (optimistic: the post moment shows instantly; the insert runs in
@@ -521,12 +562,27 @@ export default function PlanComposerV2() {
       return;
     }
 
+    // Optional end time (legacy parity): roll an earlier clock time to the next
+    // day (overnight), require at least 30 min after start.
+    let endTimeIso: string | null = null;
+    if (endTimeSelected) {
+      let endDt = buildDatetime(dateMonth, dateDay, dateYear, endTimeHour, endTimeMinute, endTimePeriod);
+      if (endDt.getTime() <= startTime.getTime()) {
+        endDt = new Date(endDt.getTime() + 24 * 60 * 60 * 1000);
+      }
+      if (endDt.getTime() - startTime.getTime() < 30 * 60 * 1000) {
+        setAlertInfo({ title: 'Give it a little longer', message: 'An end time should be at least 30 minutes after the start.' });
+        return;
+      }
+      endTimeIso = endDt.toISOString();
+    }
+
     // Snapshot everything the insert needs - the form resets immediately.
     const ageBounds = ageRangesToMinMax(ageRanges);
     const row = {
       title: title.trim(),
       start_time: startTime.toISOString(),
-      end_time: null as string | null,
+      end_time: endTimeIso,
       drop_in: dropIn,
       allow_duplicate: allowDuplicate,
       location_text: location.trim() || null,
@@ -778,6 +834,21 @@ export default function PlanComposerV2() {
             period={timePeriod}
             selected={timeSelected}
             onChange={(h, m, p) => { setTimeHour(h); setTimeMinute(m); setTimePeriod(p); setTimeSelected(true); }}
+          />
+          <View style={styles.endTimeRow}>
+            <Text style={styles.subLabel}>ends<Text style={styles.labelOptional}> · optional</Text></Text>
+            {endTimeSelected ? (
+              <TouchableOpacity onPress={() => { hapticLight(); setEndTimeSelected(false); }} hitSlop={8}>
+                <Text style={styles.clearEndText}>clear</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <TimePicker
+            hour={endTimeHour}
+            minute={endTimeMinute}
+            period={endTimePeriod}
+            selected={endTimeSelected}
+            onChange={(h, m, p) => { setEndTimeHour(h); setEndTimeMinute(m); setEndTimePeriod(p); setEndTimeSelected(true); }}
           />
           {nudge === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
         </View>
@@ -1051,6 +1122,14 @@ const styles = StyleSheet.create({
   labelOptional: {
     fontFamily: Fonts.sansMedium, fontSize: 13, letterSpacing: 0,
     textTransform: 'none', color: Colors.secondary,
+  },
+  endTimeRow: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginTop: 16,
+  },
+  clearEndText: {
+    fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.secondary,
+    marginBottom: 8, marginTop: 4,
   },
 
   // Photo

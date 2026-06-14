@@ -100,6 +100,9 @@ export default function YoursScreen() {
   const [query, setQuery] = useState('');
   const [pathsOpen, setPathsOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
+  // The requester to float to the top of the list, captured from a notification
+  // deep-link at open time so it survives the URL param being cleared.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const [profileTarget, setProfileTarget] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
@@ -115,9 +118,10 @@ export default function YoursScreen() {
   // A people_request notification routes here with ?openRequests=1 so the
   // accept card stack opens directly instead of the user hunting for the
   // banner. Consume it once, only when there is actually a request waiting.
-  const { openRequests, tab: tabParam } = useLocalSearchParams<{
+  const { openRequests, tab: tabParam, requesterId } = useLocalSearchParams<{
     openRequests?: string;
     tab?: string;
+    requesterId?: string;
   }>();
   // Deep-link into the Circles tab (the Chats > Circles empty state routes here
   // with ?tab=circles). Consume once per mount, mirroring the openRequests
@@ -148,12 +152,16 @@ export default function YoursScreen() {
     if (autoOpenedRequestsRef.current) return;
     if (requests.length > 0) {
       autoOpenedRequestsRef.current = true;
+      // Capture the notification's target before clearing the URL, so the list
+      // can float that person up even after the param is gone. Opening the list
+      // accepts/declines NOTHING.
+      setHighlightId(requesterId ?? null);
       setRequestsOpen(true);
-      // Consume the flag so it doesn't re-open the stack on a later tab
+      // Consume the flags so they don't re-open/re-highlight on a later tab
       // revisit (the ref only guards within a single mount).
-      router.setParams({ openRequests: undefined } as never);
+      router.setParams({ openRequests: undefined, requesterId: undefined } as never);
     }
-  }, [openRequests, requests.length]);
+  }, [openRequests, requests.length, requesterId]);
 
   // Track which user ids have already been seen so the light-up plays
   // once for a freshly added person and never on scroll recycle.
@@ -216,10 +224,8 @@ export default function YoursScreen() {
               userId={uid}
               activeTab="people"
               people={people}
-              requestCount={requests.length}
               lightUpIds={lightUpIds}
               onAdd={() => setPathsOpen(true)}
-              onOpenRequests={() => setRequestsOpen(true)}
               onPressPerson={(p: YoursGridPerson) =>
                 router.push(`/person/${p.user_id}` as never)
               }
@@ -285,7 +291,10 @@ export default function YoursScreen() {
                 userId={uid}
                 hasPeople={people.length > 0}
                 onOpenCircle={(id) =>
-                  router.push(`/(tabs)/chats/circle/${id}` as never)
+                  // Open the circle PAGE (identity, members, plans, action row),
+                  // not the chat - the page is the circle's front door; chat is
+                  // one action inside it (reachable from the page header).
+                  router.push(`/circle/${id}` as never)
                 }
                 onCreate={openCreateCircle}
                 onAddPeople={() => setPathsOpen(true)}
@@ -316,9 +325,13 @@ export default function YoursScreen() {
       {!!uid && requestsOpen && (
         <RequestStack
           visible={requestsOpen}
-          onClose={() => setRequestsOpen(false)}
+          onClose={() => {
+            setRequestsOpen(false);
+            setHighlightId(null);
+          }}
           userId={uid}
           requests={requests}
+          highlightRequesterId={highlightId}
         />
       )}
 

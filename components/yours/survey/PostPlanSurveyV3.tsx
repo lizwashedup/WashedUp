@@ -280,10 +280,28 @@ export default function PostPlanSurveyV3({
     }
   };
 
+  // Record who didn't make it, as the spec requires ("writes no_show_reports
+  // rows as before"). Fire-and-forget + idempotent: the SECURITY DEFINER RPC
+  // validates the reporter and target are members and ignores duplicates, so a
+  // re-entered step never double-counts. Called once when attendance is
+  // finalized (advancing off the "who made it" step).
+  const commitNoShows = (ids: Set<string>) => {
+    for (const id of ids) {
+      supabase
+        .rpc('report_no_show', { p_event_id: plan.id, p_no_show_user_id: id })
+        .then(({ error }) => {
+          if (error) console.warn('[survey] report_no_show failed:', error.message);
+        });
+    }
+  };
+
   // Step 3 gating: only with the people system on, and only when there is at
   // least one eligible person (incoming_pending or none; mutual / outgoing /
   // blocked are excluded server-side via keep_state). Otherwise close.
   const goToKeepOrClose = (currentNoShows: Set<string>) => {
+    // Persist attendance before we branch to keep-or-close, so the no-show
+    // record is written whether or not a keep step follows.
+    commitNoShows(currentNoShows);
     if (!YOURS_PAGE_ENABLED) {
       exit();
       return;

@@ -451,10 +451,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         const focusParam = type === 'interest_signal' ? '?focus=interest' : '';
         safePush(`/plan/${data.eventId}${focusParam}`);
       } else if (type === 'people_request') {
-        // An incoming add-request: route to People and OPEN the accept stack
-        // directly (YoursScreen consumes ?openRequests=1). The notification is
-        // a pointer; it never accepts/declines/destroys the request.
-        safePush('/(tabs)/friends?openRequests=1&tab=people');
+        // An incoming add-request: route to People and OPEN the requests LIST
+        // (YoursScreen consumes ?openRequests=1). The notification is a pointer
+        // ONLY; it never accepts/declines/destroys anything. If the push payload
+        // carries the requester id, float that person to the top of the list;
+        // otherwise the full pending list (each row individually actionable)
+        // already makes wrong-target impossible.
+        const requester =
+          data?.actorUserId ?? data?.actor_user_id ?? data?.requesterId ?? null;
+        safePush(
+          requester
+            ? `/(tabs)/friends?openRequests=1&tab=people&requesterId=${requester}`
+            : '/(tabs)/friends?openRequests=1&tab=people',
+        );
       } else if (
         type === 'people_request_accepted' ||
         type === 'referral_joined'

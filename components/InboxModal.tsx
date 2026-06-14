@@ -160,7 +160,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
   }, [visible, loadingInvites, loadingNotifs, queryClient]);
 
-  const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string) => {
+  const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string, actorId?: string) => {
     hapticLight();
     try {
       await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
@@ -177,8 +177,13 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         onClose();
         // Only the rebuilt Yours screen handles ?openRequests=1; with the flag
         // off the legacy screen can't, so route plain to avoid a dead-end.
+        // Force the People tab (not last-used) and carry the requester id so the
+        // list floats THIS person to the top. Opening accepts/declines nothing.
         if (notifType === 'people_request' && YOURS_PAGE_ENABLED) {
-          router.push('/(tabs)/friends?openRequests=1' as any);
+          const target = actorId
+            ? `/(tabs)/friends?openRequests=1&tab=people&requesterId=${actorId}`
+            : '/(tabs)/friends?openRequests=1&tab=people';
+          router.push(target as any);
         } else {
           router.push('/(tabs)/friends' as any);
         }
@@ -417,7 +422,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                       // consume it.
                       if (isExceptionInvite) return;
                       return hasAction
-                        ? handleNotifAction(notif.id, 'acted', notif.event_id, notif.type)
+                        ? handleNotifAction(notif.id, 'acted', notif.event_id, notif.type, notif.actor_user_id)
                         : handleNotifAction(notif.id, 'read');
                     }}
                   >
