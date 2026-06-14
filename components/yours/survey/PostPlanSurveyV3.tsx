@@ -97,22 +97,29 @@ export default function PostPlanSurveyV3({
     [members, userId],
   );
 
-  // Plan-type rules. Featured plans never police attendance; circle plans only
-  // when strangers actually joined (and then only the strangers are listed).
-  const showWhoMadeIt =
-    !plan.is_featured && (plan.circle_id == null || plan.any_stranger_joined);
-  const whoMadeItList = useMemo<SurveyMember[]>(() => {
+  // The people pool for the who-made-it AND keep steps. On an opened-up circle
+  // plan (strangers joined) the steps ONLY concern strangers plus the creator,
+  // never circle co-members; the creator is always shown even when they are a
+  // circle member. Public plans show everyone (is_stranger is false for all
+  // there, so the stranger filter must not apply).
+  const peoplePool = useMemo<SurveyMember[]>(() => {
     if (plan.circle_id != null && plan.any_stranger_joined) {
-      return others.filter((m) => m.is_stranger);
+      return others.filter((m) => m.is_stranger || m.is_creator);
     }
     return others;
   }, [others, plan.circle_id, plan.any_stranger_joined]);
+
+  // Plan-type rules. Featured plans never police attendance; circle plans only
+  // when strangers actually joined (and then only strangers + the creator).
+  const showWhoMadeIt =
+    !plan.is_featured && (plan.circle_id == null || plan.any_stranger_joined);
+  const whoMadeItList = peoplePool;
 
   // Whether a keep step will exist at all (pre-no-show estimate) drives the
   // honest step counter. No-shows only ever SUBTRACT from this set.
   const keepPossible =
     YOURS_PAGE_ENABLED &&
-    others.some(
+    peoplePool.some(
       (m) => m.keep_state === 'incoming_pending' || m.keep_state === 'none',
     );
   const totalSteps = 1 + (showWhoMadeIt ? 1 : 0) + (keepPossible ? 1 : 0);
@@ -133,6 +140,9 @@ export default function PostPlanSurveyV3({
 
   const wroteRef = useRef(false);
   const exitedRef = useRef(false);
+  // True once the user commits the TOP rating ("Really good"). Reported up on
+  // exit so the owner can fire the native review ask after this modal dismisses.
+  const topRatedRef = useRef(false);
 
   // ── Grow-sheet motion. translateY: enter/exit. sheetHeight: monotonic grow
   // from HALF to TALL on the first non-'how' step. Both JS-driven so height can
@@ -228,7 +238,7 @@ export default function PostPlanSurveyV3({
         );
     }
     if (reduceMotion) {
-      onComplete();
+      onComplete(topRatedRef.current);
       return;
     }
     Animated.parallel([
@@ -242,7 +252,7 @@ export default function PostPlanSurveyV3({
         duration: 220,
         useNativeDriver: false,
       }),
-    ]).start(() => onComplete());
+    ]).start(() => onComplete(topRatedRef.current));
   };
 
   // Rail 3: complete-state upsert (rating + comment together), fire-and-forget.
@@ -278,7 +288,7 @@ export default function PostPlanSurveyV3({
       exit();
       return;
     }
-    const eligible = others.filter(
+    const eligible = peoplePool.filter(
       (m) =>
         !currentNoShows.has(m.id) &&
         (m.keep_state === 'incoming_pending' || m.keep_state === 'none'),
@@ -294,12 +304,12 @@ export default function PostPlanSurveyV3({
 
   const keepCandidates = useMemo<SurveyMember[]>(
     () =>
-      others.filter(
+      peoplePool.filter(
         (m) =>
           !noShows.has(m.id) &&
           (m.keep_state === 'incoming_pending' || m.keep_state === 'none'),
       ),
-    [others, noShows],
+    [peoplePool, noShows],
   );
 
   // Step-3 footer label: the button speaks the name when exactly one is picked.
@@ -465,6 +475,9 @@ export default function PostPlanSurveyV3({
                     if (rating == null) return;
                     if (rating !== 'thumbs_down') commitFeedback(rating, null);
                     else commitFeedback('thumbs_down', comment.trim() || null);
+                    // The TOP rating is the soft-ask for the native review sheet;
+                    // recorded here, fired by the owner after this modal closes.
+                    topRatedRef.current = rating === 'thumbs_up';
                     afterRating();
                   } else {
                     goToKeepOrClose(noShows);

@@ -65,12 +65,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
-import AppStoreReviewAsk, {
-  REVIEW_ASK_COUNT_KEY,
-  REVIEW_ASK_COMPLETED_KEY,
-  REVIEW_ASK_LEGACY_KEY,
-  REVIEW_ASK_MAX,
-} from '../components/AppStoreReviewAsk';
+import { maybeRequestReviewAfterTopRating } from '../lib/reviewAsk';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
 import PushPrimerModal from '../components/PushPrimerModal';
 import VideoSplash from '../components/VideoSplash';
@@ -272,8 +267,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (prevUserIdRef.current !== null) {
         surveyCheckedRef.current = false;
         setSurveyCheckDone(false);
+        setReviewCheckDone(false);
         setSurveyPlan(null);
-        setShowReviewAsk(false);
+        setReviewSheetPending(false);
         pushPrimerCheckedRef.current = false;
         setShowPushPrimer(false);
       }
@@ -306,12 +302,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
             circle_id: string | null;
             is_featured: boolean;
             any_stranger_joined: boolean;
+            creator_user_id: string | null;
           };
           members: Array<{
             id: string;
             first_name_display: string | null;
             profile_photo_url: string | null;
             is_stranger: boolean;
+            is_creator: boolean;
             keep_state: SurveyMember['keep_state'];
           }>;
         };
@@ -329,6 +327,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           circle_id: payload.plan.circle_id ?? null,
           is_featured: !!payload.plan.is_featured,
           any_stranger_joined: !!payload.plan.any_stranger_joined,
+          creator_user_id: payload.plan.creator_user_id ?? null,
         });
         setSurveyMembers(
           (payload.members ?? []).map((m) => ({
@@ -336,6 +335,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
             first_name_display: m.first_name_display,
             profile_photo_url: m.profile_photo_url,
             is_stranger: !!m.is_stranger,
+            is_creator: !!m.is_creator,
             keep_state: m.keep_state ?? 'none',
           })),
         );
@@ -345,58 +345,33 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   }, [authedUserId, authResolved]);
 
   // ── App Store review ask ────────────────────────────────────────────────
-  const [showReviewAsk, setShowReviewAsk] = useState(false);
-  // Resolves true once the review eligibility check finishes (shown or not),
-  // so the push primer can wait for the decision instead of racing it.
+  // The review ask is no longer a competing root modal. It is the native OS
+  // review sheet, fired from the survey's onComplete (a TOP rating) AFTER the
+  // survey Modal has fully dismissed (see lib/reviewAsk). While that sheet is
+  // pending we hold the lower-precedence modals off, exactly like the old
+  // review modal did. reviewCheckDone stays as the gate the push primer and the
+  // album/mark modals wait on; it now resolves as soon as the survey decision
+  // is made (there is no separate review pre-check to await).
   const [reviewCheckDone, setReviewCheckDone] = useState(false);
-  const reviewAskShownRef = useRef(false);
+  const [reviewSheetPending, setReviewSheetPending] = useState(false);
 
   useEffect(() => {
-    if (!authedUserId || !surveyCheckDone || surveyPlan) return;
+    if (surveyCheckDone) setReviewCheckDone(true);
+  }, [surveyCheckDone]);
 
-    (async () => {
-      try {
-        // Hard stops: completed flag (clicked Write a Review) or legacy key
-        // (already saw it in the pre-counter version of the app).
-        const completed = await AsyncStorage.getItem(REVIEW_ASK_COMPLETED_KEY);
-        if (completed === 'true') return;
-        const legacy = await AsyncStorage.getItem(REVIEW_ASK_LEGACY_KEY);
-        if (legacy === 'true') return;
-
-        // Soft stop: max ask count reached.
-        const askCountRaw = await AsyncStorage.getItem(REVIEW_ASK_COUNT_KEY);
-        const askCount = parseInt(askCountRaw ?? '0', 10) || 0;
-        if (askCount >= REVIEW_ASK_MAX) return;
-
-        // Need 2+ completed plans as a joined member
-        const { count } = await supabase
-          .from('event_members')
-          .select('id, events!inner(status)', { count: 'exact', head: true })
-          .eq('user_id', authedUserId)
-          .eq('status', 'joined')
-          .eq('events.status', 'completed');
-
-        if ((count ?? 0) < 2) return;
-
-        // Eligibility (a real thumbs_up, OR no real feedback yet) is decided
-        // server-side so the sentinel rows (comment='sentinel') are excluded
-        // with the correct IS DISTINCT FROM semantics PostgREST can't express.
-        const { data: eligible, error: eligErr } = await supabase.rpc(
-          'get_review_ask_eligibility',
-        );
-        if (eligErr) {
-          console.warn('[WashedUp] review eligibility RPC failed:', eligErr.message);
-          return;
-        }
-
-        if (eligible === true) {
-          reviewAskShownRef.current = true;
-          setShowReviewAsk(true);
-        }
-      } catch (e) { logError(e, 'layout.reviewCheck'); }
-      finally { setReviewCheckDone(true); }
-    })();
-  }, [authedUserId, surveyCheckDone, surveyPlan]);
+  // Called from the survey owner after a TOP-rating completion. Defers the push
+  // primer to a later launch (the review sheet owns this beat) and fires the
+  // native ask once the survey Modal has unmounted (the handoff window).
+  const fireReviewAfterSurvey = () => {
+    pushPrimerCheckedRef.current = true;
+    setShowPushPrimer(false);
+    setReviewSheetPending(true);
+    setTimeout(() => {
+      void maybeRequestReviewAfterTopRating().finally(() =>
+        setReviewSheetPending(false),
+      );
+    }, MODAL_HANDOFF_MS + 60);
+  };
 
   // Pre-permission primer gate. Native only. Fires once per cold launch
   // (ref resets only on user change) while the user is authed, auth is
@@ -411,9 +386,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     if (!reviewCheckDone) return;
     if (pushPrimerCheckedRef.current) return;
     pushPrimerCheckedRef.current = true;
-    // If the review ask was shown this launch, defer the primer to the next
-    // cold launch rather than stacking it the instant the review closes.
-    if (reviewAskShownRef.current) return;
+    // A TOP-rating survey completion defers the primer to a later launch via
+    // fireReviewAfterSurvey (it sets pushPrimerCheckedRef + hides the primer),
+    // so the native review sheet is never stacked under the primer.
     (async () => {
       try {
         const snoozedAt = await AsyncStorage.getItem(PUSH_PRIMER_SNOOZE_KEY);
@@ -902,23 +877,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           plan={surveyPlan}
           members={surveyMembers}
           userId={authedUserId}
-          onComplete={() => handoffModal(() => setSurveyPlan(null))}
+          onComplete={(topRated) => {
+            handoffModal(() => setSurveyPlan(null));
+            // TOP rating: fire the native review ask after this modal unmounts.
+            if (topRated) fireReviewAfterSurvey();
+          }}
         />
       )}
-      {showReviewAsk && !surveyPlan && !modalLocked && (
-        <AppStoreReviewAsk
-          visible={showReviewAsk && !surveyPlan && !modalLocked}
-          onClose={() => handoffModal(() => setShowReviewAsk(false))}
-        />
-      )}
-      {authedUserId && reviewCheckDone && !surveyPlan && !showReviewAsk && !modalLocked && (
+      {authedUserId && reviewCheckDone && !surveyPlan && !reviewSheetPending && !modalLocked && (
         <AlbumUploadPromptModal userId={authedUserId} />
       )}
       <KeyboardDoneBar />
-      {authedUserId && surveyCheckDone && reviewCheckDone && !surveyPlan && !showReviewAsk && !modalLocked && (
+      {authedUserId && surveyCheckDone && reviewCheckDone && !surveyPlan && !reviewSheetPending && !modalLocked && (
         <MarkEarnedModal userId={authedUserId} />
       )}
-      {showPushPrimer && authedUserId && !surveyPlan && !showReviewAsk && !modalLocked && (
+      {showPushPrimer && authedUserId && !surveyPlan && !reviewSheetPending && !modalLocked && (
         <PushPrimerModal
           visible={showPushPrimer}
           onEnable={async () => {

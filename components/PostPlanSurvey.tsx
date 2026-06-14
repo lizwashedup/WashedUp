@@ -21,6 +21,7 @@ export interface SurveyPlan {
   circle_id: string | null;
   is_featured: boolean;
   any_stranger_joined: boolean;
+  creator_user_id: string | null;
 }
 
 export interface SurveyMember {
@@ -28,6 +29,9 @@ export interface SurveyMember {
   first_name_display: string | null;
   profile_photo_url: string | null;
   is_stranger: boolean;
+  // The plan creator is ALWAYS shown in the people steps, even when they are a
+  // circle co-member (get_pending_post_plan_survey tags this).
+  is_creator: boolean;
   keep_state: KeepState;
 }
 
@@ -36,7 +40,9 @@ export interface SurveyProps {
   plan: SurveyPlan;
   members: SurveyMember[];
   userId: string;
-  onComplete: () => void;
+  // topRated is true when the user committed the TOP rating ("Really good").
+  // The owner uses it to fire the native review ask AFTER this modal dismisses.
+  onComplete: (topRated: boolean) => void;
 }
 
 // ─── Local suppression (the lockout backstop) ────────────────────────────────
