@@ -1040,7 +1040,7 @@ export default function PlanDetailScreen() {
     setBrandedAlert({
       visible: true,
       title: "Can't make it?",
-      message: 'Your spot will open for someone else. The group will be notified.',
+      message: 'Your spot will open for someone else. Everyone will be notified.',
       buttons: [
         { text: 'Stay', style: 'cancel' },
         {
@@ -1213,7 +1213,7 @@ export default function PlanDetailScreen() {
     setBrandedAlert({
       visible: true,
       title: 'Cancel this plan?',
-      message: 'This will cancel the plan for everyone. Members will be notified in the group chat.',
+      message: 'This will cancel the plan for everyone. Members will be notified in the chat.',
       buttons: [
         { text: 'Keep Plan', style: 'cancel' },
         {
@@ -1380,7 +1380,7 @@ export default function PlanDetailScreen() {
     ].filter(Boolean);
   const isWomenOnly = plan.gender_rule === 'women_only';
 
-  const groupSizeLabel = isFeatured ? (isBirthdayParty ? 'Birthday Party' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small group • intimate' : totalCapacity <= 6 ? 'Cozy group' : 'Larger group';
+  const groupSizeLabel = isFeatured ? (isBirthdayParty ? 'Birthday Party' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small • intimate' : totalCapacity <= 6 ? 'Cozy' : 'Larger';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -1709,10 +1709,10 @@ export default function PlanDetailScreen() {
           <View style={styles.ctaBlock}>
             {!isFeatured && spotsLeft > 0 && spotsLeft <= 2 && (
               <Text style={styles.ctaInfo}>
-                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left, group closes soon
+                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left, closing soon
               </Text>
             )}
-            <Text style={styles.ctaSub}>A group chat opens the moment you join</Text>
+            <Text style={styles.ctaSub}>A chat opens the moment you join</Text>
           </View>
         )}
 
@@ -1980,7 +1980,7 @@ export default function PlanDetailScreen() {
               <Text style={joinStyles.infoText}>You're part of the plan.</Text>
             </View>
 
-            <Text style={joinStyles.label}>Say something to the group <Text style={joinStyles.required}>*required</Text></Text>
+            <Text style={joinStyles.label}>Say something to everyone <Text style={joinStyles.required}>*required</Text></Text>
             <TextInput
               style={[joinStyles.input, !joinMessage.trim() && joinConfirmed && joinStyles.inputRequired]}
               placeholder="Hey everyone! Can't wait"
@@ -1991,7 +1991,7 @@ export default function PlanDetailScreen() {
               maxLength={200}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
-            <Text style={joinStyles.hint}>This will be posted to the group chat when you join</Text>
+            <Text style={joinStyles.hint}>This will be posted to the chat when you join</Text>
 
             <TouchableOpacity
               style={joinStyles.checkRow}
