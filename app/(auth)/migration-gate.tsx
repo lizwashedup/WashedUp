@@ -23,6 +23,8 @@ import PhoneInput from '../../components/auth/PhoneInput';
 import { useSubmitGuard } from '../../hooks/useSubmitGuard';
 import { PHONE_CANONICAL_ENABLED } from '../../constants/FeatureFlags';
 import { reconcileAccountByPhone } from '../../lib/reconcileAccount';
+import { unauthedRoute } from '../../lib/authRouting';
+import { lastUnauthRedirectAt } from '../../lib/navState';
 
 export default function MigrationGateScreen() {
   const [phone, setPhone] = useState('');
@@ -50,10 +52,27 @@ export default function MigrationGateScreen() {
       if (PHONE_CANONICAL_ENABLED) {
         const decision = await reconcileAccountByPhone(e164);
         if (decision.isDup) {
+          // H-1: sign the empty Apple shell OUT before swapping to the canonical
+          // account, so a failed OTP send/verify can never strand the user in a
+          // half-signed-in limbo. We stamp lastUnauthRedirectAt first so the root
+          // SIGNED_OUT listener does not auto-bounce us to the unauthed landing;
+          // navigation here is deterministic and owned by this flow.
+          lastUnauthRedirectAt.ts = Date.now();
+          await supabase.auth.signOut();
           const { error: otpError } = await supabase.auth.signInWithOtp({ phone: e164 });
-          if (otpError) throw otpError;
+          if (otpError) {
+            // Shell is already signed out -> a clean signed-out state, no limbo.
+            // Land on the unauthed entry (not this authed-only gate) and surface
+            // the error there rather than stranding the user here.
+            hapticError();
+            router.replace(unauthedRoute() as never);
+            return;
+          }
           hapticLight();
-          router.push({
+          // replace (not push): the shell session is gone, so there is no valid
+          // gate to return to; verify-code (reconcile) signs into the canonical
+          // account via the sms OTP.
+          router.replace({
             pathname: '/verify-code',
             params: { phone, mode: 'reconcile' },
           });
