@@ -51,7 +51,7 @@ import {
   NEIGHBORHOOD_OPTIONS,
   NEIGHBORHOOD_OTHER,
 } from '../../constants/Neighborhoods';
-import { type PlanCategory } from '../../constants/Categories';
+import { PLAN_CATEGORIES, type PlanCategory } from '../../constants/Categories';
 import { COPY } from '../yours/state/constants';
 import { useAuthUserId } from '../yours/state/useAuthUserId';
 import type { MyFace } from '../../hooks/useMyFace';
@@ -69,7 +69,7 @@ import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
 import EditorialTitleField from '../composer/EditorialTitleField';
 import CategoryChips from '../composer/CategoryChips';
 import CollapsibleCalendar from '../composer/CollapsibleCalendar';
-import TimePicker, { displayTime } from '../composer/TimePicker';
+import TimePicker, { displayTime, MINUTE_OPTIONS } from '../composer/TimePicker';
 import InlineNudge from '../composer/InlineNudge';
 import { useNudgeArbiter, NUDGE_PLACE_BASE } from '../composer/nudgeArbiter';
 import PlacePicker, { type PlaceValue } from '../composer/place/PlacePicker';
@@ -142,6 +142,23 @@ export default function PlanComposerV2() {
     prefillInvitePersonId?: string;
     prefillInvitePersonName?: string;
     prefillInvitePersonPhoto?: string;
+    // "Post your own" (duplicate) prefill set (buildDuplicatePostParams).
+    prefillDescription?: string;
+    prefillLocation?: string;
+    prefillLocationLat?: string;
+    prefillLocationLng?: string;
+    prefillNeighborhood?: string;
+    prefillCategory?: string;
+    prefillImageUrl?: string;
+    prefillStartTime?: string;
+    prefillEventDate?: string;
+    prefillDropIn?: string;
+    prefillAllowDuplicate?: string;
+    prefillAgeRange?: string;
+    prefillGenderPref?: string;
+    prefillGroupSize?: string;
+    prefillTicketsUrl?: string;
+    duplicatedFromEventId?: string;
   }>();
 
   // ── Profile (gender options) ──
@@ -235,7 +252,10 @@ export default function PlanComposerV2() {
     }
   }, [shareWanted, postedPlanId]);
 
-  // ── Prefill: pre-attached person from "Make a plan with {Name}" ──
+  // ── Prefill: pre-attached person from "Make a plan with {Name}", AND the
+  // full "Post your own" (duplicate) set. V2 previously only read prefillTitle,
+  // so duplicates silently dropped date/time/place/ticket/etc.; this mirrors
+  // LegacyComposer's hydration so "Post your own" carries the source plan over. ──
   useEffect(() => {
     if (params.prefillTitle) setTitle(String(params.prefillTitle));
     if (params.prefillInvitePersonId) {
@@ -252,8 +272,62 @@ export default function PlanComposerV2() {
             ],
       );
     }
+
+    // Duplicate ("Post your own") fields.
+    if (params.prefillDescription) setDescription(String(params.prefillDescription));
+    if (params.prefillTicketsUrl) setTicketUrl(String(params.prefillTicketsUrl));
+    if (params.prefillImageUrl) setImageUrl(String(params.prefillImageUrl));
+    if (params.prefillNeighborhood) setNeighborhood(String(params.prefillNeighborhood));
+    if (params.prefillLocation) setLocation(String(params.prefillLocation));
+    if (params.prefillLocationLat && params.prefillLocationLng) {
+      const lat = parseFloat(String(params.prefillLocationLat));
+      const lng = parseFloat(String(params.prefillLocationLng));
+      if (!isNaN(lat) && !isNaN(lng)) { setLocationLat(lat); setLocationLng(lng); }
+    }
+    if (params.prefillCategory) {
+      const c = String(params.prefillCategory).toLowerCase();
+      const matched = PLAN_CATEGORIES.find((p) => p.toLowerCase() === c);
+      if (matched) setCategory(matched);
+    }
+    if (params.prefillDropIn !== undefined) setDropIn(params.prefillDropIn !== 'false');
+    if (params.prefillAllowDuplicate !== undefined) setAllowDuplicate(params.prefillAllowDuplicate !== 'false');
+    if (params.prefillGenderPref) {
+      const g = String(params.prefillGenderPref);
+      if (g === 'mixed' || g === 'women_only' || g === 'men_only' || g === 'nonbinary_only') setGenderPref(g);
+    }
+    if (params.prefillGroupSize) {
+      const n = parseInt(String(params.prefillGroupSize), 10);
+      if (!isNaN(n) && n > 0) setGroupSize(n);
+    }
+    if (params.prefillAgeRange) {
+      const parsed = String(params.prefillAgeRange).split(',').map((s) => s.trim())
+        .filter((s): s is AgeRange => (AGE_RANGES as readonly string[]).includes(s));
+      if (parsed.length > 0) setAgeRanges(parsed);
+    }
+    // Date: accepts YYYY-MM-DD or full ISO.
+    if (params.prefillEventDate) {
+      const raw = String(params.prefillEventDate);
+      const d = raw.includes('T') ? new Date(raw) : new Date(`${raw}T12:00:00`);
+      if (!isNaN(d.getTime())) {
+        setDateMonth(d.getMonth()); setDateDay(d.getDate()); setDateYear(d.getFullYear()); setDateSelected(true);
+      }
+    }
+    // Time: from start_time (ISO or HH:MM[:SS]); snap to the picker's minutes.
+    if (params.prefillStartTime) {
+      const st = String(params.prefillStartTime);
+      let hours: number | null = null; let minutes: number | null = null;
+      if (st.includes('T')) { const d = new Date(st); if (!isNaN(d.getTime())) { hours = d.getHours(); minutes = d.getMinutes(); } }
+      else if (st.includes(':')) { const parts = st.split(':'); hours = parseInt(parts[0], 10); minutes = parseInt(parts[1] ?? '0', 10); }
+      if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
+        const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
+        let displayHour = hours % 12; if (displayHour === 0) displayHour = 12;
+        const nearestMinute = MINUTE_OPTIONS.reduce((prev, curr) =>
+          Math.abs(parseInt(curr) - minutes!) < Math.abs(parseInt(prev) - minutes!) ? curr : prev);
+        setTimeHour(displayHour); setTimeMinute(nearestMinute); setTimePeriod(period); setTimeSelected(true);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.prefillTitle, params.prefillInvitePersonId, params.prefillInvitePersonName, params.prefillInvitePersonPhoto]);
+  }, [params.prefillTitle, params.prefillInvitePersonId, params.prefillInvitePersonName, params.prefillInvitePersonPhoto, params.duplicatedFromEventId]);
 
   // ── Invite suggestions (want-in only; reactance fix) ──
   const inviteSuggestions = useMemo<InviteSuggestion[]>(() => {
@@ -471,6 +545,7 @@ export default function PlanComposerV2() {
       city: 'Los Angeles',
       image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
       neighborhood: neighborhood.trim() || null,
+      duplicated_from_event_id: params.duplicatedFromEventId ? String(params.duplicatedFromEventId) : null,
     };
     const inviteIds = invited.map((c) => c.user_id);
     const genderLabelSnap =
@@ -549,6 +624,17 @@ export default function PlanComposerV2() {
         // only now (not right after the event insert) so an orphan rollback above
         // still removes the card via the catch's rollback().
         optimistic?.commit(insertedEvent.id);
+        // If this was a "Post your own" duplicate, notify the source plan's
+        // waitlist (fire-and-forget; mirrors LegacyComposer).
+        if (params.duplicatedFromEventId) {
+          supabase.rpc('notify_waitlist_duplicate_plan', {
+            p_original_event_id: String(params.duplicatedFromEventId),
+            p_new_event_id: insertedEvent.id,
+            p_creator_user_id: user.id,
+          }).then(({ error: notifyErr }) => {
+            if (notifyErr) console.warn('[post] notify_waitlist_duplicate_plan failed:', notifyErr.message);
+          });
+        }
         if (inviteIds.length > 0) {
           invitePeopleToPlan.mutate(
             { eventId: insertedEvent.id, recipientIds: inviteIds },
