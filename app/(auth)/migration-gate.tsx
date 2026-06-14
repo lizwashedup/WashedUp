@@ -21,6 +21,8 @@ import { formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
 import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 import PhoneInput from '../../components/auth/PhoneInput';
 import { useSubmitGuard } from '../../hooks/useSubmitGuard';
+import { PHONE_CANONICAL_ENABLED } from '../../constants/FeatureFlags';
+import { reconcileAccountByPhone } from '../../lib/reconcileAccount';
 
 export default function MigrationGateScreen() {
   const [phone, setPhone] = useState('');
@@ -37,6 +39,30 @@ export default function MigrationGateScreen() {
     setSubmitting(true);
     try {
       const e164 = formatToE164(phone);
+
+      // Phone-canonical reconciliation: if this phone already belongs to a
+      // DIFFERENT account (the user's real one, e.g. they signed up with phone
+      // on web, then tapped Sign in with Apple here), don't dead-end with
+      // "linked to another account." Sign them into that account instead. The
+      // phone is unique, so a fresh sign-in OTP resolves to the canonical
+      // account; the empty Apple shell is swept out-of-band, we never delete
+      // inside the session swap. Flag-gated until the swap is device-tested.
+      if (PHONE_CANONICAL_ENABLED) {
+        const decision = await reconcileAccountByPhone(e164);
+        if (decision.isDup) {
+          const { error: otpError } = await supabase.auth.signInWithOtp({ phone: e164 });
+          if (otpError) throw otpError;
+          hapticLight();
+          router.push({
+            pathname: '/verify-code',
+            params: { phone, mode: 'reconcile' },
+          });
+          return;
+        }
+        // Not a dup (or shell has content) -> fall through to the normal
+        // phone-attach flow below.
+      }
+
       // updateUser sends an OTP to the new phone for verification of the
       // already-authenticated user's phone change. Confirmed on the
       // verify-code screen with verifyOtp({ type: 'phone_change' }).

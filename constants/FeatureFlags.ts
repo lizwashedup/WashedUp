@@ -65,3 +65,30 @@ export const YOURS_PAGE_ENABLED = process.env.EXPO_PUBLIC_YOURS_PAGE_ENABLED ===
  * are applied to prod.
  */
 export const GROUPS_ENABLED = process.env.EXPO_PUBLIC_GROUPS_ENABLED === 'true';
+
+/**
+ * Phone-canonical account reconciliation (prevents phone-vs-Apple duplicate
+ * accounts).
+ *
+ * When false (current prod default): the migration gate dead-ends with
+ * "that number is linked to another account" if the phone is already taken.
+ *
+ * When true: at the migration gate, if the entered phone already belongs to
+ * a DIFFERENT account, we sign the user into THAT account (their real one)
+ * via a fresh sign-in OTP instead of dead-ending, so an Apple signup that
+ * collides with an existing phone account resolves to one account, not two.
+ *
+ * FLAG SAFETY: the committed default is authoritative. The env var is an
+ * ADDITIVE local-test override only; when UNSET it resolves to the committed
+ * default, so an EAS build with no env var ships the committed value and can
+ * never silently ship OFF. Flip the committed default to true only after the
+ * session swap (sign out shell, verify SMS, land on the canonical account) is
+ * device-tested.
+ */
+const PHONE_CANONICAL_COMMITTED_DEFAULT = false;
+export const PHONE_CANONICAL_ENABLED =
+  process.env.EXPO_PUBLIC_PHONE_CANONICAL_ENABLED === 'true'
+    ? true
+    : process.env.EXPO_PUBLIC_PHONE_CANONICAL_ENABLED === 'false'
+      ? false
+      : PHONE_CANONICAL_COMMITTED_DEFAULT;

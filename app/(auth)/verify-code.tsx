@@ -31,13 +31,23 @@ const SUCCESS_HOLD_MS = 600;
 const ERROR_HOLD_MS = 600;
 const CODE_LEN = 6;
 
-type Mode = 'signup' | 'migration';
+// 'reconcile' = a phone-canonical sign-in: an Apple shell whose entered phone
+// already belongs to their real account, so we sign them INTO that account.
+// It uses the same sms / signInWithOtp path as 'signup' (non-migration), and
+// skips the migration-only phone_change assertions, handled by the existing
+// `mode === 'migration' ? ... : ...` branches throughout this screen.
+type Mode = 'signup' | 'migration' | 'reconcile';
 type OtpState = 'idle' | 'success' | 'error';
 
 export default function VerifyCodeScreen() {
   const params = useLocalSearchParams<{ phone?: string; mode?: string }>();
   const phone = (params.phone ?? '').replace(/\D/g, '').slice(0, 10);
-  const mode: Mode = params.mode === 'migration' ? 'migration' : 'signup';
+  const mode: Mode =
+    params.mode === 'migration'
+      ? 'migration'
+      : params.mode === 'reconcile'
+        ? 'reconcile'
+        : 'signup';
   const queryClient = useQueryClient();
 
   const [code, setCode] = useState('');
