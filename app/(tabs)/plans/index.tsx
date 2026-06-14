@@ -1786,7 +1786,8 @@ const styles = StyleSheet.create({
   // ── Filters ──
   filterRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 4,
     marginTop: 4,
