@@ -11,7 +11,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Plus } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
-import { CIRCLE_DIR, TYPE } from '../../../constants/YoursDesign';
+import { CIRCLE_DIR, TYPE, RADII } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 
@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.terracotta,
-    borderRadius: 999,
+    borderRadius: RADII.button,
     shadowColor: Colors.terracotta,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,

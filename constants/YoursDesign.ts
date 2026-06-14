@@ -38,6 +38,9 @@ export const RADII = {
   pill: 4,    // Avatar subtext pill (e.g. "Beach day, Sat")
   card: 16,   // Plan preview card, profile sheet card
   sheet: 16,  // Bottom-sheet top corners
+  button: 14, // Primary action buttons (Message / Make a plan / New circle).
+              // A tightened, intentional corner; the old full pill (999) read
+              // generic. Sits in the card/field radius family.
 } as const;
 
 // ── Slot spacing (pt) ─────────────────────────────────────────────────────

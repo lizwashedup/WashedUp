@@ -13,6 +13,7 @@ import { router } from 'expo-router';
 import { ChevronLeft, MoreHorizontal, MessageCircle, CalendarPlus } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import { RADII } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 import { buildComposerWithPerson } from '../../../lib/composerLink';
@@ -315,7 +316,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderRadius: 999,
+    borderRadius: RADII.button,
     paddingVertical: 14,
   },
   actionDisabled: { opacity: 0.55 },
@@ -382,7 +383,7 @@ const styles = StyleSheet.create({
 
   primaryBtn: {
     backgroundColor: Colors.terracotta,
-    borderRadius: 999,
+    borderRadius: RADII.button,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 28,
