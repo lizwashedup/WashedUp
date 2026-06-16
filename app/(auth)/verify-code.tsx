@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
+import { withTimeout } from '../../lib/withTimeout';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { formatDisplay, formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
 import { authedDest } from '../../lib/authRouting';
@@ -233,11 +234,18 @@ export default function VerifyCodeScreen() {
             router.replace('/onboarding/basics');
             return;
           }
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('onboarding_status, referral_source')
-            .eq('id', verifiedUser.id)
-            .maybeSingle();
+          // Bounded so a stalled read can't strand the user on the success
+          // screen: on timeout, profile is null and authedDest falls back to
+          // the onboarding resume path, so navigation always happens.
+          const { data: profile } = await withTimeout(
+            supabase
+              .from('profiles')
+              .select('onboarding_status, referral_source')
+              .eq('id', verifiedUser.id)
+              .maybeSingle(),
+            4000,
+            { data: null } as any,
+          );
           const next = authedDest({
             onboarding_status: profile?.onboarding_status,
             referral_source: profile?.referral_source,

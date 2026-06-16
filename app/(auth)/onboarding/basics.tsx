@@ -19,6 +19,7 @@ import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
+import { withTimeout } from '../../../lib/withTimeout';
 import { getUserBounded } from '../../../lib/authGate';
 import { unauthedRoute } from '../../../lib/authRouting';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
@@ -82,18 +83,33 @@ export default function OnboardingBasicsScreen() {
   // with empty names; email/OAuth users already have them from signup.
   useEffect(() => {
     let cancelled = false;
+    // Watchdog: never let the full-screen bootstrap spinner outlive the bounded
+    // reads below. A stale session can make getUser/refresh stall; this forces
+    // the form to render so the user is never trapped on a dead spinner.
+    const watchdog = setTimeout(() => {
+      if (!cancelled) setBootstrapping(false);
+    }, 8000);
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        // Bounded so a hung auth call (stale session) can't freeze this gate.
+        const { data: { user } } = await withTimeout(
+          supabase.auth.getUser(),
+          4000,
+          { data: { user: null } } as any,
+        );
         if (!user) {
           setBootstrapping(false);
           return;
         }
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('first_name_display, last_name, birthday, gender, email, marketing_opt_in')
-          .eq('id', user.id)
-          .maybeSingle();
+        const { data: profile } = await withTimeout(
+          supabase
+            .from('profiles')
+            .select('first_name_display, last_name, birthday, gender, email, marketing_opt_in')
+            .eq('id', user.id)
+            .maybeSingle(),
+          4000,
+          { data: null } as any,
+        );
         if (cancelled) return;
         if (profile?.first_name_display) setFirstName(profile.first_name_display);
         if (profile?.last_name) setLastName(profile.last_name);
@@ -116,7 +132,7 @@ export default function OnboardingBasicsScreen() {
         if (!cancelled) setBootstrapping(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(watchdog); };
   }, []);
 
   // Meta/Samsung in-app browsers inject `setContactAutofillValuesFromBridge`

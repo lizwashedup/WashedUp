@@ -9,7 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { X } from 'lucide-react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import RequestRow from './RequestRow';
@@ -118,9 +118,19 @@ export default function RequestStack({
   const dismissBlockPrompt = () => setBlockFor(null);
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
+    // statusBarTranslucent + an in-Modal SafeAreaProvider so SafeAreaView gets
+    // real insets: a bare SafeAreaView inside a RN Modal measures zero (the
+    // Modal renders in its own root, outside the app's SafeAreaProvider), which
+    // pinned the header under the status bar. Mirrors PostPlanSurveyV3.
+    <Modal
+      visible={visible}
+      animationType="slide"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+          <View style={styles.header}>
           <Text style={styles.title}>{COPY.requestListTitle}</Text>
           <Pressable
             style={styles.close}
@@ -164,7 +174,8 @@ export default function RequestStack({
             <Text style={styles.emptyText}>{COPY.requestListEmpty}</Text>
           </View>
         )}
-      </SafeAreaView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
