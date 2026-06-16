@@ -131,7 +131,12 @@ export default function PhoneEntryScreen() {
 
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          // Android: edgeToEdgeEnabled makes windowSoftInputMode=adjustResize
+          // ineffective (the window no longer shrinks for the keyboard), so a
+          // bare KAV (behavior=undefined) left the input covered. 'height'
+          // shrinks the KAV by the IME height itself, independent of the window
+          // resize, so scrollToBottomOnFocus lands the input above the keyboard.
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.kav}
         >
           <ScrollView

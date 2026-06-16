@@ -361,7 +361,11 @@ export default function VerifyCodeScreen() {
 
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          // Android: edgeToEdgeEnabled makes windowSoftInputMode=adjustResize
+          // ineffective, so a bare KAV (behavior=undefined) left the OTP cells
+          // under the keyboard (worse here: OtpInput autoFocuses on mount).
+          // 'height' shrinks the KAV by the IME height so the cells stay visible.
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.kav}
         >
           <ScrollView
