@@ -42,12 +42,18 @@ module.exports = {
     ...appJson.expo,
     // Inject iosUrlScheme into the Google Sign-In plugin so it registers the redirect URL scheme.
     // This overrides the plain string entry from app.json with the configured object form.
-    plugins: appJson.expo.plugins.map((p) => {
-      if (p === '@react-native-google-signin/google-signin') {
-        return ['@react-native-google-signin/google-signin', { iosUrlScheme: googleIosUrlScheme }];
-      }
-      return p;
-    }),
+    plugins: [
+      ...appJson.expo.plugins.map((p) => {
+        if (p === '@react-native-google-signin/google-signin') {
+          return ['@react-native-google-signin/google-signin', { iosUrlScheme: googleIosUrlScheme }];
+        }
+        return p;
+      }),
+      // Re-applies the AppCheckCore modular-headers Podfile patch during prebuild
+      // (ios/ is gitignored, so the manual edit doesn't reach EAS). Fixes the
+      // iOS "Install pods" failure on cloud builds.
+      './plugins/withIosModularHeaders',
+    ],
     updates: {
       url: 'https://u.expo.dev/9584097f-8f32-4fce-ae36-e87c1ffd50cc',
       // Wait up to 8s at the native splash for a newer bundle before falling
