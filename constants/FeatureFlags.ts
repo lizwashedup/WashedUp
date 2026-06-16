@@ -41,7 +41,9 @@ export const PHONE_AUTH_ENABLED = true;
  * (supabase/migrations/20260517*) are applied to prod, including the gated archive
  * of the legacy friends / pinned_people data.
  */
-export const YOURS_PAGE_ENABLED = process.env.EXPO_PUBLIC_YOURS_PAGE_ENABLED === 'true';
+// LAUNCH: committed ON. The env var is now an emergency-rollback override only.
+// Set EXPO_PUBLIC_YOURS_PAGE_ENABLED=false to force OFF; unset ships ON.
+export const YOURS_PAGE_ENABLED = process.env.EXPO_PUBLIC_YOURS_PAGE_ENABLED !== 'false';
 
 /**
  * Circles (people + circles).
@@ -64,7 +66,9 @@ export const YOURS_PAGE_ENABLED = process.env.EXPO_PUBLIC_YOURS_PAGE_ENABLED ===
  * Circles is tested AND the backing migrations (supabase/migrations/20260530*)
  * are applied to prod.
  */
-export const GROUPS_ENABLED = process.env.EXPO_PUBLIC_GROUPS_ENABLED === 'true';
+// LAUNCH: committed ON. Emergency-rollback override only. Set
+// EXPO_PUBLIC_GROUPS_ENABLED=false to force OFF; unset ships ON.
+export const GROUPS_ENABLED = process.env.EXPO_PUBLIC_GROUPS_ENABLED !== 'false';
 
 /**
  * Phone-canonical account reconciliation (prevents phone-vs-Apple duplicate
@@ -85,7 +89,8 @@ export const GROUPS_ENABLED = process.env.EXPO_PUBLIC_GROUPS_ENABLED === 'true';
  * session swap (sign out shell, verify SMS, land on the canonical account) is
  * device-tested.
  */
-const PHONE_CANONICAL_COMMITTED_DEFAULT = false;
+// LAUNCH: committed ON (default authoritative; env unset ships this value).
+const PHONE_CANONICAL_COMMITTED_DEFAULT = true;
 export const PHONE_CANONICAL_ENABLED =
   process.env.EXPO_PUBLIC_PHONE_CANONICAL_ENABLED === 'true'
     ? true
