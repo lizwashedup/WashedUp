@@ -95,7 +95,10 @@ export default function EventDetailScreen() {
   const { blockUser } = useBlock();
 
   React.useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+    supabase.auth
+      .getUser()
+      .then(({ data }) => setUserId(data.user?.id ?? null))
+      .catch(() => {});
   }, []);
 
   const handleCreatorMenu = useCallback((creatorId: string, creatorName: string) => {

@@ -50,9 +50,12 @@ export default function ScenePage() {
 
   // Auth
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setUserId(data.user.id);
-    });
+    supabase.auth
+      .getUser()
+      .then(({ data }) => {
+        if (data.user) setUserId(data.user.id);
+      })
+      .catch(() => {});
   }, []);
 
   // Check waitlist status + user count

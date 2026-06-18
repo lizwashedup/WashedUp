@@ -41,11 +41,14 @@ export default function AdminUsersScreen() {
   const [removing, setRemoving] = useState<string | null>(null);
 
   React.useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const uid = data.user?.id ?? null;
-      setUserId(uid);
-      if (uid !== null && !isAdmin(uid)) router.back();
-    });
+    supabase.auth
+      .getUser()
+      .then(({ data }) => {
+        const uid = data.user?.id ?? null;
+        setUserId(uid);
+        if (uid !== null && !isAdmin(uid)) router.back();
+      })
+      .catch(() => {});
   }, [router]);
 
   const { data: users = [], isLoading, refetch, isRefetching } = useQuery({

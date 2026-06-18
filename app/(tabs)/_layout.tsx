@@ -91,9 +91,14 @@ export default function TabLayout() {
   const tabBarPaddingBottom = isAndroid ? androidBottomInset : 28;
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUserId(session?.user?.id ?? null);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setUserId(session?.user?.id ?? null);
+      })
+      // A residual ProcessLockAcquireTimeoutError must not become an unhandled
+      // rejection; onAuthStateChange below re-sets userId regardless.
+      .catch(() => {});
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserId(session?.user?.id ?? null);
     });

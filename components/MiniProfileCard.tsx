@@ -51,7 +51,10 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? null));
+    supabase.auth
+      .getUser()
+      .then(({ data }) => setCurrentUserId(data.user?.id ?? null))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {

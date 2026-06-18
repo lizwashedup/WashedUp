@@ -121,7 +121,10 @@ export default function AdminEventsScreen() {
   };
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+    supabase.auth
+      .getUser()
+      .then(({ data }) => setUserId(data.user?.id ?? null))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {

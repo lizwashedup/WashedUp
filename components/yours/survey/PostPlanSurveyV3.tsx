@@ -110,24 +110,14 @@ export default function PostPlanSurveyV3({
   }, [others, plan.circle_id, plan.any_stranger_joined]);
 
   // Plan-type rules. Featured plans never police attendance; circle plans only
-  // when strangers actually joined (and then only strangers + the creator).
+  // when strangers actually joined (and then only strangers + the creator). A
+  // who-made-it step with nobody to show is meaningless, so an empty pool (solo
+  // plan, or every co-member filtered out) skips the step entirely.
   const showWhoMadeIt =
-    !plan.is_featured && (plan.circle_id == null || plan.any_stranger_joined);
+    !plan.is_featured &&
+    (plan.circle_id == null || plan.any_stranger_joined) &&
+    peoplePool.length > 0;
   const whoMadeItList = peoplePool;
-
-  // Whether a keep step will exist at all (pre-no-show estimate) drives the
-  // honest step counter. No-shows only ever SUBTRACT from this set.
-  const keepPossible =
-    YOURS_PAGE_ENABLED &&
-    peoplePool.some(
-      (m) => m.keep_state === 'incoming_pending' || m.keep_state === 'none',
-    );
-  const totalSteps = 1 + (showWhoMadeIt ? 1 : 0) + (keepPossible ? 1 : 0);
-  const stepIndex: Record<Step, number> = {
-    how: 1,
-    who: showWhoMadeIt ? 2 : 1,
-    keep: totalSteps,
-  };
 
   const [step, setStep] = useState<Step>('how');
   const [rating, setRating] = useState<Rating | null>(null);
@@ -137,6 +127,25 @@ export default function PostPlanSurveyV3({
   const [addSel, setAddSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<HandshakeResult | null>(null);
+
+  // Whether a keep step will actually follow, given the CURRENT no-show
+  // selection. Computed live (not a pre-no-show estimate) so the step counter
+  // and dots stay honest: marking the last keep-candidate as a no-show on the
+  // who step retracts the keep step rather than promising a "3 of 3" that then
+  // closes at 2. No-shows only ever subtract from the eligible set.
+  const keepWillFollow =
+    YOURS_PAGE_ENABLED &&
+    peoplePool.some(
+      (m) =>
+        !noShows.has(m.id) &&
+        (m.keep_state === 'incoming_pending' || m.keep_state === 'none'),
+    );
+  const totalSteps = 1 + (showWhoMadeIt ? 1 : 0) + (keepWillFollow ? 1 : 0);
+  const stepIndex: Record<Step, number> = {
+    how: 1,
+    who: showWhoMadeIt ? 2 : 1,
+    keep: totalSteps,
+  };
 
   const wroteRef = useRef(false);
   const exitedRef = useRef(false);

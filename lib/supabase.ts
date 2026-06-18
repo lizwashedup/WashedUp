@@ -22,7 +22,13 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? DEFAULT_ANO
 // Storage uploads/downloads (photos, albums, voice notes) can legitimately run
 // long on weak networks, so they are explicitly exempt — only auth/REST/edge
 // requests get the hard ceiling that releases the lock.
-const REQUEST_TIMEOUT_MS = 12000;
+//
+// Kept deliberately BELOW GoTrue's 10s processLock acquire timeout: an in-flight
+// auth request must abort (and release the lock) before any queued waiter hits
+// its own 10s lock-acquire ceiling. At 12000 a waiter could time out ~2s before
+// the holder released, still surfacing ProcessLockAcquireTimeoutError; 8000
+// guarantees the holder lets go first.
+const REQUEST_TIMEOUT_MS = 8000;
 
 const timeoutFetch: typeof fetch = (input, init) => {
   // Avoid referencing the global `Request` (instanceof would throw on every

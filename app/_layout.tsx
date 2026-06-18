@@ -18,6 +18,7 @@ import {
   PlusJakartaSans_700Bold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { Stack, useRouter, usePathname, useRootNavigationState } from 'expo-router';
+import { setAudioModeAsync } from 'expo-audio';
 import * as SplashScreen from 'expo-splash-screen';
 import { OneSignal } from 'react-native-onesignal';
 import { useEffect, useRef, useState } from 'react';
@@ -92,6 +93,24 @@ export { ErrorBoundary } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ duration: 300, fade: true });
+
+// Let the user's own audio (music, podcasts) keep playing when the app opens.
+// Set at MODULE LOAD, before the component tree (and VideoSplash's video
+// player) mounts, so the non-interrupting mode is applied before anything can
+// seize the iOS audio session and clip background music on cold open. A mount
+// effect would be too late: React flushes child effects before parent effects,
+// so the splash player could activate the session first.
+//
+// The .catch handles async rejection; the try/catch guards a synchronous throw
+// in case the native audio bridge isn't ready at import time (harmless: the OS
+// default applies, and the first audio interaction re-asserts the mode). JS-only.
+try {
+  setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers' }).catch(
+    () => {},
+  );
+} catch {
+  // native module not ready at module load; ignore.
+}
 
 export const unstable_settings = {
   // Start with (tabs) so we never flash login before auth check completes
