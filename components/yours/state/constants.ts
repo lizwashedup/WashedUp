@@ -385,7 +385,9 @@ export const COPY = {
   menuViewProfile: 'View profile',
   menuViewProfileSub: "See what they're up to",
   // Section labels.
-  keepComingUpTogether: 'coming up together',
+  // The card shows the person's OWN upcoming plans (get_profile_card.upcoming is
+  // the target's joined plans, not shared), so frame it as theirs, not "together".
+  keepComingUp: (name: string | null) => (name ? `${name}'s coming up` : 'coming up'),
   keepStorySoFar: 'your story so far',
   // Timeline. The oldest shared plan is marked as the beginning.
   keepFirstPlan: 'first plan',

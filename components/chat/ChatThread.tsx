@@ -766,7 +766,7 @@ const swipeStyles = StyleSheet.create({
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function ChatThread(props: ChatThreadProps) {
+function ChatThread(props: ChatThreadProps) {
   const { id } = props;
   const isPast = props.readOnly != null;
   const router = useRouter();
@@ -1606,6 +1606,75 @@ export default function ChatThread(props: ChatThreadProps) {
   }, []);
   const handleAvatarPress = useCallback((uid: string) => setMiniProfileUserId(uid), []);
 
+  // Stable renderItem. An inline arrow in the FlatList changes identity every
+  // render, so the list re-renders every visible row on ANY state change (opening
+  // the + menu, toggling a panel, typing) -- the synchronous main-thread work that
+  // widens the iOS keyboard task-queue deadlock window. Memoized here so a control
+  // press no longer re-renders the message list. Recreates only when the data or a
+  // row dependency actually changes.
+  const renderMessage = useCallback(
+    ({ item, index }: { item: EnrichedItem; index: number }) => {
+      if ('type' in item && (item.type === 'date' || item.type === 'time')) {
+        return (
+          <View style={bubbleStyles.systemRow}>
+            <Text style={bubbleStyles.systemText}>{item.label}</Text>
+          </View>
+        );
+      }
+
+      const msg = item as ChatMessage;
+      const isOwn = msg.user_id === currentUserId;
+
+      // In inverted list: index-1 = newer in time, index+1 = older in time
+      const newerItem = enrichedItems[index - 1];
+      const newerMsg = newerItem && !('type' in newerItem) ? (newerItem as ChatMessage) : null;
+      const olderItem = enrichedItems[index + 1];
+      const olderMsg = olderItem && !('type' in olderItem) ? (olderItem as ChatMessage) : null;
+
+      const isGroupedWithOlder = !!(olderMsg?.user_id === msg.user_id && isSameDay(olderMsg.created_at, msg.created_at));
+      const isGroupedWithNewer = !!(newerMsg?.user_id === msg.user_id && isSameDay(msg.created_at, newerMsg.created_at));
+
+      const showAvatar = !isOwn && !isGroupedWithNewer;
+      const showName = !isOwn && !isGroupedWithOlder;
+
+      const gap = isGroupedWithOlder ? chatStyles.msgGap1
+        : msg.reactions?.length ? chatStyles.msgGap18
+        : chatStyles.msgGap10;
+
+      return (
+        <SwipeableRow
+          containerStyle={gap}
+          enabled={!isPast && msg.message_type === 'user'}
+          onTriggerReply={() => {
+            setReplyingTo({
+              id: msg.id,
+              content: msg.content,
+              senderName: msg.sender?.first_name ?? 'Someone',
+            });
+            setEditingMessageId(null);
+          }}
+        >
+          <MessageBubble
+            message={msg}
+            isOwn={isOwn}
+            showAvatar={showAvatar}
+            showName={showName}
+            isGrouped={isGroupedWithNewer}
+            currentUserId={currentUserId}
+            contextTitle={props.contextTitle}
+            onPhotoPress={setPhotoViewUrl}
+            onReaction={handleReaction}
+            onMessageLongPress={handleMessageLongPress}
+            onReplyTap={handleReplyTap}
+            onAvatarPress={handleAvatarPress}
+            mentionNames={mentionNames}
+          />
+        </SwipeableRow>
+      );
+    },
+    [currentUserId, enrichedItems, isPast, props.contextTitle, handleReaction, handleMessageLongPress, handleReplyTap, handleAvatarPress, mentionNames],
+  );
+
   return (
     <View style={chatStyles.screen}>
       {/* ── Header ── */}
@@ -1808,68 +1877,7 @@ export default function ChatThread(props: ChatThreadProps) {
               </View>
             }
             ListFooterComponent={props.renderPinnedFooter ? props.renderPinnedFooter() : null}
-            renderItem={({ item, index }) => {
-              if ('type' in item && (item.type === 'date' || item.type === 'time')) {
-                return (
-                  <View style={bubbleStyles.systemRow}>
-                    <Text style={bubbleStyles.systemText}>{item.label}</Text>
-                  </View>
-                );
-              }
-
-              const msg = item as ChatMessage;
-              const isOwn = msg.user_id === currentUserId;
-
-              // In inverted list: index-1 = newer in time, index+1 = older in time
-              const newerItem = enrichedItems[index - 1];
-              const newerMsg = newerItem && !('type' in newerItem) ? newerItem as ChatMessage : null;
-              const olderItem = enrichedItems[index + 1];
-              const olderMsg = olderItem && !('type' in olderItem) ? olderItem as ChatMessage : null;
-
-              // In inverted list: index-1 = newer in time (below visually), index+1 = older in time (above visually)
-              const isGroupedWithOlder = !!(olderMsg?.user_id === msg.user_id && isSameDay(olderMsg.created_at, msg.created_at));
-              const isGroupedWithNewer = !!(newerMsg?.user_id === msg.user_id && isSameDay(msg.created_at, newerMsg.created_at));
-
-              // Avatar: show on bottom-most message of group (when newer msg is different sender or doesn't exist)
-              const showAvatar = !isOwn && !isGroupedWithNewer;
-              // Name: show above top-most message of group (when older msg is different sender or doesn't exist)
-              const showName = !isOwn && !isGroupedWithOlder;
-
-              const gap = isGroupedWithOlder ? chatStyles.msgGap1
-                : msg.reactions?.length ? chatStyles.msgGap18
-                : chatStyles.msgGap10;
-
-              return (
-                <SwipeableRow
-                  containerStyle={gap}
-                  enabled={!isPast && msg.message_type === 'user'}
-                  onTriggerReply={() => {
-                    setReplyingTo({
-                      id: msg.id,
-                      content: msg.content,
-                      senderName: msg.sender?.first_name ?? 'Someone',
-                    });
-                    setEditingMessageId(null);
-                  }}
-                >
-                  <MessageBubble
-                    message={msg}
-                    isOwn={isOwn}
-                    showAvatar={showAvatar}
-                    showName={showName}
-                    isGrouped={isGroupedWithNewer}
-                    currentUserId={currentUserId}
-                    contextTitle={props.contextTitle}
-                    onPhotoPress={setPhotoViewUrl}
-                    onReaction={handleReaction}
-                    onMessageLongPress={handleMessageLongPress}
-                    onReplyTap={handleReplyTap}
-                    onAvatarPress={handleAvatarPress}
-                    mentionNames={mentionNames}
-                  />
-                </SwipeableRow>
-              );
-            }}
+            renderItem={renderMessage}
           />
         )}
 
@@ -2305,6 +2313,11 @@ export default function ChatThread(props: ChatThreadProps) {
     </View>
   );
 }
+
+// Memoized so a parent re-render (e.g. the DM screen toggling its + menu /
+// add-people / plan state) does not re-render the whole chat. Paired with the
+// stabilized props passed by CircleChatScreenInner.
+export default memo(ChatThread);
 
 const chatStyles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.parchment },

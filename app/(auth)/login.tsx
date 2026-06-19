@@ -164,7 +164,7 @@ export default function LoginScreen() {
     <ImageBackground
       source={{ uri: WELCOME_HERO_URI }}
       style={styles.bg}
-      blurRadius={14}
+      blurRadius={6}
       resizeMode="cover"
     >
       {/* Parchment overlay so the photo bleeds through at ~15% — keeps a

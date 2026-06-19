@@ -120,6 +120,7 @@ function MenuRowItem({
 export default function MenuCard({
   visible,
   onClose,
+  onClosed,
   anchor,
   placement,
   rows,
@@ -127,6 +128,10 @@ export default function MenuCard({
 }: {
   visible: boolean;
   onClose: () => void;
+  /** Fires once the dismiss animation finishes and the modal has unmounted.
+   * Use to open a follow-on modal without two modals overlapping (iOS drops
+   * the second when one is mid-dismiss). */
+  onClosed?: () => void;
   anchor: AnchorRect | null;
   /** 'avatar' blooms below/above a face; 'top-right' drops down from the + button. */
   placement: 'avatar' | 'top-right';
@@ -145,7 +150,10 @@ export default function MenuCard({
       progress.value = withTiming(1, { duration: 150 });
     } else {
       progress.value = withTiming(0, { duration: 120 }, (finished) => {
-        if (finished) runOnJS(setRender)(false);
+        if (finished) {
+          runOnJS(setRender)(false);
+          if (onClosed) runOnJS(onClosed)();
+        }
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

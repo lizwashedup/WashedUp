@@ -180,6 +180,8 @@ export default function PhoneEntryScreen() {
               </Text>
             </TouchableOpacity>
 
+            <Text style={styles.reassure}>new or returning, your number is your login.</Text>
+
             {/* Escape hatch for existing email/Apple/Google users — without
                 this they'd accidentally create a duplicate account by
                 entering their phone above. Full-width secondary button so
@@ -189,9 +191,9 @@ export default function PhoneEntryScreen() {
               activeOpacity={0.85}
               style={styles.ctaSecondary}
               accessibilityRole="button"
-              accessibilityLabel="already on washedup? sign in"
+              accessibilityLabel="signed up another way? log in"
             >
-              <Text style={styles.ctaSecondaryText}>already a member? sign in</Text>
+              <Text style={styles.ctaSecondaryText}>signed up another way? log in</Text>
             </TouchableOpacity>
 
             <Text style={styles.legal}>
@@ -217,6 +219,16 @@ export default function PhoneEntryScreen() {
                 community guidelines
               </Text>
             </Text>
+
+            <Text style={styles.contact}>
+              need help?{' '}
+              <Text
+                style={styles.contactLink}
+                onPress={() => Linking.openURL('mailto:hello@washedup.app')}
+              >
+                contact us
+              </Text>
+            </Text>
           </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -230,6 +242,29 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   kav: { flex: 1, paddingHorizontal: 28 },
   scrollContent: { flexGrow: 1 },
+  reassure: {
+    fontFamily: Fonts.sans,
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.creamMuted,
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  contact: {
+    fontFamily: Fonts.sans,
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.creamMuted,
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  contactLink: {
+    fontFamily: Fonts.sansSemibold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.creamHigh,
+    textDecorationLine: 'underline',
+  },
   topRow: {
     paddingTop: 8,
     flexDirection: 'row',

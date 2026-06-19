@@ -10,7 +10,7 @@
  *
  * Gated behind GROUPS_ENABLED; a direct hit with the flag off bounces to Chats.
  */
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, Platform, ActionSheetIOS, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -36,36 +36,51 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
   const [planOpen, setPlanOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<AnchorRect | null>(null);
+  // "Start a circle" opens AddPeopleSheet, but it must wait until the MenuCard
+  // modal has fully dismissed -- two iOS modals overlapping (one dismissing, one
+  // presenting) makes the second silently fail ("goes nowhere"). The tap sets
+  // this flag; MenuCard's onClosed (post-dismiss) consumes it.
+  const pendingAddRef = useRef(false);
 
-  const members: ChatThreadMember[] = (data?.members ?? []).map((m) => ({
-    id: m.user_id,
-    first_name: m.first_name_display,
-    avatar_url: m.profile_photo_url,
-  }));
-  const memberIds = data?.members.map((m) => m.user_id) ?? [];
+  // Memoized so the props handed to the (memoized) ChatThread stay referentially
+  // stable across this screen's own state changes (+ menu, add-people, plan).
+  const members: ChatThreadMember[] = useMemo(
+    () =>
+      (data?.members ?? []).map((m) => ({
+        id: m.user_id,
+        first_name: m.first_name_display,
+        avatar_url: m.profile_photo_url,
+      })),
+    [data?.members],
+  );
+  const memberIds = useMemo(() => data?.members.map((m) => m.user_id) ?? [], [data?.members]);
 
   // A DM is an unnamed 2-person circle: render the counterpart (name + "View
   // {name}" -> their keep page) instead of "View circle". A grown DM (3+) and a
   // named circle both render as a circle. Gate on myUserId too: without it, both
   // members survive the self-filter and a DM would briefly mis-render as a
   // 2-person "unnamed circle" until auth resolves.
-  const disp = data && myUserId
-    ? circleDisplay(
-        data.circle.name,
-        data.members.map((m) => ({
-          user_id: m.user_id,
-          name: m.first_name_display,
-          avatar_url: m.profile_photo_url,
-        })),
-        myUserId,
-      )
-    : null;
+  const disp = useMemo(
+    () =>
+      data && myUserId
+        ? circleDisplay(
+            data.circle.name,
+            data.members.map((m) => ({
+              user_id: m.user_id,
+              name: m.first_name_display,
+              avatar_url: m.profile_photo_url,
+            })),
+            myUserId,
+          )
+        : null,
+    [data, myUserId],
+  );
 
   // The "+" header menu. In a DM (2-person) it blooms the shared MenuCard from
   // the + button (Make a plan, Start a circle). Circle chats (3+) keep the
   // native menu this pass (out of scope per spec). "Add people now" retires:
   // in a DM, pulling more people in IS Start a circle (grows it into a circle).
-  const openPlusMenu = (anchor: AnchorRect) => {
+  const openPlusMenu = useCallback((anchor: AnchorRect) => {
     if (disp?.isDm) {
       setMenuAnchor(anchor);
       setMenuOpen(true);
@@ -89,7 +104,54 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         { text: COPY.circlePlusCancel, style: 'cancel' },
       ]);
     }
-  };
+  }, [disp]);
+
+  // Stable closures/objects for the memoized ChatThread.
+  const onViewContext = useCallback(() => {
+    if (disp?.isDm && disp.otherUserId) {
+      router.push(`/person/${disp.otherUserId}` as any);
+    } else {
+      router.push(`/circle/${circleId}` as any);
+    }
+  }, [disp, circleId, router]);
+
+  const headerMenu = useMemo(
+    () => ({ type: 'plus' as const, onPress: openPlusMenu }),
+    [openPlusMenu],
+  );
+
+  const menuRows = useMemo(
+    () => [
+      {
+        key: 'plan',
+        icon: CalendarPlus,
+        label: COPY.menuMakePlan,
+        subtitle: COPY.menuMakePlanSub,
+        // From a DM: open the composer with the counterpart pre-attached as a
+        // removable invite chip (a normal plan + invite), not the circle-plan
+        // composer. Decided 2026-06-10 (Liz owns; sanity-check live).
+        onPress: () => {
+          if (disp?.otherUserId) {
+            router.push(buildComposerWithPerson(disp.otherUserId, disp.title, disp.otherAvatar) as never);
+          }
+        },
+      },
+      {
+        key: 'circle',
+        icon: Users,
+        label: COPY.menuStartCircle,
+        subtitle: COPY.menuStartCircleSub,
+        // Pulling more people into a DM grows it into a circle (the old
+        // "Add people now", relabelled per the consistency rule). Deferred to
+        // MenuCard's onClosed so AddPeopleSheet opens only after this menu's
+        // modal has dismissed (no overlapping modals).
+        onPress: () => {
+          pendingAddRef.current = true;
+        },
+      },
+    ],
+    [disp, router],
+  );
 
   if (isError) {
     return (
@@ -113,12 +175,8 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         subtitle={data && disp && !disp.isDm ? COPY.circleHomeMembers(members.length) : null}
         members={members}
         viewContextLabel={disp?.isDm ? COPY.dmViewPerson(disp.title) : COPY.circleViewButton}
-        onViewContext={() =>
-          disp?.isDm && disp.otherUserId
-            ? router.push(`/person/${disp.otherUserId}` as any)
-            : router.push(`/circle/${circleId}` as any)
-        }
-        headerMenu={{ type: 'plus', onPress: openPlusMenu }}
+        onViewContext={onViewContext}
+        headerMenu={headerMenu}
         emptyText={COPY.circleChatStart}
       />
       <AddPeopleSheet
@@ -149,33 +207,15 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
       <MenuCard
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
+        onClosed={() => {
+          if (pendingAddRef.current) {
+            pendingAddRef.current = false;
+            setAddOpen(true);
+          }
+        }}
         anchor={menuAnchor}
         placement="top-right"
-        rows={[
-          {
-            key: 'plan',
-            icon: CalendarPlus,
-            label: COPY.menuMakePlan,
-            subtitle: COPY.menuMakePlanSub,
-            // From a DM: open the composer with the counterpart pre-attached as a
-            // removable invite chip (a normal plan + invite), not the circle-plan
-            // composer. Decided 2026-06-10 (Liz owns; sanity-check live).
-            onPress: () => {
-              if (disp?.otherUserId) {
-                router.push(buildComposerWithPerson(disp.otherUserId, disp.title, disp.otherAvatar) as never);
-              }
-            },
-          },
-          {
-            key: 'circle',
-            icon: Users,
-            label: COPY.menuStartCircle,
-            subtitle: COPY.menuStartCircleSub,
-            // Pulling more people into a DM grows it into a circle (the old
-            // "Add people now", relabelled per the consistency rule).
-            onPress: () => setAddOpen(true),
-          },
-        ]}
+        rows={menuRows}
       />
     </>
   );

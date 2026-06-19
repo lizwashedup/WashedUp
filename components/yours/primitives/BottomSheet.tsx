@@ -149,15 +149,16 @@ export default function BottomSheet({
             paddingBottom: Math.max(44, insets.bottom + 16),
           },
         ]}
-        {...panResponder.panHandlers}
       >
-        <Pressable
-          onStartShouldSetResponder={() => true}
-          style={heightPct ? styles.fillContent : undefined}
-        >
+        {/* Drag-to-dismiss lives on the top grabber only, so a scrollable
+            child (e.g. the circle plan composer) owns vertical gestures and
+            scrolls freely instead of the sheet stealing the pan. */}
+        <View {...panResponder.panHandlers} style={styles.grabber}>
           <View style={styles.handle} />
+        </View>
+        <View style={heightPct ? styles.fillContent : undefined}>
           {children}
-        </Pressable>
+        </View>
       </Animated.View>
     </Modal>
   );
@@ -176,6 +177,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
   },
+  // Full-width drag zone at the top of the sheet. Carries the dismiss
+  // PanResponder so the rest of the sheet can host a scrollable child.
+  grabber: { alignItems: 'center', paddingTop: 2, paddingBottom: 2 },
   handle: {
     alignSelf: 'center',
     width: 36,

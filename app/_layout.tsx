@@ -87,6 +87,24 @@ Sentry.init({
   tracesSampleRate: 0,
   enableAutoSessionTracking: true,
   ignoreErrors: [/getRegistrationInfoAsync/],
+  // RN-14 (iOS) / RN-13 (Android) scoped guard. ProcessLockAcquireTimeoutError is
+  // thrown INSIDE @supabase/auth-js's processLock (no app-level promise to wrap,
+  // which is why the getSession().then() .catch sweep missed it). It is non-fatal:
+  // the abort-timeout fetch already releases the lock, so this is reporting noise,
+  // not a freeze. DOWNSAMPLE only this error class to ~1-in-10 so the escalation
+  // noise stops but a trend signal survives in Sentry for the processLock
+  // root-cause follow-up (returning null would drop it entirely, and console logs
+  // are device-only = fully blind). Every other event reports untouched.
+  beforeSend(event, hint) {
+    const err = hint?.originalException;
+    const name = err instanceof Error ? err.name : '';
+    const message = err instanceof Error ? err.message : String(err ?? '');
+    if (name === 'ProcessLockAcquireTimeoutError' || /Acquiring process lock .* timed out/.test(message)) {
+      // Keep ~10% as handled events for the trend; drop the rest.
+      return Math.random() < 0.1 ? event : null;
+    }
+    return event;
+  },
 });
 
 export { ErrorBoundary } from 'expo-router';

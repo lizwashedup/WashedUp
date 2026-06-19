@@ -230,7 +230,7 @@ export default function KeepPage({
 
         {!!card.upcoming?.length && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>{COPY.keepComingUpTogether}</Text>
+            <Text style={styles.sectionLabel}>{COPY.keepComingUp(card.first_name_display)}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {card.upcoming.map((u) => (
                 <Pressable

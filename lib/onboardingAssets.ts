@@ -6,4 +6,4 @@
 // TODO: replace with a bundled asset under assets/images/. Cold-start auth
 // UX should not depend on Unsplash CDN availability.
 export const WELCOME_HERO_URI =
-  'https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?w=900&q=80';
+  'https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?w=2000&q=80';
