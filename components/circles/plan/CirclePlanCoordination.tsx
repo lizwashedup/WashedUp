@@ -28,6 +28,15 @@ interface CirclePlanCoordinationProps {
   hasOwnChat: boolean | undefined;
   /** Only members of the plan's circle see these affordances. */
   viewerIsMember: boolean | undefined;
+  /**
+   * Only the plan's creator may "Open it up": release_circle_plan is
+   * creator-only server-side (creator_user_id = auth.uid()). This must be the
+   * same creator test the server enforces; the caller passes
+   * `plan.creator_user_id === currentUserId`, where currentUserId is
+   * auth.getUser().id, so the button disappears exactly when the server would
+   * refuse, and the two never disagree.
+   */
+  viewerIsCreator: boolean | undefined;
 }
 
 export default function CirclePlanCoordination({
@@ -36,6 +45,7 @@ export default function CirclePlanCoordination({
   visibility,
   hasOwnChat,
   viewerIsMember,
+  viewerIsCreator,
 }: CirclePlanCoordinationProps) {
   const spawnChat = useSpawnPlanChat(eventId);
   const release = useReleaseCirclePlan(eventId);
@@ -46,6 +56,12 @@ export default function CirclePlanCoordination({
   if (!viewerIsMember || visibility !== 'circle_only') return null;
 
   const showStartChat = hasOwnChat === false;
+  // "Open it up" is creator-only (matches the server guard). A non-creator
+  // member used to see this and now gets a server error on tap, so hide it.
+  const showRelease = viewerIsCreator === true;
+
+  // Nothing to coordinate for this viewer.
+  if (!showStartChat && !showRelease) return null;
 
   return (
     <View style={styles.wrap}>
@@ -63,17 +79,19 @@ export default function CirclePlanCoordination({
         </Pressable>
       )}
 
-      <Pressable
-        style={styles.row}
-        onPress={() => setConfirmRelease(true)}
-        disabled={release.isPending}
-      >
-        <DoorOpen size={CIRCLE_PLAN.memberCheck} color={Colors.terracotta} strokeWidth={2} />
-        <View style={styles.rowBody}>
-          <Text style={styles.rowTitle}>{COPY.circlePlanRelease}</Text>
-          <Text style={styles.rowSub}>{COPY.circlePlanReleaseExplain(circleName)}</Text>
-        </View>
-      </Pressable>
+      {showRelease && (
+        <Pressable
+          style={styles.row}
+          onPress={() => setConfirmRelease(true)}
+          disabled={release.isPending}
+        >
+          <DoorOpen size={CIRCLE_PLAN.memberCheck} color={Colors.terracotta} strokeWidth={2} />
+          <View style={styles.rowBody}>
+            <Text style={styles.rowTitle}>{COPY.circlePlanRelease}</Text>
+            <Text style={styles.rowSub}>{COPY.circlePlanReleaseExplain(circleName)}</Text>
+          </View>
+        </Pressable>
+      )}
 
       {confirmRelease && (
         <BrandedAlert

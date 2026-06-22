@@ -21,7 +21,7 @@ import { Stack, useRouter, usePathname, useRootNavigationState } from 'expo-rout
 import { setAudioModeAsync } from 'expo-audio';
 import * as SplashScreen from 'expo-splash-screen';
 import { OneSignal } from 'react-native-onesignal';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, LogBox, Platform } from 'react-native';
 import 'react-native-reanimated';
 
@@ -221,26 +221,17 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
   // Cold-start push tap race guard. OneSignal buffers a cold-start click and
   // replays it the instant our JS listener attaches, but Expo Router's root
-  // navigation state hydrates a beat later. router.push() called before
-  // hydration is silently dropped, so we hold the destination in a ref and
-  // flush it the moment nav becomes ready. Applies to every notification
-  // type, not just album_ready.
+  // navigation state hydrates a beat later AND the auth gate's own redirect
+  // resolves seconds later still. We hold the destination in pendingDeepLinkRef
+  // and navigate to it only AFTER auth resolves to an in-app route (see
+  // honorPendingDeepLink below), so the auth redirect can never clobber it and
+  // a gated/unauthed user can never deep-link past the gate. Applies to every
+  // notification type, not just album_ready.
   const rootNavState = useRootNavigationState();
   const navReady = !!rootNavState?.key;
   const navReadyRef = useRef(navReady);
   useEffect(() => { navReadyRef.current = navReady; }, [navReady]);
   const pendingDeepLinkRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (navReady && pendingDeepLinkRef.current) {
-      const href = pendingDeepLinkRef.current;
-      pendingDeepLinkRef.current = null;
-      router.push(href as any);
-    }
-  }, [navReady, router]);
-  const safePush = (href: string) => {
-    if (navReadyRef.current) router.push(href as any);
-    else pendingDeepLinkRef.current = href;
-  };
 
   const [authResolved, setAuthResolved] = useState(false);
   const [authedUserId, setAuthedUserId] = useState<string | null>(null);
@@ -248,6 +239,40 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const isRecoveryRef = useRef(false);
   const splashHiddenRef = useRef(false);
   const lastNavRef = useRef({ dest: '', ts: 0 });
+
+  // Deep-link honor (pairs with the cold-start guard above). Navigate to a
+  // buffered push destination ONLY after auth has resolved to an in-app
+  // /(tabs)/* route, i.e. authedDest cleared ban + phone-migration +
+  // onboarding. The gate reads authedDestRef, a dedicated value stamped
+  // synchronously by the auth resolver right before it flips authResolved, so
+  // it can't be skewed by an unrelated re-emit overwriting lastNavRef in the
+  // ~80ms window (which would silently hold a valid cold tap). Because
+  // authResolved flips AFTER the auth redirect, the honor always runs last and
+  // becomes the single final destination, never clobbered. Fail-closed: a
+  // login / onboarding / migration-gate dest holds the link rather than
+  // bypassing the gate (authedUserId alone is NOT sufficient; it is set even on
+  // the migration-gate path). Consume-once: cleared the instant it is honored so
+  // a TOKEN_REFRESHED / re-emit can't replay a stale link.
+  const authResolvedRef = useRef(authResolved);
+  useEffect(() => { authResolvedRef.current = authResolved; }, [authResolved]);
+  const authedDestRef = useRef('');
+  const honorPendingDeepLink = useCallback(() => {
+    if (!navReadyRef.current || !authResolvedRef.current) return;
+    if (!authedUserIdRef.current) return;
+    if (!authedDestRef.current.startsWith('/(tabs)')) return;
+    const href = pendingDeepLinkRef.current;
+    if (!href) return;
+    pendingDeepLinkRef.current = null;
+    router.push(href as any);
+  }, [router]);
+  const safePush = (href: string) => {
+    pendingDeepLinkRef.current = href;
+    honorPendingDeepLink();
+  };
+  useEffect(() => {
+    honorPendingDeepLink();
+  }, [navReady, authResolved, authedUserId, honorPendingDeepLink]);
+
   usePushNotifications(authedUserId);
   useSessionLogger(authedUserId);
 
@@ -646,6 +671,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         if (!session?.user) {
           const unauth = unauthedRoute();
           lastNavRef.current = { dest: unauth, ts: Date.now() };
+          authedDestRef.current = unauth;
           router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
           return;
@@ -720,6 +746,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
             setAuthedUserId(session.user.id);
             const dest = needsPhone ? '/migration-gate' : '/(tabs)/plans';
             lastNavRef.current = { dest, ts: Date.now() };
+            authedDestRef.current = dest;
             router.replace(dest as any);
             setTimeout(() => setAuthResolved(true), 80);
             return;
@@ -743,6 +770,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           needs_phone_migration: needsPhone,
         });
         lastNavRef.current = { dest, ts: Date.now() };
+        authedDestRef.current = dest;
         // Navigate first, then lift the overlay (prevents a 1-frame flash
         // where the splash is gone but the destination hasn't rendered yet).
         router.replace(dest as any);
@@ -751,6 +779,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         if (!cancelled) {
           const unauth = unauthedRoute();
           lastNavRef.current = { dest: unauth, ts: Date.now() };
+          authedDestRef.current = unauth;
           router.replace(unauth as any);
           setTimeout(() => setAuthResolved(true), 80);
         }
@@ -782,6 +811,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
               needs_phone_migration: false,
             });
             lastNavRef.current = { dest, ts: Date.now() };
+            authedDestRef.current = dest;
             router.replace(dest as any);
           }
         }
@@ -797,9 +827,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
 
       if (!session?.user) {
+        pendingDeepLinkRef.current = null;
         authedUserIdRef.current = null;
         setAuthedUserId(null);
         const unauth = unauthedRoute();
+        authedDestRef.current = unauth;
         // Skip the redirect if either (a) the pathname already matches
         // the unauthed route, or (b) a caller (e.g. delete-account flow)
         // synchronously stamped lastUnauthRedirectAt.ts before this
@@ -827,6 +859,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setAuthedUserId(null);
         const unauth = unauthedRoute();
         lastNavRef.current = { dest: unauth, ts: Date.now() };
+        authedDestRef.current = unauth;
         router.replace(unauth as any);
         return;
       }
@@ -874,11 +907,13 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // SIGNED_IN re-emit later this session is treated as a re-emit.
         authedUserIdRef.current = session.user.id;
         if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {
+          authedDestRef.current = dest;
           setAuthedUserId(session.user.id);
           setAuthResolved(true);
           return;
         }
         lastNavRef.current = { dest, ts: now };
+        authedDestRef.current = dest;
         setAuthedUserId(session.user.id);
         router.replace(dest as any);
         setTimeout(() => setAuthResolved(true), 80);
@@ -887,6 +922,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         authedUserIdRef.current = session.user.id;
         setAuthedUserId(session.user.id);
         lastNavRef.current = { dest: '/(tabs)/plans', ts: Date.now() };
+        authedDestRef.current = '/(tabs)/plans';
         router.replace('/(tabs)/plans' as any);
         setTimeout(() => setAuthResolved(true), 80);
       }

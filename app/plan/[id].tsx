@@ -675,6 +675,27 @@ export default function PlanDetailScreen() {
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
 
+  // Does this plan have a live (non-archived) album? Gates the past-plan
+  // "Add photos" entry so it appears only when there is actually an album to
+  // add to. It never resurrects an archived one, and never drops the user into
+  // an empty upload screen. An album row only exists for plans that have ended
+  // (the server creates it post-end), so this is inherently end-time-aware.
+  // RLS double-checks membership.
+  const { data: hasLiveAlbum = false } = useQuery({
+    queryKey: ['planAlbumExists', id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('plan_albums')
+        .select('id')
+        .eq('event_id', id as string)
+        .is('archived_at', null)
+        .maybeSingle();
+      return !!data;
+    },
+    enabled: !!id && !!plan && (isMember || isCreator),
+    staleTime: 60_000,
+  });
+
   // Circle-aware plans: one read (gated; degrades to is_circle_plan=false when
   // the held RPC is absent / GROUPS_ENABLED off) drives the join path, the
   // member intro-bypass, and the Start-a-chat / Open-it-up affordances.
@@ -1726,6 +1747,7 @@ export default function PlanDetailScreen() {
               visibility={circleCtx?.circle_visibility}
               hasOwnChat={circleCtx?.has_own_chat}
               viewerIsMember={circleViewerIsMember}
+              viewerIsCreator={isCreator}
             />
           </React.Suspense>
         )}
@@ -1736,6 +1758,15 @@ export default function PlanDetailScreen() {
       <View style={[styles.stickyBar, { paddingBottom: insets.bottom + 12 }]}>
         {isPastPlan && (isMember || isCreator) && currentUserId ? (
           <View style={styles.memberActions}>
+            {hasLiveAlbum && (
+              <TouchableOpacity
+                style={styles.openChatButton}
+                onPress={() => router.push(`/album/upload/${plan!.id}` as any)}
+              >
+                <Ionicons name="camera-outline" size={18} color={Colors.white} />
+                <Text style={styles.openChatText}>Add photos</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.openChatButton}
               onPress={() => router.push(`/(tabs)/chats/${plan!.id}` as any)}

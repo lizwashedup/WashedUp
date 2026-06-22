@@ -338,7 +338,7 @@ export default function AlbumUploadScreen() {
       <ScrollView ref={scrollRef} contentContainerStyle={[styles.scroll, { paddingBottom: 120 + insets.bottom }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {/* Pitch */}
         <Text style={styles.pitch}>
-          Everyone took photos. Now put them together. Upload yours and get everyone else's back.
+          Upload your photos so you can share them with everyone.
         </Text>
 
         {/* Picker section */}
