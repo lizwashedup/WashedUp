@@ -49,3 +49,6 @@ GoogleService-Info.plist
 
 # editor swap files
 *.swp
+
+# local device-test scratch docs (never bundled; keeps OTA publishes pristine)
+docs/phone-canonical-device-test.md
