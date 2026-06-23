@@ -1398,9 +1398,16 @@ export default function PlansScreen() {
   const overlayReady = dataReady || welcomeWatchdogFired;
   const emptyMessage = heartFilter
     ? 'When you save a plan it shows up here'
-    : allPlans.length > 0
-      ? 'No plans match your filters.'
-      : 'No plans yet.';
+    : nearMeActive
+      ? 'Nothing quite that close yet.'
+      : allPlans.length > 0
+        ? 'No plans match your filters.'
+        : 'No plans yet.';
+  // Near-me empty is a proximity gap on a young feed, not a dead end. Reframe it
+  // warmly: name the growth, hand back agency (post + share), no plea.
+  const emptySubText = nearMeActive && !heartFilter
+    ? "We're still growing in LA. Post your own and share it around. That's how the map fills in."
+    : null;
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -1612,6 +1619,7 @@ export default function PlansScreen() {
               {listHeader}
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>{emptyMessage}</Text>
+                {emptySubText && <Text style={styles.emptySubText}>{emptySubText}</Text>}
                 <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
                   <Text style={styles.emptyButtonText}>Post a Plan</Text>
                 </TouchableOpacity>
@@ -2079,6 +2087,7 @@ const styles = StyleSheet.create({
   map: { flex: 1 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: '#78695C', textAlign: 'center', marginBottom: 20 },
+  emptySubText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: '#A09385', textAlign: 'center', lineHeight: 21, marginTop: -8, marginBottom: 20, maxWidth: 300 },
   emptyButton: { backgroundColor: TC, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
   emptyButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: '#FFFFFF' },
   errorTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: '#2C1810', marginBottom: 8, textAlign: 'center' },
