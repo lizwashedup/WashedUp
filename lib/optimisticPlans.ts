@@ -61,6 +61,7 @@ export function buildOptimisticPlan(
     max_invites: row.max_invites ?? null,
     min_invites: row.min_invites ?? null,
     neighborhood: row.neighborhood ?? null,
+    distance_km: null,
     slug: null,
     member_count: 1,
     status: row.status ?? 'forming',

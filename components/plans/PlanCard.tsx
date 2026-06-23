@@ -36,6 +36,13 @@ import { getPlanPinColor } from '../../lib/planColors';
 import { COPY } from '../yours/state/constants';
 
 
+// km -> miles for the card meta line. Under 10 mi shows one decimal ("1.2 mi"),
+// 10+ rounds to a whole number ("12 mi").
+function formatDistanceMi(km: number): string {
+  const mi = km * 0.621371;
+  return `${mi < 10 ? mi.toFixed(1) : Math.round(mi)} mi`;
+}
+
 interface PlanCardProps {
   plan: {
     id: string;
@@ -44,6 +51,7 @@ interface PlanCardProps {
     start_time: string;
     location_text: string | null;
     neighborhood?: string | null;
+    distance_km?: number | null;
     slug?: string | null;
     category: string | null;
     gender_rule?: string | null;
@@ -253,9 +261,13 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   const locationRaw = plan.location_text && !plan.location_text.startsWith('http')
     ? plan.location_text
     : null;
-  const locationDisplay = locationRaw
+  // Distance only when the feed passed location (Near-me on); null otherwise, so
+  // the meta line is byte-identical to before off Near-me. Shown in miles (LA).
+  const distanceLabel = plan.distance_km != null ? formatDistanceMi(plan.distance_km) : null;
+  const placePart = locationRaw
     ? (plan.neighborhood ? `${locationRaw} · ${plan.neighborhood}` : locationRaw)
     : null;
+  const locationDisplay = [distanceLabel, placePart].filter(Boolean).join(' · ') || null;
 
   const creatorNote = plan.host_message
     ? `"${plan.host_message}"`

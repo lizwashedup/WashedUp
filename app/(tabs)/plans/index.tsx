@@ -12,6 +12,7 @@ import {
     Dimensions,
     Easing,
     FlatList,
+    Linking,
     Modal,
     Pressable,
     RefreshControl,
@@ -39,6 +40,7 @@ import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import { fetchPlans, fetchInterestedPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
+import { requestNearMeLocation, type NearMeCoords } from '../../../lib/location/nearMe';
 import { supabase } from '../../../lib/supabase';
 import { withTimeout, withDeadline } from '../../../lib/withTimeout';
 import { friendlyError } from '../../../lib/friendlyError';
@@ -480,6 +482,25 @@ export default function PlansScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>('plans');
   const [mapView, setMapView] = useState(false);
   const [heartFilter, setHeartFilter] = useState(false);
+  // Near-me (WS-6): OFF by default. Location is requested just-in-time only on
+  // the tap, never at startup. When off, the feed query omits geo params so the
+  // default feed is byte-identical to before (off-state parity).
+  const [nearMe, setNearMe] = useState(false);
+  const [nearMeCoords, setNearMeCoords] = useState<NearMeCoords | null>(null);
+  const [radiusMi, setRadiusMi] = useState(10);
+  const [nearMeNotice, setNearMeNotice] = useState<string | null>(null);
+  const nearMeActive = nearMe && !!nearMeCoords;
+  const radiusKm = radiusMi * 1.60934;
+
+  const handleNearMeToggle = useCallback(async () => {
+    hapticLight();
+    if (nearMe) { setNearMe(false); setNearMeNotice(null); return; }
+    if (nearMeCoords) { setNearMe(true); setNearMeNotice(null); return; } // reuse cached fix
+    const res = await requestNearMeLocation();
+    if (res.ok) { setNearMeCoords(res.coords); setNearMe(true); setNearMeNotice(null); }
+    else if (res.reason === 'denied') setNearMeNotice("Turn on location in Settings to see what's near you.");
+    else setNearMeNotice("Couldn't get your location. Try again.");
+  }, [nearMe, nearMeCoords]);
   const [pastExpanded, setPastExpanded] = useState(false);
   const navigation = useNavigation();
 
@@ -679,10 +700,14 @@ export default function PlansScreen() {
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const { data: allPlans = [], isLoading, isError, error, refetch, isRefetching } = useQuery({
-    queryKey: ['events', 'feed', userId],
+    queryKey: ['events', 'feed', userId,
+      nearMeActive ? `near:${nearMeCoords!.lat.toFixed(3)},${nearMeCoords!.lng.toFixed(3)},${radiusMi}` : 'all'],
     // Bounded so a stuck request rejects (and retries) instead of hanging the
     // loading gate forever. See FEED_DEADLINE_MS.
-    queryFn: () => withDeadline(fetchPlans(userId!), FEED_DEADLINE_MS, 'feed'),
+    queryFn: () => withDeadline(
+      fetchPlans(userId!, nearMeActive ? { lat: nearMeCoords!.lat, lng: nearMeCoords!.lng, radiusKm } : undefined),
+      FEED_DEADLINE_MS, 'feed',
+    ),
     enabled: !!userId,
     staleTime: 60_000,
     retry: 2,
@@ -1446,6 +1471,14 @@ export default function PlansScreen() {
             <Text style={[styles.filterPillText, heartFilter && styles.filterPillTextActive]}>Saved</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            style={[styles.filterPill, nearMeActive && styles.filterPillActive]}
+            onPress={handleNearMeToggle}
+            accessibilityLabel={nearMeActive ? 'Turn off near me' : 'Show plans near me'}
+          >
+            <Ionicons name="location-outline" size={14} color={nearMeActive ? '#FFFFFF' : '#78695C'} />
+            <Text style={[styles.filterPillText, nearMeActive && styles.filterPillTextActive]}>Near me</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.filterPill, mapView && styles.filterPillActive]}
             onPress={() => {
               hapticSelection();
@@ -1463,6 +1496,30 @@ export default function PlansScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+      )}
+
+      {/* Near-me: radius presets + permission-deny notice (list view only) */}
+      {nearMeActive && !mapView && (
+        <View style={styles.radiusRow}>
+          {[5, 10, 25].map((mi) => (
+            <TouchableOpacity
+              key={mi}
+              style={[styles.radiusPill, radiusMi === mi && styles.radiusPillActive]}
+              onPress={() => { hapticLight(); setRadiusMi(mi); }}
+            >
+              <Text style={[styles.radiusPillText, radiusMi === mi && styles.radiusPillTextActive]}>{mi} mi</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+      {nearMeNotice && (
+        <TouchableOpacity
+          style={styles.nearMeNotice}
+          onPress={() => Linking.openSettings()}
+          accessibilityLabel="Open location settings"
+        >
+          <Text style={styles.nearMeNoticeText}>{nearMeNotice}</Text>
+        </TouchableOpacity>
       )}
 
       {/* Row 2b: Map toggle for My Plans */}
@@ -1823,6 +1880,49 @@ const styles = StyleSheet.create({
   },
   filterPillTextActive: {
     color: '#FFFFFF',
+  },
+  // ── Near-me radius presets + deny notice ──
+  radiusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginTop: -4,
+    marginBottom: 12,
+  },
+  radiusPill: {
+    paddingHorizontal: 12,
+    height: 30,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5EDE0',
+  },
+  radiusPillActive: {
+    backgroundColor: '#B5522E',
+  },
+  radiusPillText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 12,
+    color: '#78695C',
+    includeFontPadding: false,
+  },
+  radiusPillTextActive: {
+    color: '#FFFFFF',
+  },
+  nearMeNotice: {
+    marginHorizontal: 16,
+    marginTop: -4,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: '#F5EDE0',
+  },
+  nearMeNoticeText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 13,
+    color: '#78695C',
   },
   // ── List ──
   listContent: {

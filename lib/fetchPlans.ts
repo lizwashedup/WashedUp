@@ -39,6 +39,9 @@ export interface Plan {
   max_invites: number | null;
   min_invites: number | null;
   neighborhood: string | null;
+  // Straight-line distance from the viewer in km. Only populated when the feed
+  // query passes the user's location (Near-me on); null otherwise.
+  distance_km: number | null;
   slug: string | null;
   member_count: number;
   status: string;
@@ -73,6 +76,7 @@ function mapRowToPlan(item: any): Plan {
     image_url: item.image_url ?? null,
     category: item.primary_vibe ?? null,
     neighborhood: item.neighborhood ?? null,
+    distance_km: item.distance_km ?? null,
     slug: item.slug ?? null,
     gender_rule: item.gender_rule ?? null,
     max_invites: item.max_invites ?? null,
@@ -96,11 +100,17 @@ function mapRowToPlan(item: any): Plan {
   };
 }
 
-export async function fetchPlans(userId: string): Promise<Plan[]> {
+export async function fetchPlans(
+  userId: string,
+  opts?: { lat: number; lng: number; radiusKm: number },
+): Promise<Plan[]> {
   if (!userId) return [];
 
   const { data, error } = await supabase.rpc('get_filtered_feed', {
     p_user_id: userId,
+    // Geo params only when the caller opts into Near-me; omitted otherwise so the
+    // default feed query is byte-identical to before (off-state parity).
+    ...(opts ? { p_lat: opts.lat, p_lng: opts.lng, p_radius_km: opts.radiusKm } : {}),
   });
 
   if (error) {
