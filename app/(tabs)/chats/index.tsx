@@ -18,6 +18,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react-native';
 const wLogo = require('../../../assets/images/w-logo-waves.png');
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
+import { withTimeout } from '../../../lib/withTimeout';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 import { consumeChatListDirty } from '../../../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
@@ -222,7 +223,11 @@ export default function ChatsScreen() {
       Notifications.setBadgeCountAsync(0).catch(() => {});
       (async () => {
         try {
-          const { data: { user } } = await supabase.auth.getUser();
+          // Bounded so a stale-session refresh can't hang this notification-clear
+          // side-effect; same pattern as the chat-list fetch.
+          const { data: { user } } = await withTimeout(
+            supabase.auth.getUser(), 3000, { data: { user: null } } as any,
+          );
           if (!user) return;
           await supabase
             .from('app_notifications')

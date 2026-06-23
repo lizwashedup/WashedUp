@@ -18,6 +18,7 @@ import { CIRCLE_DIR, TYPE } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 import type { MyCircle, MemberPreview } from '../../../lib/circles/types';
+import { buildCircleCoverUrl } from '../../../lib/circles/coverUrl';
 import CircleCover from './CircleCover';
 import CircleMemberStack from './CircleMemberStack';
 
@@ -50,7 +51,7 @@ export default function CircleCard({
           <View style={styles.top}>
             <CircleCover
               name={title}
-              coverUrl={null}
+              coverUrl={buildCircleCoverUrl(circle.id, circle.cover_upload_id)}
               tone="gold"
               size={CIRCLE_DIR.cover}
               radius={CIRCLE_DIR.coverRadius}

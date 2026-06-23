@@ -97,6 +97,9 @@ async function fetchAlbumsForUser(userId: string): Promise<AlbumRow[]> {
     .select('id, event_id, status, first_upload_at, prompt_sent_at, created_at')
     .in('event_id', eventIds)
     .is('archived_at', null)
+    // Only surface albums that have at least one photo (first_upload_at is set on
+    // the first upload); empty albums stay hidden until someone adds to them.
+    .not('first_upload_at', 'is', null)
     .order('created_at', { ascending: false });
   if (aErr) throw aErr;
   if (!albums || albums.length === 0) return [];

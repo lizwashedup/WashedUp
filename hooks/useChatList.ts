@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { withTimeout } from '../lib/withTimeout';
 import { GROUPS_ENABLED } from '../constants/FeatureFlags';
 import { circleDisplay, type DisplayMember } from '../lib/circles/display';
 
@@ -31,7 +32,7 @@ export interface ChatPreview {
  * GROUPS_ENABLED (the circles tables/RPCs are not applied to prod yet), and the
  * caller wraps this so any failure degrades to an event-only list.
  */
-async function fetchCircleChats(userId: string): Promise<ChatPreview[]> {
+async function fetchCircleChats(userId: string, senderCache?: Map<string, string>): Promise<ChatPreview[]> {
   const { data: memberships } = await supabase
     .from('circle_members')
     .select('circle_id, circles ( id, name, cover_upload_id, status, created_at )')
@@ -74,7 +75,10 @@ async function fetchCircleChats(userId: string): Promise<ChatPreview[]> {
   (memberRows ?? []).forEach((r: any) => {
     const profile = r.profiles_public as any;
     const name = profile?.first_name_display;
-    if (name && r.user_id && !senderNameMap[r.user_id]) senderNameMap[r.user_id] = name;
+    if (name && r.user_id && !senderNameMap[r.user_id]) {
+      senderNameMap[r.user_id] = name;
+      senderCache?.set(r.user_id, name); // seed the cross-render realtime cache
+    }
     const url = profile?.profile_photo_url;
     if (url && r.circle_id) {
       if (!avatarMap[r.circle_id]) avatarMap[r.circle_id] = [];
@@ -140,11 +144,24 @@ export function useChatList() {
   const [chats, setChats] = useState<ChatPreview[]>([]);
   const [loading, setLoading] = useState(true);
   const userIdRef = useRef<string | null>(null);
+  // Sender name cache (user_id -> first_name_display), populated from the roster
+  // fetch so the realtime handler doesn't fire a profiles_public lookup per
+  // incoming message.
+  const senderNameCacheRef = useRef<Map<string, string>>(new Map());
 
   const fetchChats = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const user = (await supabase.auth.getUser()).data?.user;
+      // Bound so a stale-session server refresh can't hang the whole list behind
+      // it (the P1 freeze). On timeout, fall back to the CACHED session:
+      // getSession does NO server refresh, so it can't hang; the list still
+      // loads on a stale session instead of going empty. The RLS queries below
+      // still enforce auth via the client token, so this only scopes the reads.
+      let user = (await withTimeout(supabase.auth.getUser(), 3000, { data: { user: null } } as any)).data?.user ?? null;
+      if (!user) {
+        const cached = await withTimeout(supabase.auth.getSession(), 2000, { data: { session: null } } as any);
+        user = cached.data?.session?.user ?? null;
+      }
       if (!user) return;
       userIdRef.current = user.id;
 
@@ -226,6 +243,8 @@ export function useChatList() {
           const name = profile?.first_name_display;
           if (name && r.user_id && !senderNameMap[r.user_id]) {
             senderNameMap[r.user_id] = name;
+            // Persist into the cross-render cache the realtime handler reads.
+            senderNameCacheRef.current.set(r.user_id, name);
           }
           const url = profile?.profile_photo_url;
           if (url && r.event_id) {
@@ -286,7 +305,7 @@ export function useChatList() {
       let circlePreviews: ChatPreview[] = [];
       if (GROUPS_ENABLED) {
         try {
-          circlePreviews = await fetchCircleChats(user.id);
+          circlePreviews = await fetchCircleChats(user.id, senderNameCacheRef.current);
         } catch {
           circlePreviews = [];
         }
@@ -343,12 +362,18 @@ export function useChatList() {
             const isOwn = userIdRef.current === msg.user_id;
             let senderName: string | null = isOwn ? 'You' : null;
             if (!isOwn && msg.user_id) {
-              const { data: profile } = await supabase
-                .from('profiles_public')
-                .select('first_name_display')
-                .eq('id', msg.user_id)
-                .maybeSingle();
-              senderName = profile?.first_name_display ?? null;
+              // Prefer the cached sender name (seeded from the roster fetch);
+              // only hit profiles_public on a miss, then cache it.
+              senderName = senderNameCacheRef.current.get(msg.user_id) ?? null;
+              if (senderName == null) {
+                const { data: profile } = await supabase
+                  .from('profiles_public')
+                  .select('first_name_display')
+                  .eq('id', msg.user_id)
+                  .maybeSingle();
+                senderName = profile?.first_name_display ?? null;
+                if (senderName) senderNameCacheRef.current.set(msg.user_id, senderName);
+              }
             }
             const text = msg.message_type === 'audio' || msg.audio_url
               ? 'sent a voice message'
