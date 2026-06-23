@@ -487,7 +487,10 @@ export default function PlansScreen() {
   // default feed is byte-identical to before (off-state parity).
   const [nearMe, setNearMe] = useState(false);
   const [nearMeCoords, setNearMeCoords] = useState<NearMeCoords | null>(null);
-  const [radiusMi, setRadiusMi] = useState(10);
+  // Default 25mi (not 10): p_radius_km is a hard server-side filter and the feed
+  // is thin, so a tighter default too often returns an empty Near-me. Wider
+  // default = the first tap usually shows something; presets let users narrow.
+  const [radiusMi, setRadiusMi] = useState(25);
   const [nearMeNotice, setNearMeNotice] = useState<string | null>(null);
   const nearMeActive = nearMe && !!nearMeCoords;
   const radiusKm = radiusMi * 1.60934;
