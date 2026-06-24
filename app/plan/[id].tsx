@@ -763,6 +763,7 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
       queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(id ?? '') });
       queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
@@ -985,6 +986,7 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       queryClient.invalidateQueries({ queryKey: ['wishlists'] });
       queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
 
@@ -1024,6 +1026,7 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
     },
     onError: (error: any) => {
       setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
@@ -1219,6 +1222,7 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
     } catch (e: any) {
       const rawMsg = e?.message ?? '';
       const msg = rawMsg.includes('events_host_message_length')
@@ -1260,6 +1264,7 @@ export default function PlanDetailScreen() {
               setManageModalVisible(false);
               queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
               queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+              queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
               router.back();
             } catch (e: any) {
               setBrandedAlert({ visible: true, title: 'Error', message: friendlyError(e, 'Could not cancel plan.') });

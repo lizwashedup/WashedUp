@@ -77,6 +77,7 @@ export const YOURS_HEADER_ACTION: 'fill' | 'outline' = 'outline';
 export const COPY = {
   wordmark: 'yours',
   tabPeople: 'People',
+  tabMyPlans: 'My Plans',
   tabCircles: 'Circles',
   tabAlbums: 'Albums',
 

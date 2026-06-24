@@ -1064,6 +1064,7 @@ export default function LegacyComposer() {
       // Plans. Same keys/style as join/leave in app/plan/[id].tsx.
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       setPostedPlanId(insertedEvent?.id ?? null);
       setPostedPlanTitle(title.trim());
       setPostedSpotsLeft(groupSize);

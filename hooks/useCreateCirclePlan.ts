@@ -60,6 +60,7 @@ export function useCreateCirclePlan() {
       queryClient.invalidateQueries({ queryKey: ['circle-plans', args.circleId] });
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
     },
   });
 }

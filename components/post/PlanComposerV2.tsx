@@ -701,6 +701,7 @@ export default function PlanComposerV2() {
 
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       setPostedPlanId(insertedEvent?.id ?? null);
       if (isFirst) {
         await AsyncStorage.setItem('hasSeenFirstPlanCelebration', '1');

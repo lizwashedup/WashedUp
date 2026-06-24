@@ -27,6 +27,7 @@ import { AlbumsGrid } from '../albums/AlbumsGrid';
 import YoursHeader from './header/YoursHeader';
 import YoursTabs, { type YoursTab } from './header/YoursTabs';
 import PopulatedView from './screens/PopulatedView';
+import MyPlansView from './screens/MyPlansView';
 import FreshStartView from './screens/FreshStartView';
 import NewUserEmptyView from './screens/NewUserEmptyView';
 import RequestBanner from './requests/RequestBanner';
@@ -96,7 +97,7 @@ export default function YoursScreen() {
     });
   };
 
-  const [tab, setTab] = useState<YoursTab>('people');
+  const [tab, setTab] = useState<YoursTab>('myPlans');
   const [query, setQuery] = useState('');
   const [pathsOpen, setPathsOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
@@ -275,9 +276,11 @@ export default function YoursScreen() {
             )}
           </View>
 
-          {/* Requests entry is reachable in ANY people state (was hidden once
-              populated, which stranded incoming requests). */}
-          {tab === 'people' && requests.length > 0 && (
+          {/* Incoming-requests banner lives at the Yours level (above the tab
+              content, visible on ANY tab). Yours now defaults to My Plans, so
+              gating this to the People tab would hide a pending request behind a
+              tab switch. The Add pill stays People-only. */}
+          {requests.length > 0 && (
             <RequestBanner
               count={requests.length}
               onPress={() => setRequestsOpen(true)}
@@ -285,6 +288,11 @@ export default function YoursScreen() {
           )}
 
           {tab === 'people' && renderPeopleBody()}
+          {tab === 'myPlans' && (
+            <View style={styles.fill}>
+              <MyPlansView userId={uid} />
+            </View>
+          )}
           {GROUPS_ENABLED && tab === 'circles' && (
             <View style={styles.fill}>
               <CirclesDirectory

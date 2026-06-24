@@ -4,7 +4,7 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess,
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useNavigation } from 'expo-router';
-import { ChevronDown, ChevronRight, LayoutList, Map } from 'lucide-react-native';
+import { ChevronDown, LayoutList, Map } from 'lucide-react-native';
 import React, { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -39,7 +39,8 @@ import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Catego
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
-import { fetchPlans, fetchInterestedPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
+import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
+import { toPlanCardPlan, type PlanCardPlan } from '../../../lib/creatorMarks';
 import { requestNearMeLocation, type NearMeCoords } from '../../../lib/location/nearMe';
 import { getLADayParts, dayKey, MONTHS } from '../../../lib/laDate';
 import { WhenCalendarSheet } from '../../../components/plans/WhenCalendarSheet';
@@ -96,7 +97,7 @@ const WELCOME_OVERLAY_MAX_MS = 10000;
 // degrade to [] on error, so this preserves observable behavior).
 const FEED_DEADLINE_MS = 15000;
 const WISHLISTS_TIMEOUT_MS = 8000;
-const MY_PLANS_TIMEOUT_MS = 12000;
+const MEMBER_IDS_TIMEOUT_MS = 8000;
 
 function WelcomeLoading({
   done,
@@ -242,8 +243,6 @@ const LazyPlansMapView = lazy(() => import('../../../components/plans/PlansMapVi
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TabKey = 'plans' | 'myplans';
-
 interface SectionDef {
   key: string;
   title: string;
@@ -251,70 +250,8 @@ interface SectionDef {
   to: Date;
 }
 
-// Plan shape expected by PlanCard (person-first)
-interface PlanCardPlan {
-  id: string;
-  title: string;
-  host_message: string | null;
-  start_time: string;
-  location_text: string | null;
-  neighborhood: string | null;
-  slug: string | null;
-  category: string | null;
-  gender_rule?: string | null;
-  max_invites: number;
-  member_count: number;
-  is_featured?: boolean;
-  featured_type?: 'washedup_event' | 'birthday_party' | null;
-  allow_duplicate?: boolean;
-  creator: {
-    id: string;
-    first_name_display: string;
-    profile_photo_url: string | null;
-    member_since?: string;
-    plans_posted?: number;
-    milestone_slug?: string | null;
-    milestone_name?: string | null;
-    milestone_icon?: string | null;
-  };
-}
-
 interface FeaturedPlan extends PlanCardPlan {
   attendees: { profile_photo_url: string | null }[];
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-// Creator milestone marks cache — populated by feed queries
-let _creatorMarksMap: Record<string, { slug: string; name: string; icon: string }> = {};
-
-function toPlanCardPlan(plan: Plan): PlanCardPlan {
-  const mark = _creatorMarksMap[plan.creator?.id ?? ''];
-  return {
-    id: plan.id,
-    title: plan.title,
-    host_message: plan.host_message ?? null,
-    start_time: plan.start_time,
-    location_text: plan.location_text ?? null,
-    neighborhood: plan.neighborhood ?? null,
-    slug: plan.slug ?? null,
-    category: plan.category ?? null,
-    gender_rule: plan.gender_rule ?? null,
-    max_invites: plan.max_invites ?? 0,
-    member_count: plan.member_count ?? 0,
-    is_featured: plan.is_featured ?? false,
-    featured_type: plan.featured_type ?? null,
-    allow_duplicate: plan.allow_duplicate ?? true,
-    creator: {
-      id: plan.creator?.id ?? '',
-      first_name_display: plan.creator?.first_name_display ?? 'Creator',
-      profile_photo_url: plan.creator?.profile_photo_url ?? null,
-      plans_posted: plan.creator?.plans_posted ?? undefined,
-      milestone_slug: mark?.slug ?? null,
-      milestone_name: mark?.name ?? null,
-      milestone_icon: mark?.icon ?? null,
-    },
-  };
 }
 
 // ─── Section boundary logic ───────────────────────────────────────────────────
@@ -405,7 +342,7 @@ function feedItemMatchesCategory(item: FeedItem, filter: CategoryOption[]): bool
 
 // Bucket plans into FeedItems by cluster_root_id. The RPC guarantees a
 // non-null cluster_root_id only when ≥2 visible rows share the lineage,
-// but client-side filters (heartFilter, !is_featured, etc.) run AFTER the
+// but client-side filters (day filter, !is_featured, etc.) run AFTER the
 // RPC and can reduce a cluster back to 1 visible member. We re-collapse
 // any 1-member cluster into a standalone here so the "popular plan"
 // header never sits over a single card.
@@ -482,9 +419,7 @@ export default function PlansScreen() {
   }, []));
   const sectionDefs = useMemo(() => getSectionDefs(now), [now]);
 
-  const [activeTab, setActiveTab] = useState<TabKey>('plans');
   const [mapView, setMapView] = useState(false);
-  const [heartFilter, setHeartFilter] = useState(false);
   // Near-me (WS-6): OFF by default. Location is requested just-in-time only on
   // the tap, never at startup. When off, the feed query omits geo params so the
   // default feed is byte-identical to before (off-state parity).
@@ -507,16 +442,14 @@ export default function PlansScreen() {
     else if (res.reason === 'denied') setNearMeNotice("Turn on location in Settings to see what's near you.");
     else setNearMeNotice("Couldn't get your location. Try again.");
   }, [nearMe, nearMeCoords]);
-  const [pastExpanded, setPastExpanded] = useState(false);
   const navigation = useNavigation();
 
   React.useEffect(() => {
     const unsubscribe = navigation.addListener('tabPress' as any, () => {
       if (mapView) setMapView(false);
-      if (activeTab !== 'plans') setActiveTab('plans');
     });
     return unsubscribe;
-  }, [navigation, mapView, activeTab]);
+  }, [navigation, mapView]);
 
   const [whenSheetOpen, setWhenSheetOpen] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
@@ -876,171 +809,25 @@ export default function PlansScreen() {
     staleTime: 60_000,
   });
 
-  const { data: myPlans = [], isLoading: myPlansLoading } = useQuery<Plan[]>({
-    queryKey: ['my-plans', userId],
-    // Whole multi-step body bounded so a stuck sub-request can't pin the gate.
+  // Lightweight, bounded, NON-BLOCKING membership lookup. The feed RPC does not
+  // return a per-card membership flag, and isMember only flips a FULL plan's CTA
+  // ("Waitlist" -> "Let's Go") for plans you're already in. Fetch just the
+  // joined + created event ids (ids only) so the feed renders immediately and
+  // isMember fills in once this resolves; withTimeout-bounded so it can never
+  // pin the feed load. The full My Plans data now lives in the Yours tab.
+  const { data: memberIds = [] } = useQuery<string[]>({
+    queryKey: ['feed-member-ids', userId],
     queryFn: () => withTimeout((async () => {
       if (!userId) return [];
-
-      const { data: memberships, error: memError } = await supabase
-        .from('event_members')
-        .select(`
-          event_id,
-          events (
-            id, title, start_time, location_text, location_lat, location_lng,
-            image_url, primary_vibe, gender_rule, max_invites, min_invites,
-            member_count, status, creator_user_id, host_message, neighborhood, slug,
-            is_featured, featured_type
-          )
-        `)
-        .eq('user_id', userId)
-        .eq('status', 'joined');
-
-      if (memError) return [];
-
-      const { data: created } = await supabase
-        .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug, is_featured, featured_type')
-        .eq('creator_user_id', userId)
-        .in('status', ['forming', 'active', 'full', 'completed']);
-
-      // Fetch event_ids the user has explicitly LEFT. The joined branch above
-      // already filters status='joined', but the created branch pulls events
-      // straight from the events table without checking member status — so a
-      // creator who walks away from their own plan would still see it here.
-      // We exclude any left events from the merged list below.
-      const { data: leftRows } = await supabase
-        .from('event_members')
-        .select('event_id')
-        .eq('user_id', userId)
-        .eq('status', 'left');
-      const leftEventIds = new Set((leftRows ?? []).map((r: any) => r.event_id as string));
-
-      const joinedEvents = (memberships ?? [])
-        .map((m: any) => m.events)
-        .filter((e: any) => e && ['forming', 'active', 'full', 'completed'].includes(e.status));
-
-      const seen: Record<string, boolean> = {};
-      const allEvents: any[] = [];
-      [...joinedEvents, ...(created ?? [])].forEach((e: any) => {
-        if (e && !seen[e.id] && !leftEventIds.has(e.id)) {
-          seen[e.id] = true;
-          allEvents.push(e);
-        }
-      });
-
-      if (!allEvents.length) return [];
-
-      const creatorIds = allEvents.map((e: any) => e.creator_user_id).filter(Boolean);
-      const uniqueCreatorIds = creatorIds.filter((id: string, i: number) => creatorIds.indexOf(id) === i);
-
-      const { data: profilesData } = uniqueCreatorIds.length > 0
-        ? await supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', uniqueCreatorIds)
-        : { data: [] as any[] };
-
-      const profileMap: Record<string, any> = {};
-      (profilesData ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-
-      const realCounts = await fetchRealMemberCounts(allEvents.map((e: any) => e.id));
-
-      // Fetch creator milestone marks
-      if (uniqueCreatorIds.length > 0) {
-        const { data: marksData } = await supabase.rpc('get_creator_milestone_marks', { p_user_ids: uniqueCreatorIds });
-        if (marksData) {
-          (marksData as any[]).forEach((m: any) => {
-            _creatorMarksMap[m.user_id] = { slug: m.mark_slug, name: m.mark_name, icon: m.mark_icon_name };
-          });
-        }
-      }
-
-      return allEvents.map((e: any) => {
-        const hp = profileMap[e.creator_user_id] ?? null;
-        return {
-          id: e.id,
-          title: e.title,
-          start_time: e.start_time,
-          location_text: e.location_text ?? null,
-          location_lat: e.location_lat ?? null,
-          location_lng: e.location_lng ?? null,
-          image_url: e.image_url ?? null,
-          category: e.primary_vibe ?? null,
-          gender_rule: e.gender_rule ?? null,
-          max_invites: e.max_invites ?? null,
-          min_invites: e.min_invites ?? null,
-          member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
-          status: e.status ?? 'forming',
-          host_message: e.host_message ?? null,
-          is_featured: e.is_featured ?? false,
-          featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
-          creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
-        } as Plan;
-      });
-    })(), MY_PLANS_TIMEOUT_MS, []),
-    enabled: !!userId,
-    staleTime: 10_000,
-    // NOTE: no refetchOnMount:'always' — see the feed query above. This
-    // is an expensive multi-step fetch (joined+created events, dedup,
-    // profiles, member counts); forcing it on every remount was a major
-    // contributor to the 2026-05-18 freeze/slowness incident. staleTime
-    // still refreshes it shortly after it goes stale.
-  });
-
-  const { data: waitlistedPlans = [] } = useQuery<Plan[]>({
-    queryKey: ['waitlisted-plans', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-
-      // Step 1: get waitlisted event IDs (no FK on event_waitlist, so join won't work)
-      const { data: waitlistRows } = await supabase
-        .from('event_waitlist')
-        .select('event_id')
-        .eq('user_id', userId);
-
-      const eventIds = (waitlistRows ?? []).map((w: any) => w.event_id as string);
-      if (eventIds.length === 0) return [];
-
-      // Step 2: fetch the actual events
-      const { data: eventsData } = await supabase
-        .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug')
-        .in('id', eventIds)
-        .in('status', ['forming', 'active', 'full']);
-
-      const active = eventsData ?? [];
-      if (active.length === 0) return [];
-
-      const creatorIds = [...new Set(active.map((e: any) => e.creator_user_id).filter(Boolean))];
-      const { data: profiles } = creatorIds.length > 0
-        ? await supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', creatorIds)
-        : { data: [] as any[] };
-
-      const profileMap: Record<string, any> = {};
-      (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-
-      const realCounts = await fetchRealMemberCounts(active.map((e: any) => e.id));
-
-      // Fetch creator milestone marks
-      if (creatorIds.length > 0) {
-        const { data: marksData } = await supabase.rpc('get_creator_milestone_marks', { p_user_ids: creatorIds });
-        if (marksData) {
-          (marksData as any[]).forEach((m: any) => {
-            _creatorMarksMap[m.user_id] = { slug: m.mark_slug, name: m.mark_name, icon: m.mark_icon_name };
-          });
-        }
-      }
-
-      return active.map((e: any) => {
-        const hp = profileMap[e.creator_user_id] ?? null;
-        return {
-          id: e.id, title: e.title, start_time: e.start_time,
-          location_text: e.location_text ?? null, location_lat: e.location_lat ?? null, location_lng: e.location_lng ?? null,
-          image_url: e.image_url ?? null, category: e.primary_vibe ?? null, gender_rule: e.gender_rule ?? null,
-          max_invites: e.max_invites ?? null, min_invites: e.min_invites ?? null,
-          member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0), status: e.status ?? 'forming', host_message: e.host_message ?? null,
-          creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
-        } as Plan;
-      });
-    },
+      const [joinedRes, createdRes] = await Promise.all([
+        supabase.from('event_members').select('event_id').eq('user_id', userId).eq('status', 'joined'),
+        supabase.from('events').select('id').eq('creator_user_id', userId),
+      ]);
+      const ids = new Set<string>();
+      (joinedRes.data ?? []).forEach((r: any) => ids.add(r.event_id as string));
+      (createdRes.data ?? []).forEach((r: any) => ids.add(r.id as string));
+      return [...ids];
+    })(), MEMBER_IDS_TIMEOUT_MS, []),
     enabled: !!userId,
     staleTime: 30_000,
   });
@@ -1053,48 +840,9 @@ export default function PlansScreen() {
 
   const memberIdSet = useMemo(() => {
     const lookup: Record<string, boolean> = {};
-    myPlans.forEach((p: Plan) => { lookup[p.id] = true; });
+    memberIds.forEach((id: string) => { lookup[id] = true; });
     return lookup;
-  }, [myPlans]);
-
-  const myPlansUpcoming = useMemo(
-    () => myPlans
-      .filter((p) => ['forming', 'active', 'full'].includes(p.status) && new Date(p.start_time) >= new Date(Date.now() - 3 * 60 * 60 * 1000))
-      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
-    [myPlans, now],
-  );
-
-  const myPlansPast = useMemo(
-    () => myPlans
-      .filter((p) => p.status === 'completed' || new Date(p.start_time) < new Date(Date.now() - 3 * 60 * 60 * 1000))
-      .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
-      .slice(0, 20),
-    [myPlans, now],
-  );
-
-  const [waitlistExpanded, setWaitlistExpanded] = useState(false);
-
-  const savedPlans = useMemo(
-    () => allPlans.filter(p => wishlistedSet[p.id]),
-    [allPlans, wishlistedSet],
-  );
-
-  const { data: interestedPlans = [] } = useQuery<Plan[]>({
-    queryKey: ['plans.myInterested', userId],
-    queryFn: () => fetchInterestedPlans(),
-    enabled: !!userId,
-    staleTime: 60_000,
-  });
-
-  const myPlansSections = useMemo(() => {
-    const s: { title: string; data: Plan[] }[] = [];
-    if (myPlansUpcoming.length > 0) s.push({ title: 'Upcoming', data: myPlansUpcoming });
-    if (savedPlans.length > 0) s.push({ title: 'Saved', data: savedPlans });
-    if (interestedPlans.length > 0) s.push({ title: 'Interested', data: interestedPlans });
-    if (waitlistedPlans.length > 0) s.push({ title: 'Waitlisted', data: waitlistExpanded ? waitlistedPlans : [] });
-    if (myPlansPast.length > 0) s.push({ title: 'Past', data: pastExpanded ? myPlansPast : [] });
-    return s;
-  }, [myPlansUpcoming, myPlansPast, pastExpanded, waitlistedPlans, waitlistExpanded, savedPlans, interestedPlans]);
+  }, [memberIds]);
 
   // Gold-dot days for the When calendar: every LA day that has >=1 visible
   // plan. Derived from allPlans (already visibility + Near-me-radius filtered
@@ -1115,8 +863,7 @@ export default function PlansScreen() {
     // Featured plans render in their own carousel section above the
     // time-bucketed sections — strip them out here so they never
     // double-appear in "This Week" / "This Weekend" / etc.
-    const nonFeatured = allPlans.filter((p) => !p.is_featured);
-    let result = !heartFilter ? nonFeatured : nonFeatured.filter((p) => wishlistedSet[p.id]);
+    let result = allPlans.filter((p) => !p.is_featured);
     if (dayFilterKey) {
       result = result.filter((p) => {
         const { y, m, d } = getLADayParts(p.start_time);
@@ -1124,7 +871,7 @@ export default function PlansScreen() {
       });
     }
     return result;
-  }, [allPlans, heartFilter, wishlistedSet, dayFilterKey]);
+  }, [allPlans, dayFilterKey]);
 
   const feedItems = useMemo(() => groupIntoFeedItems(displayPlans), [displayPlans]);
 
@@ -1157,58 +904,20 @@ export default function PlansScreen() {
         ? categoryFilter[0]
         : `Category · ${categoryFilter.length}`;
 
-  const mapPlans = useMemo(() => {
-    if (activeTab === 'myplans') return myPlansUpcoming;
-    return allPlans;
-  }, [activeTab, allPlans, myPlansUpcoming]);
-
-  const mapLoading = activeTab === 'myplans' ? myPlansLoading : isLoading;
+  const mapPlans = allPlans;
+  const mapLoading = isLoading;
 
   const renderSectionHeader = useCallback(
     ({ section }: { section: { title: string } }) => {
-      if (section.title === 'Past') {
-        return (
-          <TouchableOpacity
-            style={styles.pastSectionHeader}
-            onPress={() => { hapticLight(); setPastExpanded((v) => !v); }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.sectionHeader}>{section.title}</Text>
-            <View style={styles.pastChevronRow}>
-              <Text style={styles.pastCount}>{myPlansPast.length}</Text>
-              {pastExpanded
-                ? <ChevronDown size={16} color={'#A09385'} />
-                : <ChevronRight size={16} color={'#A09385'} />}
-            </View>
-          </TouchableOpacity>
-        );
-      }
-      if (section.title === 'Waitlisted') {
-        return (
-          <TouchableOpacity
-            style={styles.pastSectionHeader}
-            onPress={() => { hapticLight(); setWaitlistExpanded((v) => !v); }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.sectionHeader}>{section.title}</Text>
-            <View style={styles.pastChevronRow}>
-              <Text style={styles.pastCount}>{waitlistedPlans.length}</Text>
-              {waitlistExpanded
-                ? <ChevronDown size={16} color={'#A09385'} />
-                : <ChevronRight size={16} color={'#A09385'} />}
-            </View>
-          </TouchableOpacity>
-        );
-      }
       return <Text style={styles.sectionHeader}>{section.title}</Text>;
     },
-    [pastExpanded, myPlansPast.length, waitlistExpanded, waitlistedPlans.length],
+    [],
   );
 
   const { blockUser } = useBlock();
 
   const handleReport = useCallback((planId: string) => {
-    const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find((p) => p.id === planId);
+    const plan = allPlans.find((p) => p.id === planId);
     if (plan?.creator?.id) {
       setReportTarget({
         userId: plan.creator.id,
@@ -1216,14 +925,14 @@ export default function PlansScreen() {
         eventId: planId,
       });
     }
-  }, [allPlans, myPlans, waitlistedPlans]);
+  }, [allPlans]);
 
   const handleBlock = useCallback((planId: string) => {
-    const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find((p) => p.id === planId);
+    const plan = allPlans.find((p) => p.id === planId);
     if (plan?.creator?.id) {
       blockUser(plan.creator.id, plan.creator.first_name_display ?? 'User');
     }
-  }, [allPlans, myPlans, waitlistedPlans, blockUser]);
+  }, [allPlans, blockUser]);
 
   const renderItem = useCallback(
     ({ item }: { item: Plan }) => (
@@ -1235,7 +944,7 @@ export default function PlansScreen() {
           onWishlist={(id, current) => {
             wishlistMutation.mutate({ eventId: id, current });
             if (!current) {
-              const plan = allPlans.find(p => p.id === id) ?? myPlans.find(p => p.id === id);
+              const plan = allPlans.find(p => p.id === id);
               setSnackbar({ planId: id, planTitle: plan?.title ?? '' });
             } else {
               setSnackbar(null);
@@ -1248,7 +957,7 @@ export default function PlansScreen() {
         />
       </View>
     ),
-    [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, allPlans, myPlans],
+    [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, allPlans],
   );
 
   // Renders a cluster of duplicate plans as a horizontal scroll. Each member
@@ -1410,7 +1119,7 @@ export default function PlansScreen() {
   // First-visit overlay readiness: feed is mounted underneath as soon as
   // userId + all loading queries resolve. The overlay watches this flag
   // (plus its own min-display timer) to decide when to fade away.
-  const dataReady = !!userId && !isLoading && !wishlistsLoading && !myPlansLoading;
+  const dataReady = !!userId && !isLoading && !wishlistsLoading;
   const showWelcomeOverlay = (showWelcome || postAuthTransition) && !welcomeOverlayDone;
 
   // Watchdog: while the overlay is up and data hasn't resolved, arm a timer
@@ -1425,16 +1134,14 @@ export default function PlansScreen() {
   // The overlay treats "watchdog fired" the same as "data ready": stop
   // capturing touches and begin its exit. Data keeps loading underneath.
   const overlayReady = dataReady || welcomeWatchdogFired;
-  const emptyMessage = heartFilter
-    ? 'When you save a plan it shows up here'
-    : nearMeActive
-      ? 'Nothing quite that close yet.'
-      : allPlans.length > 0
-        ? 'No plans match your filters.'
-        : 'No plans yet.';
+  const emptyMessage = nearMeActive
+    ? 'Nothing quite that close yet.'
+    : allPlans.length > 0
+      ? 'No plans match your filters.'
+      : 'No plans yet.';
   // Near-me empty is a proximity gap on a young feed, not a dead end. Reframe it
   // warmly: name the growth, hand back agency (post + share), no plea.
-  const emptySubText = nearMeActive && !heartFilter
+  const emptySubText = nearMeActive
     ? "We're still growing in LA. Post your own and share it around. That's how the map fills in."
     : null;
 
@@ -1450,30 +1157,8 @@ export default function PlansScreen() {
         <ProfileButton />
       </View>
 
-      {/* Row 1: All Plans | My Plans — full-width underline tabs */}
-      <View style={styles.tabRow}>
-        {(['plans', 'myplans'] as const).map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => {
-              hapticLight();
-              setActiveTab(tab);
-            }}
-          >
-            <Text
-              style={[styles.tabText, activeTab === tab && styles.tabTextActive]}
-              numberOfLines={1}
-              allowFontScaling={false}
-            >
-              {tab === 'plans' ? 'All Plans' : 'My Plans'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Row 2: When, Category, Heart, Map — fixed-row layout, no scrolling */}
-      {activeTab === 'plans' && !mapView && (
+      {/* Filter row: When, Category, Near me, Map (fixed-row layout, no scrolling) */}
+      {!mapView && (
         <View style={styles.filterRow}>
           <TouchableOpacity
             style={[styles.filterPill, whenActive && styles.filterPillActive]}
@@ -1498,16 +1183,6 @@ export default function PlansScreen() {
               {categoryLabel}
             </Text>
             <ChevronDown size={10} color={categoryActive ? '#FFFFFF' : '#78695C'} strokeWidth={2.5} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterPill, heartFilter && styles.filterPillActive]}
-            onPress={() => {
-              hapticLight();
-              setHeartFilter((v) => !v);
-            }}
-          >
-            <Ionicons name={heartFilter ? 'bookmark' : 'bookmark-outline'} size={14} color={heartFilter ? '#FFFFFF' : '#78695C'} />
-            <Text style={[styles.filterPillText, heartFilter && styles.filterPillTextActive]}>Saved</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.filterPill, nearMeActive && styles.filterPillActive]}
@@ -1561,29 +1236,6 @@ export default function PlansScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Row 2b: Map toggle for My Plans */}
-      {activeTab === 'myplans' && !mapView && (
-        <View style={styles.myPlansFilterRow}>
-          <TouchableOpacity
-            style={[styles.filterPill, mapView && styles.filterPillActive]}
-            onPress={() => {
-              hapticSelection();
-              setMapView((v) => !v);
-            }}
-            accessibilityLabel={mapView ? 'Switch to list view' : 'Switch to map view'}
-          >
-            {mapView ? (
-              <LayoutList size={14} color={Colors.white} strokeWidth={2} />
-            ) : (
-              <Map size={14} color={'#78695C'} strokeWidth={2} />
-            )}
-            <Text style={[styles.filterPillText, mapView && styles.filterPillTextActive]}>
-              {mapView ? 'List' : 'Map'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* Map view — lazy-loaded to avoid crash when react-native-maps fails (e.g. Expo Go) */}
       {mapView ? (
         mapLoading ? (
@@ -1607,7 +1259,7 @@ export default function PlansScreen() {
             </Suspense>
           </MapErrorBoundary>
         )
-      ) : activeTab === 'plans' ? (
+      ) : (
         <>
           {userIdTimedOut && !userId ? (
             <View style={styles.centered}>
@@ -1626,7 +1278,7 @@ export default function PlansScreen() {
                 <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
             </View>
-          ) : !userId || isLoading || wishlistsLoading || myPlansLoading ? (
+          ) : !userId || isLoading || wishlistsLoading ? (
             <SkeletonFeed />
           ) : isError ? (
             <View style={styles.centered}>
@@ -1676,33 +1328,6 @@ export default function PlansScreen() {
             />
           )}
         </>
-      ) : (
-        <View style={{ flex: 1 }}>
-          {myPlansLoading ? (
-            <SkeletonFeed />
-          ) : myPlansSections.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>You haven't joined any plans yet.</Text>
-              <TouchableOpacity style={styles.emptyButton} onPress={() => setActiveTab('plans')}>
-                <Text style={styles.emptyButtonText}>Browse Plans</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <SectionList
-              decelerationRate="normal"
-              sections={myPlansSections}
-              keyExtractor={(item) => item.id}
-              renderItem={renderItem}
-              renderSectionHeader={renderSectionHeader}
-              stickySectionHeadersEnabled={false}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              initialNumToRender={30}
-              maxToRenderPerBatch={20}
-              windowSize={11}
-            />
-          )}
-        </View>
       )}
 
       <WhenCalendarSheet
@@ -1783,7 +1408,7 @@ export default function PlansScreen() {
         planTitle={snackbar?.planTitle ?? ''}
         onShare={(id) => {
           setSnackbar(null);
-          const plan = [...allPlans, ...myPlans, ...waitlistedPlans].find(p => p.id === id);
+          const plan = allPlans.find(p => p.id === id);
           setShareSheet({ planId: id, planTitle: plan?.title ?? '', slug: plan?.slug ?? null });
         }}
         onDismiss={() => setSnackbar(null)}
@@ -1857,33 +1482,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Full-width underline tabs ──
-  tabRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5DDD1',
-    marginHorizontal: 20,
-    marginBottom: 12,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 2.5,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: TC,
-  },
-  tabText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: '#A09385',
-  },
-  tabTextActive: {
-    color: '#2C1810',
-    fontFamily: Fonts.sansBold,
-  },
-
   // ── Filters ──
   filterRow: {
     flexDirection: 'row',
@@ -1893,15 +1491,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     marginTop: 4,
     marginBottom: 12,
-  },
-  myPlansFilterRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-    marginTop: 4,
-    marginBottom: 12,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
   },
   filterPill: {
     flexDirection: 'row',
@@ -2095,23 +1684,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginTop: 24,
     marginBottom: 12,
-  },
-  pastSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  pastChevronRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  pastCount: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: '#A09385',
   },
   cardWrap: {
     marginBottom: 14,

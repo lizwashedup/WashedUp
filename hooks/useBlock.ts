@@ -64,6 +64,7 @@ export function useBlock() {
               queryClient.invalidateQueries({ queryKey: ['event-plans'] });
               queryClient.invalidateQueries({ queryKey: ['my-profile'] });
               queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+              queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
               queryClient.invalidateQueries({ queryKey: ['profile-blocked'] });
               queryClient.invalidateQueries({ queryKey: ['friends'] });
               queryClient.invalidateQueries({ queryKey: ['profile-search'] });

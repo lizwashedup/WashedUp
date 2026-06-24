@@ -244,6 +244,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       queryClient.invalidateQueries({ queryKey: ['events', 'members', eventId] });
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', eventId] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
       queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(eventId) });
       onClose();
