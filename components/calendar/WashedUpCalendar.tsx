@@ -20,6 +20,7 @@ import {
   getTodayInLA,
   isBeforeTodayLA,
   buildMonthGrid,
+  dayKey,
 } from '../../lib/laDate';
 
 export type CalendarDay = { year: number; month: number; day: number };
@@ -31,10 +32,13 @@ export default function WashedUpCalendar({
   mode = 'pick',
   selected,
   onSelect,
+  markedDays,
 }: {
   mode?: 'pick' | 'filter';
   selected: CalendarDay | null;
   onSelect: (day: CalendarDay) => void;
+  /** filter mode: LA day-keys that have >=1 plan; rendered as a gold dot. */
+  markedDays?: Set<string>;
 }) {
   const [view, setView] = useState<{ m: number; y: number }>(() => {
     if (selected) return { m: selected.month, y: selected.year };
@@ -116,11 +120,14 @@ export default function WashedUpCalendar({
               const isToday = view.y === t.y && view.m === t.m && day === t.d;
               const isSel =
                 !!selected && selected.year === view.y && selected.month === view.m && selected.day === day;
+              // filter mode: future days are tappable (to filter the feed); past
+              // stays disabled in both modes. A gold dot marks days with plans.
+              const marked = mode === 'filter' && !!markedDays?.has(dayKey(view.y, view.m, day));
               return (
                 <Pressable
                   key={ci}
                   style={styles.cell}
-                  disabled={past || mode !== 'pick'}
+                  disabled={past}
                   onPress={() => {
                     onSelect({ year: view.y, month: view.m, day });
                     hapticLight();
@@ -146,6 +153,7 @@ export default function WashedUpCalendar({
                       {day}
                     </Text>
                   </View>
+                  {marked && !isSel && <View style={styles.dot} />}
                 </Pressable>
               );
             })}
@@ -205,4 +213,13 @@ const styles = StyleSheet.create({
   dayText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   dayTextDisabled: { color: Colors.textLight, opacity: 0.4 },
   dayTextSelected: { color: Colors.cream, fontFamily: Fonts.sansMedium },
+  // Gold dot under days that have plans (filter mode). Decorative, never on text.
+  dot: {
+    position: 'absolute',
+    bottom: 4,
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: Colors.gold,
+  },
 });

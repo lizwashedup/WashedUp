@@ -41,6 +41,9 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
 import { fetchPlans, fetchInterestedPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { requestNearMeLocation, type NearMeCoords } from '../../../lib/location/nearMe';
+import { getLADayParts, dayKey, MONTHS } from '../../../lib/laDate';
+import { WhenCalendarSheet } from '../../../components/plans/WhenCalendarSheet';
+import { type CalendarDay } from '../../../components/calendar/WashedUpCalendar';
 import { supabase } from '../../../lib/supabase';
 import { withTimeout, withDeadline } from '../../../lib/withTimeout';
 import { friendlyError } from '../../../lib/friendlyError';
@@ -518,6 +521,9 @@ export default function PlansScreen() {
   const [whenSheetOpen, setWhenSheetOpen] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [whenFilter, setWhenFilter] = useState<string[]>([]);
+  // When-calendar: a specific LA day chosen from the grid. Mutually exclusive
+  // with the coarse whenFilter buckets (selecting one clears the other).
+  const [dayFilter, setDayFilter] = useState<CalendarDay | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryOption[]>([]);
   const [reportTarget, setReportTarget] = useState<{ userId: string; userName: string; eventId: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
@@ -1090,14 +1096,35 @@ export default function PlansScreen() {
     return s;
   }, [myPlansUpcoming, myPlansPast, pastExpanded, waitlistedPlans, waitlistExpanded, savedPlans, interestedPlans]);
 
+  // Gold-dot days for the When calendar: every LA day that has >=1 visible
+  // plan. Derived from allPlans (already visibility + Near-me-radius filtered
+  // server-side), so the dots respect Where automatically. (Category refinement
+  // of the dots is a small follow-up; the tap-to-day filter respects Category.)
+  const dayFilterKey = dayFilter ? dayKey(dayFilter.year, dayFilter.month, dayFilter.day) : null;
+  const markedDays = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of allPlans) {
+      if (p.is_featured) continue;
+      const { y, m, d } = getLADayParts(p.start_time);
+      set.add(dayKey(y, m, d));
+    }
+    return set;
+  }, [allPlans]);
+
   const displayPlans = useMemo(() => {
     // Featured plans render in their own carousel section above the
     // time-bucketed sections — strip them out here so they never
     // double-appear in "This Week" / "This Weekend" / etc.
     const nonFeatured = allPlans.filter((p) => !p.is_featured);
-    if (!heartFilter) return nonFeatured;
-    return nonFeatured.filter((p) => wishlistedSet[p.id]);
-  }, [allPlans, heartFilter, wishlistedSet]);
+    let result = !heartFilter ? nonFeatured : nonFeatured.filter((p) => wishlistedSet[p.id]);
+    if (dayFilterKey) {
+      result = result.filter((p) => {
+        const { y, m, d } = getLADayParts(p.start_time);
+        return dayKey(y, m, d) === dayFilterKey;
+      });
+    }
+    return result;
+  }, [allPlans, heartFilter, wishlistedSet, dayFilterKey]);
 
   const feedItems = useMemo(() => groupIntoFeedItems(displayPlans), [displayPlans]);
 
@@ -1113,13 +1140,15 @@ export default function PlansScreen() {
     })).filter((s) => s.data.length > 0);
   }, [sections]);
 
-  const whenLabel = whenFilter.length === 0
-    ? 'When'
-    : whenFilter.length === 1
-      ? WHEN_OPTIONS.find((o) => o.key === whenFilter[0])?.label ?? 'When'
-      : `When · ${whenFilter.length}`;
+  const whenLabel = dayFilter
+    ? `${MONTHS[dayFilter.month].slice(0, 3)} ${dayFilter.day}`
+    : whenFilter.length === 0
+      ? 'When'
+      : whenFilter.length === 1
+        ? WHEN_OPTIONS.find((o) => o.key === whenFilter[0])?.label ?? 'When'
+        : `When · ${whenFilter.length}`;
 
-  const whenActive = whenFilter.length > 0;
+  const whenActive = whenFilter.length > 0 || !!dayFilter;
   const categoryActive = categoryFilter.length > 0;
   const categoryLabel =
     categoryFilter.length === 0
@@ -1676,14 +1705,18 @@ export default function PlansScreen() {
         </View>
       )}
 
-      <FilterBottomSheet
+      <WhenCalendarSheet
         visible={whenSheetOpen}
-        title="When"
-        options={[...WHEN_OPTIONS]}
-        selected={whenFilter}
-        onToggle={(key) => setWhenFilter((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))}
+        whenSelected={whenFilter}
+        onToggleWhen={(key) => {
+          setDayFilter(null); // bucket and specific-day are mutually exclusive
+          setWhenFilter((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+        }}
+        daySelected={dayFilter}
+        onSelectDay={(d) => { setWhenFilter([]); setDayFilter(d); }}
+        markedDays={markedDays}
+        onClear={() => { setWhenFilter([]); setDayFilter(null); }}
         onClose={() => setWhenSheetOpen(false)}
-        onClear={() => setWhenFilter([])}
       />
 
       <FilterBottomSheet

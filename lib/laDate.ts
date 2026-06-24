@@ -61,6 +61,23 @@ export function laWallTimeToUTC(
   return new Date(utc);
 }
 
+// LA-zone {y, m(0-indexed), d} for any instant. Mirrors getTodayInLA for an
+// arbitrary timestamp so callers can bucket plans by their LA calendar day
+// (used by the When-chip calendar to mark days that have plans).
+export function getLADayParts(when: Date | string | number): { y: number; m: number; d: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+  }).formatToParts(new Date(when));
+  const get = (k: 'year' | 'month' | 'day') => Number(parts.find((p) => p.type === k)!.value);
+  return { y: get('year'), m: get('month') - 1, d: get('day') };
+}
+
+// Stable key for a calendar day (LA), for marked-day sets + selection compares.
+export function dayKey(y: number, m: number, d: number): string {
+  return `${y}-${m}-${d}`;
+}
+
 export function isBeforeTodayLA(y: number, m: number, d: number): boolean {
   const t = getTodayInLA();
   if (y !== t.y) return y < t.y;
