@@ -722,6 +722,7 @@ export default function PlansScreen() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
+      queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
     },
   });
 

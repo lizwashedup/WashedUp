@@ -71,6 +71,7 @@ export function useBlock() {
               queryClient.invalidateQueries({ queryKey: ['scene-events'] });
               queryClient.invalidateQueries({ queryKey: ['explore-wishlists'] });
               queryClient.invalidateQueries({ queryKey: ['wishlists'] });
+              queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
 
               onSuccess?.();
               setTimeout(() => {

@@ -93,6 +93,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
+      queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
     },
   });
 

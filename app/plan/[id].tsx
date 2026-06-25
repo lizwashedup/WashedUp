@@ -988,6 +988,7 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
       queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       queryClient.invalidateQueries({ queryKey: ['wishlists'] });
+      queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
       queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
 
       // Clear local waitlist state since the trigger deleted the row
@@ -1288,6 +1289,7 @@ export default function PlanDetailScreen() {
       await supabase.from('wishlists').insert({ user_id: currentUserId, event_id: id });
     }
     queryClient.invalidateQueries({ queryKey: ['wishlists', currentUserId] });
+    queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
   }, [currentUserId, id, isWishlisted, queryClient]);
 
   // ─── Waitlist ─────────────────────────────────────────────────────────────────
