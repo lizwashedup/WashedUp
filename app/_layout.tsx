@@ -84,6 +84,12 @@ if (process.env.EXPO_PUBLIC_GIPHY_SDK_KEY) {
 
 Sentry.init({
   dsn: 'https://fb9ffdb4b5f0fb3ea5191274a258f266@o4511311419604992.ingest.us.sentry.io/4511311773827072',
+  // Do NOT report in development (Metro/simulator/dev-client). Dev hot-reload
+  // of a half-finished edit (e.g. the "Property 'TC' doesn't exist" transient)
+  // fires false-alarm crash emails that never reach users. __DEV__ is false in
+  // all EAS release builds (preview + production), so prod/preview reporting is
+  // unchanged; only dev/sim goes quiet.
+  enabled: !__DEV__,
   tracesSampleRate: 0,
   enableAutoSessionTracking: true,
   ignoreErrors: [/getRegistrationInfoAsync/],

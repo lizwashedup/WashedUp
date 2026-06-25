@@ -435,6 +435,10 @@ export const COPY = {
     'add a short message so people know it is really you.',
   composerDescriptionRequired:
     'add a description so people know what to expect.',
+  // Shown when a URL is pasted into the description and the ticket field is empty.
+  // One-tap move (never a silent strip): lifts the link into the ticket field.
+  composerLinkDetected:
+    'looks like a link. keep tickets and links in their own spot?',
   circlePlanDescriptionRequired:
     'this one is open to others. add a description so they know what to expect.',
   circlePlanDescriptionLabel: 'description',

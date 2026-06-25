@@ -37,9 +37,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { ImagePlus, X, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { ImagePlus, X, ChevronDown } from 'lucide-react-native';
 
 import Colors from '../../constants/Colors';
+import { extractFirstUrl } from '../../lib/url';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
@@ -208,8 +209,8 @@ export default function PlanComposerV2() {
   const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
   const [ageRanges, setAgeRanges] = useState<AgeRange[]>([]);
 
-  // ── More options ──
-  const [moreOpen, setMoreOpen] = useState(false);
+  // ── Link/tickets, joinability, + secondary optional fields (surfaced from the
+  //    retired "more options" collapsible) ──
   const [ticketUrl, setTicketUrl] = useState('');
   const [dropIn, setDropIn] = useState(true);
   const [allowDuplicate, setAllowDuplicate] = useState(true);
@@ -512,7 +513,7 @@ export default function PlanComposerV2() {
     setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
     setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
     setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
-    setAllowDuplicate(true); setMoreOpen(false); setInvited([]);
+    setAllowDuplicate(true); setInvited([]);
     setEndTimeSelected(false);
     // Clear every prefill/duplicate param after a successful post. Otherwise a
     // "Post your own" leaves duplicatedFromEventId (and the rest) in route state,
@@ -808,6 +809,24 @@ export default function PlanComposerV2() {
           />
           {title.trim().length > 0 && description.trim().length === 0
             ? <InlineNudge text={COPY.composerDescriptionRequired} /> : null}
+          {(() => {
+            // One-tap (never silent): a pasted URL in the description is offered
+            // a home in the ticket/link field, so links stop becoming a wall.
+            const detectedUrl = extractFirstUrl(description);
+            return detectedUrl && !ticketUrl.trim() ? (
+              <InlineNudge
+                text={COPY.composerLinkDetected}
+                actionLabel="add it"
+                onPress={() => {
+                  hapticLight();
+                  setTicketUrl(detectedUrl);
+                  setDescription((d) =>
+                    d.replace(detectedUrl, '').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim(),
+                  );
+                }}
+              />
+            ) : null;
+          })()}
         </View>
 
         {/* WHEN */}
@@ -859,6 +878,21 @@ export default function PlanComposerV2() {
           <Text style={styles.label}>where</Text>
           <PlacePicker value={place} onChange={onPlaceChange} />
           {nudge === 'placeSkip' ? <InlineNudge text={NUDGE_PLACE_BASE} /> : null}
+        </View>
+
+        {/* LINK OR TICKETS (surfaced from the retired "more options"; decision-shaping,
+            and the visible home that keeps links out of the description) */}
+        <View style={styles.section}>
+          <Text style={styles.label}>link or tickets<Text style={styles.labelOptional}> · optional</Text></Text>
+          <TextInput
+            style={styles.textField}
+            value={ticketUrl}
+            onChangeText={setTicketUrl}
+            placeholder="https://"
+            placeholderTextColor={Colors.inkSoft}
+            autoCapitalize="none"
+            keyboardType="url"
+          />
         </View>
 
         {/* HOW MANY (existing semantics, new skin) */}
@@ -925,6 +959,19 @@ export default function PlanComposerV2() {
           </View>
         </View>
 
+        {/* JOINABILITY (surfaced from the retired "more options"; decision-shaping) */}
+        <View style={styles.section}>
+          <TouchableOpacity style={styles.toggleRow} onPress={() => { hapticLight(); setDropIn((v) => !v); }} activeOpacity={0.7}>
+            <View style={styles.toggleTextWrap}>
+              <Text style={styles.toggleTitle}>drop-in welcome</Text>
+              <Text style={styles.toggleSub}>people can still join after it starts</Text>
+            </View>
+            <View style={[styles.switchTrack, dropIn && styles.switchTrackOn]}>
+              <View style={[styles.switchThumb, dropIn && styles.switchThumbOn]} />
+            </View>
+          </TouchableOpacity>
+        </View>
+
         {/* INVITE PEOPLE */}
         <View style={styles.section}>
           <InvitePeopleSection
@@ -939,55 +986,26 @@ export default function PlanComposerV2() {
           />
         </View>
 
-        {/* MORE OPTIONS */}
-        <View style={styles.section}>
-          <TouchableOpacity style={styles.moreToggle} onPress={() => { hapticLight(); setMoreOpen((v) => !v); }} activeOpacity={0.7}>
-            <Text style={styles.moreToggleText}>more options</Text>
-            {moreOpen ? <ChevronUp size={16} color={Colors.secondary} /> : <ChevronDown size={16} color={Colors.secondary} />}
+        {/* OPTIONAL EXTRAS (genuinely secondary; quiet, at the bottom, no collapsible.
+            Ticket link + drop-in were surfaced above into the main flow.) */}
+        <View style={[styles.section, styles.secondarySection]}>
+          <Text style={styles.secondaryHeader}>optional extras</Text>
+          <Text style={styles.mutedLabel}>neighborhood</Text>
+          <TouchableOpacity style={styles.selectField} onPress={() => setShowNeighborhoodPicker(true)} activeOpacity={0.7}>
+            <Text style={[styles.selectFieldText, !neighborhood && styles.selectFieldPlaceholder]}>
+              {neighborhood || 'pick a neighborhood'}
+            </Text>
+            <ChevronDown size={16} color={Colors.tertiary} />
           </TouchableOpacity>
-          {moreOpen && (
-            <View style={styles.moreBody}>
-              {/* Ticket link */}
-              <Text style={styles.subLabel}>ticket link<Text style={styles.labelOptional}> · optional</Text></Text>
-              <TextInput
-                style={styles.textField}
-                value={ticketUrl}
-                onChangeText={setTicketUrl}
-                placeholder="https://"
-                placeholderTextColor={Colors.inkSoft}
-                autoCapitalize="none"
-                keyboardType="url"
-              />
-              {/* Neighborhood */}
-              <Text style={styles.subLabel}>neighborhood</Text>
-              <TouchableOpacity style={styles.selectField} onPress={() => setShowNeighborhoodPicker(true)} activeOpacity={0.7}>
-                <Text style={[styles.selectFieldText, !neighborhood && styles.selectFieldPlaceholder]}>
-                  {neighborhood || 'pick a neighborhood'}
-                </Text>
-                <ChevronDown size={16} color={Colors.tertiary} />
-              </TouchableOpacity>
-              {/* Drop-in toggle */}
-              <TouchableOpacity style={styles.toggleRow} onPress={() => { hapticLight(); setDropIn((v) => !v); }} activeOpacity={0.7}>
-                <View style={styles.toggleTextWrap}>
-                  <Text style={styles.toggleTitle}>drop-in welcome</Text>
-                  <Text style={styles.toggleSub}>people can still join after it starts</Text>
-                </View>
-                <View style={[styles.switchTrack, dropIn && styles.switchTrackOn]}>
-                  <View style={[styles.switchThumb, dropIn && styles.switchThumbOn]} />
-                </View>
-              </TouchableOpacity>
-              {/* Allow duplicate toggle */}
-              <TouchableOpacity style={styles.toggleRow} onPress={() => { hapticLight(); setAllowDuplicate((v) => !v); }} activeOpacity={0.7}>
-                <View style={styles.toggleTextWrap}>
-                  <Text style={styles.toggleTitle}>let others copy this plan</Text>
-                  <Text style={styles.toggleSub}>when it fills, others can post their own</Text>
-                </View>
-                <View style={[styles.switchTrack, allowDuplicate && styles.switchTrackOn]}>
-                  <View style={[styles.switchThumb, allowDuplicate && styles.switchThumbOn]} />
-                </View>
-              </TouchableOpacity>
+          <TouchableOpacity style={styles.toggleRow} onPress={() => { hapticLight(); setAllowDuplicate((v) => !v); }} activeOpacity={0.7}>
+            <View style={styles.toggleTextWrap}>
+              <Text style={styles.toggleTitle}>let others copy this plan</Text>
+              <Text style={styles.toggleSub}>when it fills, others can post their own</Text>
             </View>
-          )}
+            <View style={[styles.switchTrack, allowDuplicate && styles.switchTrackOn]}>
+              <View style={[styles.switchThumb, allowDuplicate && styles.switchThumbOn]} />
+            </View>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -1200,10 +1218,13 @@ const styles = StyleSheet.create({
   smallPillText: { fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.secondary },
   smallPillTextOn: { color: Colors.terracotta },
 
-  // More options
-  moreToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  moreToggleText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.secondary },
-  moreBody: { marginTop: 14, gap: 4 },
+  // Optional extras (quiet secondary footer section; no collapsible)
+  secondarySection: { borderBottomWidth: 0, paddingTop: 16, paddingBottom: 28 },
+  secondaryHeader: {
+    fontFamily: Fonts.sansSemibold, fontSize: 12, letterSpacing: 1.2,
+    textTransform: 'uppercase', color: Colors.tertiary, marginBottom: 14,
+  },
+  mutedLabel: { fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.secondary, marginBottom: 8 },
   textField: {
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
     paddingHorizontal: 14, paddingVertical: 11, marginBottom: 14,

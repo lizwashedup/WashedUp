@@ -57,6 +57,7 @@ import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import LinkifiedText from '../../components/LinkifiedText';
 import { friendlyError } from '../../lib/friendlyError';
 import {
   acceptWaitlistException,
@@ -1547,7 +1548,7 @@ export default function PlanDetailScreen() {
 
         {/* D. Description */}
         {plan.description && (
-          <Text style={styles.description}>{plan.description}</Text>
+          <LinkifiedText text={plan.description} style={styles.description} />
         )}
 
         {/* F. Creator's Note */}

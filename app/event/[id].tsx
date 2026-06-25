@@ -17,6 +17,7 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess,
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight, MoreHorizontal } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import LinkifiedText from '../../components/LinkifiedText';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { useBlock } from '../../hooks/useBlock';
@@ -344,7 +345,7 @@ export default function EventDetailScreen() {
 
           {event.description && (
             <View style={styles.descriptionSection}>
-              <Text style={styles.descriptionText}>{event.description}</Text>
+              <LinkifiedText text={event.description} style={styles.descriptionText} />
             </View>
           )}
 
