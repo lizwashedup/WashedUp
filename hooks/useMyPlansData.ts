@@ -187,7 +187,9 @@ export function useInterestedPlans(userId: string | null | undefined) {
  * could only show saved plans that were ALSO in the current feed payload), this
  * fetches the saved events directly, so the Saved section is complete. The view
  * still filters the result by the live wishlist cache so optimistic un-save is
- * instant. Matches the feed's status window (forming/active/full).
+ * instant. Saved is a personal COLLECTION (not a discovery filter), so it
+ * includes completed saves too (rendered past-style), newest-first; cancelled
+ * events are excluded.
  */
 export function useSavedPlans(userId: string | null | undefined) {
   return useQuery<Plan[]>({
@@ -207,7 +209,8 @@ export function useSavedPlans(userId: string | null | undefined) {
         .from('events')
         .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug')
         .in('id', eventIds)
-        .in('status', ['forming', 'active', 'full']);
+        .in('status', ['forming', 'active', 'full', 'completed'])
+        .order('start_time', { ascending: false });
 
       const active = eventsData ?? [];
       if (active.length === 0) return [];
