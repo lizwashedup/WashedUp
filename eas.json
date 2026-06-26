@@ -9,7 +9,8 @@
       "distribution": "internal",
       "channel": "development",
       "env": {
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": "fc98cc7c-b325-4a45-b3d2-19527c280fca"
       }
     },
     "development-simulator": {
@@ -20,21 +21,24 @@
       },
       "channel": "development",
       "env": {
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": "fc98cc7c-b325-4a45-b3d2-19527c280fca"
       }
     },
     "preview": {
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": "fc98cc7c-b325-4a45-b3d2-19527c280fca"
       }
     },
     "production": {
       "channel": "production",
       "env": {
         "EXPO_PUBLIC_POSTHOG_API_KEY": "phc_CERHPC5vuHZmoZu7Q6JBwsEiuNqnavU8gf2tCfWye6fL",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw"
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": "fc98cc7c-b325-4a45-b3d2-19527c280fca"
       }
     }
   },

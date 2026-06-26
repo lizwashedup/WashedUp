@@ -10,6 +10,16 @@ import { supabase } from '../lib/supabase';
 // module (and the click listener in app/_layout.tsx) gates on this promise
 // so we never call into the native SDK before initWithContext has run on
 // Android.
+//
+// OneSignal App ID. Prefer the build-time env var (EAS Secret / .env), but fall
+// back to the known production App ID so a missing OR BLANK env var can NEVER
+// silently disable push again. (2026-06: an env-var drop shipped appId='' in
+// build 27 and every OTA after it, so OneSignal.initialize never ran -> ~0%
+// push registration fleet-wide for 9 days. This mirrors the URL/anon-key
+// fallback in lib/supabase.ts.) The App ID is a PUBLIC identifier (it ships in
+// the client and rides in every notification payload), not a secret.
+const DEFAULT_ONESIGNAL_APP_ID = 'fc98cc7c-b325-4a45-b3d2-19527c280fca';
+
 let readyPromise: Promise<boolean> | null = null;
 
 export function initOneSignal(): Promise<boolean> {
@@ -22,10 +32,19 @@ export function initOneSignal(): Promise<boolean> {
     return readyPromise;
   }
   if (readyPromise) return readyPromise;
-  const appId =
-    Constants.expoConfig?.extra?.oneSignalAppId ??
-    process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID ??
-    '';
+  // Use || (NOT ??) so a present-but-BLANK env var ('') also falls through to
+  // the hardcoded default. '' ?? DEFAULT returns '', which is the silent
+  // empty-appId failure this fallback exists to prevent.
+  const envAppId =
+    Constants.expoConfig?.extra?.oneSignalAppId ||
+    process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID ||
+    null;
+  const appId = envAppId || DEFAULT_ONESIGNAL_APP_ID;
+  if (!envAppId && __DEV__) {
+    console.warn(
+      '[PushNotifications] EXPO_PUBLIC_ONESIGNAL_APP_ID missing or blank; using hardcoded fallback App ID.',
+    );
+  }
   if (!appId) {
     readyPromise = Promise.resolve(false);
     return readyPromise;
