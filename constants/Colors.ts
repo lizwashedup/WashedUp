@@ -24,6 +24,7 @@ const brand = {
 
   // ── Semantic ─────────────────────────────────────────────────────────────
   successGreen: '#4CAF50',
+  goingConfirmedFill: 'rgba(197,165,90,0.28)', // gold #C5A55A @ 28%: confirmed "Going" affirmation fill (warm success, NOT green); mirrors surveyChipFill
   errorRed: '#E53935',
   errorBgLight: '#FEE2E2',
   cancelRed: '#DC2626',

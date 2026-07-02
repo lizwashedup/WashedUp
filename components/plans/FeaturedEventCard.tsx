@@ -288,7 +288,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
           onPress={handlePress}
           activeOpacity={0.85}
         >
-          <Text style={styles.ctaButtonText}>
+          <Text style={[styles.ctaButtonText, isMember && styles.ctaButtonJoinedText]}>
             {isMember ? "Going \u2713" : "Let's Go \u2192"}
           </Text>
         </TouchableOpacity>
@@ -450,13 +450,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'transparent', // keeps geometry stable vs. the joined state's gold border
   },
   ctaButtonJoined: {
-    backgroundColor: Colors.successGreen,
+    backgroundColor: Colors.goingConfirmedFill, // gold affirmation: confirmed "Going" (warm success, NOT green)
+    borderColor: Colors.gold, // crisper #C5A55A hairline; goldAccent was too pale against the 28% fill
   },
   ctaButtonText: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodySM,
     color: Colors.white,
+  },
+  ctaButtonJoinedText: {
+    color: Colors.brandDeep, // deep-brand label reads warm on the light gold fill (no gold text)
   },
 });

@@ -4,7 +4,7 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess,
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useNavigation } from 'expo-router';
-import { ChevronDown, LayoutList, Map } from 'lucide-react-native';
+import { Calendar, ChevronDown, LayoutList, Map } from 'lucide-react-native';
 import React, { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -1168,6 +1168,7 @@ export default function PlansScreen() {
               setWhenSheetOpen(true);
             }}
           >
+            <Calendar size={14} color={whenActive ? '#FFFFFF' : '#78695C'} strokeWidth={2} />
             <Text style={[styles.filterPillText, whenActive && styles.filterPillTextActive]} numberOfLines={1}>
               {whenLabel}
             </Text>
