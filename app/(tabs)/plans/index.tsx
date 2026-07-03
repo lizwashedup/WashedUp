@@ -1642,7 +1642,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   featuredHeaderText: {
-    fontFamily: 'Cochin',
+    fontFamily: Fonts.display,
     fontSize: 16,
     color: Colors.asphalt,
   },
@@ -1659,7 +1659,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   clusterHeaderText: {
-    fontFamily: 'DMSans_700Bold',
+    fontFamily: Fonts.sansBold,
     fontSize: 11,
     color: TC,
     textTransform: 'uppercase',
@@ -1679,7 +1679,7 @@ const styles = StyleSheet.create({
     width: Math.min(300, Dimensions.get('window').width - 60),
   },
   sectionHeader: {
-    fontFamily: 'DMSans_700Bold',
+    fontFamily: Fonts.sansBold,
     fontSize: 11,
     color: TC,
     textTransform: 'uppercase',

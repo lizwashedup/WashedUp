@@ -19,7 +19,7 @@ import { supabase } from '../../../lib/supabase';
 import { hapticLight, hapticSuccess } from '../../../lib/haptics';
 import ProfileButton from '../../../components/ProfileButton';
 import Colors from '../../../constants/Colors';
-import { FontSizes } from '../../../constants/Typography';
+import { Fonts, FontSizes } from '../../../constants/Typography';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -312,9 +312,8 @@ const styles = StyleSheet.create({
 
   // ── Copy ──
   headline: {
-    fontFamily: 'Cochin',
+    fontFamily: Fonts.displayBold, // weight lives in the face; a fontWeight override would faux-bold on Android
     fontSize: 30,
-    fontWeight: '700',
     color: Colors.darkWarm,
     textAlign: 'center',
     marginTop: 20,

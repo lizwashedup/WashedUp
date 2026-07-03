@@ -293,7 +293,7 @@ export default function ChatsScreen() {
           <Image source={wLogo} style={styles.emptyLogo} contentFit="contain" />
           <Text style={styles.emptyTitle}>Join a plan to start chatting</Text>
           <Text style={styles.emptySubtitle}>
-            A group chat opens once 2 people are going.
+            The chat opens once 2 people are going.
           </Text>
           <TouchableOpacity
             style={styles.emptyButton}

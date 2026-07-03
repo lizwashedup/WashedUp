@@ -64,7 +64,7 @@ export function SaveSnackbar({ visible, planId, planTitle, onShare, onDismiss }:
       <View style={styles.left}>
         <Ionicons name="bookmark" size={14} color={Colors.terracotta} />
         <Text style={styles.savedText}>Saved!</Text>
-        <Text style={styles.promptText}> · Share with a friend?</Text>
+        <Text style={styles.promptText}> · Share it with someone?</Text>
       </View>
       <TouchableOpacity
         style={styles.shareBtn}
