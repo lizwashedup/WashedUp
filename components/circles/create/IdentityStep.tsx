@@ -1,8 +1,9 @@
 /**
- * IdentityStep - the Name step of the create-circle flow: a live serif monogram
- * preview (or the picked cover), name (required), optional description, and an
- * optional "Add a cover photo" affordance. The cover is skippable and never
- * blocks Next; it uploads after the circle exists (useCreateCircle).
+ * IdentityStep - the Name step of the create-circle flow: name (required) and
+ * optional description lead; the optional cover affordance sits below, with a
+ * preview only once a photo is actually picked (no empty ghost tile). The
+ * cover is skippable and never blocks Next; it uploads after the circle
+ * exists (useCreateCircle).
  */
 import React, { useState } from 'react';
 import { ScrollView, View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
@@ -35,30 +36,6 @@ export default function IdentityStep({
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <View style={styles.coverWrap}>
-        <CircleCover
-          name={name}
-          coverUrl={coverPreviewUri}
-          size={CIRCLE_CREATE.coverPreview}
-          radius={CIRCLE_CREATE.coverPreviewRadius}
-          monogramSize={CIRCLE_CREATE.coverMonogram}
-        />
-        <Pressable
-          onPress={onPickCover}
-          onPressIn={() => setCoverPressed(true)}
-          onPressOut={() => setCoverPressed(false)}
-          android_ripple={{ color: Colors.border }}
-          style={[styles.coverBtn, coverPressed && styles.coverBtnPressed]}
-          accessibilityRole="button"
-          accessibilityLabel={coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
-        >
-          <ImagePlus size={16} color={Colors.terracotta} strokeWidth={1.75} />
-          <Text style={styles.coverBtnText}>
-            {coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
-          </Text>
-        </Pressable>
-        {!coverPreviewUri && <Text style={styles.coverSub}>{COPY.circleCoverSub}</Text>}
-      </View>
       <Text style={styles.title}>{COPY.circleStep1Title}</Text>
       <TextInput
         style={styles.field}
@@ -79,18 +56,43 @@ export default function IdentityStep({
         multiline
         maxLength={140}
       />
+      <View style={styles.coverWrap}>
+        {!!coverPreviewUri && (
+          <CircleCover
+            name={name}
+            coverUrl={coverPreviewUri}
+            size={CIRCLE_CREATE.coverPreview}
+            radius={CIRCLE_CREATE.coverPreviewRadius}
+            monogramSize={CIRCLE_CREATE.coverMonogram}
+          />
+        )}
+        <Pressable
+          onPress={onPickCover}
+          onPressIn={() => setCoverPressed(true)}
+          onPressOut={() => setCoverPressed(false)}
+          android_ripple={{ color: Colors.border }}
+          style={[styles.coverBtn, coverPressed && styles.coverBtnPressed]}
+          accessibilityRole="button"
+          accessibilityLabel={coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
+        >
+          <ImagePlus size={16} color={Colors.terracotta} strokeWidth={1.75} />
+          <Text style={styles.coverBtnText}>
+            {coverPreviewUri ? COPY.circleCoverChange : COPY.circleCoverAdd}
+          </Text>
+        </Pressable>
+        {!coverPreviewUri && <Text style={styles.coverSub}>{COPY.circleCoverSub}</Text>}
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { padding: 20, alignItems: 'stretch' },
-  coverWrap: { alignItems: 'center', marginBottom: 20 },
+  coverWrap: { alignItems: 'center', marginTop: 16, gap: 12 },
   coverBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 12,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 999,
@@ -104,7 +106,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.tertiary,
     textAlign: 'center',
-    marginTop: 8,
     maxWidth: 260,
   },
   title: {

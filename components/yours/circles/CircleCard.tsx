@@ -1,14 +1,16 @@
 /**
  * CircleCard - one circle in the Yours > Circles directory, as a rich card.
  *
- * A white rounded card (not a thin row): a leading gold monogram square (a cover
- * photo drops in once cover_upload_id resolves, next chunk), the name in serif
- * italic, a "{N} people" meta line, and an overlapping member-avatar row.
+ * A white rounded card (not a thin row): a leading identity tile, the name in
+ * serif italic, a "{N} people, active 2h ago" meta line, and an overlapping
+ * member-avatar row.
  *
- * Graceful degrade: get_my_circles carries no plans-together count, upcoming
- * plan, or cover URL yet, so the "plans together" meta and the contextual chip
- * (terracotta upcoming-plan pill / gold "it's been a minute" nudge) are omitted
- * this chunk and fill in once circle-plans data exists.
+ * The identity tile follows the same ladder as the circle home: a manual cover
+ * wins; with none, the living cover is a tight mosaic of the circle's newest
+ * shared plan-album photos (get_circle().recent_together, signed); with
+ * neither, the serif monogram tile. The get_circle fetch is skipped entirely
+ * for circles that already have a manual cover, and its payload pre-warms the
+ * circle home (same React Query key).
  */
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
@@ -19,7 +21,11 @@ import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 import type { MyCircle, MemberPreview } from '../../../lib/circles/types';
 import { buildCircleCoverUrl } from '../../../lib/circles/coverUrl';
+import { relativeActivity } from '../../../lib/circles/relativeActivity';
+import { useCircle } from '../../../hooks/useCircle';
+import { useSignedAlbumUrls } from '../../../hooks/useSignedAlbumUrls';
 import CircleCover from './CircleCover';
+import CircleLivingMosaic from './CircleLivingMosaic';
 import CircleMemberStack from './CircleMemberStack';
 
 export default function CircleCard({
@@ -33,6 +39,22 @@ export default function CircleCard({
 }) {
   const title =
     (circle.name ?? '').trim() || circle.display_name || COPY.circleUnnamed;
+
+  // Identity ladder: manual cover > living mosaic > monogram. The detail fetch
+  // only runs for circles WITHOUT a manual cover (useCircle disables on null).
+  const manualCoverUrl = buildCircleCoverUrl(circle.id, circle.cover_upload_id);
+  const { data: detail } = useCircle(manualCoverUrl ? null : circle.id);
+  const recentPaths = (detail?.recent_together ?? [])
+    .slice(0, 4)
+    .map((p) => p.media_path);
+  const { data: signed = {} } = useSignedAlbumUrls(recentPaths);
+  const mosaicUris = recentPaths
+    .map((p) => signed[p])
+    .filter((u): u is string => !!u);
+
+  // Warm last-activity clause; falls to the quiet line when nothing recent.
+  const rel = relativeActivity(circle.last_message_at);
+  const activity = rel ? COPY.circleActive(rel) : COPY.circleQuiet;
 
   return (
     <Pressable
@@ -49,20 +71,28 @@ export default function CircleCard({
         // Pressable does not paint its background as a child cell here.
         <View style={[styles.card, pressed && styles.pressed]}>
           <View style={styles.top}>
-            <CircleCover
-              name={title}
-              coverUrl={buildCircleCoverUrl(circle.id, circle.cover_upload_id)}
-              tone="gold"
-              size={CIRCLE_DIR.cover}
-              radius={CIRCLE_DIR.coverRadius}
-              monogramSize={CIRCLE_DIR.monogram}
-            />
+            {!manualCoverUrl && mosaicUris.length > 0 ? (
+              <CircleLivingMosaic
+                uris={mosaicUris}
+                size={CIRCLE_DIR.cover}
+                radius={CIRCLE_DIR.coverRadius}
+              />
+            ) : (
+              <CircleCover
+                name={title}
+                coverUrl={manualCoverUrl}
+                tone="gold"
+                size={CIRCLE_DIR.cover}
+                radius={CIRCLE_DIR.coverRadius}
+                monogramSize={CIRCLE_DIR.monogram}
+              />
+            )}
             <View style={styles.textCol}>
               <Text style={styles.name} numberOfLines={1}>
                 {title}
               </Text>
               <Text style={styles.meta} numberOfLines={1}>
-                {COPY.circleMembers(circle.member_count)}
+                {COPY.circleMembers(circle.member_count)} · {activity}
               </Text>
             </View>
           </View>

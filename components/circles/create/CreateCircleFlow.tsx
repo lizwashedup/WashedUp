@@ -156,6 +156,13 @@ export default function CreateCircleFlow() {
 
   const primaryLabel = step < TOTAL_STEPS ? COPY.circleCreateNext : COPY.circleCreateMake;
 
+  // The header grows with the pick: "(N)" is the circle size counting you, so
+  // it appears once the first person is in and matches "three or more".
+  const headerTitle =
+    selected.size > 0
+      ? COPY.circleCreateBuildTitleN(selected.size + 1)
+      : COPY.circleCreateBuildTitle;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -166,7 +173,7 @@ export default function CreateCircleFlow() {
             <X size={24} color={Colors.asphalt} />
           )}
         </Pressable>
-        <Text style={styles.headerTitle}>{COPY.circleCreateTitle}</Text>
+        <Text style={styles.headerTitle}>{headerTitle}</Text>
         <View style={styles.dots}>
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
             <View key={i} style={[styles.dot, i + 1 === step && styles.dotOn]} />
@@ -202,6 +209,7 @@ export default function CreateCircleFlow() {
           )}
           {step === 3 && (
             <PermissionsStep
+              circleName={name.trim()}
               policy={policy}
               onPolicy={setPolicy}
               selectedPeople={selectedPeople}

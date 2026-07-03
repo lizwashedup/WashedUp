@@ -77,11 +77,12 @@ function SectionLabel({ children }: { children: string }) {
 }
 
 function ActionButton({
-  icon: Icon, label, primary, onPress,
+  icon: Icon, label, primary, grow, onPress,
 }: {
   icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
   label: string;
   primary?: boolean;
+  grow?: boolean;
   onPress?: () => void;
 }) {
   const [pressed, setPressed] = useState(false);
@@ -91,11 +92,20 @@ function ActionButton({
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
       android_ripple={{ color: Colors.border }}
-      style={[styles.actionBtn, primary && styles.actionPrimary, pressed && styles.actionBtnPressed]}
+      style={[
+        styles.actionBtn,
+        grow && styles.actionGrow,
+        primary && styles.actionPrimary,
+        pressed && styles.actionBtnPressed,
+      ]}
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Icon size={18} color={primary ? Colors.white : Colors.terracotta} strokeWidth={1.75} />
+      <Icon
+        size={primary ? 20 : 18}
+        color={primary ? Colors.white : Colors.terracotta}
+        strokeWidth={1.75}
+      />
       <Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text>
     </Pressable>
   );
@@ -177,11 +187,14 @@ export default function CircleNoticeboard({
         )}
       </View>
 
-      {/* Action row: the only way to make a plan / open chat / invite from here. */}
-      <View style={styles.actionRow}>
+      {/* Action area: "post a plan" is the circle's one dominant CTA (full-width
+          terracotta); chat + invite ride below as a lighter secondary pair. */}
+      <View style={styles.actionCol}>
         <ActionButton icon={CalendarPlus} label={COPY.circleActionPost} primary onPress={onPostPlan} />
-        <ActionButton icon={MessageCircle} label={COPY.circleActionChat} onPress={onOpenChat} />
-        <ActionButton icon={UserPlus} label={COPY.circleActionInvite} onPress={onAddPeople} />
+        <View style={styles.actionRowSecondary}>
+          <ActionButton icon={MessageCircle} label={COPY.circleActionChat} grow onPress={onOpenChat} />
+          <ActionButton icon={UserPlus} label={COPY.circleActionInvite} grow onPress={onAddPeople} />
+        </View>
       </View>
 
       {/* Members */}
@@ -324,14 +337,16 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
   },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
+  actionCol: {
+    gap: 10,
     paddingHorizontal: CIRCLE_HOME.sectionPadH,
     marginBottom: CIRCLE_HOME.sectionGapV,
   },
+  actionRowSecondary: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   actionBtn: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -342,10 +357,20 @@ const styles = StyleSheet.create({
     borderColor: Colors.terracotta,
     backgroundColor: Colors.cardBg,
   },
-  actionPrimary: { backgroundColor: Colors.terracotta },
+  actionGrow: { flex: 1 },
+  actionPrimary: {
+    backgroundColor: Colors.terracotta,
+    borderColor: Colors.terracotta,
+    paddingVertical: 14,
+    shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
+  },
   actionBtnPressed: { opacity: 0.7 },
   actionText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  actionPrimaryText: { color: Colors.white },
+  actionPrimaryText: { color: Colors.white, fontSize: FontSizes.bodyMD },
   section: { marginBottom: CIRCLE_HOME.sectionGapV },
   sectionLabel: {
     fontFamily: Fonts.sansBold,

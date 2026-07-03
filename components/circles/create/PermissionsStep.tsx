@@ -11,7 +11,7 @@ import { Image } from 'expo-image';
 import { Check } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
-import { CIRCLE_CREATE } from '../../../constants/YoursDesign';
+import { CIRCLE_CREATE, TYPE } from '../../../constants/YoursDesign';
 import { COPY } from '../../yours/state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 import type { CircleInvitePolicy } from '../../../lib/circles/types';
@@ -28,12 +28,14 @@ function nameOf(p: YoursGridPerson): string {
 }
 
 export default function PermissionsStep({
+  circleName,
   policy,
   onPolicy,
   selectedPeople,
   adminIds,
   onToggleAdmin,
 }: {
+  circleName?: string;
   policy: CircleInvitePolicy;
   onPolicy: (p: CircleInvitePolicy) => void;
   selectedPeople: YoursGridPerson[];
@@ -42,6 +44,13 @@ export default function PermissionsStep({
 }) {
   return (
     <ScrollView contentContainerStyle={styles.wrap} showsVerticalScrollIndicator={false}>
+      {/* The circle you just built, as a warm summary above the last choice. */}
+      {!!circleName && (
+        <View style={styles.summary}>
+          <Text style={styles.summaryName} numberOfLines={2}>{circleName}</Text>
+          <Text style={styles.summarySub}>{COPY.circleStep3Summary(selectedPeople.length)}</Text>
+        </View>
+      )}
       <Text style={styles.title}>{COPY.circleStep3Title}</Text>
 
       {OPTIONS.map((opt) => {
@@ -110,6 +119,18 @@ export default function PermissionsStep({
 
 const styles = StyleSheet.create({
   wrap: { padding: 20 },
+  summary: { alignItems: 'center', marginBottom: 24 },
+  summaryName: {
+    ...TYPE.heroDisplay,
+    color: Colors.darkWarm,
+    textAlign: 'center',
+  },
+  summarySub: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    marginTop: 6,
+  },
   title: {
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displaySM,

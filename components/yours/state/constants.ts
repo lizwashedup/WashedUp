@@ -194,6 +194,8 @@ export const COPY = {
   circleUnnamed: 'New circle',
   // Shown in place of a last-activity time when a circle has no messages yet.
   circleQuiet: 'Quietly kept',
+  // Relative last-activity clause on a directory card, e.g. "active 2h ago".
+  circleActive: (rel: string) => `active ${rel}`,
   // The first-class "make a circle" entry point (also lives on Chats).
   circleMakeCta: 'Make a circle',
   circleMakeSub: 'Gather a few of your people',
@@ -302,8 +304,13 @@ export const COPY = {
 
   // ── Create-circle flow (3 steps) ────────────────────────────────────────
   circleCreateTitle: 'New circle',
+  // Header grows with the pick: "Build your circle (4)" = you + 3 picked.
+  circleCreateBuildTitle: 'Build your circle',
+  circleCreateBuildTitleN: (n: number) => `Build your circle (${n})`,
   circleCreateNext: 'Next',
   circleCreateMake: 'Make the circle',
+  // Step 3 summary line above the admin options: the circle you just built.
+  circleStep3Summary: (n: number) => (n === 1 ? 'You and 1 other.' : `You and ${n} others.`),
   // Step 1, identity.
   circleStep1Title: 'Name your circle',
   circleNamePlaceholder: 'Circle name',
