@@ -35,6 +35,7 @@ import Colors from '../../constants/Colors';
 import { SkeletonProfile } from '../../components/SkeletonCard';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
+import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
 import { lastUnauthRedirectAt } from '../../lib/navState';
@@ -945,6 +946,25 @@ export default function ProfileScreen() {
           {supportRows.map((row, i) => renderSettingsRow(row, i === supportRows.length - 1))}
         </View>
 
+        {/* Creators (Communities & Events, flag-gated) */}
+        {COMMUNITIES_ENABLED && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Creators</Text>
+            </View>
+            <View style={styles.settingsGroup}>
+              <TouchableOpacity
+                style={styles.settingsRow}
+                onPress={() => router.push('/creator/apply')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.settingsLabel}>Run things on washedup</Text>
+                <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
         {/* Admin */}
         {isAdmin(profile?.id ?? null) && (
           <>
@@ -958,6 +978,14 @@ export default function ProfileScreen() {
                 activeOpacity={0.7}
               >
                 <Text style={styles.settingsLabel}>Manage Scene Events</Text>
+                <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.settingsRow}
+                onPress={() => router.push('/admin/applications')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.settingsLabel}>Creator Applications</Text>
                 <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
               </TouchableOpacity>
             </View>
