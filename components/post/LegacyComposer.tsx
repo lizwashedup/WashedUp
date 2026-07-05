@@ -61,9 +61,9 @@ import { Toast } from '@/components/Toast';
 import WashedUpCalendar, { type CalendarDay } from '@/components/calendar/WashedUpCalendar';
 import { MONTHS } from '@/lib/laDate';
 
-// Google Maps key comes from the EAS secret exposed as EXPO_PUBLIC_GOOGLE_MAPS_API_KEY.
-// No hardcoded fallback: the var must be present at build time (source of truth).
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
+// Google Maps key: shared env-first module with fallback (an OTA published
+// without the EXPO_PUBLIC_ var once shipped an empty key and broke place search).
+import { GOOGLE_MAPS_API_KEY } from '@/lib/googleMapsKey';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

@@ -25,7 +25,7 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { hapticLight } from '../../../lib/haptics';
 import { addRecentPlace, loadRecentPlaces, relativeUsed, type RecentPlace } from './recentPlaces';
 
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
+import { GOOGLE_MAPS_API_KEY } from '../../../lib/googleMapsKey';
 
 export interface PlaceValue {
   name: string;

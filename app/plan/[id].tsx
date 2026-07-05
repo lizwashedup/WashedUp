@@ -75,12 +75,8 @@ let showLocation: typeof import('react-native-map-link').showLocation | null = n
 try { showLocation = require('react-native-map-link').showLocation; } catch {}
 import { MapView, Marker } from '../../components/MapView';
 
-// Prefer the EXPO_PUBLIC_ var (available at runtime in all Expo builds).
-// Falls back to the hard-coded key so autocomplete works in preview/CI builds
-// where only the EAS Secret GOOGLE_MAPS_API_KEY was set (server-side only).
-const GOOGLE_MAPS_API_KEY =
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-  'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';
+// Google Maps key: shared env-first module with fallback (single source).
+import { GOOGLE_MAPS_API_KEY } from '../../lib/googleMapsKey';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_WIDTH * (9 / 16);
