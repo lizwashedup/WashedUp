@@ -954,6 +954,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="album/upload/[eventId]" options={{ headerShown: false, gestureEnabled: true, fullScreenGestureEnabled: true }} />
         <Stack.Screen name="admin/events" options={{ headerShown: false }} />
         <Stack.Screen name="admin/applications" options={{ headerShown: false }} />
+        <Stack.Screen name="(creator)" options={{ headerShown: false }} />
         <Stack.Screen name="creator/apply" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/apply-events" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/apply-community" options={{ headerShown: false, gestureEnabled: true }} />

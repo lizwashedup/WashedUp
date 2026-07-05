@@ -36,6 +36,7 @@ import { SkeletonProfile } from '../../components/SkeletonCard';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import { getCreatorAccess, hasCreatorAccess } from '../../lib/creatorMode';
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
 import { lastUnauthRedirectAt } from '../../lib/navState';
@@ -66,6 +67,15 @@ export default function ProfileScreen() {
   const queryClient = useQueryClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  // creator mode entry: true when the user leads a community or holds an
+  // approved operator grant (checked server-side too; this only shows the row)
+  const [creatorAccess, setCreatorAccess] = useState(false);
+  useEffect(() => {
+    if (!COMMUNITIES_ENABLED) return;
+    getCreatorAccess()
+      .then((a) => setCreatorAccess(hasCreatorAccess(a)))
+      .catch(() => setCreatorAccess(false));
+  }, []);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [showDeleteFlow, setShowDeleteFlow] = useState(false);
   const [deleteStep, setDeleteStep] = useState(1);
@@ -953,6 +963,19 @@ export default function ProfileScreen() {
               <Text style={styles.sectionTitle}>Creators</Text>
             </View>
             <View style={styles.settingsGroup}>
+              {creatorAccess && (
+                <TouchableOpacity
+                  style={styles.settingsRow}
+                  onPress={() => router.replace('/(creator)/today')}
+                  activeOpacity={0.7}
+                >
+                  {/* exact switch copy is Liz's call (doc 00 open question); generic Airbnb-style draft */}
+                  <Text style={[styles.settingsLabel, { color: Colors.terracotta, fontFamily: Fonts.sansBold }]}>
+                    switch to your community & events
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.terracotta} />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={styles.settingsRow}
                 onPress={() => router.push('/creator/apply')}
