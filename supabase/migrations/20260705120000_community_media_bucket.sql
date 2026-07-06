@@ -13,8 +13,17 @@
 
 begin;
 
-insert into storage.buckets (id, name, public)
-values ('community-media', 'community-media', true)
+-- Cowork review 2026-07-06: images only (videos later as a deliberate
+-- decision), 10MB cap per file. Uploader sends jpeg today; png and webp
+-- allowed for headroom.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'community-media',
+  'community-media',
+  true,
+  10485760, -- 10MB
+  array['image/jpeg', 'image/png', 'image/webp']
+)
 on conflict (id) do nothing;
 
 -- public read (bucket is public; the select policy keeps the API path open)
@@ -48,11 +57,21 @@ using (
 do $$
 declare
   v_bucket_public boolean;
+  v_size_limit bigint;
+  v_mime_types text[];
   v_policy_count integer;
 begin
-  select public into v_bucket_public from storage.buckets where id = 'community-media';
+  select public, file_size_limit, allowed_mime_types
+    into v_bucket_public, v_size_limit, v_mime_types
+    from storage.buckets where id = 'community-media';
   if v_bucket_public is distinct from true then
     raise exception 'SELF-TEST FAIL: community-media bucket missing or not public';
+  end if;
+  if v_size_limit is distinct from 10485760 then
+    raise exception 'SELF-TEST FAIL: community-media file_size_limit is %, expected 10485760', v_size_limit;
+  end if;
+  if v_mime_types is distinct from array['image/jpeg', 'image/png', 'image/webp'] then
+    raise exception 'SELF-TEST FAIL: community-media allowed_mime_types is %, expected images only', v_mime_types;
   end if;
 
   select count(*) into v_policy_count
