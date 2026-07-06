@@ -28,8 +28,13 @@ if [ -z "$message" ]; then
   exit 2
 fi
 
-# Hard gate — aborts on wrong branch, dirty tree, or forbidden native imports.
+# Hard gate — aborts on wrong branch, dirty tree, forbidden native imports,
+# or empty EXPO_PUBLIC_ keys in .env.local.
 bash "$(dirname "$0")/ota-guard.sh"
+
+# Load the pinned env HERE, not from the interactive shell, so EXPO_PUBLIC_
+# values always reach the export step (they bake into the bundle).
+set -a; . ./.env.local; set +a
 
 echo ""
 echo "Publishing production OTA → platform=$platform"

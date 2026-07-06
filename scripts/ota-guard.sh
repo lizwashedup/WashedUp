@@ -59,4 +59,29 @@ if git grep -nE "$FORBIDDEN" -- app components hooks lib >/dev/null 2>&1; then
   fail "source imports native modules not in the 1.0.4 binary. These require a new EAS build."
 fi
 
-echo "✅ OTA guard passed — on main, clean tree, commit $(git rev-parse --short HEAD), no forbidden native imports."
+# 4. Every EXPO_PUBLIC_ var pinned in .env.local must be non-empty once loaded.
+#    EXPO_PUBLIC_ values are inlined into the JS bundle at export time, so a
+#    publish from a shell missing one ships it as empty string. That exact miss
+#    (the 2026-06-30 splash OTA, EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) killed
+#    composer place search in prod for four days. .env.local is the machine's
+#    pin list: if a key is declared there, an empty value is always a mistake.
+if [ ! -f .env.local ]; then
+  fail ".env.local is missing — EXPO_PUBLIC_ values would bake into the bundle as empty strings."
+fi
+set -a; . ./.env.local; set +a
+while IFS= read -r var; do
+  if [ -z "${!var:-}" ]; then
+    fail "$var is declared in .env.local but empty — it would ship baked-in as ''."
+  fi
+done < <(grep -oE '^EXPO_PUBLIC_[A-Z0-9_]+' .env.local)
+
+# Warn (don't block) on source-referenced EXPO_PUBLIC_ vars not set anywhere —
+# these have shipped unset in every bundle to date; add them to .env.local to
+# promote them to hard-gated.
+for var in $(grep -rhoE 'EXPO_PUBLIC_[A-Z0-9_]+' app components hooks lib constants 2>/dev/null | sort -u); do
+  if [ -z "${!var:-}" ]; then
+    echo "⚠️  $var is referenced in source but unset — it will bake into the bundle as empty." >&2
+  fi
+done
+
+echo "✅ OTA guard passed — on main, clean tree, commit $(git rev-parse --short HEAD), no forbidden native imports, .env.local keys all non-empty."
