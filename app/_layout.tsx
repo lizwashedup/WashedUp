@@ -958,6 +958,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="creator/apply" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/apply-events" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/apply-community" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="creator/edit-page" options={{ headerShown: false, gestureEnabled: true }} />
       </Stack>
       {!authResolved && (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.parchment }}>

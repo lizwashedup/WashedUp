@@ -19,7 +19,9 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -29,6 +31,7 @@ import { hapticSuccess } from '../../lib/haptics';
 import { getCreatorAccess, getBroadcasts, sendBroadcast } from '../../lib/creatorMode';
 
 export default function CreatorCommunityScreen() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -110,12 +113,15 @@ export default function CreatorCommunityScreen() {
           )}
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>your page</Text>
-          <View style={styles.placeholderCard}>
-            <Text style={styles.placeholderText}>
-              the page editor lands here: your cover, your colors, your blocks.
-              it is the next big build after the logic settles.
-            </Text>
-          </View>
+          <TouchableOpacity style={styles.editPageCard} onPress={() => router.push('/creator/edit-page')}>
+            <View style={styles.editPageTextWrap}>
+              <Text style={styles.editPageTitle}>edit your page</Text>
+              <Text style={styles.editPageHint}>
+                your cover, your about, your blocks. what members and visitors see.
+              </Text>
+            </View>
+            <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -181,13 +187,18 @@ const styles = StyleSheet.create({
   },
   broadcastBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   broadcastMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 6 },
-  placeholderCard: {
+  editPageCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.cardBg,
     borderRadius: 16,
     borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: Colors.borderWarm,
-    padding: 16,
+    borderColor: Colors.border,
+    padding: 14,
     marginBottom: 40,
+    gap: 10,
   },
-  placeholderText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, lineHeight: LineHeights.bodySM },
+  editPageTextWrap: { flex: 1, gap: 2 },
+  editPageTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  editPageHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
 });
