@@ -1,9 +1,10 @@
 /**
  * Yours page — typed data layer.
  *
- * Shapes mirror the RPC return columns in supabase/migrations/20260517*
- * exactly (PostgREST returns snake_case). Built against the agreed schema;
- * the backing migrations are review-only and not yet applied.
+ * Shapes mirror the RPC return columns exactly (PostgREST returns snake_case).
+ * The WS-3 trust-signal extension (get_person_profile) and the get_yours_grid
+ * upcoming_neighborhood column are applied to prod (migrations
+ * 20260629000100 / 20260629000200).
  */
 
 export type RingBucket = 'full' | '75' | '50' | '25' | 'none';
@@ -34,6 +35,8 @@ export interface YoursGridPerson {
   upcoming_event_id: string | null;
   upcoming_title: string | null;
   upcoming_start: string | null;
+  /** Neighborhood-level place of the next plan, for the list's "in {hood}" line. */
+  upcoming_neighborhood: string | null;
   connected_at: string;
 }
 
@@ -100,16 +103,38 @@ export interface PersonProfilePast {
   date: string;
 }
 
+/** A mutual connection's face on the profile (you both know N). */
+export interface PersonProfileMutualFace {
+  user_id: string;
+  first_name_display: string | null;
+  profile_photo_url: string | null;
+}
+
 /**
  * get_person_profile payload (the individual profile page, "just {name}").
  * The RPC returns a single jsonb object, or NULL for a non-mutual / blocked
  * viewer (the page's not-found state). No albums (those are keep-page only).
+ * Trust signals (mutuals, joined_at, plans_created, phone_verified, is_new) are
+ * honest, viewer-visible facts; the RPC enforces the mutual gate + just-us
+ * exclusion server-side (migration 20260629000100).
  */
 export interface PersonProfile {
   user_id: string;
   first_name_display: string | null;
   profile_photo_url: string | null;
   handle: string | null;
+  // Identity / completeness
+  bio: string | null;
+  vibe_tags: string[];
+  neighborhood: string | null;
+  // Trust signals
+  phone_verified: boolean;
+  joined_at: string;
+  plans_created: number;
+  mutual_count: number;
+  mutual_faces: PersonProfileMutualFace[];
+  is_new: boolean;
+  // Plan life
   upcoming: PersonProfileUpcoming[];
   upcoming_count: number;
   past: PersonProfilePast[];

@@ -44,7 +44,7 @@ export function assertRpcShape<T>(
 export const YOURS_GRID_KEYS = [
   'user_id', 'first_name_display', 'profile_photo_url', 'handle',
   'ring_bucket', 'shared_count', 'milestone', 'upcoming_event_id',
-  'upcoming_title', 'upcoming_start', 'connected_at',
+  'upcoming_title', 'upcoming_start', 'upcoming_neighborhood', 'connected_at',
 ] as const;
 
 export const BACKLOG_KEYS = [
