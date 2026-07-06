@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { yoursKeys } from '../lib/yours/keys';
 
 /**
  * Apple Guideline 1.2: Blocking must (1) notify the developer of inappropriate content,
@@ -72,6 +73,19 @@ export function useBlock() {
               queryClient.invalidateQueries({ queryKey: ['explore-wishlists'] });
               queryClient.invalidateQueries({ queryKey: ['wishlists'] });
               queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
+
+              // Yours surfaces: sever the blocked person from the grid + their
+              // profile/keep caches so access dies on the next read (the block
+              // RPC also re-gates server-side; this clears the local cache).
+              queryClient.invalidateQueries({ queryKey: yoursKeys.grid(user.id) });
+              queryClient.invalidateQueries({ queryKey: yoursKeys.backlog(user.id) });
+              queryClient.invalidateQueries({ queryKey: yoursKeys.requests(user.id) });
+              queryClient.invalidateQueries({
+                queryKey: yoursKeys.profileCard(user.id, blockedId),
+              });
+              queryClient.invalidateQueries({
+                queryKey: yoursKeys.personProfile(user.id, blockedId),
+              });
 
               onSuccess?.();
               setTimeout(() => {

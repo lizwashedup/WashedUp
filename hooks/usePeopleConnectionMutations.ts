@@ -37,6 +37,11 @@ export function usePeopleConnectionMutations(
     qc.invalidateQueries({ queryKey: yoursKeys.backlog(userId) });
     qc.invalidateQueries({ queryKey: yoursKeys.requests(userId) });
     qc.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+    // Sever the per-person surfaces too (remove/decline must drop access to the
+    // profile + keep page). Prefix-match every target so one write covers the
+    // person it acted on without threading the id through here.
+    qc.invalidateQueries({ queryKey: ['yours', 'profile-card'] });
+    qc.invalidateQueries({ queryKey: ['yours', 'person-profile'] });
   };
 
   const sendRequest = useMutation({
