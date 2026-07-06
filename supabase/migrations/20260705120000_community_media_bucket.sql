@@ -3,10 +3,9 @@
 -- carousel, gallery, header logo). Mirrors the circle-covers pattern exactly:
 -- public read, writes folder-scoped to the community id in the object path,
 -- gated by is_community_leader (leaders and co-leaders only, probe-guarded).
--- HELD: committed on feature/communities, NOT applied; proposed for Cowork
--- review, rides the next migration batch with the join-flow riders. Until it
--- applies, the RN block editor's photo upload fails with a friendly error and
--- every non-image editor path still works.
+-- APPLIED to prod 2026-07-06 with the join-flow batch (Cowork approved with
+-- the 10MB + images-only caps; self-tests passed on apply). Block editor
+-- photo upload is live from this point.
 -- Additive only: new bucket, new storage.objects policies, nothing existing
 -- touched.
 -- ============================================================================

@@ -4,8 +4,8 @@
 -- but community_members RLS is member-scoped, so anon cannot count. This
 -- security-definer aggregate answers ONLY a count, ONLY for active
 -- communities (no probing draft or archived sizes), no identities.
--- HELD: committed on feature/communities, NOT applied; rides the phase 3
--- batch. Web renders without the count until then (graceful fallback).
+-- APPLIED to prod 2026-07-06 with the join-flow batch (Cowork approved
+-- as-is; self-tests passed on apply).
 -- ============================================================================
 
 begin;
