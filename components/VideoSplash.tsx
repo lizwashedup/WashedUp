@@ -50,6 +50,12 @@ function VideoSplashImpl({ onFinish }: Props) {
   const player = useVideoPlayer(VIDEO_SOURCE, (p: any) => {
     p.loop = false;
     p.muted = true;
+    // Mix with other audio: an expo-video player defaults to audioMixingMode
+    // 'auto', which seizes the iOS AVAudioSession and STOPS the user's music
+    // on cold open even while muted (muted only silences output). 'mixWithOthers'
+    // leaves any music / podcast / call audio playing. Opening the app must not
+    // interrupt background audio.
+    p.audioMixingMode = 'mixWithOthers';
     p.play();
   });
 
