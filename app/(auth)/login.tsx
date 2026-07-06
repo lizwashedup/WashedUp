@@ -1,11 +1,10 @@
-import * as AppleAuthentication from 'expo-apple-authentication';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { Eye, EyeOff } from 'lucide-react-native';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
     ActivityIndicator,
     ImageBackground,
@@ -27,8 +26,6 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { isAppleAuthAvailable, isGoogleAuthConfigured, signInWithApple, signInWithGoogle } from '../../lib/socialAuth';
-import { friendlyAppleError, friendlyGoogleError } from '../../lib/socialAuthErrors';
 import { supabase } from '../../lib/supabase';
 import { PHONE_AUTH_ENABLED } from '../../constants/FeatureFlags';
 import { postAuthTransitionRef } from '../../lib/navState';
@@ -41,7 +38,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState<'apple' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
@@ -50,45 +46,7 @@ export default function LoginScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [resetLoading, setResetLoading] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
-  const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
-  const showGoogle = isGoogleAuthConfigured();
   const passwordInputRef = useRef<TextInput>(null);
-
-  useEffect(() => {
-    isAppleAuthAvailable().then(setAppleAvailable);
-  }, []);
-
-  const handleAppleSignIn = async () => {
-    setError(null);
-    setSocialLoading('apple');
-    try {
-      await signInWithApple();
-      // Plans tab consumes this on mount and shows the WelcomeLoading
-      // transition over the skeleton — covers the login→tabs blink.
-      postAuthTransitionRef.active = true;
-    } catch (e: any) {
-      if (e?.code !== 'ERR_REQUEST_CANCELED') {
-        setError(friendlyAppleError(e));
-      }
-    } finally {
-      setSocialLoading(null);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    setError(null);
-    setSocialLoading('google');
-    try {
-      await signInWithGoogle();
-      postAuthTransitionRef.active = true;
-    } catch (e: any) {
-      if (e?.code !== 'SIGN_IN_CANCELLED') {
-        setError(friendlyGoogleError(e));
-      }
-    } finally {
-      setSocialLoading(null);
-    }
-  };
 
   const handleLogin = async () => {
     setError(null);
@@ -308,46 +266,6 @@ export default function LoginScreen() {
               entering={FadeIn.duration(400).delay(200)}
               style={styles.bottomSection}
             >
-              <View style={styles.orRow}>
-                <View style={styles.orLine} />
-                <View style={styles.orChip}>
-                  <Text style={styles.orText}>or</Text>
-                </View>
-                <View style={styles.orLine} />
-              </View>
-              <View style={styles.gap16} />
-
-              {appleAvailable && (
-                <View pointerEvents={socialLoading ? 'none' : 'auto'} style={socialLoading ? { opacity: 0.5 } : undefined}>
-                  <AppleAuthentication.AppleAuthenticationButton
-                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                    cornerRadius={14}
-                    style={styles.appleButton}
-                    onPress={handleAppleSignIn}
-                  />
-                </View>
-              )}
-
-              {showGoogle && (
-                <>
-                  <View style={styles.gap12} />
-                  <TouchableOpacity
-                    style={styles.googleButton}
-                    onPress={handleGoogleSignIn}
-                    onPressIn={triggerHaptic}
-                    activeOpacity={0.9}
-                    disabled={!!socialLoading}
-                  >
-                    {socialLoading === 'google' ? (
-                      <ActivityIndicator color={Colors.asphalt} />
-                    ) : (
-                      <Text style={styles.googleButtonText}>continue with google</Text>
-                    )}
-                  </TouchableOpacity>
-                </>
-              )}
-
               {/* When phone auth is the primary entry, brand new users
                   shouldn't reach email signup from here. Existing users
                   arrived via the phone-entry escape hatch and only need
@@ -578,25 +496,6 @@ const styles = StyleSheet.create({
   bottomSection: {
     paddingBottom: 8,
   },
-  orRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  orLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.border,
-  },
-  orChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    backgroundColor: Colors.cardBg,
-  },
-  orText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textMedium,
-  },
   signupRow: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -612,25 +511,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyMD,
     color: Colors.terracotta,
-  },
-  appleButton: {
-    height: 52,
-    width: '100%',
-  },
-  googleButton: {
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexDirection: 'row',
-  },
-  googleButtonText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
   },
 });
 
