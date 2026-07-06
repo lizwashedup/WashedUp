@@ -279,8 +279,12 @@ export default function KeepPage({
             text: 'Remove',
             style: 'destructive',
             onPress: () => {
-              remove.mutate(card.user_id);
-              router.back();
+              // Gate nav on success: the mutation severs the grid + profile/keep
+              // caches onSuccess. Navigating first could hide a failure.
+              remove.mutate(card.user_id, {
+                onSuccess: () => router.back(),
+                onError: () => Alert.alert('', COPY.ppRemoveError),
+              });
             },
           },
         ]}

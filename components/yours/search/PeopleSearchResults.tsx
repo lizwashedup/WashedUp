@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, ScrollView, Alert, StyleSheet } from 'react-native';
+import { View, Text, Alert, StyleSheet } from 'react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { COPY } from '../state/constants';
@@ -18,6 +18,12 @@ import type { YoursGridPerson } from '../../../lib/yours/types';
  *     opens the minimal profile so you can add them)
  * Strangers are never surfaced by name; the remote half is exact-handle
  * only (enforced server-side by search_people).
+ *
+ * Renders a plain View (no own ScrollView): it mounts INLINE inside
+ * PeopleScreen's always-mounted ScrollView, which owns scrolling; that is
+ * what keeps the search TextInput mounted (and focused) across the
+ * browse <-> search flip. Result sets are small (your people + exact-handle
+ * matches), so no virtualization is needed.
  */
 export default function PeopleSearchResults({
   userId,
@@ -85,11 +91,7 @@ export default function PeopleSearchResults({
   }
 
   return (
-    <ScrollView
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={styles.scroll}
-    >
+    <View style={styles.list}>
       {local.length > 0 && (
         <>
           <Text style={styles.section}>{COPY.searchYoursSection}</Text>
@@ -127,12 +129,12 @@ export default function PeopleSearchResults({
           ))}
         </>
       )}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 16, paddingBottom: 32 },
+  list: { paddingHorizontal: 16, paddingBottom: 32 },
   section: {
     fontFamily: Fonts.sansSemibold,
     fontSize: FontSizes.caption,

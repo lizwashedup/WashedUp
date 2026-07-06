@@ -77,7 +77,7 @@ export const YOURS_HEADER_ACTION: 'fill' | 'outline' = 'outline';
 export const COPY = {
   wordmark: 'yours',
   tabPeople: 'People',
-  tabMyPlans: 'My Plans',
+  tabMyPlans: 'Plans',
   tabCircles: 'Circles',
   tabAlbums: 'Albums',
 
@@ -129,9 +129,7 @@ export const COPY = {
   stateRequested: 'Requested',
   addButton: 'Add',
 
-  profileInviteToPlan: 'Invite to a plan',
   profileComingUp: 'Coming up',
-  profileAdventures: 'Your adventures',
   profileRemove: 'Remove from your people',
   // SIM-EYEBALL #3: remove confirmation
   removeConfirm:
@@ -177,6 +175,22 @@ export const COPY = {
   albumCollecting: 'Collecting photos',
   albumAddYours: 'Add yours',
   albumAddYoursBanner: 'Looking back on these will be fun. Add yours.',
+
+  // ── People tab (populated redesign) ─────────────────────────────────────
+  // CTA labels render lowercase by design (warm, not shouty); accessibility
+  // labels stay sentence case.
+  peopleListAdd: 'add people',
+  peopleCreateCircle: 'create a circle',
+  peopleWarmTitle: 'recently with you',
+  peopleEveryone: (n: number) => `everyone · ${n}`,
+  peopleQuietLately: 'quiet lately',
+  // Incoming requests, framed as a gift (reciprocity), never an alert.
+  peopleGiftTitle: (n: number) =>
+    `${n} ${n === 1 ? 'person wants' : 'people want'} to connect`,
+  peopleGiftSub: (n: number) =>
+    n === 1
+      ? 'Someone new wants to be in your world'
+      : 'New people want to be in your world',
 
   // ── People hub search (find the people you already have) ───────────────
   searchPlaceholder: 'Search your people, or a handle',
@@ -528,4 +542,17 @@ export const COPY = {
   // Denied mid-session / severed / nonexistent: one quiet line, no error
   // styling, no explanation (denied and nonexistent look identical).
   ppNotFound: 'Nothing here.',
+  // Trust signals (honest, viewer-visible facts, the app's own voice). Mutuals
+  // are the #1 conversion lever; new-here is warm, never "unproven".
+  ppMutuals: (name: string, total: number) =>
+    total <= 1
+      ? `you both know ${name}`
+      : total === 2
+        ? `you both know ${name} and 1 other`
+        : `you both know ${name} and ${total - 1} others`,
+  ppJoined: (label: string) => `Joined ${label}`,
+  ppCreated: (n: number) => `${n} ${n === 1 ? 'plan' : 'plans'} created`,
+  ppPhoneVerified: 'phone verified',
+  ppNewHere: 'New to WashedUp',
+  ppRemoveError: "Couldn't remove them just now. Try again.",
 } as const;

@@ -6,6 +6,7 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -28,13 +29,12 @@ import { usePersonProfile } from '../../../hooks/usePersonProfile';
 import { useGetOrCreateDm } from '../../../hooks/useGetOrCreateDm';
 import { usePeopleConnectionMutations } from '../../../hooks/usePeopleConnectionMutations';
 import { useBlock } from '../../../hooks/useBlock';
-import { useQueryClient } from '@tanstack/react-query';
-import { yoursKeys } from '../../../lib/yours/keys';
 import { BrandedAlert } from '../../BrandedAlert';
 import MenuCard, { type AnchorRect } from '../../menu/MenuCard';
 import type {
   PersonProfileUpcoming,
   PersonProfilePast,
+  PersonProfileMutualFace,
 } from '../../../lib/yours/types';
 
 /** "Sat, Jun 14", pinned to the LA clock plans live on (no dashes). */
@@ -49,6 +49,53 @@ function fmtDate(iso: string): string {
   } catch {
     return '';
   }
+}
+
+/** "March 2025", LA clock, for the joined-since trust signal. */
+function fmtMonthYear(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Los_Angeles',
+      month: 'long',
+      year: 'numeric',
+    }).format(new Date(iso));
+  } catch {
+    return '';
+  }
+}
+
+/** Up to three overlapping mutual faces + "you both know {name} and N others". */
+function MutualFaces({
+  faces,
+  total,
+}: {
+  faces: PersonProfileMutualFace[];
+  total: number;
+}) {
+  if (total <= 0) return null;
+  const lead = faces[0]?.first_name_display ?? 'someone';
+  return (
+    <View style={styles.mutuals}>
+      {faces.length > 0 && (
+        <View style={styles.mutualStack}>
+          {faces.map((f, i) => (
+            <View key={f.user_id} style={[styles.mutualFace, i > 0 && styles.mutualFaceOverlap]}>
+              {f.profile_photo_url ? (
+                <Image source={{ uri: f.profile_photo_url }} style={styles.mutualImg} contentFit="cover" />
+              ) : (
+                <Text style={styles.mutualInitial}>
+                  {(f.first_name_display ?? '?').trim().charAt(0).toUpperCase() || '?'}
+                </Text>
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+      <Text style={styles.mutualText} numberOfLines={2}>
+        {COPY.ppMutuals(lead, total)}
+      </Text>
+    </View>
+  );
 }
 
 /** Back chevron always; overflow only when there is a real profile to act on. */
@@ -170,7 +217,6 @@ export default function PersonProfilePage({
   const getOrCreateDm = useGetOrCreateDm();
   const { remove } = usePeopleConnectionMutations(userId);
   const { blockUser } = useBlock();
-  const qc = useQueryClient();
 
   const [messagePressed, setMessagePressed] = useState(false);
   const [planPressed, setPlanPressed] = useState(false);
@@ -207,10 +253,14 @@ export default function PersonProfilePage({
   // trap). The block flow uses a system Alert (not an RN Modal), so it is safe
   // to fire directly from the closing menu.
   const confirmRemove = () => setTimeout(() => setRemoveConfirmVisible(true), 180);
+  // Gate navigation on success: the connection-mutation hook invalidates the
+  // grid + profile/keep caches onSuccess (severed access). Navigating before the
+  // write lands could strand the user on a stale page or hide a failure.
   const doRemove = () => {
-    remove.mutate(targetId);
-    qc.invalidateQueries({ queryKey: yoursKeys.personProfile(userId, targetId) });
-    router.back();
+    remove.mutate(targetId, {
+      onSuccess: () => router.back(),
+      onError: () => Alert.alert('', COPY.ppRemoveError),
+    });
   };
   const onReportBlock = () => blockUser(targetId, name, () => router.back());
 
@@ -240,15 +290,29 @@ export default function PersonProfilePage({
     );
   }
 
-  const hasUpcoming = profile.upcoming.length > 0;
-  const hasPast = profile.past.length > 0;
+  // Defensive: the RPC coalesces these to [] / 0, but never deref a null array.
+  const upcoming = profile.upcoming ?? [];
+  const past = profile.past ?? [];
+  const mutualFaces = profile.mutual_faces ?? [];
+  const vibeTags = profile.vibe_tags ?? [];
+  const hasUpcoming = upcoming.length > 0;
+  const hasPast = past.length > 0;
   const isBrandNew = profile.upcoming_count === 0 && profile.past_total === 0;
-  const moreInPast = profile.past_total - profile.past.length;
+  const moreInPast = profile.past_total - past.length;
 
   // Stats line, anti-zero: drop any zero, render nothing if both are zero.
   const statParts: string[] = [];
   if (profile.past_total > 0) statParts.push(COPY.ppStatPlans(profile.past_total));
   if (profile.upcoming_count > 0) statParts.push(COPY.ppStatComingUp(profile.upcoming_count));
+
+  // Trust line, anti-zero: joined is always shown; plans-created + phone-verified
+  // only when real. The warm new-here marker stands in for the track record while
+  // new (never "unproven" framing). Honest signals only.
+  const trustParts: string[] = [COPY.ppJoined(fmtMonthYear(profile.joined_at))];
+  if (!profile.is_new && profile.plans_created > 0) {
+    trustParts.push(COPY.ppCreated(profile.plans_created));
+  }
+  if (profile.phone_verified) trustParts.push(COPY.ppPhoneVerified);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -256,6 +320,27 @@ export default function PersonProfilePage({
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <Avatar name={profile.first_name_display} photoUrl={profile.profile_photo_url} />
         <Text style={styles.name}>{name}</Text>
+
+        {profile.neighborhood ? (
+          <Text style={styles.place}>{profile.neighborhood}</Text>
+        ) : null}
+
+        {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
+
+        {vibeTags.length > 0 && (
+          <View style={styles.tags}>
+            {vibeTags.map((t) => (
+              <View key={t} style={styles.tag}>
+                <Text style={styles.tagText}>{t}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <MutualFaces faces={mutualFaces} total={profile.mutual_count} />
+
+        {profile.is_new ? <Text style={styles.newHere}>{COPY.ppNewHere}</Text> : null}
+        <Text style={styles.trust}>{trustParts.join(' · ')}</Text>
 
         <View style={styles.actions}>
           <Pressable
@@ -304,7 +389,7 @@ export default function PersonProfilePage({
             {hasUpcoming && (
               <View style={styles.section}>
                 <SectionLabel>{COPY.profileComingUp}</SectionLabel>
-                {profile.upcoming.map((u) => (
+                {upcoming.map((u) => (
                   <UpcomingRow key={u.event_id} row={u} />
                 ))}
               </View>
@@ -313,7 +398,7 @@ export default function PersonProfilePage({
             {hasPast && (
               <View style={styles.section}>
                 <SectionLabel>{COPY.ppStorySoFar}</SectionLabel>
-                {profile.past.map((p) => (
+                {past.map((p) => (
                   <PastRow key={p.event_id} row={p} />
                 ))}
                 {moreInPast > 0 && (
@@ -424,6 +509,97 @@ const styles = StyleSheet.create({
     color: Colors.terracotta,
     textAlign: 'center',
     marginTop: 14,
+  },
+
+  place: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.tertiary,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  bio: {
+    fontFamily: Fonts.display,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginTop: 12,
+    paddingHorizontal: 28,
+  },
+  tags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 12,
+    paddingHorizontal: 24,
+  },
+  tag: {
+    backgroundColor: Colors.warmTint,
+    borderRadius: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  tagText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+  },
+  mutuals: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+    paddingHorizontal: 24,
+  },
+  mutualStack: { flexDirection: 'row' },
+  mutualFace: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    overflow: 'hidden',
+    backgroundColor: Colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.cream,
+  },
+  mutualFaceOverlap: { marginLeft: -7 },
+  mutualImg: { width: '100%', height: '100%' },
+  mutualInitial: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.micro,
+    color: Colors.terracotta,
+  },
+  mutualText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    flexShrink: 1,
+  },
+  // New-here marker: gold tint as a warm background (not gold text), status-
+  // neutral, invites welcome. Fades by data once they have history.
+  newHere: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+    backgroundColor: Colors.goldenAmberTint15,
+    overflow: 'hidden',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    alignSelf: 'center',
+    marginTop: 16,
+  },
+  trust: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.tertiary,
+    textAlign: 'center',
+    marginTop: 10,
+    paddingHorizontal: 24,
   },
 
   actions: {

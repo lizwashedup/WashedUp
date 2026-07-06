@@ -26,7 +26,7 @@ import { hapticSelection } from '../../lib/haptics';
 import { AlbumsGrid } from '../albums/AlbumsGrid';
 import YoursHeader from './header/YoursHeader';
 import YoursTabs, { type YoursTab } from './header/YoursTabs';
-import PopulatedView from './screens/PopulatedView';
+import PeopleScreen from './people/PeopleScreen';
 import MyPlansView from './screens/MyPlansView';
 import FreshStartView from './screens/FreshStartView';
 import NewUserEmptyView from './screens/NewUserEmptyView';
@@ -34,7 +34,6 @@ import RequestBanner from './requests/RequestBanner';
 import PathsSheet from './paths/PathsSheet';
 import ProfileCardSheet from './profile/ProfileCardSheet';
 import RequestStack from './requests/RequestStack';
-import PeopleSearchBar from './search/PeopleSearchBar';
 import PeopleSearchResults from './search/PeopleSearchResults';
 import CirclesDirectory from './circles/CirclesDirectory';
 import MenuCard, { type AnchorRect } from '../menu/MenuCard';
@@ -42,10 +41,11 @@ import { buildComposerWithPerson } from '../../lib/composerLink';
 import type { YoursGridPerson } from '../../lib/yours/types';
 
 /**
- * Small "+ add" pill shown below the tabs when the populated grid (which
- * has its own in-grid AddGridCell) isn't visible. Per spec the add action
- * is always reachable whether you have 0 people or 50; in populated state
- * the grid cell handles it, otherwise this pill does.
+ * Small "+ add" pill shown below the tabs when the populated People body
+ * (which has its own "add people" CTA inside PeopleScreen) isn't visible.
+ * Per spec the add action is always reachable whether you have 0 people or
+ * 50; in populated state PeopleScreen's CTA handles it, otherwise this
+ * pill does.
  */
 function AddPill({ onPress }: { onPress: () => void }) {
   return (
@@ -164,25 +164,6 @@ export default function YoursScreen() {
     }
   }, [openRequests, requests.length, requesterId]);
 
-  // Track which user ids have already been seen so the light-up plays
-  // once for a freshly added person and never on scroll recycle.
-  const seenRef = useRef<Set<string>>(new Set());
-  const [lightUpIds, setLightUpIds] = useState<Set<string>>(new Set());
-  useEffect(() => {
-    const fresh = new Set<string>();
-    for (const p of people) {
-      if (!seenRef.current.has(p.user_id)) {
-        if (seenRef.current.size > 0) fresh.add(p.user_id);
-        seenRef.current.add(p.user_id);
-      }
-    }
-    if (fresh.size) {
-      setLightUpIds(fresh);
-      const t = setTimeout(() => setLightUpIds(new Set()), 1500);
-      return () => clearTimeout(t);
-    }
-  }, [people]);
-
   const invite = async () => {
     try {
       const code = await ensureReferralCode(uid);
@@ -208,11 +189,12 @@ export default function YoursScreen() {
   // are handled outside this function so the tabs stay visible.
   const renderPeopleBody = () => {
     if (state === 'populated') {
-      const searching = query.trim().length > 0;
       return (
-        <View style={styles.fill}>
-          <PeopleSearchBar value={query} onChange={setQuery} />
-          {searching ? (
+        <PeopleScreen
+          people={people}
+          query={query}
+          onQueryChange={setQuery}
+          searchResults={
             <PeopleSearchResults
               userId={uid}
               query={query}
@@ -220,24 +202,16 @@ export default function YoursScreen() {
               onOpenPerson={(id) => router.push(`/person/${id}` as never)}
               onOpenMinimal={(id) => setProfileTarget(id)}
             />
-          ) : (
-            <PopulatedView
-              userId={uid}
-              activeTab="people"
-              people={people}
-              lightUpIds={lightUpIds}
-              onAdd={() => setPathsOpen(true)}
-              onPressPerson={(p: YoursGridPerson) =>
-                router.push(`/person/${p.user_id}` as never)
-              }
-              onLongPressPerson={handleLongPressPerson}
-              onPressPill={(p: YoursGridPerson) =>
-                p.upcoming_event_id &&
-                router.push(`/plan/${p.upcoming_event_id}` as never)
-              }
-            />
-          )}
-        </View>
+          }
+          pendingRequests={requests.length}
+          onRequestsPress={() => setRequestsOpen(true)}
+          onPersonPress={(p: YoursGridPerson) =>
+            router.push(`/person/${p.user_id}` as never)
+          }
+          onLongPressPerson={handleLongPressPerson}
+          onAddPeople={() => setPathsOpen(true)}
+          onCreateCircle={() => router.push('/circle/new' as never)}
+        />
       );
     }
     if (state === 'fresh') {
@@ -268,8 +242,8 @@ export default function YoursScreen() {
             <View style={{ flex: 1 }}>
               <YoursTabs active={tab} onChange={setTab} />
             </View>
-            {/* Persistent + add pill. In populated state the AvatarGrid's
-                in-grid AddGridCell handles add, so the pill hides to avoid
+            {/* Persistent + add pill. In populated state PeopleScreen's
+                "add people" CTA handles add, so the pill hides to avoid
                 a duplicate affordance. */}
             {tab === 'people' && state !== 'populated' && (
               <AddPill onPress={() => setPathsOpen(true)} />
@@ -280,7 +254,12 @@ export default function YoursScreen() {
               content, visible on ANY tab). Yours now defaults to My Plans, so
               gating this to the People tab would hide a pending request behind a
               tab switch. The Add pill stays People-only. */}
-          {requests.length > 0 && (
+          {/* Global request banner on every tab EXCEPT the populated People tab,
+              which shows its own gift-framed banner inside PeopleScreen (design).
+              In the fresh/empty states PeopleScreen never mounts, so the global
+              banner must still cover People; a zero-connection user is exactly
+              who has a pending incoming request. */}
+          {requests.length > 0 && !(tab === 'people' && state === 'populated') && (
             <RequestBanner
               count={requests.length}
               onPress={() => setRequestsOpen(true)}

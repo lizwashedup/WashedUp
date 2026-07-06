@@ -41,7 +41,17 @@ export const RADII = {
   button: 14, // Primary action buttons (Message / Make a plan / New circle).
               // A tightened, intentional corner; the old full pill (999) read
               // generic. Sits in the card/field radius family.
+  // People/Circles redesign (2026-06): restrained, editorial corners; less
+  // curved than `button`. App-wide pill uniformity (every 999 -> tight) is a
+  // separate fast-follow pass; these are scoped to the redesigned surfaces.
+  buttonTight: 7,   // Redesign CTAs (add people / create a circle / post a plan)
+  cardTight: 10,    // Redesign grid cells + circle cards
 } as const;
+
+// Fallback-initial glyph size as a fraction of the avatar circle it sits in;
+// one ratio so every size of face (grid 52, warm row 64) renders the same
+// visual weight of initial.
+export const AVATAR_INITIAL_RATIO = 0.38;
 
 // ── Slot spacing (pt) ─────────────────────────────────────────────────────
 export const SPACING = {

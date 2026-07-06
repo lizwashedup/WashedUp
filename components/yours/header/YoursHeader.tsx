@@ -14,8 +14,8 @@ import { COPY } from '../state/constants';
  * people-accepted, referral-joined notifications route to this page from
  * there. Keeping a second bell would split the inbox into a dual-bell system.
  *
- * The add-people entry point is also NOT here. Per spec it lives in-page as
- * the first cell of the people grid (see AddGridCell).
+ * The add-people entry point is also NOT here. Per spec it lives in-page:
+ * PeopleScreen's "add people" CTA (populated) or the AddPill under the tabs.
  */
 export default function YoursHeader() {
   return (
