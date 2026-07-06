@@ -47,7 +47,8 @@ const OPTIONS: Option[] = [
   { label: 'google', value: 'google' },
   { label: 'ai (chatgpt, etc.)', value: 'ai' },
   { label: 'press', value: 'press' },
-  { label: 'friend', value: 'friend' },
+  // Label is lexicon-safe; the stored value keeps its original spelling for analytics continuity.
+  { label: 'someone I know', value: 'friend' },
   { label: 'other', value: 'other' },
 ];
 
