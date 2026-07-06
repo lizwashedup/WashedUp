@@ -106,22 +106,73 @@ export async function getCommunityMembers(communityId: string): Promise<Communit
 }
 
 /**
- * Approve or decline a pending join request. Leader-only by RLS.
- * Decline sets 'removed' for now; whether a declined person can re-request
- * is an open phase 3 question (the unique row currently blocks a second
- * request).
+ * Approve or decline a pending join request via the review_community_join
+ * RPC (leader-gated server-side). Approval activates the member, posts their
+ * intro answer into the introductions topic AS them, subscribes them, and
+ * sends the warm note. Decline sets the distinct 'declined' status and sends
+ * a kind note; whether a declined person can re-request later is a logged
+ * open question (currently blocked).
  */
 export async function reviewJoinRequest(memberRowId: string, approve: boolean): Promise<void> {
-  const patch = approve
-    ? { status: 'active', joined_at: new Date().toISOString() }
-    : { status: 'removed' };
-  const { error, count } = await supabase
-    .from('community_members')
-    .update(patch, { count: 'exact' })
-    .eq('id', memberRowId)
-    .eq('status', 'pending');
+  const { error } = await supabase.rpc('review_community_join', {
+    p_member_id: memberRowId,
+    p_approve: approve,
+  });
   if (error) throw error;
-  if (!count) throw new Error('That request is gone or already handled.');
+}
+
+/**
+ * Private join answers for the leader's request review (email and zip are
+ * leader-eyes-only; community_member_answers RLS enforces it). Keyed by the
+ * membership row id.
+ */
+export async function getJoinAnswersByMember(
+  communityId: string,
+): Promise<Map<string, Record<string, string>>> {
+  const { data, error } = await supabase
+    .from('community_member_answers')
+    .select('member_id, answers')
+    .eq('community_id', communityId);
+  if (error) throw error;
+  return new Map((data ?? []).map((r: any) => [r.member_id, r.answers ?? {}]));
+}
+
+// -- join gate settings (doc 09: welcome message, intro question, guidelines) --
+
+export interface JoinGateSettings {
+  join_welcome_message: string | null;
+  join_intro_question: string | null;
+  guidelines_url: string | null;
+}
+
+export async function getJoinGateSettings(communityId: string): Promise<JoinGateSettings> {
+  const { data, error } = await supabase
+    .from('communities')
+    .select('join_welcome_message, join_intro_question, guidelines_url')
+    .eq('id', communityId)
+    .single();
+  if (error) throw error;
+  return data as JoinGateSettings;
+}
+
+/** Leader-only by the communities_update RLS policy. Empty strings clear a field. */
+export async function updateJoinGateSettings(
+  communityId: string,
+  settings: JoinGateSettings,
+): Promise<void> {
+  const { error, count } = await supabase
+    .from('communities')
+    .update(
+      {
+        join_welcome_message: settings.join_welcome_message?.trim() || null,
+        join_intro_question: settings.join_intro_question?.trim() || null,
+        guidelines_url: settings.guidelines_url?.trim() || null,
+      },
+      { count: 'exact' },
+    )
+    .eq('id', communityId);
+  if (error) throw error;
+  if (!count) throw new Error('That did not save.');
 }
 
 /** Remove an active member (leader-only by RLS). */

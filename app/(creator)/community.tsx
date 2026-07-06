@@ -122,6 +122,17 @@ export default function CreatorCommunityScreen() {
             </View>
             <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
           </TouchableOpacity>
+
+          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>your join gate</Text>
+          <TouchableOpacity style={[styles.editPageCard, styles.lastCard]} onPress={() => router.push('/creator/join-gate')}>
+            <View style={styles.editPageTextWrap}>
+              <Text style={styles.editPageTitle}>set up the door</Text>
+              <Text style={styles.editPageHint}>
+                your welcome message, your intro question, your guidelines link.
+              </Text>
+            </View>
+            <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -195,9 +206,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     padding: 14,
-    marginBottom: 40,
     gap: 10,
   },
+  lastCard: { marginBottom: 40 },
   editPageTextWrap: { flex: 1, gap: 2 },
   editPageTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   editPageHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },

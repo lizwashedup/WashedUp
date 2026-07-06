@@ -18,6 +18,7 @@ import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import {
   getCreatorAccess,
   getCommunityMembers,
+  getJoinAnswersByMember,
   reviewJoinRequest,
   removeMember,
   type CommunityMemberRow,
@@ -26,6 +27,7 @@ import {
 export default function CreatorMembersScreen() {
   const queryClient = useQueryClient();
   const [actingId, setActingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
@@ -34,6 +36,13 @@ export default function CreatorMembersScreen() {
   const { data: members = [], isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['creator-members', community?.id],
     queryFn: () => getCommunityMembers(community!.id),
+    enabled: !!community,
+  });
+
+  // private join answers, leader-eyes-only by RLS (community_member_answers)
+  const { data: answersByMember } = useQuery({
+    queryKey: ['join-answers', community?.id],
+    queryFn: () => getJoinAnswersByMember(community!.id),
     enabled: !!community,
   });
 
@@ -51,6 +60,19 @@ export default function CreatorMembersScreen() {
     } finally {
       setActingId(null);
     }
+  };
+
+  // guard against the accidental decline: it notifies and blocks a re-ask
+  const confirmDecline = (m: CommunityMemberRow) => {
+    hapticLight();
+    setAlertInfo({
+      title: `Decline ${m.name ?? 'this request'}?`,
+      message: 'They get a kind note, and they cannot ask again for now.',
+      buttons: [
+        { text: 'Keep it pending', style: 'cancel' },
+        { text: 'Decline', style: 'destructive', onPress: () => act(() => reviewJoinRequest(m.id, false), m.id) },
+      ],
+    });
   };
 
   const confirmRemove = (m: CommunityMemberRow) => {
@@ -81,35 +103,69 @@ export default function CreatorMembersScreen() {
           {pending.length > 0 && (
             <>
               <Text style={styles.sectionLabel}>wants in ({pending.length})</Text>
-              {pending.map((m) => (
-                <View key={m.id} style={[styles.row, styles.rowPending]}>
-                  <MemberFace m={m} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rowName}>{m.name ?? 'someone'}</Text>
-                    <Text style={styles.rowMeta}>asked {new Date(m.created_at).toLocaleDateString()}</Text>
-                  </View>
-                  {actingId === m.id ? (
-                    <ActivityIndicator size="small" color={Colors.terracotta} />
-                  ) : (
-                    <View style={styles.actionPair}>
+              {pending.map((m) => {
+                const answers = answersByMember?.get(m.id);
+                const expanded = expandedId === m.id;
+                return (
+                  <View key={m.id} style={[styles.row, styles.rowPending, styles.rowColumn]}>
+                    <View style={styles.rowTop}>
                       <TouchableOpacity
-                        style={[styles.roundBtn, styles.approveBtn]}
-                        onPress={() => act(() => reviewJoinRequest(m.id, true), m.id)}
-                        hitSlop={8}
+                        style={styles.rowTopTap}
+                        onPress={() => { hapticLight(); setExpandedId(expanded ? null : m.id); }}
                       >
-                        <Check size={18} color={Colors.white} strokeWidth={2.5} />
+                        <MemberFace m={m} />
+                        <View style={styles.rowTopText}>
+                          <Text style={styles.rowName}>
+                            {answers ? `${answers.first_name ?? ''} ${answers.last_name ?? ''}`.trim() || (m.name ?? 'someone') : m.name ?? 'someone'}
+                          </Text>
+                          <Text style={styles.rowMeta}>
+                            asked {new Date(m.created_at).toLocaleDateString()}
+                            {answers ? '  tap for their answers' : ''}
+                          </Text>
+                        </View>
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.roundBtn, styles.declineBtn]}
-                        onPress={() => act(() => reviewJoinRequest(m.id, false), m.id)}
-                        hitSlop={8}
-                      >
-                        <X size={18} color={Colors.secondary} strokeWidth={2.5} />
-                      </TouchableOpacity>
+                      {actingId === m.id ? (
+                        <ActivityIndicator size="small" color={Colors.terracotta} />
+                      ) : (
+                        <View style={styles.actionPair}>
+                          <TouchableOpacity
+                            style={[styles.roundBtn, styles.approveBtn]}
+                            onPress={() => act(() => reviewJoinRequest(m.id, true), m.id)}
+                            hitSlop={8}
+                          >
+                            <Check size={18} color={Colors.white} strokeWidth={2.5} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.roundBtn, styles.declineBtn]}
+                            onPress={() => confirmDecline(m)}
+                            hitSlop={8}
+                          >
+                            <X size={18} color={Colors.secondary} strokeWidth={2.5} />
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
-                  )}
-                </View>
-              ))}
+                    {expanded && answers && (
+                      <View style={styles.answers}>
+                        {!!answers.intro_answer && (
+                          <>
+                            <Text style={styles.answerLabel}>their introduction</Text>
+                            <Text style={styles.answerIntro}>{answers.intro_answer}</Text>
+                          </>
+                        )}
+                        <Text style={styles.answerLabel}>only you see these</Text>
+                        <Text style={styles.answerLine}>{answers.email ?? 'no email'}</Text>
+                        <Text style={styles.answerLine}>zip {answers.zip ?? 'unknown'}</Text>
+                        {!!answers.guidelines_accepted_at && (
+                          <Text style={styles.answerLine}>
+                            accepted the guidelines {new Date(answers.guidelines_accepted_at).toLocaleDateString()}
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
             </>
           )}
 
@@ -193,6 +249,21 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   rowPending: { borderColor: Colors.gold, borderWidth: 1.5 },
+  rowColumn: { flexDirection: 'column', alignItems: 'stretch' },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  rowTopTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  rowTopText: { flex: 1 },
+  answers: { marginTop: 12, gap: 4 },
+  answerLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginTop: 6,
+  },
+  answerIntro: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
+  answerLine: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
   face: { width: 40, height: 40, borderRadius: 20 },
   facePlaceholder: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
   faceInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
