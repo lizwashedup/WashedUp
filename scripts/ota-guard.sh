@@ -49,14 +49,17 @@ if [ -n "$(git status --porcelain)" ]; then
   fail "working tree is dirty. Commit or stash so the OTA matches main HEAD."
 fi
 
-# 3. No tracked source may import native modules missing from the 1.0.4 binary.
+# 3. No tracked source may import native modules missing from the live binary.
 #    Keep this denylist in sync with what the *shipped* binary actually bundles;
 #    anything added here needs a new EAS build, not an OTA.
-FORBIDDEN='expo-audio|giphy-react-native-sdk|@giphy|GiphySDK|RTNGiphy'
-if git grep -nE "$FORBIDDEN" -- app components hooks lib >/dev/null 2>&1; then
+#    2026-07-05: the live 1.0.5 binary was built from this trunk WITH expo-audio
+#    and the Giphy SDK (chat upgrade), so the old 1.0.4-era entries came off.
+#    When a new native dependency lands ahead of its EAS build, add it here.
+FORBIDDEN=''
+if [ -n "$FORBIDDEN" ] && git grep -nE "$FORBIDDEN" -- app components hooks lib >/dev/null 2>&1; then
   echo "Forbidden native-module imports in tracked source:" >&2
   git grep -nE "$FORBIDDEN" -- app components hooks lib >&2
-  fail "source imports native modules not in the 1.0.4 binary. These require a new EAS build."
+  fail "source imports native modules not in the live binary. These require a new EAS build."
 fi
 
 # 4. Every EXPO_PUBLIC_ var pinned in .env.local must be non-empty once loaded.
