@@ -36,6 +36,7 @@ import type {
   PersonProfilePast,
   PersonProfileMutualFace,
 } from '../../../lib/yours/types';
+import { initialOf } from '../../../lib/yours/personDisplay';
 
 /** "Sat, Jun 14", pinned to the LA clock plans live on (no dashes). */
 function fmtDate(iso: string): string {
@@ -84,7 +85,7 @@ function MutualFaces({
                 <Image source={{ uri: f.profile_photo_url }} style={styles.mutualImg} contentFit="cover" />
               ) : (
                 <Text style={styles.mutualInitial}>
-                  {(f.first_name_display ?? '?').trim().charAt(0).toUpperCase() || '?'}
+                  {initialOf(f.first_name_display)}
                 </Text>
               )}
             </View>
@@ -143,7 +144,7 @@ function Avatar({ name, photoUrl }: { name: string | null; photoUrl: string | nu
         <Image source={{ uri: photoUrl }} style={styles.avatarImg} contentFit="cover" />
       ) : (
         <Text style={styles.avatarInitial}>
-          {(name ?? '?').trim().charAt(0).toUpperCase() || '?'}
+          {initialOf(name)}
         </Text>
       )}
     </View>

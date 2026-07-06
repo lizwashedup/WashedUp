@@ -13,7 +13,7 @@ import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { RADII, SEARCH } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
-import { isRecentlyActive } from '../../../lib/yours/personDisplay';
+import { isRecentlyActive, compareByFirstName } from '../../../lib/yours/personDisplay';
 import WarmPersonAvatar from './WarmPersonAvatar';
 import PeopleGridCell from './PeopleGridCell';
 import type { AnchorRect } from '../../menu/MenuCard';
@@ -73,23 +73,10 @@ export default function PeopleScreen({
   }, [searching]);
 
   const warm = useMemo(() => people.filter(isRecentlyActive), [people]);
-  const grid = useMemo(
-    () =>
-      [...people].sort((a, b) =>
-        (a.first_name_display ?? '').localeCompare(
-          b.first_name_display ?? '',
-          undefined,
-          { sensitivity: 'base' },
-        ),
-      ),
-    [people],
-  );
-
-  const gridRows = useMemo(() => {
-    const rows: YoursGridPerson[][] = [];
-    for (let i = 0; i < grid.length; i += COLS) rows.push(grid.slice(i, i + COLS));
-    return rows;
-  }, [grid]);
+  // One shared Intl.Collator (localeCompare with options builds a collator per
+  // comparison); explicit cell widths let flexWrap produce the 3-column matrix
+  // with no hand chunking or filler views.
+  const grid = useMemo(() => [...people].sort(compareByFirstName), [people]);
 
   const SearchField = (
     <View style={styles.search}>
@@ -208,23 +195,17 @@ export default function PeopleScreen({
 
           {/* Everyone grid (label renders uppercase via textTransform) */}
           <Text style={styles.sectionLabel}>{COPY.peopleEveryone(grid.length)}</Text>
-          {gridRows.map((row, i) => (
-            <View key={i} style={styles.gridRow}>
-              {row.map((p) => (
-                <PeopleGridCell
-                  key={p.user_id}
-                  person={p}
-                  width={cellW}
-                  onPress={onPersonPress}
-                  onLongPress={onLongPressPerson}
-                />
-              ))}
-              {row.length < COLS &&
-                Array(COLS - row.length)
-                  .fill(null)
-                  .map((_, k) => <View key={`e${k}`} style={{ width: cellW }} />)}
-            </View>
-          ))}
+          <View style={styles.gridWrap}>
+            {grid.map((p) => (
+              <PeopleGridCell
+                key={p.user_id}
+                person={p}
+                width={cellW}
+                onPress={onPersonPress}
+                onLongPress={onLongPressPerson}
+              />
+            ))}
+          </View>
 
           <View style={styles.bottomSpacer} />
         </>
@@ -249,7 +230,7 @@ const styles = StyleSheet.create({
   },
   warmTitle: {
     fontFamily: Fonts.displayItalic,
-    fontSize: 22,
+    fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
   },
   warmDot: {
@@ -367,20 +348,23 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
 
+  // Section-header spec (CLAUDE.md): 11px, 600-weight, brand accent,
+  // letter-spacing 1.5, uppercase.
   sectionLabel: {
     fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.micro,
-    letterSpacing: 1.3,
+    fontSize: FontSizes.caption,
+    letterSpacing: 1.5,
     color: Colors.terracotta,
     textTransform: 'uppercase',
     paddingHorizontal: H,
     marginBottom: 12,
   },
-  gridRow: {
+  gridWrap: {
     flexDirection: 'row',
-    gap: GAP,
+    flexWrap: 'wrap',
+    columnGap: GAP,
+    rowGap: GAP,
     paddingHorizontal: H,
-    marginBottom: GAP,
   },
   bottomSpacer: { height: 24 },
 });
