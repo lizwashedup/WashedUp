@@ -31,6 +31,7 @@ import {
   getSceneEvents,
   type SceneEvent,
 } from '../../lib/sceneDiscovery';
+import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 
 const POSTER_RATIO = 0.56;
 const RAIL_CARD_WIDTH = 220;
@@ -117,6 +118,9 @@ export function SceneDiscovery() {
                     <View style={[styles.railCover, { backgroundColor: c.accent_color ?? Colors.accentSubtle }]} />
                   )}
                   <View style={styles.railBody}>
+                    {isHouseCommunity(c.handle) && (
+                      <Text style={styles.houseMark}>{HOUSE_MARK_LABEL}</Text>
+                    )}
                     <Text style={styles.railName} numberOfLines={1}>{c.name}</Text>
                     <Text style={styles.railMeta} numberOfLines={1}>
                       {c.member_count} in
@@ -189,6 +193,13 @@ const styles = StyleSheet.create({
   },
   railCover: { width: '100%', height: RAIL_COVER_HEIGHT },
   railBody: { padding: 12 },
+  houseMark: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
   railName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   railMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary, marginTop: 2 },
   chipRow: { gap: 8, marginBottom: 14 },

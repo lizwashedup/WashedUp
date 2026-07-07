@@ -31,6 +31,7 @@ import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPo
 import { getCommunityPage, getMemberFaces, type CommunityPageEvent } from '../../lib/communityPage';
 import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
 import { getCommunityChatCards, joinTopic } from '../../lib/communityChat';
+import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -257,6 +258,9 @@ export default function CommunityPageScreen() {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
       >
+        {isHouseCommunity(page.community.handle) && (
+          <Text style={styles.houseMark}>{HOUSE_MARK_LABEL}</Text>
+        )}
         <Text style={[styles.name, { color: accent }]}>{page.community.name}</Text>
         {!!page.community.description && !isMember && (
           <Text style={styles.description}>{page.community.description}</Text>
@@ -376,6 +380,13 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     marginBottom: 6,
+  },
+  houseMark: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1,
+    marginBottom: 2,
   },
   description: {
     fontFamily: Fonts.sans,

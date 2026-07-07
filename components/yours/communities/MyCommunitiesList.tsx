@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
 import { getMyCommunities } from '../../../lib/communityPage';
+import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../../lib/houseCommunity';
 
 const COVER_HEIGHT = 120;
 
@@ -41,6 +42,9 @@ export function MyCommunitiesList({ onOpen, onBrowse }: Props) {
           )}
           <View style={[styles.accentBar, c.accent_color ? { backgroundColor: c.accent_color } : null]} />
           <View style={styles.body}>
+            {isHouseCommunity(c.handle) && (
+              <Text style={styles.houseMark}>{HOUSE_MARK_LABEL}</Text>
+            )}
             <Text style={styles.name} numberOfLines={1}>{c.name}</Text>
             <Text style={styles.meta}>
               {c.member_count !== null ? `${c.member_count} in` : ' '}
@@ -80,6 +84,15 @@ const styles = StyleSheet.create({
   cover: { width: '100%', height: COVER_HEIGHT },
   accentBar: { height: 3, backgroundColor: Colors.gold },
   body: { padding: 14 },
+  // terracotta, not gold: gold text on light grounds is banned (documented
+  // exceptions only); the card's gold accent bar carries the house warmth
+  houseMark: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
   name: {
     fontFamily: Fonts.display,
     fontSize: FontSizes.displayMD,
