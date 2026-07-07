@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Bell, BellOff } from 'lucide-react-native';
+import { ArrowLeft, Bell, BellOff, CalendarDays } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -28,8 +28,9 @@ import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import {
   getCommunityBroadcasts,
-  getCommunityChatCards,
+  getCommunityChatPayload,
   getMyBroadcastMute,
+  getPinnedCommunityEvent,
   markBroadcastsRead,
   setBroadcastMute,
   type CommunityBroadcast,
@@ -43,11 +44,11 @@ export default function CommunityThreadScreen() {
   const listRef = useRef<FlatList<CommunityBroadcast>>(null);
   const [alertInfo, setAlertInfo] = React.useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
-  const { data: cards = [] } = useQuery({
+  const { data: payload } = useQuery({
     queryKey: ['community-chat-cards'],
-    queryFn: getCommunityChatCards,
+    queryFn: getCommunityChatPayload,
   });
-  const card = cards.find((c) => c.community_id === id) ?? null;
+  const card = payload?.cards.find((c) => c.community_id === id) ?? null;
 
   const { data: broadcasts = [], isLoading } = useQuery({
     queryKey: ['community-broadcasts', id],
@@ -60,6 +61,13 @@ export default function CommunityThreadScreen() {
   const { data: muted = false } = useQuery({
     queryKey: ['community-mute', id],
     queryFn: () => getMyBroadcastMute(id!),
+    enabled: !!id,
+  });
+
+  // chat model 7-07: the soonest upcoming Live event sits pinned at the top
+  const { data: pinnedEvent = null } = useQuery({
+    queryKey: ['community-pinned-event', id],
+    queryFn: () => getPinnedCommunityEvent(id!),
     enabled: !!id,
   });
 
@@ -124,6 +132,28 @@ export default function CommunityThreadScreen() {
       </View>
       {muted && (
         <Text style={styles.mutedLine}>muted. you still see everything here, it just stays quiet.</Text>
+      )}
+      {!!pinnedEvent && (
+        <TouchableOpacity
+          style={styles.pinnedCard}
+          onPress={() => router.push(`/event/${pinnedEvent.id}` as never)}
+          activeOpacity={0.85}
+        >
+          <CalendarDays size={18} color={Colors.terracotta} strokeWidth={2.5} />
+          <View style={styles.pinnedBody}>
+            {/* LIZ COPY */}
+            <Text style={styles.pinnedLabel}>up next</Text>
+            <Text style={styles.pinnedTitle} numberOfLines={1}>{pinnedEvent.title}</Text>
+            <Text style={styles.pinnedMeta} numberOfLines={1}>
+              {[
+                pinnedEvent.event_date
+                  ? new Date(`${pinnedEvent.event_date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                  : null,
+                pinnedEvent.venue || null,
+              ].filter(Boolean).join(' at ')}
+            </Text>
+          </View>
+        </TouchableOpacity>
       )}
 
       {isLoading ? (
@@ -203,6 +233,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 4,
   },
+  pinnedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 6,
+  },
+  pinnedBody: { flex: 1 },
+  pinnedLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  pinnedTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginTop: 1 },
+  pinnedMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 1 },
   listContent: { padding: 16, paddingBottom: 40, flexGrow: 1 },
   emptyLine: {
     fontFamily: Fonts.sans,

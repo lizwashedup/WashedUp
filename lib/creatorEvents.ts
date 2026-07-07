@@ -43,6 +43,7 @@ export interface OperatorEventFields {
   external_url: string;
   ticket_price: string;
   public_name: string;
+  pin_to_chat: boolean;
 }
 
 export interface OperatorEventRow extends OperatorEventFields {
@@ -55,7 +56,7 @@ export interface OperatorEventRow extends OperatorEventFields {
 export async function getOperatorEvent(eventId: string): Promise<OperatorEventRow | null> {
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, status, community_id, host_user_id')
+    .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id')
     .eq('id', eventId)
     .maybeSingle();
   if (error) throw error;
@@ -73,6 +74,7 @@ export async function getOperatorEvent(eventId: string): Promise<OperatorEventRo
     external_url: data.external_url ?? '',
     ticket_price: data.ticket_price != null ? String(data.ticket_price) : '',
     public_name: data.public_name ?? '',
+    pin_to_chat: data.pin_to_chat ?? true,
     status: data.status,
     community_id: data.community_id ?? null,
     host_user_id: data.host_user_id ?? null,
@@ -96,6 +98,7 @@ export async function createOperatorEvent(
     p_ticket_price: fields.ticket_price || null,
     p_community_id: communityId,
     p_public_name: fields.public_name || null,
+    p_pin_to_chat: fields.pin_to_chat,
   });
   if (error) throw error;
   return data as string;
@@ -120,6 +123,7 @@ export async function updateOperatorEvent(
     p_external_url: fields.external_url || null,
     p_ticket_price: fields.ticket_price || null,
     p_public_name: fields.public_name || null,
+    p_pin_to_chat: fields.pin_to_chat,
     p_status: status,
   });
   if (error) throw error;

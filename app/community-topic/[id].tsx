@@ -30,7 +30,7 @@ import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import {
-  getCommunityChatCards,
+  getCommunityChatPayload,
   getTopicMessages,
   markTopicRead,
   sendTopicMessage,
@@ -52,11 +52,15 @@ export default function CommunityTopicScreen() {
     supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
   }, []);
 
-  const { data: cards = [] } = useQuery({
+  const { data: payload } = useQuery({
     queryKey: ['community-chat-cards'],
-    queryFn: getCommunityChatCards,
+    queryFn: getCommunityChatPayload,
   });
-  const topic = cards.flatMap((c) => c.topics).find((t) => t.id === id) ?? null;
+  // members find the room inside their card; attendees find it in their list
+  const topic =
+    payload?.cards.flatMap((c) => c.topics).find((t) => t.id === id) ??
+    payload?.attendee_topics.find((t) => t.id === id) ??
+    null;
 
   const messagesKey = ['topic-messages', id];
   const { data: messages = [], isLoading } = useQuery({

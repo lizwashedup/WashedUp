@@ -17,10 +17,30 @@ export interface ChatCardTopic {
   id: string;
   name: string;
   is_default: boolean;
+  explore_event_id: string | null;
   joined: boolean;
   notifications_on: boolean;
   unread: number;
   last_message_at: string | null;
+}
+
+/** An event chat you are in by ATTENDANCE (RSVP) without community membership. */
+export interface AttendeeTopic {
+  id: string;
+  name: string;
+  community_id: string;
+  community_name: string;
+  accent_color: string | null;
+  explore_event_id: string;
+  notifications_on: boolean;
+  unread: number;
+  last_message_at: string | null;
+  joined_at: string;
+}
+
+export interface CommunityChatPayload {
+  cards: CommunityChatCard[];
+  attendee_topics: AttendeeTopic[];
 }
 
 export interface CommunityChatCard {
@@ -36,10 +56,14 @@ export interface CommunityChatCard {
   last_activity_at: string | null;
 }
 
-export async function getCommunityChatCards(): Promise<CommunityChatCard[]> {
+export async function getCommunityChatPayload(): Promise<CommunityChatPayload> {
   const { data, error } = await supabase.rpc('get_my_community_chat_cards');
   if (error) throw error;
-  return (data ?? []) as CommunityChatCard[];
+  const payload = (data ?? {}) as Partial<CommunityChatPayload>;
+  return {
+    cards: payload.cards ?? [],
+    attendee_topics: payload.attendee_topics ?? [],
+  };
 }
 
 // -- the chats-list rows (revised doc 09: no hub screen, chats are just chats) --
@@ -66,8 +90,8 @@ export interface CommunityChatRowData {
  * client-side pass over recent messages (no schema change).
  */
 export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
-  const cards = await getCommunityChatCards();
-  if (cards.length === 0) return [];
+  const { cards, attendee_topics } = await getCommunityChatPayload();
+  if (cards.length === 0 && attendee_topics.length === 0) return [];
 
   // a community with no broadcasts yet anchors at YOUR join time (a fresh
   // chat enters the list when it begins, then floats on real activity)
@@ -84,7 +108,10 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
     }
   }
 
-  const joinedTopicIds = cards.flatMap((c) => c.topics.filter((t) => t.joined).map((t) => t.id));
+  const joinedTopicIds = [
+    ...cards.flatMap((c) => c.topics.filter((t) => t.joined).map((t) => t.id)),
+    ...attendee_topics.map((t) => t.id),
+  ];
   const previewByTopic = new Map<string, string>();
   if (joinedTopicIds.length > 0) {
     const { data: recent } = await supabase
@@ -129,6 +156,22 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
         accent: c.accent_color,
       });
     }
+  }
+  // event chats you attend without membership are rows of their own
+  for (const at of attendee_topics) {
+    rows.push({
+      key: `room-${at.id}`,
+      kind: 'room',
+      targetId: at.id,
+      communityId: at.community_id,
+      title: at.name,
+      secondary: at.community_name,
+      // LIZ COPY
+      preview: previewByTopic.get(at.id) ?? "you're going. talk it out here.",
+      lastAt: at.last_message_at ?? at.joined_at,
+      unread: at.unread,
+      accent: at.accent_color,
+    });
   }
   // newest activity first, community rows float above their rooms on ties
   rows.sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''));
@@ -356,6 +399,38 @@ export async function getMyBroadcastMute(communityId: string): Promise<boolean> 
     .eq('user_id', user.id)
     .maybeSingle();
   return !!data?.broadcasts_muted;
+}
+
+// -- pinned event (chat model 7-07: main chat pins the soonest upcoming) ----------
+
+export interface PinnedCommunityEvent {
+  id: string;
+  title: string;
+  event_date: string | null;
+  start_time: string | null;
+  venue: string | null;
+  image_url: string | null;
+}
+
+/**
+ * The soonest upcoming Live community event with pin_to_chat on, or null.
+ * Reads through the existing explore_events public-read policy.
+ */
+export async function getPinnedCommunityEvent(communityId: string): Promise<PinnedCommunityEvent | null> {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const { data, error } = await supabase
+    .from('explore_events')
+    .select('id, title, event_date, start_time, venue, image_url')
+    .eq('community_id', communityId)
+    .eq('status', 'Live')
+    .eq('pin_to_chat', true)
+    .gte('event_date', todayStr)
+    .order('event_date', { ascending: true })
+    .order('start_time', { ascending: true, nullsFirst: false })
+    .limit(1);
+  if (error) throw error;
+  return (data?.[0] as PinnedCommunityEvent | undefined) ?? null;
 }
 
 // -- shared ----------------------------------------------------------------------

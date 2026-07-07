@@ -30,7 +30,7 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
 import { getCommunityPage, getMemberFaces, type CommunityPageEvent } from '../../lib/communityPage';
 import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
-import { getCommunityChatCards, joinTopic } from '../../lib/communityChat';
+import { getCommunityChatPayload, joinTopic } from '../../lib/communityChat';
 import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
@@ -72,12 +72,12 @@ export default function CommunityPageScreen() {
   // rooms live here for discovery (unjoined rooms never clutter the chat list)
   const [joiningTopicId, setJoiningTopicId] = useState<string | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
-  const { data: cards = [] } = useQuery({
+  const { data: chatPayload } = useQuery({
     queryKey: ['community-chat-cards'],
-    queryFn: getCommunityChatCards,
+    queryFn: getCommunityChatPayload,
     enabled: isMember,
   });
-  const card = cards.find((c) => c.community_id === id) ?? null;
+  const card = chatPayload?.cards.find((c) => c.community_id === id) ?? null;
 
   const handleJoinTopic = async (topicId: string) => {
     setJoiningTopicId(topicId);

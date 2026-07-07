@@ -260,6 +260,9 @@ export default function EventDetailScreen() {
   const invalidateRsvp = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['event-rsvp', id] });
     queryClient.invalidateQueries({ queryKey: ['event-rsvp-count', id] });
+    // going in or out of a community event adds or removes its chat
+    queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+    queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
   }, [queryClient, id]);
 
   const handleCountMeIn = useCallback(async () => {

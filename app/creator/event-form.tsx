@@ -62,6 +62,7 @@ export default function EventFormScreen() {
   const [ticketPrice, setTicketPrice] = useState('');
   const [publicName, setPublicName] = useState('');
   const [fromCommunity, setFromCommunity] = useState(true);
+  const [pinToChat, setPinToChat] = useState(true);
   const [eventStatus, setEventStatus] = useState<string>('Live');
   const [eventCommunityId, setEventCommunityId] = useState<string | null>(null);
   const [seeded, setSeeded] = useState(false);
@@ -94,6 +95,7 @@ export default function EventFormScreen() {
       setExternalUrl(existing.external_url);
       setTicketPrice(existing.ticket_price);
       setPublicName(existing.public_name);
+      setPinToChat(existing.pin_to_chat);
       setEventStatus(existing.status);
       setEventCommunityId(existing.community_id);
       setSeeded(true);
@@ -105,6 +107,11 @@ export default function EventFormScreen() {
   const collectFields = (): OperatorEventFields | null => {
     if (!title.trim()) {
       showError('Almost', 'A title is required.');
+      return null;
+    }
+    if (!category) {
+      // mirrors the server guard ("Pick a category."), caught here first
+      showError('Almost', 'Pick a category.');
       return null;
     }
     if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
@@ -136,6 +143,7 @@ export default function EventFormScreen() {
       external_url: externalUrl,
       ticket_price: ticketPrice,
       public_name: publicName,
+      pin_to_chat: pinToChat,
     };
   };
 
@@ -353,6 +361,28 @@ export default function EventFormScreen() {
               <Text style={styles.fieldHint}>
                 {eventCommunityId ? 'a community event, set at posting.' : 'a standalone event, set at posting.'}
               </Text>
+            )}
+
+            {((!editing && fromCommunity && !!community) || (editing && !!eventCommunityId)) && (
+              <>
+                <Text style={styles.fieldLabel}>pin it in your chat</Text>
+                {/* LIZ COPY */}
+                <Text style={styles.fieldHint}>your soonest upcoming event sits at the top of your community chat.</Text>
+                <View style={styles.chipWrap}>
+                  <TouchableOpacity
+                    style={[styles.chip, pinToChat && styles.chipOn]}
+                    onPress={() => { hapticLight(); setPinToChat(true); }}
+                  >
+                    <Text style={[styles.chipText, pinToChat && styles.chipTextOn]}>pin it</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.chip, !pinToChat && styles.chipOn]}
+                    onPress={() => { hapticLight(); setPinToChat(false); }}
+                  >
+                    <Text style={[styles.chipText, !pinToChat && styles.chipTextOn]}>keep it off the chat</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
             )}
 
             <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnBusy]} onPress={handleSave} disabled={saving}>
