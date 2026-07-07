@@ -24,7 +24,7 @@ import { consumeChatListDirty } from '../../../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
 import { COMMUNITIES_ENABLED, GROUPS_ENABLED, YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { useQuery } from '@tanstack/react-query';
-import { getCommunityChatRows } from '../../../lib/communityChat';
+import { getCommunityChatRows, type CommunityChatRowData } from '../../../lib/communityChat';
 import { CommunityChatRow } from '../../../components/chats/CommunityChatRow';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
@@ -277,16 +277,55 @@ export default function ChatsScreen() {
     return chats;
   }, [chats, section]);
   const activeChats = useMemo(() => sectionChats.filter(c => !c.is_past), [sectionChats]);
+
+  // One unified list (Liz, final structure): every chat type mixed, sorted
+  // purely by most recent message, the WhatsApp model. Rows keep their
+  // type's personality; the LIST is what unifies. Flag off or no community
+  // rows -> exactly the shipped list, untouched order.
+  type ListItem =
+    | { t: 'chat'; chat: ChatPreview }
+    | { t: 'community'; row: CommunityChatRowData };
+  const listItems = useMemo<ListItem[]>(() => {
+    const chatItems: ListItem[] = activeChats.map((c) => ({ t: 'chat' as const, chat: c }));
+    const communityItems: ListItem[] =
+      COMMUNITIES_ENABLED && (section === 'all' || section === 'communities')
+        ? communityRows.map((r) => ({ t: 'community' as const, row: r }))
+        : [];
+    if (communityItems.length === 0) return chatItems;
+    return [...chatItems, ...communityItems].sort((a, b) => {
+      const ka = a.t === 'chat' ? a.chat.last_message_at ?? '' : a.row.lastAt ?? '';
+      const kb = b.t === 'chat' ? b.chat.last_message_at ?? '' : b.row.lastAt ?? '';
+      return kb.localeCompare(ka);
+    });
+  }, [activeChats, communityRows, section]);
   // Circle chats are persistent (never is_past), so pastChats is always empty in
   // the Circles section and its "Past Plans" footer never renders there.
   const pastChats = useMemo(() => sectionChats.filter(c => c.is_past), [sectionChats]);
 
-  const renderChat = useCallback(({ item }: { item: ChatPreview }) => (
-    <ChatRow
-      chat={item}
-      onPress={() => router.push(chatHref(item) as any)}
-    />
-  ), [router]);
+  const renderListItem = useCallback(({ item }: { item: ListItem }) => {
+    if (item.t === 'community') {
+      const r = item.row;
+      return (
+        <CommunityChatRow
+          row={r}
+          onPress={() =>
+            router.push(
+              (r.kind === 'community'
+                ? `/community-thread/${r.targetId}`
+                : `/community-topic/${r.targetId}`) as any,
+            )
+          }
+        />
+      );
+    }
+    return (
+      <ChatRow
+        chat={item.chat}
+        onPress={() => router.push(chatHref(item.chat) as any)}
+      />
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   if (loading) {
     return (
@@ -328,41 +367,21 @@ export default function ChatsScreen() {
       ) : (
         <FlatList
           decelerationRate="normal"
-          data={activeChats}
-          keyExtractor={item => item.conversationId}
+          data={listItems}
+          keyExtractor={(item) => (item.t === 'chat' ? item.chat.conversationId : item.row.key)}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.terracotta} />
           }
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={ChatSeparator}
+          // The Active label dies with the unified list (Liz), but flag-off
+          // users keep today's screen byte-identical until the flip.
           ListHeaderComponent={
-            <>
-              {COMMUNITIES_ENABLED &&
-                (section === 'all' || section === 'communities') &&
-                communityRows.length > 0 && (
-                  <View>
-                    <Text style={styles.sectionLabel}>Communities</Text>
-                    {communityRows.map((r) => (
-                      <CommunityChatRow
-                        key={r.key}
-                        row={r}
-                        onPress={() =>
-                          router.push(
-                            (r.kind === 'community'
-                              ? `/community-thread/${r.targetId}`
-                              : `/community-topic/${r.targetId}`) as any,
-                          )
-                        }
-                      />
-                    ))}
-                  </View>
-                )}
-              {section !== 'communities' && activeChats.length > 0 ? (
-                <Text style={styles.sectionLabel}>Active</Text>
-              ) : null}
-            </>
+            !COMMUNITIES_ENABLED && activeChats.length > 0 ? (
+              <Text style={styles.sectionLabel}>Active</Text>
+            ) : null
           }
-          renderItem={renderChat}
+          renderItem={renderListItem}
           ListEmptyComponent={
             section === 'communities' ? (
               communityRows.length > 0 ? null : (

@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Home } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import type { CommunityChatRowData } from '../../lib/communityChat';
@@ -55,6 +56,8 @@ export const CommunityChatRow = React.memo(function CommunityChatRow({ row, onPr
           <View style={styles.titleRow}>
             {hasUnread && <View style={styles.unreadDot} />}
             <Text style={styles.title} numberOfLines={1}>{row.title}</Text>
+            {/* the at-a-glance community marker; final look is a design-pass call */}
+            <Home size={12} color={row.accent ?? Colors.terracotta} strokeWidth={2.5} />
           </View>
           {row.lastAt && <Text style={styles.timestamp}>{formatTime(row.lastAt)}</Text>}
         </View>
@@ -96,7 +99,8 @@ const styles = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.terracotta },
-  title: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, flex: 1 },
+  // flexShrink (not flex) so the community marker hugs the title text
+  title: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, flexShrink: 1 },
   timestamp: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary },
   secondary: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary },
   preview: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
