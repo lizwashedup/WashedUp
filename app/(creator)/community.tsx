@@ -29,12 +29,15 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
 import { getCreatorAccess, getBroadcasts, sendBroadcast } from '../../lib/creatorMode';
+import { createTopic } from '../../lib/communityChat';
 
 export default function CreatorCommunityScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [roomDraft, setRoomDraft] = useState('');
+  const [roomBusy, setRoomBusy] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
@@ -45,6 +48,21 @@ export default function CreatorCommunityScreen() {
     queryFn: () => getBroadcasts(community!.id),
     enabled: !!community,
   });
+
+  const handleCreateRoom = async () => {
+    if (!community || !roomDraft.trim() || roomBusy) return;
+    setRoomBusy(true);
+    try {
+      await createTopic(community.id, roomDraft);
+      hapticSuccess();
+      setRoomDraft('');
+      queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+    } catch (e) {
+      setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
+    } finally {
+      setRoomBusy(false);
+    }
+  };
 
   const handleSend = async () => {
     if (!community || !draft.trim()) return;
@@ -124,7 +142,7 @@ export default function CreatorCommunityScreen() {
           </TouchableOpacity>
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>your join gate</Text>
-          <TouchableOpacity style={[styles.editPageCard, styles.lastCard]} onPress={() => router.push('/creator/join-gate')}>
+          <TouchableOpacity style={styles.editPageCard} onPress={() => router.push('/creator/join-gate')}>
             <View style={styles.editPageTextWrap}>
               <Text style={styles.editPageTitle}>set up the door</Text>
               <Text style={styles.editPageHint}>
@@ -133,6 +151,34 @@ export default function CreatorCommunityScreen() {
             </View>
             <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
           </TouchableOpacity>
+
+          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>rooms</Text>
+          <Text style={styles.hint}>
+            the chat spaces members can join. introductions makes itself; leaders
+            make the rest.
+          </Text>
+          <View style={[styles.composer, styles.lastCard]}>
+            <TextInput
+              style={styles.roomInput}
+              value={roomDraft}
+              onChangeText={setRoomDraft}
+              placeholder="name a new room"
+              placeholderTextColor={Colors.inkSoft}
+              maxLength={60}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
+            <TouchableOpacity
+              style={[styles.sendBtn, (!roomDraft.trim() || roomBusy) && { opacity: 0.4 }]}
+              onPress={handleCreateRoom}
+              disabled={!roomDraft.trim() || roomBusy}
+            >
+              {roomBusy ? (
+                <ActivityIndicator size="small" color={Colors.white} />
+              ) : (
+                <Text style={styles.sendBtnText}>open the room</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -209,6 +255,11 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   lastCard: { marginBottom: 40 },
+  roomInput: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+  },
   editPageTextWrap: { flex: 1, gap: 2 },
   editPageTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   editPageHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
