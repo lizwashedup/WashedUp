@@ -42,7 +42,7 @@ export default function CreatorEventsScreen() {
 
         <TouchableOpacity style={styles.postBtn} onPress={() => router.push('/creator/event-form')}>
           <Plus size={16} color={Colors.white} strokeWidth={2.5} />
-          <Text style={styles.postBtnText}>post an event</Text>
+          <Text style={styles.postBtnText}>put on an event</Text>
         </TouchableOpacity>
 
         {live.length > 0 && <Text style={styles.sectionLabel}>live</Text>}

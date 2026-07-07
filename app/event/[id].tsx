@@ -41,6 +41,7 @@ interface ExploreEvent {
   category: string | null;
   external_url: string | null;
   ticket_price: string | null;
+  public_name: string | null;
 }
 
 interface LinkedPlan {
@@ -134,7 +135,7 @@ export default function EventDetailScreen() {
     queryFn: async (): Promise<ExploreEvent | null> => {
       const { data, error } = await supabase
         .from('explore_events')
-        .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price')
+        .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -427,6 +428,11 @@ export default function EventDetailScreen() {
 
           <Text style={styles.title}>{event.title}</Text>
 
+          {COMMUNITIES_ENABLED && !!event.public_name && (
+            /* LIZ COPY (decision 16): bylines say put on by, never hosted by */
+            <Text style={styles.putOnBy}>put on by {event.public_name}</Text>
+          )}
+
           <View style={styles.metaRow}>
             <Calendar size={16} color={Colors.warmGray} strokeWidth={2} />
             <Text style={styles.metaText}>{formatFullDate(event.event_date, event.start_time)}</Text>
@@ -679,4 +685,10 @@ const styles = StyleSheet.create({
   },
   rsvpButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta },
   rsvpButtonTextGoing: { color: Colors.brandDeep },
+  putOnBy: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.warmGray,
+    marginBottom: 8,
+  },
 });

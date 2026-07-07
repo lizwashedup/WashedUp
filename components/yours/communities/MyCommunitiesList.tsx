@@ -48,8 +48,8 @@ export function MyCommunitiesList({ onOpen, onBrowse }: Props) {
             <Text style={styles.name} numberOfLines={1}>{c.name}</Text>
             <Text style={styles.meta}>
               {c.member_count !== null ? `${c.member_count} in` : ' '}
-              {/* LIZ COPY: the role word is hers to pick; "runs this" is the placeholder */}
-              {c.role !== 'member' ? '  runs this' : ''}
+              {/* LIZ COPY (decision 16): community creator; co-runner placeholder */}
+              {c.role === 'leader' ? ' · community creator' : c.role === 'co_leader' ? ' · helps run it' : ''}
             </Text>
           </View>
         </TouchableOpacity>

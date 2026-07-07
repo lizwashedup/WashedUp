@@ -178,8 +178,12 @@ export default function CreatorMembersScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowName}>
                   {m.name ?? 'someone'}
-                  {/* LIZ COPY: the role word is hers; placeholder per the walkthrough */}
-                  {m.role !== 'member' && <Text style={styles.roleTag}>  runs this</Text>}
+                  {/* LIZ COPY (decision 16): community creator; co-runner placeholder */}
+                  {m.role !== 'member' && (
+                    <Text style={styles.roleTag}>
+                      {m.role === 'leader' ? ' · community creator' : ' · helps run it'}
+                    </Text>
+                  )}
                 </Text>
                 <Text style={styles.rowMeta}>
                   joined {m.joined_at ? new Date(m.joined_at).toLocaleDateString() : 'recently'}

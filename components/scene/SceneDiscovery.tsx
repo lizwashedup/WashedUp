@@ -77,7 +77,7 @@ export function SceneDiscovery() {
             e.venue,
           ].filter(Boolean).join('  ')}
         </Text>
-        {!!e.public_name && <Text style={styles.posterBy}>by {e.public_name}</Text>}
+        {!!e.public_name && <Text style={styles.posterBy}>put on by {e.public_name}</Text>}
       </View>
     </TouchableOpacity>
   );

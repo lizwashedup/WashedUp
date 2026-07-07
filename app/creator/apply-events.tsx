@@ -149,7 +149,7 @@ export default function ApplyEventsScreen() {
       ) : (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-            <Text style={styles.title}>host events</Text>
+            <Text style={styles.title}>put on events</Text>
             <Text style={styles.intro}>
               post one-off events to the scene. a human reads every application and replies within a day.
             </Text>

@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ChevronRight, Sparkles, UsersRound } from 'lucide-react-native';
+import { ArrowLeft, ChevronRight, Ticket, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
@@ -14,21 +14,22 @@ const TRACK_CARDS: {
   title: string;
   blurb: string;
   route: string;
-  Icon: typeof Sparkles;
+  Icon: typeof Ticket;
 }[] = [
   {
     track: 'event_host',
-    title: 'host events',
-    blurb: 'post one-off events to the scene. shows, dinners, runs, anything you run for real.',
+    // LIZ COPY (decision 16: put on / start; never host, post, lead)
+    title: 'put on events',
+    blurb: 'put your events on the scene. shows, dinners, pop-ups, anything real.',
     route: '/creator/apply-events',
-    Icon: Sparkles,
+    Icon: Ticket,
   },
   {
     track: 'community_leader',
-    title: 'lead a community',
-    blurb: 'an ongoing crew people join and belong to. you also get event hosting with it.',
+    title: 'start a community',
+    blurb: 'a group people join and belong to, run by you. putting on events comes with it.',
     route: '/creator/apply-community',
-    Icon: UsersRound,
+    Icon: Users,
   },
 ];
 

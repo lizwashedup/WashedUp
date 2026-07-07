@@ -143,9 +143,9 @@ export default function ApplyCommunityScreen() {
       ) : (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-            <Text style={styles.title}>lead a community</Text>
+            <Text style={styles.title}>start a community</Text>
             <Text style={styles.intro}>
-              an ongoing crew people join and belong to. a human reads every application and replies within a day.
+              a group people join and belong to, run by you. a human reads every application and replies within a day.
             </Text>
 
             <Field label="your name" value={yourName} onChange={setYourName} maxLength={80} />

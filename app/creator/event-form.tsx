@@ -256,7 +256,7 @@ export default function EventFormScreen() {
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>{editing ? 'edit your event' : 'post an event'}</Text>
+            <Text style={styles.title}>{editing ? 'edit your event' : 'put on an event'}</Text>
             {editing && eventStatus !== 'Live' && (
               <Text style={styles.statusLine}>this event is {eventStatus.toLowerCase()}.</Text>
             )}
