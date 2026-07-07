@@ -20,6 +20,8 @@ import { hapticLight, hapticSuccess } from '../../../lib/haptics';
 import ProfileButton from '../../../components/ProfileButton';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
+import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
+import { SceneDiscovery } from '../../../components/scene/SceneDiscovery';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -34,7 +36,15 @@ const PLACEHOLDERS = [
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
+// COMMUNITIES_ENABLED is a compile-time constant, so this branch is stable
+// for the app's lifetime: flag off ships the coming-soon page byte-identical
+// to today; flag on ships discovery (doc 10 phase 5).
 export default function ScenePage() {
+  if (COMMUNITIES_ENABLED) return <SceneDiscovery />;
+  return <SceneComingSoon />;
+}
+
+function SceneComingSoon() {
   const [userId, setUserId] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState('');
   const [submitState, setSubmitState] = useState<'idle' | 'success'>('idle');
