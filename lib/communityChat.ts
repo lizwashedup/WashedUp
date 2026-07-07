@@ -69,6 +69,21 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
   const cards = await getCommunityChatCards();
   if (cards.length === 0) return [];
 
+  // a community with no broadcasts yet anchors at YOUR join time (a fresh
+  // chat enters the list when it begins, then floats on real activity)
+  const { data: { user } } = await supabase.auth.getUser();
+  const joinedAtByCommunity = new Map<string, string>();
+  if (user) {
+    const { data: memberships } = await supabase
+      .from('community_members')
+      .select('community_id, joined_at')
+      .eq('user_id', user.id)
+      .eq('status', 'active');
+    for (const m of (memberships ?? []) as { community_id: string; joined_at: string | null }[]) {
+      if (m.joined_at) joinedAtByCommunity.set(m.community_id, m.joined_at);
+    }
+  }
+
   const joinedTopicIds = cards.flatMap((c) => c.topics.filter((t) => t.joined).map((t) => t.id));
   const previewByTopic = new Map<string, string>();
   if (joinedTopicIds.length > 0) {
@@ -94,7 +109,7 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
       secondary: null,
       // LIZ COPY
       preview: c.latest_broadcast?.body ?? 'you are in.',
-      lastAt: c.latest_broadcast?.created_at ?? null,
+      lastAt: c.latest_broadcast?.created_at ?? joinedAtByCommunity.get(c.community_id) ?? null,
       unread: c.unread_broadcasts,
       accent: c.accent_color,
     });
