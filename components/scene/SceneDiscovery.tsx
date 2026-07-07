@@ -157,6 +157,20 @@ export function SceneDiscovery() {
         ) : (
           filtered.map(renderEvent)
         )}
+
+        {/* the supply funnel: every browser is a possible creator. quiet,
+            visible, never shouting. LIZ COPY */}
+        <View style={styles.creatorCard}>
+          <Text style={styles.creatorText}>
+            run a community or throw events? bring it to washedup.
+          </Text>
+          <TouchableOpacity
+            style={styles.creatorBtn}
+            onPress={() => router.push('/creator/apply' as never)}
+          >
+            <Text style={styles.creatorBtnText}>tell us about it</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -247,4 +261,29 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     lineHeight: LineHeights.bodyMD,
   },
+  creatorCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.borderWarm,
+    padding: 16,
+    marginTop: 12,
+    gap: 12,
+    alignItems: 'center',
+  },
+  creatorText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.secondary,
+    lineHeight: LineHeights.bodyMD,
+    textAlign: 'center',
+  },
+  creatorBtn: {
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  creatorBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
 });
