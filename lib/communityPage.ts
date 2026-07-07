@@ -71,6 +71,67 @@ export async function getCommunityPage(communityId: string): Promise<CommunityPa
   };
 }
 
+// -- Yours: my communities (decision 7: communities get a page on Yours) --------
+
+export interface MyCommunity {
+  id: string;
+  handle: string;
+  name: string;
+  accent_color: string | null;
+  role: 'leader' | 'co_leader' | 'member';
+  cover_image: string | null;
+  member_count: number | null;
+}
+
+export async function getMyCommunities(): Promise<MyCommunity[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data: rows, error } = await supabase
+    .from('community_members')
+    .select('role, communities ( id, handle, name, accent_color, status )')
+    .eq('user_id', user.id)
+    .eq('status', 'active');
+  if (error) throw error;
+  const memberships = (rows ?? [])
+    .map((r: any) => ({ role: r.role, c: r.communities }))
+    .filter((r: any) => r.c && r.c.status === 'active');
+  if (memberships.length === 0) return [];
+
+  const ids = memberships.map((m: any) => m.c.id);
+  const [{ data: covers }, counts] = await Promise.all([
+    supabase
+      .from('community_blocks')
+      .select('community_id, content, position')
+      .in('community_id', ids)
+      .eq('block_type', 'cover')
+      .eq('visible', true)
+      .order('position', { ascending: true }),
+    Promise.all(
+      ids.map((cid: string) =>
+        supabase
+          .rpc('get_community_member_count', { p_community_id: cid })
+          .then(({ data }) => [cid, typeof data === 'number' ? data : null] as const),
+      ),
+    ),
+  ]);
+  const coverById = new Map<string, string>();
+  for (const b of (covers ?? []) as any[]) {
+    const first = Array.isArray(b.content?.images) ? b.content.images[0] : null;
+    if (first && !coverById.has(b.community_id)) coverById.set(b.community_id, first);
+  }
+  const countById = new Map(counts);
+
+  return memberships.map((m: any) => ({
+    id: m.c.id,
+    handle: m.c.handle,
+    name: m.c.name,
+    accent_color: m.c.accent_color ?? null,
+    role: m.role,
+    cover_image: coverById.get(m.c.id) ?? null,
+    member_count: countById.get(m.c.id) ?? null,
+  }));
+}
+
 /** A handful of member faces for the members_auto block (active only). */
 export async function getMemberFaces(
   communityId: string,

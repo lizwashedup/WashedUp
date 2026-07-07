@@ -13,7 +13,7 @@ import { Plus, MessageCircle, CalendarPlus, Users, User } from 'lucide-react-nat
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { SPACING } from '../../constants/YoursDesign';
-import { GROUPS_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
 import { COPY } from './state/constants';
 import { useAuthUserId } from './state/useAuthUserId';
 import { useGetOrCreateDm } from '../../hooks/useGetOrCreateDm';
@@ -36,6 +36,7 @@ import ProfileCardSheet from './profile/ProfileCardSheet';
 import RequestStack from './requests/RequestStack';
 import PeopleSearchResults from './search/PeopleSearchResults';
 import CirclesDirectory from './circles/CirclesDirectory';
+import { MyCommunitiesList } from './communities/MyCommunitiesList';
 import MenuCard, { type AnchorRect } from '../menu/MenuCard';
 import { buildComposerWithPerson } from '../../lib/composerLink';
 import type { YoursGridPerson } from '../../lib/yours/types';
@@ -285,6 +286,16 @@ export default function YoursScreen() {
                 }
                 onCreate={openCreateCircle}
                 onAddPeople={() => setPathsOpen(true)}
+              />
+            </View>
+          )}
+          {COMMUNITIES_ENABLED && tab === 'communities' && (
+            <View style={styles.fill}>
+              <MyCommunitiesList
+                // The community PAGE is the front door (decision 7); chat is
+                // one action inside it, mirroring how circles open.
+                onOpen={(id) => router.push(`/community/${id}` as never)}
+                onBrowse={() => router.push('/(tabs)/explore' as never)}
               />
             </View>
           )}
