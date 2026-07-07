@@ -1,20 +1,22 @@
 /**
- * Creator mode: events. Read-only this slice: lists live events attributed
- * to the community or the creator. Creation and editing need the operator
- * RPCs plus an owner-read RLS policy on explore_events, which ride the
- * discovery-revival migration (phase 5); the placeholder says so honestly.
+ * Creator mode: events. The list (owner-read RLS shows every status now)
+ * plus post-an-event and tap-to-edit against the batch-15 operator RPCs.
+ * Functionally minimal per decision 15a.
  */
 
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
+import { Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCreatorEvents } from '../../lib/creatorMode';
 import { supabase } from '../../lib/supabase';
 
 export default function CreatorEventsScreen() {
+  const router = useRouter();
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
 
   const { data: events = [], refetch, isRefetching } = useQuery({
@@ -27,6 +29,9 @@ export default function CreatorEventsScreen() {
     enabled: access != null,
   });
 
+  const live = events.filter((e) => e.status === 'Live');
+  const past = events.filter((e) => e.status !== 'Live');
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -35,25 +40,43 @@ export default function CreatorEventsScreen() {
       >
         <Text style={styles.title}>events</Text>
 
-        {events.map((e) => (
-          <View key={e.id} style={styles.card}>
+        <TouchableOpacity style={styles.postBtn} onPress={() => router.push('/creator/event-form')}>
+          <Plus size={16} color={Colors.white} strokeWidth={2.5} />
+          <Text style={styles.postBtnText}>post an event</Text>
+        </TouchableOpacity>
+
+        {live.length > 0 && <Text style={styles.sectionLabel}>live</Text>}
+        {live.map((e) => (
+          <TouchableOpacity
+            key={e.id}
+            style={styles.card}
+            onPress={() => router.push(`/creator/event-form?id=${e.id}` as never)}
+          >
             <Text style={styles.cardTitle}>{e.title}</Text>
             <Text style={styles.cardMeta}>
-              {[e.public_name, e.event_date, e.venue].filter(Boolean).join(' · ')}
+              {[e.public_name, e.event_date, e.venue].filter(Boolean).join('  ')}
             </Text>
-          </View>
+          </TouchableOpacity>
+        ))}
+
+        {past.length > 0 && <Text style={[styles.sectionLabel, styles.sectionGap]}>past and cancelled</Text>}
+        {past.map((e) => (
+          <TouchableOpacity
+            key={e.id}
+            style={[styles.card, styles.cardPast]}
+            onPress={() => router.push(`/creator/event-form?id=${e.id}` as never)}
+          >
+            <Text style={styles.cardTitle}>{e.title}</Text>
+            <Text style={styles.cardMeta}>
+              {e.status.toLowerCase()}
+              {e.event_date ? `  ${e.event_date}` : ''}
+            </Text>
+          </TouchableOpacity>
         ))}
 
         {events.length === 0 && (
-          <Text style={styles.empty}>nothing on the calendar yet.</Text>
+          <Text style={styles.empty}>your first event goes here.</Text>
         )}
-
-        <View style={styles.placeholderCard}>
-          <Text style={styles.placeholderText}>
-            posting and editing events from here lands with the discovery
-            revival. until then the washedup team posts them for you, fast.
-          </Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -67,8 +90,27 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
-    marginBottom: 8,
+    marginBottom: 4,
   },
+  postBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 12,
+    marginBottom: 6,
+  },
+  postBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  sectionLabel: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  sectionGap: { marginTop: 12 },
   card: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
@@ -76,16 +118,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     padding: 16,
   },
+  cardPast: { opacity: 0.7 },
   cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
   cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary },
-  placeholderCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: Colors.borderWarm,
-    padding: 16,
-    marginTop: 8,
-  },
-  placeholderText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, lineHeight: LineHeights.bodySM },
 });
