@@ -960,6 +960,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="creator/apply-community" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/edit-page" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/join-gate" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="community/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community-chat/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community-topic/[id]" options={{ headerShown: false, gestureEnabled: true }} />
       </Stack>

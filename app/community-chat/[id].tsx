@@ -106,7 +106,13 @@ export default function CommunityChatScreen() {
         <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
           <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{card?.name ?? 'community'}</Text>
+        <TouchableOpacity
+          style={styles.headerTitleTap}
+          onPress={() => router.push(`/community/${id}` as never)}
+          hitSlop={6}
+        >
+          <Text style={styles.headerTitle} numberOfLines={1}>{card?.name ?? 'community'}</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={handleMute} hitSlop={12}>
           {muted ? (
             <BellOff size={20} color={Colors.tertiary} strokeWidth={2.5} />
@@ -208,8 +214,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
+  headerTitleTap: { flex: 1 },
   headerTitle: {
-    flex: 1,
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyLG,
     color: Colors.darkWarm,
