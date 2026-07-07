@@ -24,6 +24,8 @@ import { useBlock } from '../../hooks/useBlock';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -222,6 +224,109 @@ export default function EventDetailScreen() {
     },
   });
 
+  // -- just-join RSVPs + the doc 09 smart popup (flag-gated additions) ----------
+  const [rsvpBusy, setRsvpBusy] = useState(false);
+  const { data: myRsvp = null } = useQuery({
+    queryKey: ['event-rsvp', id, userId],
+    queryFn: () => getMyRsvp(id!),
+    enabled: COMMUNITIES_ENABLED && !!id && !!userId,
+  });
+  const { data: rsvpCount = null } = useQuery({
+    queryKey: ['event-rsvp-count', id],
+    queryFn: () => getRsvpCount(id!),
+    enabled: COMMUNITIES_ENABLED && !!id,
+  });
+
+  const goFindPeople = useCallback(() => {
+    if (!event) return;
+    hapticMedium();
+    router.push({
+      pathname: '/(tabs)/post',
+      params: {
+        prefillTitle: event.title,
+        prefillExploreEventId: event.id,
+        prefillStartTime: event.start_time ?? '',
+        prefillEventDate: event.event_date ?? '',
+        prefillDescription: event.description ?? '',
+        prefillImageUrl: event.image_url ?? '',
+        prefillLocation: event.venue_address ?? event.venue ?? '',
+        prefillCategory: event.category ?? '',
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event]);
+
+  const invalidateRsvp = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['event-rsvp', id] });
+    queryClient.invalidateQueries({ queryKey: ['event-rsvp-count', id] });
+  }, [queryClient, id]);
+
+  const handleCountMeIn = useCallback(async () => {
+    if (!id || rsvpBusy) return;
+    if (myRsvp === 'going') {
+      // LIZ COPY
+      setAlertInfo({
+        title: 'not going anymore?',
+        message: 'no pressure either way.',
+        buttons: [
+          { text: 'still going', style: 'cancel' },
+          {
+            text: 'take me off',
+            onPress: async () => {
+              try {
+                await setRsvp(id, false);
+                invalidateRsvp();
+              } catch {
+                hapticError();
+              }
+            },
+          },
+        ],
+      });
+      return;
+    }
+    setRsvpBusy(true);
+    try {
+      await setRsvp(id, true);
+      hapticSuccess();
+      invalidateRsvp();
+      // the smart popup: one nudge per event, never again once answered
+      if (!(await wasNudged(id))) {
+        await markNudged(id);
+        const openPlans = linkedPlans.filter((p) => {
+          const actualCount = memberCountsMap[p.id] ?? p.member_count;
+          return capDisplayCount(actualCount) < Math.min((p.max_invites ?? 7) + 1, MAX_GROUP);
+        });
+        if (openPlans.length > 0) {
+          // LIZ COPY
+          setAlertInfo({
+            title: 'a group is forming for this',
+            message: 'want in? your spot at the event stands either way.',
+            buttons: [
+              { text: 'see the group', onPress: () => router.push(`/plan/${openPlans[0].id}`) },
+              { text: 'find people to go with', onPress: goFindPeople },
+              { text: 'just going', style: 'cancel' },
+            ],
+          });
+        } else {
+          // LIZ COPY
+          setAlertInfo({
+            title: 'want people to go with?',
+            message: "you're in either way. small groups form around events like this.",
+            buttons: [
+              { text: 'find people', onPress: goFindPeople },
+              { text: 'just going', style: 'cancel' },
+            ],
+          });
+        }
+      }
+    } catch {
+      hapticError();
+    } finally {
+      setRsvpBusy(false);
+    }
+  }, [id, rsvpBusy, myRsvp, linkedPlans, memberCountsMap, invalidateRsvp, goFindPeople]);
+
   if (!id || isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -343,6 +448,13 @@ export default function EventDetailScreen() {
             </View>
           )}
 
+          {COMMUNITIES_ENABLED && rsvpCount !== null && rsvpCount > 0 && (
+            <View style={styles.metaRow}>
+              <Users size={16} color={Colors.warmGray} strokeWidth={2} />
+              <Text style={styles.metaText}>{rsvpCount} going</Text>
+            </View>
+          )}
+
           {event.description && (
             <View style={styles.descriptionSection}>
               <LinkifiedText text={event.description} style={styles.descriptionText} />
@@ -429,25 +541,22 @@ export default function EventDetailScreen() {
       </ScrollView>
 
       <View style={[styles.stickyBar, { paddingBottom: insets.bottom + 8 }]}>
-        <TouchableOpacity
-          style={styles.postPlanButton}
-          onPress={() => {
-            hapticMedium();
-            router.push({
-              pathname: '/(tabs)/post',
-              params: {
-                prefillTitle: event.title,
-                prefillExploreEventId: event.id,
-                prefillStartTime: event.start_time ?? '',
-                prefillEventDate: event.event_date ?? '',
-                prefillDescription: event.description ?? '',
-                prefillImageUrl: event.image_url ?? '',
-                prefillLocation: event.venue_address ?? event.venue ?? '',
-                prefillCategory: event.category ?? '',
-              },
-            });
-          }}
-        >
+        {COMMUNITIES_ENABLED && (
+          <TouchableOpacity
+            style={[styles.rsvpButton, myRsvp === 'going' && styles.rsvpButtonGoing]}
+            onPress={handleCountMeIn}
+            disabled={rsvpBusy}
+          >
+            {rsvpBusy ? (
+              <ActivityIndicator size="small" color={Colors.terracotta} />
+            ) : (
+              <Text style={[styles.rsvpButtonText, myRsvp === 'going' && styles.rsvpButtonTextGoing]}>
+                {myRsvp === 'going' ? "you're going" : 'count me in'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.postPlanButton} onPress={goFindPeople}>
           <Text style={styles.postPlanButtonText}>Find People to Go With</Text>
         </TouchableOpacity>
       </View>
@@ -536,6 +645,8 @@ const styles = StyleSheet.create({
   planTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   planMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
   stickyBar: {
+    flexDirection: 'row',
+    gap: 10,
     paddingHorizontal: 20,
     paddingTop: 12,
     backgroundColor: Colors.parchment,
@@ -543,10 +654,29 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.inputBg,
   },
   postPlanButton: {
+    flex: 1,
     backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
+  // RSVP: outline until going; going = the documented gold confirmed-state
+  // (fill + hairline gold border + brandDeep label), never a terracotta CTA
+  rsvpButton: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rsvpButtonGoing: {
+    backgroundColor: Colors.goingConfirmedFill,
+    borderColor: Colors.gold,
+  },
+  rsvpButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta },
+  rsvpButtonTextGoing: { color: Colors.brandDeep },
 });

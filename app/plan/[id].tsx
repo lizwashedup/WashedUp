@@ -40,7 +40,7 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
-import { YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
 import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
 // Lazy so a circle component's module-scope code (its StyleSheet) is never
 // evaluated for non-circle users on this universally-reachable shipped screen.
@@ -816,6 +816,29 @@ export default function PlanDetailScreen() {
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
   const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
+
+  // Communities: if this plan spawned from a Scene event and that event was
+  // cancelled (a Live-only RLS read comes back empty while the plan is still
+  // in the future), say so plainly. The plan itself is untouched: formed
+  // groups keep their plans and decide for themselves (batch 15 call b).
+  const { data: sourceEventCancelled = false } = useQuery({
+    queryKey: ['plan-source-event-gone', id],
+    enabled: COMMUNITIES_ENABLED && !!id && !!plan && !isPastPlan,
+    queryFn: async () => {
+      const { data: row } = await supabase
+        .from('events')
+        .select('explore_event_id')
+        .eq('id', id!)
+        .maybeSingle();
+      if (!row?.explore_event_id) return false;
+      const { data: ev } = await supabase
+        .from('explore_events')
+        .select('id')
+        .eq('id', row.explore_event_id)
+        .maybeSingle();
+      return !ev;
+    },
+  });
   // Next Time! uses the end_time-aware "past" check so users can still
   // signal interest on a plan that's already started but not yet ended.
   const interestPlanEnded = plan ? isPlanPast(plan.start_time, plan.end_time) : true;
@@ -1502,6 +1525,15 @@ export default function PlanDetailScreen() {
 
         {/* B. Plan Title */}
         <Text style={styles.planTitle}>{plan.title}</Text>
+
+        {COMMUNITIES_ENABLED && sourceEventCancelled && (
+          /* LIZ COPY (taste call 7) */
+          <View style={styles.cancelledEventBanner}>
+            <Text style={styles.cancelledEventText}>
+              the event this plan came from was cancelled. your plans are your own.
+            </Text>
+          </View>
+        )}
 
         {/* C. Category Tags — featured pill ("washedup event" gold or "birthday party" pink) for featured plans, otherwise regular category */}
         {isFeatured ? (
@@ -2802,6 +2834,19 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
     lineHeight: 34,
     marginBottom: 12,
+  },
+  cancelledEventBanner: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.gold,
+    padding: 12,
+    marginBottom: 12,
+  },
+  cancelledEventText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
   },
   categoryTagsRow: {
     flexDirection: 'row',
