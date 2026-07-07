@@ -22,7 +22,10 @@ import { withTimeout } from '../../../lib/withTimeout';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 import { consumeChatListDirty } from '../../../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
-import { GROUPS_ENABLED, YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, GROUPS_ENABLED, YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
+import { useQuery } from '@tanstack/react-query';
+import { getCommunityChatCards } from '../../../lib/communityChat';
+import { CommunityChatCard } from '../../../components/chats/CommunityChatCard';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
 import CircleCover from '../../../components/yours/circles/CircleCover';
@@ -199,6 +202,16 @@ export default function ChatsScreen() {
   const [section, setSection] = React.useState<ChatSection>('all');
 
   const queryClient = useQueryClient();
+
+  // Communities section (doc 09): one card per joined community, above the
+  // plan chats. Query disabled when the flag is off, so today's screen is
+  // byte-identical for live users.
+  const { data: communityCards = [] } = useQuery({
+    queryKey: ['community-chat-cards'],
+    queryFn: getCommunityChatCards,
+    enabled: COMMUNITIES_ENABLED,
+  });
+
   // Throttle the focus-driven chat-list refetch. It runs ~5 parallel
   // Supabase queries; firing it on *every* tab focus (the prior behavior)
   // was a primary contributor to the 2026-05-18 "chat is slow" reports.
@@ -213,6 +226,10 @@ export default function ChatsScreen() {
       if (consumeChatListDirty() || nowTs - lastChatsFocusFetchRef.current > 30_000) {
         lastChatsFocusFetchRef.current = nowTs;
         refetch();
+        // communities section rides the same throttle; no-op when the flag is off
+        if (COMMUNITIES_ENABLED) {
+          queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+        }
       }
       // Opening the Chats tab means the user is looking at their messages.
       // Clear the app icon badge AND mark all new_message notifications as
@@ -288,7 +305,7 @@ export default function ChatsScreen() {
         <ChatSegments value={section} onChange={setSection} />
       )}
 
-      {chats.length === 0 ? (
+      {chats.length === 0 && communityCards.length === 0 ? (
         <View style={styles.emptyState}>
           <Image source={wLogo} style={styles.emptyLogo} contentFit="contain" />
           <Text style={styles.emptyTitle}>Join a plan to start chatting</Text>
@@ -312,7 +329,23 @@ export default function ChatsScreen() {
           }
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={ChatSeparator}
-          ListHeaderComponent={activeChats.length > 0 ? <Text style={styles.sectionLabel}>Active</Text> : null}
+          ListHeaderComponent={
+            <>
+              {COMMUNITIES_ENABLED && section === 'all' && communityCards.length > 0 && (
+                <View>
+                  <Text style={styles.sectionLabel}>communities</Text>
+                  {communityCards.map((c) => (
+                    <CommunityChatCard
+                      key={c.community_id}
+                      card={c}
+                      onPress={() => router.push(`/community-chat/${c.community_id}` as any)}
+                    />
+                  ))}
+                </View>
+              )}
+              {activeChats.length > 0 ? <Text style={styles.sectionLabel}>Active</Text> : null}
+            </>
+          }
           renderItem={renderChat}
           ListEmptyComponent={
             section === 'circles' ? (
