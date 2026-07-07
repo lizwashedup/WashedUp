@@ -71,6 +71,20 @@ export async function requestToJoinCommunity(communityId: string, answers: JoinA
   if (error) throw error;
 }
 
+/** My own join answers (self-readable by RLS); the intro seeds the empty thread. */
+export async function getMyIntroAnswer(communityId: string): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from('community_member_answers')
+    .select('answers')
+    .eq('community_id', communityId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  const intro = (data?.answers as Record<string, unknown> | null)?.intro_answer;
+  return typeof intro === 'string' && intro.trim() ? intro : null;
+}
+
 export type MembershipStatus = 'pending' | 'active' | 'left' | 'removed' | 'banned' | 'declined';
 
 /** The viewer's own membership row for a community, if any. */
