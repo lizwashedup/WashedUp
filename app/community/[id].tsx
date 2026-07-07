@@ -30,6 +30,10 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
 import { getCommunityPage, getMemberFaces, type CommunityPageEvent } from '../../lib/communityPage';
 import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
+import { getCommunityChatCards, joinTopic } from '../../lib/communityChat';
+import { friendlyError } from '../../lib/friendlyError';
+import { hapticSuccess } from '../../lib/haptics';
+import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import type { CommunityBlock } from '../../lib/communityBlocks';
 
 const LOCK_VIEW_BLOCKS = ['cover', 'header', 'about'];
@@ -63,6 +67,30 @@ export default function CommunityPageScreen() {
     queryFn: () => getMemberFaces(id!),
     enabled: !!id && isMember,
   });
+
+  // rooms live here for discovery (unjoined rooms never clutter the chat list)
+  const [joiningTopicId, setJoiningTopicId] = useState<string | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const { data: cards = [] } = useQuery({
+    queryKey: ['community-chat-cards'],
+    queryFn: getCommunityChatCards,
+    enabled: isMember,
+  });
+  const card = cards.find((c) => c.community_id === id) ?? null;
+
+  const handleJoinTopic = async (topicId: string) => {
+    setJoiningTopicId(topicId);
+    try {
+      await joinTopic(topicId);
+      hapticSuccess();
+      await queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+      router.push(`/community-topic/${topicId}` as never);
+    } catch (e) {
+      setAlertInfo({ title: 'That did not work', message: friendlyError(e, 'Try again in a moment.') });
+    } finally {
+      setJoiningTopicId(null);
+    }
+  };
 
   if (isLoading || !id) {
     return (
@@ -216,7 +244,7 @@ export default function CommunityPageScreen() {
         {isMember && (
           <TouchableOpacity
             style={styles.chatLink}
-            onPress={() => router.push(`/community-chat/${id}` as never)}
+            onPress={() => router.push(`/community-thread/${id}` as never)}
             hitSlop={8}
           >
             <MessagesSquare size={18} color={Colors.terracotta} strokeWidth={2.5} />
@@ -235,6 +263,31 @@ export default function CommunityPageScreen() {
         )}
 
         {visibleBlocks.map(renderBlock)}
+
+        {isMember && (card?.topics.length ?? 0) > 0 && (
+          <View style={styles.block}>
+            <Text style={styles.blockLabel}>rooms</Text>
+            {card!.topics.map((t) => (
+              <View key={t.id} style={styles.roomRow}>
+                <Text style={styles.roomName} numberOfLines={1}>{t.name}</Text>
+                {t.joined ? (
+                  <TouchableOpacity
+                    onPress={() => router.push(`/community-topic/${t.id}` as never)}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.roomOpen}>open</Text>
+                  </TouchableOpacity>
+                ) : joiningTopicId === t.id ? (
+                  <ActivityIndicator size="small" color={Colors.terracotta} />
+                ) : (
+                  <TouchableOpacity style={styles.roomJoinPill} onPress={() => handleJoinTopic(t.id)}>
+                    <Text style={styles.roomJoinText}>join in</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
 
         {!isMember && (
           <View style={styles.lockFooter}>
@@ -267,6 +320,14 @@ export default function CommunityPageScreen() {
         )}
         <Text style={styles.poweredBy}>powered by washedup</Text>
       </ScrollView>
+
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
 
       {gate && (
         <JoinCommunityPopup
@@ -373,6 +434,29 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   pinnedTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 4 },
+  roomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  roomName: { flex: 1, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  roomOpen: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  roomJoinPill: {
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  roomJoinText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   lockFooter: { marginTop: 4, gap: 6 },
   pendingCard: {
     backgroundColor: Colors.cardBg,

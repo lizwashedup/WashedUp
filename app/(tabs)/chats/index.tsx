@@ -24,8 +24,8 @@ import { consumeChatListDirty } from '../../../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
 import { COMMUNITIES_ENABLED, GROUPS_ENABLED, YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { useQuery } from '@tanstack/react-query';
-import { getCommunityChatCards } from '../../../lib/communityChat';
-import { CommunityChatCard } from '../../../components/chats/CommunityChatCard';
+import { getCommunityChatRows } from '../../../lib/communityChat';
+import { CommunityChatRow } from '../../../components/chats/CommunityChatRow';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
 import CircleCover from '../../../components/yours/circles/CircleCover';
@@ -34,11 +34,14 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 
 // Chats sections (spec section 5). Only shown when GROUPS_ENABLED; otherwise the
 // list behaves exactly as it ships today (events only, no segmented control).
-type ChatSection = 'all' | 'plans' | 'circles';
+type ChatSection = 'all' | 'plans' | 'circles' | 'communities';
+// Communities joins the row as the third sibling only when the flag is on
+// (compile-time constant), so the shipped tab row is unchanged when off.
 const CHAT_SECTIONS: ReadonlyArray<readonly [ChatSection, string]> = [
   ['all', 'All'],
   ['plans', 'Plans'],
   ['circles', 'Circles'],
+  ...(COMMUNITIES_ENABLED ? ([['communities', 'Communities']] as const) : []),
 ];
 
 /** Full-width underline tabs (active: asphalt + terracotta underline). */
@@ -206,9 +209,9 @@ export default function ChatsScreen() {
   // Communities section (doc 09): one card per joined community, above the
   // plan chats. Query disabled when the flag is off, so today's screen is
   // byte-identical for live users.
-  const { data: communityCards = [] } = useQuery({
-    queryKey: ['community-chat-cards'],
-    queryFn: getCommunityChatCards,
+  const { data: communityRows = [] } = useQuery({
+    queryKey: ['community-chat-rows'],
+    queryFn: getCommunityChatRows,
     enabled: COMMUNITIES_ENABLED,
   });
 
@@ -228,6 +231,7 @@ export default function ChatsScreen() {
         refetch();
         // communities section rides the same throttle; no-op when the flag is off
         if (COMMUNITIES_ENABLED) {
+          queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
           queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
         }
       }
@@ -268,6 +272,8 @@ export default function ChatsScreen() {
   const sectionChats = useMemo(() => {
     if (section === 'plans') return chats.filter(c => c.kind === 'event');
     if (section === 'circles') return chats.filter(c => c.kind === 'circle');
+    // Communities rows render in the list header; no plan/circle chats here.
+    if (section === 'communities') return [];
     return chats;
   }, [chats, section]);
   const activeChats = useMemo(() => sectionChats.filter(c => !c.is_past), [sectionChats]);
@@ -301,11 +307,11 @@ export default function ChatsScreen() {
         <ProfileButton />
       </View>
 
-      {GROUPS_ENABLED && chats.length > 0 && (
+      {GROUPS_ENABLED && (chats.length > 0 || communityRows.length > 0) && (
         <ChatSegments value={section} onChange={setSection} />
       )}
 
-      {chats.length === 0 && communityCards.length === 0 ? (
+      {chats.length === 0 && communityRows.length === 0 ? (
         <View style={styles.emptyState}>
           <Image source={wLogo} style={styles.emptyLogo} contentFit="contain" />
           <Text style={styles.emptyTitle}>Join a plan to start chatting</Text>
@@ -331,24 +337,48 @@ export default function ChatsScreen() {
           ItemSeparatorComponent={ChatSeparator}
           ListHeaderComponent={
             <>
-              {COMMUNITIES_ENABLED && section === 'all' && communityCards.length > 0 && (
-                <View>
-                  <Text style={styles.sectionLabel}>communities</Text>
-                  {communityCards.map((c) => (
-                    <CommunityChatCard
-                      key={c.community_id}
-                      card={c}
-                      onPress={() => router.push(`/community-chat/${c.community_id}` as any)}
-                    />
-                  ))}
-                </View>
-              )}
-              {activeChats.length > 0 ? <Text style={styles.sectionLabel}>Active</Text> : null}
+              {COMMUNITIES_ENABLED &&
+                (section === 'all' || section === 'communities') &&
+                communityRows.length > 0 && (
+                  <View>
+                    <Text style={styles.sectionLabel}>Communities</Text>
+                    {communityRows.map((r) => (
+                      <CommunityChatRow
+                        key={r.key}
+                        row={r}
+                        onPress={() =>
+                          router.push(
+                            (r.kind === 'community'
+                              ? `/community-thread/${r.targetId}`
+                              : `/community-topic/${r.targetId}`) as any,
+                          )
+                        }
+                      />
+                    ))}
+                  </View>
+                )}
+              {section !== 'communities' && activeChats.length > 0 ? (
+                <Text style={styles.sectionLabel}>Active</Text>
+              ) : null}
             </>
           }
           renderItem={renderChat}
           ListEmptyComponent={
-            section === 'circles' ? (
+            section === 'communities' ? (
+              communityRows.length > 0 ? null : (
+                <View style={styles.noActiveState}>
+                  <Text style={styles.noActiveText}>
+                    Join a community and its chat lives here.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.noActiveButton}
+                    onPress={() => router.push('/(tabs)/explore' as any)}
+                  >
+                    <Text style={styles.noActiveButtonText}>Browse the Scene</Text>
+                  </TouchableOpacity>
+                </View>
+              )
+            ) : section === 'circles' ? (
               <View style={styles.noActiveState}>
                 <Text style={styles.noActiveText}>
                   Your circles show up here. Make one from your people.

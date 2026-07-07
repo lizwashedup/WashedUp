@@ -42,6 +42,84 @@ export async function getCommunityChatCards(): Promise<CommunityChatCard[]> {
   return (data ?? []) as CommunityChatCard[];
 }
 
+// -- the chats-list rows (revised doc 09: no hub screen, chats are just chats) --
+
+export interface CommunityChatRowData {
+  key: string;
+  kind: 'community' | 'room';
+  /** communityId for community rows, topicId for room rows */
+  targetId: string;
+  communityId: string;
+  title: string;
+  /** the community name, shown small on room rows */
+  secondary: string | null;
+  preview: string;
+  lastAt: string | null;
+  unread: number;
+  accent: string | null;
+}
+
+/**
+ * One row per community (its conversation: the broadcasts) plus one row per
+ * JOINED room, flattened for the Chats list. Unjoined rooms are discoverable
+ * from the community page, not here. Room previews come from a light
+ * client-side pass over recent messages (no schema change).
+ */
+export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
+  const cards = await getCommunityChatCards();
+  if (cards.length === 0) return [];
+
+  const joinedTopicIds = cards.flatMap((c) => c.topics.filter((t) => t.joined).map((t) => t.id));
+  const previewByTopic = new Map<string, string>();
+  if (joinedTopicIds.length > 0) {
+    const { data: recent } = await supabase
+      .from('community_topic_messages')
+      .select('topic_id, body, created_at')
+      .in('topic_id', joinedTopicIds)
+      .order('created_at', { ascending: false })
+      .limit(120);
+    for (const m of (recent ?? []) as { topic_id: string; body: string }[]) {
+      if (!previewByTopic.has(m.topic_id)) previewByTopic.set(m.topic_id, m.body);
+    }
+  }
+
+  const rows: CommunityChatRowData[] = [];
+  for (const c of cards) {
+    rows.push({
+      key: `community-${c.community_id}`,
+      kind: 'community',
+      targetId: c.community_id,
+      communityId: c.community_id,
+      title: c.name,
+      secondary: null,
+      // LIZ COPY
+      preview: c.latest_broadcast?.body ?? 'you are in.',
+      lastAt: c.latest_broadcast?.created_at ?? null,
+      unread: c.unread_broadcasts,
+      accent: c.accent_color,
+    });
+    for (const t of c.topics) {
+      if (!t.joined) continue;
+      rows.push({
+        key: `room-${t.id}`,
+        kind: 'room',
+        targetId: t.id,
+        communityId: c.community_id,
+        title: t.name,
+        secondary: c.name,
+        // LIZ COPY
+        preview: previewByTopic.get(t.id) ?? 'quiet so far',
+        lastAt: t.last_message_at,
+        unread: t.unread,
+        accent: c.accent_color,
+      });
+    }
+  }
+  // newest activity first, community rows float above their rooms on ties
+  rows.sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''));
+  return rows;
+}
+
 // -- read markers ----------------------------------------------------------------
 
 export async function markBroadcastsRead(communityId: string): Promise<void> {

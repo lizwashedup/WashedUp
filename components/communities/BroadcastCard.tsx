@@ -31,10 +31,12 @@ const REACTION_SET = ['❤️', '🔥', '👏'];
 
 interface Props {
   broadcast: CommunityBroadcast;
+  /** Broadcasts are the community speaking; attribution is its name, never a person. */
+  communityName: string;
   onError: (title: string, message: string) => void;
 }
 
-export function BroadcastCard({ broadcast, onError }: Props) {
+export function BroadcastCard({ broadcast, communityName, onError }: Props) {
   const queryClient = useQueryClient();
   const [showReplies, setShowReplies] = useState(false);
   const [draft, setDraft] = useState('');
@@ -79,11 +81,9 @@ export function BroadcastCard({ broadcast, onError }: Props) {
 
   return (
     <View style={styles.card}>
+      {!!communityName && <Text style={styles.attribution}>{communityName}</Text>}
       <Text style={styles.body}>{broadcast.body}</Text>
-      <Text style={styles.meta}>
-        {broadcast.sender_name ? `${broadcast.sender_name}  ` : ''}
-        {new Date(broadcast.created_at).toLocaleString()}
-      </Text>
+      <Text style={styles.meta}>{new Date(broadcast.created_at).toLocaleString()}</Text>
 
       <View style={styles.reactionRow}>
         {REACTION_SET.map((emoji) => {
@@ -159,6 +159,12 @@ const styles = StyleSheet.create({
     borderLeftColor: Colors.gold,
     padding: 14,
     marginBottom: 10,
+  },
+  attribution: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    marginBottom: 4,
   },
   body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
   meta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 6 },

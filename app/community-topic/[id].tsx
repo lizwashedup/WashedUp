@@ -83,6 +83,7 @@ export default function CommunityTopicScreen() {
     return () => {
       supabase.removeChannel(channel);
       queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+      queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
