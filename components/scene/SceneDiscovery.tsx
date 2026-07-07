@@ -175,7 +175,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginBottom: 10,
   },
   sectionGap: { marginTop: 24 },
@@ -221,7 +220,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginBottom: 4,
   },
   posterTitle: {

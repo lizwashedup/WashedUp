@@ -178,7 +178,8 @@ export default function CreatorMembersScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowName}>
                   {m.name ?? 'someone'}
-                  {m.role !== 'member' && <Text style={styles.roleTag}>  {m.role === 'leader' ? 'leader' : 'co-leader'}</Text>}
+                  {/* LIZ COPY: the role word is hers; placeholder per the walkthrough */}
+                  {m.role !== 'member' && <Text style={styles.roleTag}>  runs this</Text>}
                 </Text>
                 <Text style={styles.rowMeta}>
                   joined {m.joined_at ? new Date(m.joined_at).toLocaleDateString() : 'recently'}
@@ -235,7 +236,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginBottom: 2,
   },
   row: {
@@ -259,7 +259,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginTop: 6,
   },
   answerIntro: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },

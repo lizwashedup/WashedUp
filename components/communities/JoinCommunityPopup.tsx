@@ -98,7 +98,7 @@ export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Prop
             {!!gate.welcomeMessage && (
               <View style={styles.welcomeCard}>
                 <Text style={styles.welcomeText}>{gate.welcomeMessage}</Text>
-                <Text style={styles.welcomeFrom}>from the leader</Text>
+                <Text style={styles.welcomeFrom}>from {gate.name}</Text>
               </View>
             )}
 
@@ -169,8 +169,8 @@ export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Prop
 
             {/* LIZ COPY: the fine print, what stays private vs public */}
             <Text style={styles.finePrint}>
-              the leader sees your answers. only your introduction becomes public,
-              posted into the community chat when you are approved.
+              your answers go to whoever runs {gate.name}. only your introduction
+              becomes public, posted into the community chat when you are approved.
             </Text>
 
             {!!problem && <Text style={styles.problem}>{problem}</Text>}
@@ -187,7 +187,7 @@ export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Prop
               )}
             </TouchableOpacity>
             {/* LIZ COPY */}
-            <Text style={styles.gateNote}>the leader approves every request personally.</Text>
+            <Text style={styles.gateNote}>a real person approves every request.</Text>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -224,7 +224,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginBottom: 4,
   },
   input: {

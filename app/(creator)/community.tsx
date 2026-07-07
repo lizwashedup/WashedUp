@@ -154,7 +154,7 @@ export default function CreatorCommunityScreen() {
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>rooms</Text>
           <Text style={styles.hint}>
-            the chat spaces members can join. introductions makes itself; leaders
+            the chat spaces members can join. introductions makes itself; you
             make the rest.
           </Text>
           <View style={[styles.composer, styles.lastCard]}>
@@ -208,7 +208,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginBottom: 4,
   },
   hint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginBottom: 10 },

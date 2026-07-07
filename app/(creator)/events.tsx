@@ -108,7 +108,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
   },
   sectionGap: { marginTop: 12 },
   card: {

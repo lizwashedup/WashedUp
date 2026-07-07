@@ -303,7 +303,7 @@ export default function CommunityPageScreen() {
             {membership?.status === 'pending' ? (
               <View style={styles.pendingCard}>
                 <Text style={styles.pendingText}>
-                  your request is with the leader. they read every one personally.
+                  your request is in. a real person reads every one.
                 </Text>
               </View>
             ) : membership && ['declined', 'removed', 'banned'].includes(membership.status) ? (
@@ -400,7 +400,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginBottom: 6,
   },
   bodyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
