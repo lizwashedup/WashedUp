@@ -32,6 +32,7 @@ import { supabase } from '../../lib/supabase';
 import {
   getCommunityChatPayload,
   getTopicMessages,
+  hasSaidHiInTopic,
   markTopicRead,
   sendTopicMessage,
   setTopicNotifications,
@@ -61,6 +62,18 @@ export default function CommunityTopicScreen() {
     payload?.cards.flatMap((c) => c.topics).find((t) => t.id === id) ??
     payload?.attendee_topics.find((t) => t.id === id) ??
     null;
+
+  // event chats open only after you say something (Liz 7-07): RSVP is untouched,
+  // but the room stays veiled until your first message lands. back always works.
+  const eventTopic = !!topic?.explore_event_id;
+  const [justSaidHi, setJustSaidHi] = useState(false);
+  const { data: saidHi } = useQuery({
+    queryKey: ['topic-said-hi', id, myId],
+    queryFn: () => hasSaidHiInTopic(id!),
+    enabled: !!id && !!myId && eventTopic,
+  });
+  const gated = eventTopic && !justSaidHi && saidHi === false;
+  const gateChecking = eventTopic && !justSaidHi && saidHi === undefined;
 
   const messagesKey = ['topic-messages', id];
   const { data: messages = [], isLoading } = useQuery({
@@ -98,6 +111,10 @@ export default function CommunityTopicScreen() {
     try {
       await sendTopicMessage(id, draft);
       setDraft('');
+      if (gated || gateChecking) {
+        setJustSaidHi(true);
+        queryClient.invalidateQueries({ queryKey: ['topic-said-hi', id, myId] });
+      }
       await queryClient.invalidateQueries({ queryKey: messagesKey });
       listRef.current?.scrollToEnd({ animated: true });
     } catch (e) {
@@ -155,9 +172,19 @@ export default function CommunityTopicScreen() {
           </TouchableOpacity>
         </View>
 
-        {isLoading ? (
+        {isLoading || gateChecking ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={Colors.terracotta} />
+          </View>
+        ) : gated ? (
+          <View style={styles.gateWrap}>
+            <View style={styles.gateCard}>
+              {/* LIZ COPY */}
+              <Text style={styles.gateTitle}>say hi first</Text>
+              <Text style={styles.gateBody}>
+                drop a hi and what area you're from. the chat opens right after.
+              </Text>
+            </View>
           </View>
         ) : (
           <FlatList
@@ -178,7 +205,7 @@ export default function CommunityTopicScreen() {
             style={styles.input}
             value={draft}
             onChangeText={setDraft}
-            placeholder="say something"
+            placeholder={gated ? "hi! i'm from..." : 'say something'}
             placeholderTextColor={Colors.inkSoft}
             multiline
             maxLength={4000}
@@ -227,6 +254,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   listContent: { padding: 16, gap: 10, flexGrow: 1 },
+  gateWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  gateCard: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 20,
+    alignItems: 'center',
+    gap: 6,
+  },
+  gateTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.darkWarm,
+  },
+  gateBody: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    lineHeight: LineHeights.bodySM,
+    textAlign: 'center',
+  },
   emptyLine: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,

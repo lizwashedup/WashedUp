@@ -401,6 +401,22 @@ export async function getMyBroadcastMute(communityId: string): Promise<boolean> 
   return !!data?.broadcasts_muted;
 }
 
+// -- event chat say-hi gate (Liz 7-07: nobody creeps silently in an event room) ----
+
+/** True once the caller has sent at least one message in this topic. */
+export async function hasSaidHiInTopic(topicId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { data, error } = await supabase
+    .from('community_topic_messages')
+    .select('id')
+    .eq('topic_id', topicId)
+    .eq('sender_id', user.id)
+    .limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
 // -- pinned event (chat model 7-07: main chat pins the soonest upcoming) ----------
 
 export interface PinnedCommunityEvent {
