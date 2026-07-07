@@ -63,7 +63,7 @@ import { queryClient } from '../lib/queryClient';
 import { withTimeout } from '../lib/withTimeout';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
 import { maybeRequestReviewAfterTopRating } from '../lib/reviewAsk';
@@ -542,6 +542,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       } else if (type === 'people_ping' && data?.eventId) {
         // A ping IS the plan, open the plan detail, not the chat.
         safePush(`/plan/${data.eventId}`);
+      } else if (COMMUNITIES_ENABLED && type === 'community_join_request') {
+        // A join request is the leader's to answer: the wants-in list lives
+        // on the creator members tab (grant-gated server-side; a non-creator
+        // tapping a stale push gets redirected out of the shell safely).
+        safePush('/(creator)/members');
+      } else if (COMMUNITIES_ENABLED && type === 'community_event') {
+        // "just posted <event>" lands on Scene, where the event lives. The
+        // payload carries no event id by design (event_id is the plans FK).
+        safePush('/(tabs)/explore');
+        // community_broadcast, community_join_approved, and
+        // community_join_declined intentionally ride the generic fallback
+        // below: they carry no ids, and the chats list (with the communities
+        // section on top) is the right landing for all three.
       } else if (data?.chatId) {
         safePush(`/(tabs)/chats/${data.chatId}`);
       } else if (data?.eventId) {
