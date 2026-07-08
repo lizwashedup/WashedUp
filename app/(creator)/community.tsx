@@ -28,7 +28,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
-import { getCreatorAccess, getBroadcasts, sendBroadcast } from '../../lib/creatorMode';
+import { getCreatorAccess, getBroadcasts, publishCommunity, sendBroadcast } from '../../lib/creatorMode';
 import { createTopic } from '../../lib/communityChat';
 
 export default function CreatorCommunityScreen() {
@@ -64,6 +64,34 @@ export default function CreatorCommunityScreen() {
     }
   };
 
+  const [publishing, setPublishing] = useState(false);
+  const handlePublish = () => {
+    if (!community || publishing) return;
+    // LIZ COPY
+    setAlertInfo({
+      title: 'open your page?',
+      message: 'right now only you see it. publishing makes it real: people can find it, read it, and ask to join.',
+      buttons: [
+        { text: 'not yet', style: 'cancel' },
+        {
+          text: 'publish it',
+          onPress: async () => {
+            setPublishing(true);
+            try {
+              await publishCommunity(community.id);
+              hapticSuccess();
+              queryClient.invalidateQueries({ queryKey: ['creator-access'] });
+            } catch (e) {
+              setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
+            } finally {
+              setPublishing(false);
+            }
+          },
+        },
+      ],
+    });
+  };
+
   const handleSend = async () => {
     if (!community || !draft.trim()) return;
     setSending(true);
@@ -88,6 +116,27 @@ export default function CreatorCommunityScreen() {
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
           <Text style={styles.title}>community</Text>
+
+          {community?.status === 'draft' && (
+            <View style={styles.draftBanner}>
+              {/* LIZ COPY */}
+              <Text style={styles.draftBannerTitle}>your page is a draft</Text>
+              <Text style={styles.draftBannerBody}>
+                only you see it. shape it in your page below, then open the doors.
+              </Text>
+              <TouchableOpacity
+                style={[styles.publishBtn, publishing && { opacity: 0.6 }]}
+                onPress={handlePublish}
+                disabled={publishing}
+              >
+                {publishing ? (
+                  <ActivityIndicator size="small" color={Colors.white} />
+                ) : (
+                  <Text style={styles.publishBtnText}>publish your page</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
 
           <Text style={styles.sectionLabel}>broadcast</Text>
           <Text style={styles.hint}>
@@ -196,6 +245,36 @@ export default function CreatorCommunityScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   content: { padding: 20 },
+  draftBanner: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.gold,
+    padding: 14,
+    marginBottom: 20,
+  },
+  draftBannerTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+    marginBottom: 4,
+  },
+  draftBannerBody: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    lineHeight: LineHeights.bodySM,
+    marginBottom: 10,
+  },
+  publishBtn: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  publishBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   title: {
     fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,

@@ -68,6 +68,21 @@ export async function getCreatorAccess(): Promise<CreatorAccess> {
 
 // -- members ------------------------------------------------------------------
 
+/**
+ * Publish a draft community: status draft -> active through the leader-scoped
+ * communities_update RLS policy. Only active communities are world-readable
+ * (lock view, discovery, member pages); this is the one-way door that opens
+ * the page. Archiving stays an admin conversation for now.
+ */
+export async function publishCommunity(communityId: string): Promise<void> {
+  const { error } = await supabase
+    .from('communities')
+    .update({ status: 'active' })
+    .eq('id', communityId)
+    .eq('status', 'draft');
+  if (error) throw error;
+}
+
 export interface CommunityMemberRow {
   id: string;
   user_id: string;
