@@ -53,6 +53,7 @@ import {
   NEIGHBORHOOD_OTHER,
 } from '../../constants/Neighborhoods';
 import { PLAN_CATEGORIES, type PlanCategory } from '../../constants/Categories';
+import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { COPY } from '../yours/state/constants';
 import { useAuthUserId } from '../yours/state/useAuthUserId';
 import type { MyFace } from '../../hooks/useMyFace';
@@ -161,6 +162,8 @@ export default function PlanComposerV2() {
     prefillGroupSize?: string;
     prefillTicketsUrl?: string;
     duplicatedFromEventId?: string;
+    // resuming a saved draft: post updates this row instead of inserting
+    draftId?: string;
   }>();
 
   // ── Profile (gender options) ──
@@ -531,7 +534,92 @@ export default function PlanComposerV2() {
       prefillAgeRange: undefined, prefillGenderPref: undefined,
       prefillGroupSize: undefined, prefillTicketsUrl: undefined,
       duplicatedFromEventId: undefined,
+      draftId: undefined,
     } as never);
+  };
+
+  // ── Save as draft (COMMUNITIES_ENABLED): title + when are enough; the rest
+  // waits. No host member row, no feed presence, no waitlist notify - the row
+  // sits at status 'draft', visible only in Yours until it posts. ──
+  const canSaveDraft = title.trim().length > 0 && dateSelected && timeSelected && !loading && !imageLoading;
+  const handleSaveDraft = async () => {
+    if (loading || imageLoading || confirmVisible) return;
+    const missing: string[] = [];
+    if (title.trim().length === 0) missing.push('Title');
+    if (!dateSelected) missing.push('Day');
+    if (!timeSelected) missing.push('Time');
+    if (missing.length > 0) {
+      // LIZ COPY
+      setAlertInfo({ title: 'Almost there', message: `A draft just needs:\n\n• ${missing.join('\n• ')}` });
+      return;
+    }
+    const fieldsToCheck = [title, description, creatorMessage, location].filter(Boolean).join(' ');
+    const filter = checkContent(fieldsToCheck);
+    if (!filter.ok) {
+      setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
+      return;
+    }
+    const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
+    let endTimeIso: string | null = null;
+    if (endTimeSelected) {
+      let endDt = buildDatetime(dateMonth, dateDay, dateYear, endTimeHour, endTimeMinute, endTimePeriod);
+      if (endDt.getTime() <= startTime.getTime()) {
+        endDt = new Date(endDt.getTime() + 24 * 60 * 60 * 1000);
+      }
+      endTimeIso = endDt.toISOString();
+    }
+    const ageBounds = ageRangesToMinMax(ageRanges);
+    const row = {
+      title: title.trim(),
+      start_time: startTime.toISOString(),
+      end_time: endTimeIso,
+      drop_in: dropIn,
+      allow_duplicate: allowDuplicate,
+      location_text: location.trim() || null,
+      location_lat: locationLat,
+      location_lng: locationLng,
+      tickets_url: ticketUrl.trim() || null,
+      primary_vibe: category?.toLowerCase() ?? null,
+      gender_rule: genderPref,
+      target_age_min: ageBounds.min,
+      target_age_max: ageBounds.max,
+      description: description.trim() || null,
+      host_message: creatorMessage.trim().slice(0, MSG_LIMIT) || null,
+      max_invites: groupSize,
+      min_invites: MIN_GROUP,
+      status: 'draft',
+      city: 'Los Angeles',
+      image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
+      neighborhood: neighborhood.trim() || null,
+    };
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('auth');
+      if (params.draftId) {
+        const { error } = await supabase
+          .from('events')
+          .update(row)
+          .eq('id', String(params.draftId))
+          .eq('creator_user_id', user.id)
+          .eq('status', 'draft');
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('events')
+          .insert({ ...row, creator_user_id: user.id });
+        if (error) throw error;
+      }
+      hapticSuccess();
+      queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
+      resetForm();
+      // LIZ COPY
+      setAlertInfo({ title: 'saved', message: 'your draft lives in yours, under plans. finish it whenever.' });
+    } catch {
+      setAlertInfo({ title: 'That did not save', message: 'Try again in a moment.' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ── Submit (optimistic: the post moment shows instantly; the insert runs in
@@ -651,12 +739,28 @@ export default function PlanComposerV2() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('auth');
-      const { data: insertedEvent, error } = await supabase
-        .from('events')
-        .insert({ ...row, creator_user_id: user.id })
-        .select('id')
-        .single();
-      if (error) throw error;
+      let insertedEvent: { id: string } | null = null;
+      if (params.draftId) {
+        // finishing a draft: the row exists, flip it to forming with the
+        // final fields; the host member row lands below like any new plan
+        const { data: updated, error: updateErr } = await supabase
+          .from('events')
+          .update(row)
+          .eq('id', String(params.draftId))
+          .eq('creator_user_id', user.id)
+          .select('id')
+          .single();
+        if (updateErr) throw updateErr;
+        insertedEvent = updated;
+      } else {
+        const { data: inserted, error } = await supabase
+          .from('events')
+          .insert({ ...row, creator_user_id: user.id })
+          .select('id')
+          .single();
+        if (error) throw error;
+        insertedEvent = inserted;
+      }
 
       if (insertedEvent?.id) {
         const { error: memberErr } = await supabase.from('event_members').insert({
@@ -671,8 +775,11 @@ export default function PlanComposerV2() {
             // Best-effort rollback of the orphaned event. Error-check it: a
             // failed delete leaves an event with no host member, so flag that
             // case distinctly - both paths fall through to the quiet gold
-            // recovery below so the creator can simply retry.
-            const { error: rollbackErr } = await supabase.from('events').delete().eq('id', insertedEvent.id);
+            // recovery below so the creator can simply retry. A resumed draft
+            // rolls back to 'draft' instead of being deleted.
+            const { error: rollbackErr } = params.draftId
+              ? (await supabase.from('events').update({ status: 'draft' }).eq('id', insertedEvent.id)) 
+              : (await supabase.from('events').delete().eq('id', insertedEvent.id));
             throw new Error(rollbackErr ? 'member_orphan' : 'member');
           }
         }
@@ -702,6 +809,7 @@ export default function PlanComposerV2() {
 
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
       queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       setPostedPlanId(insertedEvent?.id ?? null);
       if (isFirst) {
@@ -1031,6 +1139,17 @@ export default function PlanComposerV2() {
         >
           {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.postBtnText}>post the plan</Text>}
         </TouchableOpacity>
+        {COMMUNITIES_ENABLED && (
+          <TouchableOpacity
+            onPress={handleSaveDraft}
+            disabled={!canSaveDraft}
+            hitSlop={8}
+            style={styles.draftLinkWrap}
+          >
+            {/* LIZ COPY */}
+            <Text style={[styles.draftLink, !canSaveDraft && styles.draftLinkOff]}>save it as a draft</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Neighborhood picker modal */}
@@ -1271,6 +1390,9 @@ const styles = StyleSheet.create({
   },
   postBtnOff: { opacity: 0.45 },
   postBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white, letterSpacing: 0.2 },
+  draftLinkWrap: { alignItems: 'center', marginTop: 10 },
+  draftLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  draftLinkOff: { opacity: 0.45 },
 
   // Modals
   modalOverlay: { flex: 1, backgroundColor: Colors.overlayDark40, justifyContent: 'flex-end' },
