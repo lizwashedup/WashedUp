@@ -21,6 +21,7 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import {
+  composeIntroLine,
   getBroadcastReplies,
   sendBroadcastReply,
   toggleBroadcastReaction,
@@ -79,10 +80,17 @@ export function BroadcastCard({ broadcast, communityName, onError }: Props) {
     }
   };
 
+  // an intro is the community introducing a new member (kind='intro'):
+  // same reactions and reply thread, its own clothes, client-composed line
+  const isIntro = broadcast.kind === 'intro';
+  const bodyText = isIntro && broadcast.payload ? composeIntroLine(broadcast.payload) : broadcast.body;
+
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, isIntro && styles.cardIntro]}>
       {!!communityName && <Text style={styles.attribution}>{communityName}</Text>}
-      <Text style={styles.body}>{broadcast.body}</Text>
+      {/* LIZ COPY */}
+      {isIntro && <Text style={styles.introEyebrow}>just joined</Text>}
+      <Text style={styles.body}>{bodyText}</Text>
       <Text style={styles.meta}>{new Date(broadcast.created_at).toLocaleString()}</Text>
 
       <View style={styles.reactionRow}>
@@ -160,10 +168,20 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
+  cardIntro: {
+    backgroundColor: Colors.accentSubtle,
+    borderLeftColor: Colors.terracotta,
+  },
   attribution: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
+    marginBottom: 4,
+  },
+  introEyebrow: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
     marginBottom: 4,
   },
   body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },

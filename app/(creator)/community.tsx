@@ -154,8 +154,8 @@ export default function CreatorCommunityScreen() {
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>rooms</Text>
           <Text style={styles.hint}>
-            the chat spaces members can join. introductions makes itself; you
-            make the rest.
+            the chat spaces members can join. you make them, members find them
+            on your page.
           </Text>
           <View style={[styles.composer, styles.lastCard]}>
             <TextInput

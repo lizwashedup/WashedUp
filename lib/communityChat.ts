@@ -212,21 +212,44 @@ export interface BroadcastReaction {
   mine: boolean;
 }
 
+export interface IntroPayload {
+  user_id: string;
+  first_name: string;
+  area: string | null;
+  question: string;
+  answer: string;
+}
+
 export interface CommunityBroadcast {
   id: string;
   body: string;
   created_at: string;
   sender_id: string | null;
   sender_name: string | null;
+  kind: 'broadcast' | 'intro';
+  payload: IntroPayload | null;
   reactions: BroadcastReaction[];
   reply_count: number;
+}
+
+/**
+ * LIZ COPY: the intro card template. The system introduces the new member in
+ * warm third person, no pronouns: name as typed, area from their zip (never
+ * the zip itself), the leader's question woven in lowercase with their answer.
+ * Template lives here so wording changes ship OTA; the DB body is a fallback.
+ */
+export function composeIntroLine(p: IntroPayload): string {
+  const fragment = p.question.trim().replace(/[?.!]+$/, '').toLowerCase();
+  const from = p.area ? `, from ${p.area}` : '';
+  const punct = /[.!?]$/.test(p.answer) ? '' : '.';
+  return `this is ${p.first_name}${from}. ${fragment}: ${p.answer}${punct}`;
 }
 
 export async function getCommunityBroadcasts(communityId: string): Promise<CommunityBroadcast[]> {
   const { data: { user } } = await supabase.auth.getUser();
   const { data: rows, error } = await supabase
     .from('community_broadcasts')
-    .select('id, body, created_at, sender_id')
+    .select('id, body, created_at, sender_id, kind, payload')
     .eq('community_id', communityId)
     .order('created_at', { ascending: false })
     .limit(30);

@@ -170,7 +170,8 @@ export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Prop
             {/* LIZ COPY: the fine print, what stays private vs public */}
             <Text style={styles.finePrint}>
               your answers go to whoever runs {gate.name}. only your introduction
-              becomes public, posted into the community chat when you are approved.
+              and your general area become public, woven into a short hello in
+              the community chat when you are approved. never your zip.
             </Text>
 
             {!!problem && <Text style={styles.problem}>{problem}</Text>}

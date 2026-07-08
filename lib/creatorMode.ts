@@ -107,9 +107,9 @@ export async function getCommunityMembers(communityId: string): Promise<Communit
 
 /**
  * Approve or decline a pending join request via the review_community_join
- * RPC (leader-gated server-side). Approval activates the member, posts their
- * intro answer into the introductions topic AS them, subscribes them, and
- * sends the warm note. Decline sets the distinct 'declined' status and sends
+ * RPC (leader-gated server-side). Approval activates the member, drops the
+ * system-composed intro card into the main community chat, and sends the
+ * warm note. Decline sets the distinct 'declined' status and sends
  * a kind note; whether a declined person can re-request later is a logged
  * open question (currently blocked).
  */

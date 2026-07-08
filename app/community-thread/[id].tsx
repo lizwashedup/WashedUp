@@ -35,7 +35,7 @@ import {
   setBroadcastMute,
   type CommunityBroadcast,
 } from '../../lib/communityChat';
-import { getJoinGate, getMyIntroAnswer } from '../../lib/communityJoin';
+import { getJoinGate } from '../../lib/communityJoin';
 
 export default function CommunityThreadScreen() {
   const router = useRouter();
@@ -71,17 +71,13 @@ export default function CommunityThreadScreen() {
     enabled: !!id,
   });
 
-  // a joined thread never looks dead: before the first broadcast, the join
-  // welcome and your own posted introduction fill the room (correction 4)
+  // a joined thread never looks dead (correction 4): since migration 19 the
+  // system-composed intro card IS in the thread, so a new member's room is
+  // never truly empty; the welcome note covers the remaining edge
   const emptyThread = !isLoading && thread.length === 0;
   const { data: gate } = useQuery({
     queryKey: ['community-gate', id],
     queryFn: () => getJoinGate(id!),
-    enabled: !!id && emptyThread,
-  });
-  const { data: myIntro = null } = useQuery({
-    queryKey: ['my-intro', id],
-    queryFn: () => getMyIntroAnswer(id!),
     enabled: !!id && emptyThread,
   });
 
@@ -178,14 +174,7 @@ export default function CommunityThreadScreen() {
                   <Text style={styles.welcomeBody}>{gate.welcomeMessage}</Text>
                 </View>
               )}
-              {!!myIntro && (
-                <View style={styles.introCard}>
-                  {/* LIZ COPY */}
-                  <Text style={styles.introLabel}>your introduction is posted in introductions</Text>
-                  <Text style={styles.introBody}>{myIntro}</Text>
-                </View>
-              )}
-              {!gate?.welcomeMessage && !myIntro && (
+              {!gate?.welcomeMessage && (
                 <Text style={styles.emptyLine}>it starts here.</Text>
               )}
             </View>
@@ -277,15 +266,6 @@ const styles = StyleSheet.create({
   },
   welcomeFrom: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 4 },
   welcomeBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
-  introCard: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 14,
-  },
-  introLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary, marginBottom: 4 },
-  introBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
   footerNote: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.caption,

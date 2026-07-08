@@ -2,9 +2,9 @@
  * Member-side join flow (doc 09): the join gate a visitor sees and the
  * request they submit. The server RPC re-validates everything; the client
  * checks mirror it so nobody round-trips to learn a field is missing.
- * Answers are stored leader-eyes-only (community_member_answers RLS); the
- * intro answer is the only part that becomes public, posted into the
- * introductions topic on approval.
+ * Answers are stored leader-eyes-only (community_member_answers RLS); on
+ * approval the system composes a warm third-person intro card into the main
+ * community chat (name, area from zip, question and answer; never the zip).
  */
 
 import { supabase } from './supabase';
