@@ -1,20 +1,23 @@
 /**
- * The community's conversation (revised doc 09: no hub screen). Opens like
- * any chat: broadcasts sit inline in the thread, highlighted, from the
- * community, and members react and reply right under them. Members do not
- * post at the top level here (that is the announcement layer); rooms are
- * where members talk, discoverable from the community page. Mute-not-leave
- * in the header, unreads clear on open.
+ * The community's conversation (doc 09 final shape + batch 21): a fully open
+ * member chat. Everyone talks freely through the composer; broadcasts and
+ * intro cards are special highlighted rows INSIDE the same stream (one
+ * table, one ordering, one unread count). Rooms remain the focused side
+ * spaces. Mute-not-leave in the header, unreads clear on open, realtime on
+ * the whole stream.
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   FlatList,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
@@ -32,10 +35,13 @@ import {
   getMyBroadcastMute,
   getPinnedCommunityEvent,
   markBroadcastsRead,
+  sendCommunityMessage,
   setBroadcastMute,
   type CommunityBroadcast,
 } from '../../lib/communityChat';
 import { getJoinGate } from '../../lib/communityJoin';
+import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
+import { supabase } from '../../lib/supabase';
 
 export default function CommunityThreadScreen() {
   const router = useRouter();
@@ -43,6 +49,13 @@ export default function CommunityThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const listRef = useRef<FlatList<CommunityBroadcast>>(null);
   const [alertInfo, setAlertInfo] = React.useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [myId, setMyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
+  }, []);
 
   const { data: payload } = useQuery({
     queryKey: ['community-chat-cards'],
@@ -89,9 +102,42 @@ export default function CommunityThreadScreen() {
         queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
       })
       .catch(() => {});
-  }, [id, queryClient]);
+    // one stream, live: messages, broadcasts, and intro cards all arrive here
+    const channel = supabase
+      .channel(`community-thread-${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'community_broadcasts', filter: `community_id=eq.${id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] });
+          markBroadcastsRead(id).catch(() => {});
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+      queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+      queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const showError = (title: string, message: string) => setAlertInfo({ title, message });
+
+  const handleSend = async () => {
+    if (!id || !draft.trim() || sending) return;
+    setSending(true);
+    try {
+      await sendCommunityMessage(id, draft);
+      setDraft('');
+      await queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] });
+      listRef.current?.scrollToEnd({ animated: true });
+    } catch (e) {
+      setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
+    } finally {
+      setSending(false);
+    }
+  };
 
   const handleMute = async () => {
     if (!id) return;
@@ -107,6 +153,7 @@ export default function CommunityThreadScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
           <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
@@ -161,9 +208,22 @@ export default function CommunityThreadScreen() {
           ref={listRef}
           data={thread}
           keyExtractor={(b) => b.id}
-          renderItem={({ item }) => (
-            <BroadcastCard broadcast={item} communityName={card?.name ?? ''} onError={showError} />
-          )}
+          renderItem={({ item }) =>
+            item.kind === 'message' ? (
+              <View style={[styles.messageRow, item.sender_id === myId && styles.messageRowMine]}>
+                <View style={[styles.bubble, item.sender_id === myId && styles.bubbleMine]}>
+                  {item.sender_id !== myId && (
+                    <Text style={styles.senderName}>{item.sender_name ?? 'someone'}</Text>
+                  )}
+                  <Text style={[styles.messageText, item.sender_id === myId && styles.messageTextMine]}>
+                    {item.body}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <BroadcastCard broadcast={item} communityName={card?.name ?? ''} onError={showError} />
+            )
+          }
           contentContainerStyle={styles.listContent}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           ListEmptyComponent={
@@ -179,14 +239,34 @@ export default function CommunityThreadScreen() {
               )}
             </View>
           }
-          ListFooterComponent={
-            thread.length > 0 ? (
-              <Text style={styles.footerNote}>react and reply right under each note.</Text>
-            ) : null
-          }
         />
       )}
 
+      <View style={styles.composer}>
+        <TextInput
+          style={styles.input}
+          value={draft}
+          onChangeText={setDraft}
+          placeholder="say something"
+          placeholderTextColor={Colors.inkSoft}
+          multiline
+          maxLength={4000}
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+        />
+        <TouchableOpacity
+          style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnOff]}
+          onPress={handleSend}
+          disabled={!draft.trim() || sending}
+        >
+          {sending ? (
+            <ActivityIndicator size="small" color={Colors.white} />
+          ) : (
+            <Text style={styles.sendBtnText}>send</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      </KeyboardAvoidingView>
       <BrandedAlert
         visible={!!alertInfo}
         title={alertInfo?.title ?? ''}
@@ -266,11 +346,51 @@ const styles = StyleSheet.create({
   },
   welcomeFrom: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 4 },
   welcomeBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
-  footerNote: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.tertiary,
-    textAlign: 'center',
-    marginTop: 8,
+  flex: { flex: 1 },
+  messageRow: { flexDirection: 'row', marginBottom: 10 },
+  messageRowMine: { justifyContent: 'flex-end' },
+  bubble: {
+    maxWidth: '78%',
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
+  bubbleMine: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
+  senderName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 2 },
+  messageText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  messageTextMine: { color: Colors.white },
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.parchment,
+  },
+  input: {
+    flex: 1,
+    maxHeight: 120,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+  },
+  sendBtn: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  sendBtnOff: { opacity: 0.4 },
+  sendBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
 });

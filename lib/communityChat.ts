@@ -226,7 +226,7 @@ export interface CommunityBroadcast {
   created_at: string;
   sender_id: string | null;
   sender_name: string | null;
-  kind: 'broadcast' | 'intro';
+  kind: 'broadcast' | 'intro' | 'message';
   payload: IntroPayload | null;
   reactions: BroadcastReaction[];
   reply_count: number;
@@ -290,6 +290,25 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
     ),
     reply_count: replyCounts.get(b.id) ?? 0,
   }));
+}
+
+/**
+ * The open composer (batch 21): any active member speaks in the main chat.
+ * kind='message' rides the same stream as broadcasts and intro cards, so
+ * ordering, unreads, previews, and realtime all inherit.
+ */
+export async function sendCommunityMessage(communityId: string, body: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const trimmed = body.trim();
+  if (!trimmed) return;
+  const { error } = await supabase.from('community_broadcasts').insert({
+    community_id: communityId,
+    sender_id: user.id,
+    body: trimmed.slice(0, 4000),
+    kind: 'message',
+  });
+  if (error) throw error;
 }
 
 export async function toggleBroadcastReaction(broadcastId: string, emoji: string, on: boolean): Promise<void> {
