@@ -36,8 +36,10 @@ import {
   announceEventToMembers,
   createOperatorEvent,
   EVENT_CATEGORIES,
+  getEventTemplate,
   getOperatorEvent,
   pickAndUploadEventImage,
+  saveEventTemplate,
   updateOperatorEvent,
   type OperatorEventFields,
 } from '../../lib/creatorEvents';
@@ -47,7 +49,7 @@ const POSTER_HEIGHT = 160;
 export default function EventFormScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { id, duplicateFrom } = useLocalSearchParams<{ id?: string; duplicateFrom?: string }>();
+  const { id, duplicateFrom, templateId } = useLocalSearchParams<{ id?: string; duplicateFrom?: string; templateId?: string }>();
   const editing = !!id;
 
   const [title, setTitle] = useState('');
@@ -72,6 +74,29 @@ export default function EventFormScreen() {
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const community = access?.ledCommunities[0] ?? null;
+
+  const { data: template } = useQuery({
+    queryKey: ['event-template', templateId],
+    queryFn: () => getEventTemplate(templateId!),
+    enabled: !editing && !duplicateFrom && !!templateId,
+  });
+  useEffect(() => {
+    if (!editing && !duplicateFrom && templateId && template && !seeded) {
+      const f = template.fields;
+      setTitle(f.title ?? '');
+      setDescription(f.description ?? '');
+      setImageUrl(f.image_url ?? '');
+      setVenue(f.venue ?? '');
+      setVenueAddress(f.venue_address ?? '');
+      setCategory(f.category ?? '');
+      setExternalUrl(f.external_url ?? '');
+      setTicketPrice(f.ticket_price ?? '');
+      setPublicName(f.public_name ?? '');
+      setPinToChat(f.pin_to_chat ?? true);
+      setFromCommunity(!!template.community_id);
+      setSeeded(true);
+    }
+  }, [editing, duplicateFrom, templateId, template, seeded]);
 
   // duplicate = same clothes, fresh date: seed everything but date and time,
   // then run the normal create path (publish, chat born, tell-your-members)
@@ -222,6 +247,69 @@ export default function EventFormScreen() {
     }
   };
 
+  // creator event drafts (batch 20): p_publish false = status Draft, no chat;
+  // the chat is born when the draft publishes
+  const isDraft = editing && eventStatus === 'Draft';
+  const handleSaveDraft = async () => {
+    const fields = collectFields();
+    if (!fields || saving) return;
+    setSaving(true);
+    try {
+      if (editing && id) {
+        await updateOperatorEvent(id, fields, null);
+      } else {
+        const communityId = fromCommunity && community ? community.id : null;
+        await createOperatorEvent(fields, communityId, false);
+      }
+      hapticSuccess();
+      afterSave();
+      router.back();
+    } catch (e) {
+      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePublishDraft = async () => {
+    const fields = collectFields();
+    if (!fields || !id || saving) return;
+    setSaving(true);
+    try {
+      await updateOperatorEvent(id, fields, 'Live');
+      hapticSuccess();
+      afterSave();
+      queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+      if (eventCommunityId) {
+        offerAnnounce(id);
+      } else {
+        router.back();
+      }
+    } catch (e) {
+      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveTemplate = async () => {
+    const fields = collectFields();
+    if (!fields || saving) return;
+    setSaving(true);
+    try {
+      const communityId = editing ? eventCommunityId : (fromCommunity && community ? community.id : null);
+      await saveEventTemplate(fields.title, fields, communityId);
+      hapticSuccess();
+      queryClient.invalidateQueries({ queryKey: ['event-templates'] });
+      // LIZ COPY
+      setAlertInfo({ title: 'saved as a template', message: 'it lives on your events tab. put it on anytime.' });
+    } catch (e) {
+      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleStatus = (status: 'Completed' | 'Cancelled') => {
     const fields = collectFields();
     if (!fields || !id) return;
@@ -288,7 +376,12 @@ export default function EventFormScreen() {
               <Text style={styles.statusLine}>same event, fresh date. pick the new one.</Text>
             )}
             {editing && eventStatus !== 'Live' && (
-              <Text style={styles.statusLine}>this event is {eventStatus.toLowerCase()}.</Text>
+              /* LIZ COPY */
+              <Text style={styles.statusLine}>
+                {eventStatus === 'Draft'
+                  ? 'a draft. only you see it until you publish.'
+                  : `this event is ${eventStatus.toLowerCase()}.`}
+              </Text>
             )}
 
             <Text style={styles.fieldLabel}>title</Text>
@@ -407,12 +500,27 @@ export default function EventFormScreen() {
               </>
             )}
 
-            <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnBusy]} onPress={handleSave} disabled={saving}>
+            <TouchableOpacity
+              style={[styles.saveBtn, saving && styles.saveBtnBusy]}
+              onPress={isDraft ? handlePublishDraft : handleSave}
+              disabled={saving}
+            >
               {saving ? (
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
-                <Text style={styles.saveBtnText}>{editing ? 'save' : 'put it up'}</Text>
+                <Text style={styles.saveBtnText}>{isDraft ? 'publish it' : editing ? 'save' : 'put it up'}</Text>
               )}
+            </TouchableOpacity>
+
+            {(!editing || isDraft) && (
+              <TouchableOpacity onPress={handleSaveDraft} disabled={saving} style={styles.quietLinkWrap} hitSlop={8}>
+                {/* LIZ COPY */}
+                <Text style={styles.quietLink}>{isDraft ? 'keep it a draft' : 'save it as a draft'}</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={handleSaveTemplate} disabled={saving} style={styles.quietLinkWrap} hitSlop={8}>
+              {/* LIZ COPY */}
+              <Text style={styles.quietLink}>save it as a template</Text>
             </TouchableOpacity>
 
             {editing && eventStatus === 'Live' && (
@@ -509,6 +617,8 @@ const styles = StyleSheet.create({
   },
   saveBtnBusy: { opacity: 0.6 },
   saveBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
+  quietLinkWrap: { alignItems: 'center', marginTop: 12 },
+  quietLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 },
   statusLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary },
 });

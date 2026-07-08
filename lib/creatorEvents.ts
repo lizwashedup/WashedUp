@@ -84,6 +84,7 @@ export async function getOperatorEvent(eventId: string): Promise<OperatorEventRo
 export async function createOperatorEvent(
   fields: OperatorEventFields,
   communityId: string | null,
+  publish: boolean = true,
 ): Promise<string> {
   const { data, error } = await supabase.rpc('operator_create_explore_event', {
     p_title: fields.title,
@@ -99,6 +100,7 @@ export async function createOperatorEvent(
     p_community_id: communityId,
     p_public_name: fields.public_name || null,
     p_pin_to_chat: fields.pin_to_chat,
+    p_publish: publish,
   });
   if (error) throw error;
   return data as string;
@@ -126,6 +128,57 @@ export async function updateOperatorEvent(
     p_pin_to_chat: fields.pin_to_chat,
     p_status: status,
   });
+  if (error) throw error;
+}
+
+// -- templates (batch 20): a template is the form's field set, owner-only ----
+
+export interface EventTemplate {
+  id: string;
+  name: string;
+  community_id: string | null;
+  fields: OperatorEventFields;
+  created_at: string;
+}
+
+export async function listEventTemplates(): Promise<EventTemplate[]> {
+  const { data, error } = await supabase
+    .from('operator_event_templates')
+    .select('id, name, community_id, fields, created_at')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as EventTemplate[];
+}
+
+/** Saves the current form as a template; date and time never travel. */
+export async function saveEventTemplate(
+  name: string,
+  fields: OperatorEventFields,
+  communityId: string | null,
+): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { error } = await supabase.from('operator_event_templates').insert({
+    user_id: user.id,
+    community_id: communityId,
+    name: name.trim().slice(0, 80),
+    fields: { ...fields, event_date: '', start_time: null },
+  });
+  if (error) throw error;
+}
+
+export async function getEventTemplate(id: string): Promise<EventTemplate | null> {
+  const { data, error } = await supabase
+    .from('operator_event_templates')
+    .select('id, name, community_id, fields, created_at')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as EventTemplate | null) ?? null;
+}
+
+export async function deleteEventTemplate(id: string): Promise<void> {
+  const { error } = await supabase.from('operator_event_templates').delete().eq('id', id);
   if (error) throw error;
 }
 

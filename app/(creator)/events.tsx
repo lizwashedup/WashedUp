@@ -8,15 +8,17 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { Plus } from 'lucide-react-native';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCreatorEvents } from '../../lib/creatorMode';
+import { deleteEventTemplate, listEventTemplates } from '../../lib/creatorEvents';
 import { supabase } from '../../lib/supabase';
 
 export default function CreatorEventsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
 
   const { data: events = [], refetch, isRefetching } = useQuery({
@@ -30,7 +32,17 @@ export default function CreatorEventsScreen() {
   });
 
   const live = events.filter((e) => e.status === 'Live');
-  const past = events.filter((e) => e.status !== 'Live');
+  const drafts = events.filter((e) => e.status === 'Draft');
+  const past = events.filter((e) => e.status !== 'Live' && e.status !== 'Draft');
+
+  const { data: templates = [] } = useQuery({
+    queryKey: ['event-templates'],
+    queryFn: listEventTemplates,
+  });
+  const removeTemplate = useMutation({
+    mutationFn: (id: string) => deleteEventTemplate(id),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['event-templates'] }),
+  });
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -45,7 +57,46 @@ export default function CreatorEventsScreen() {
           <Text style={styles.postBtnText}>put on an event</Text>
         </TouchableOpacity>
 
-        {live.length > 0 && <Text style={styles.sectionLabel}>live</Text>}
+        {drafts.length > 0 && <Text style={styles.sectionLabel}>drafts</Text>}
+        {drafts.map((e) => (
+          <TouchableOpacity
+            key={e.id}
+            style={styles.card}
+            onPress={() => router.push(`/creator/event-form?id=${e.id}` as never)}
+          >
+            <Text style={styles.cardTitle}>{e.title}</Text>
+            {/* LIZ COPY */}
+            <Text style={styles.cardMeta}>
+              only you see it{e.event_date ? `  ${e.event_date}` : ''}
+            </Text>
+          </TouchableOpacity>
+        ))}
+
+        {templates.length > 0 && (
+          <Text style={[styles.sectionLabel, drafts.length > 0 && styles.sectionGap]}>templates</Text>
+        )}
+        {templates.map((t) => (
+          <TouchableOpacity
+            key={t.id}
+            style={styles.card}
+            onPress={() => router.push(`/creator/event-form?templateId=${t.id}` as never)}
+          >
+            <View style={styles.templateRow}>
+              <View style={styles.templateBody}>
+                <Text style={styles.cardTitle}>{t.name}</Text>
+                {/* LIZ COPY */}
+                <Text style={styles.cardMeta}>tap to put it on</Text>
+              </View>
+              <TouchableOpacity onPress={() => removeTemplate.mutate(t.id)} hitSlop={10}>
+                <X size={16} color={Colors.tertiary} strokeWidth={2.5} />
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        ))}
+
+        {live.length > 0 && (
+          <Text style={[styles.sectionLabel, (drafts.length > 0 || templates.length > 0) && styles.sectionGap]}>live</Text>
+        )}
         {live.map((e) => (
           <TouchableOpacity
             key={e.id}
@@ -132,6 +183,8 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   cardPast: { opacity: 0.7 },
+  templateRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  templateBody: { flex: 1 },
   cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
   againLink: {
     fontFamily: Fonts.sansMedium,
