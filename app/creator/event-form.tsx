@@ -47,7 +47,7 @@ const POSTER_HEIGHT = 160;
 export default function EventFormScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, duplicateFrom } = useLocalSearchParams<{ id?: string; duplicateFrom?: string }>();
   const editing = !!id;
 
   const [title, setTitle] = useState('');
@@ -73,13 +73,31 @@ export default function EventFormScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const community = access?.ledCommunities[0] ?? null;
 
+  // duplicate = same clothes, fresh date: seed everything but date and time,
+  // then run the normal create path (publish, chat born, tell-your-members)
+  const sourceId = editing ? id : duplicateFrom || undefined;
   const { data: existing } = useQuery({
-    queryKey: ['operator-event', id],
-    queryFn: () => getOperatorEvent(id!),
-    enabled: editing,
+    queryKey: ['operator-event', sourceId],
+    queryFn: () => getOperatorEvent(sourceId!),
+    enabled: !!sourceId,
   });
 
   useEffect(() => {
+    if (!editing && duplicateFrom && existing && !seeded) {
+      setTitle(existing.title);
+      setDescription(existing.description);
+      setImageUrl(existing.image_url);
+      setVenue(existing.venue);
+      setVenueAddress(existing.venue_address);
+      setCategory(existing.category);
+      setExternalUrl(existing.external_url);
+      setTicketPrice(existing.ticket_price);
+      setPublicName(existing.public_name);
+      setPinToChat(existing.pin_to_chat);
+      setFromCommunity(!!existing.community_id);
+      setSeeded(true);
+      return;
+    }
     if (editing && existing && !seeded) {
       setTitle(existing.title);
       setDescription(existing.description);
@@ -246,7 +264,7 @@ export default function EventFormScreen() {
     }
   };
 
-  const loadingEdit = editing && !seeded;
+  const loadingEdit = (editing || !!duplicateFrom) && !seeded;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -264,7 +282,11 @@ export default function EventFormScreen() {
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>{editing ? 'edit your event' : 'put on an event'}</Text>
+            <Text style={styles.title}>{editing ? 'edit your event' : duplicateFrom ? 'put it on again' : 'put on an event'}</Text>
+            {!editing && !!duplicateFrom && (
+              /* LIZ COPY */
+              <Text style={styles.statusLine}>same event, fresh date. pick the new one.</Text>
+            )}
             {editing && eventStatus !== 'Live' && (
               <Text style={styles.statusLine}>this event is {eventStatus.toLowerCase()}.</Text>
             )}

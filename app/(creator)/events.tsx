@@ -56,6 +56,13 @@ export default function CreatorEventsScreen() {
             <Text style={styles.cardMeta}>
               {[e.public_name, e.event_date, e.venue].filter(Boolean).join('  ')}
             </Text>
+            <TouchableOpacity
+              onPress={() => router.push(`/creator/event-form?duplicateFrom=${e.id}` as never)}
+              hitSlop={8}
+            >
+              {/* LIZ COPY: duplicate = same event, fresh date */}
+              <Text style={styles.againLink}>put it on again</Text>
+            </TouchableOpacity>
           </TouchableOpacity>
         ))}
 
@@ -71,6 +78,13 @@ export default function CreatorEventsScreen() {
               {e.status.toLowerCase()}
               {e.event_date ? `  ${e.event_date}` : ''}
             </Text>
+            <TouchableOpacity
+              onPress={() => router.push(`/creator/event-form?duplicateFrom=${e.id}` as never)}
+              hitSlop={8}
+            >
+              {/* LIZ COPY */}
+              <Text style={styles.againLink}>put it on again</Text>
+            </TouchableOpacity>
           </TouchableOpacity>
         ))}
 
@@ -119,6 +133,12 @@ const styles = StyleSheet.create({
   },
   cardPast: { opacity: 0.7 },
   cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
+  againLink: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+    marginTop: 8,
+  },
   cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary },
 });
