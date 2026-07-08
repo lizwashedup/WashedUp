@@ -140,6 +140,7 @@ export const COPY = {
   pingButton: 'Ping them',
   pingSheetPrompt: 'Who should know about this',
   pingSeeAll: 'See all',
+  pingSkip: 'Not now',
 
   surveyHow: 'How was it?',
   surveyGood: 'Really good',

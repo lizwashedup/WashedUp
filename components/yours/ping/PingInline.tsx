@@ -13,7 +13,12 @@ import { useReduceMotion } from '../a11y/useReduceMotion';
 /**
  * Inline "Let your people know" strip shown after creating/joining a plan.
  * Auto-fades after PING_AUTOFADE_MS (SIM-EYEBALL #2), then calls onDone so
- * the caller can run its original navigation.
+ * the caller can run its original navigation. The auto-fade exists ONLY for
+ * the untouched strip: the first tap (a face, See all) cancels it for good,
+ * because the strip owns full-screen navigation via onDone: an auto-fade
+ * firing mid-selection (or while the See-all sheet is up) yanks the user to
+ * chat and silently drops their pings. "Not now" is the explicit exit once
+ * the timer is dead.
  */
 export default function PingInline({
   userId,
@@ -31,11 +36,27 @@ export default function PingInline({
   const [sheet, setSheet] = useState(false);
   const opacity = useRef(new Animated.Value(0)).current;
   const doneRef = useRef(false);
+  const engagedRef = useRef(false);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const finish = () => {
     if (doneRef.current) return;
     doneRef.current = true;
     onDone();
+  };
+
+  // First interaction kills the auto-dismiss: clear the pending timer and,
+  // if the fade-out already started, halt it and restore the strip.
+  const engage = () => {
+    if (engagedRef.current) return;
+    engagedRef.current = true;
+    if (fadeTimerRef.current) {
+      clearTimeout(fadeTimerRef.current);
+      fadeTimerRef.current = null;
+    }
+    opacity.stopAnimation(() => {
+      if (!doneRef.current) opacity.setValue(1);
+    });
   };
 
   useEffect(() => {
@@ -44,14 +65,21 @@ export default function PingInline({
       duration: reduceMotion ? 0 : ANIM.welcomeFadeMs,
       useNativeDriver: true,
     }).start();
-    const t = setTimeout(() => {
+    fadeTimerRef.current = setTimeout(() => {
+      if (engagedRef.current) return;
       Animated.timing(opacity, {
         toValue: 0,
         duration: reduceMotion ? 0 : ANIM.welcomeFadeMs,
         useNativeDriver: true,
-      }).start(finish);
+      }).start(({ finished }) => {
+        // stopAnimation (engage mid-fade) lands here with finished=false;
+        // only a fade-out that actually completed may run the host nav.
+        if (finished && !engagedRef.current) finish();
+      });
     }, PING_AUTOFADE_MS);
-    return () => clearTimeout(t);
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
   }, []);
 
   const sendPings = async (ids: string[]) => {
@@ -75,6 +103,7 @@ export default function PingInline({
             key={p.user_id}
             style={styles.face}
             onPress={() => {
+              engage();
               hapticSelection();
               setSel((s) => {
                 const n = new Set(s);
@@ -91,7 +120,13 @@ export default function PingInline({
             />
           </Pressable>
         ))}
-        <Pressable style={styles.seeAll} onPress={() => setSheet(true)}>
+        <Pressable
+          style={styles.seeAll}
+          onPress={() => {
+            engage();
+            setSheet(true);
+          }}
+        >
           <Text style={styles.seeAllText}>{COPY.pingSeeAll}</Text>
         </Pressable>
       </ScrollView>
@@ -101,6 +136,9 @@ export default function PingInline({
         onPress={() => sendPings(Array.from(sel))}
       >
         <Text style={styles.btnText}>{COPY.pingButton}</Text>
+      </Pressable>
+      <Pressable style={styles.skip} onPress={finish}>
+        <Text style={styles.skipText}>{COPY.pingSkip}</Text>
       </Pressable>
 
       <PingSheet
@@ -147,5 +185,11 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyLG,
     color: Colors.white,
+  },
+  skip: { alignItems: 'center', paddingVertical: 4 },
+  skipText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
   },
 });

@@ -407,7 +407,10 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                   notif.type === 'invite_accepted' ||
                   notif.type === 'waitlist_request' ||
                   notif.type === 'exception_slot_refunded' ||
-                  notif.type === 'exception_invite'
+                  notif.type === 'exception_invite' ||
+                  // A ping IS the plan: tap must open the plan detail (the
+                  // handleNotifAction event_id fallthrough), not just mark read.
+                  notif.type === 'people_ping'
                 ) && notif.event_id);
                 const timeLeft = notif.expires_at
                   ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
