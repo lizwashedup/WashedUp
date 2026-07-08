@@ -2572,6 +2572,24 @@ export default function PlanDetailScreen() {
                 )}
               </TouchableOpacity>
 
+              {/* Duplicate: reuse the exact prefill pipeline the waitlist
+                  "Post your own" path uses, from the creator's own plan */}
+              {COMMUNITIES_ENABLED && (
+                <TouchableOpacity
+                  style={manageStyles.duplicateBtn}
+                  onPress={() => {
+                    setManageModalVisible(false);
+                    router.push({
+                      pathname: '/(tabs)/post',
+                      params: buildDuplicatePostParams(plan, id),
+                    });
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={manageStyles.duplicateBtnText}>Post This Again</Text>
+                </TouchableOpacity>
+              )}
+
               {/* Cancel plan */}
               <TouchableOpacity
                 style={manageStyles.cancelBtn}
@@ -3687,6 +3705,8 @@ const manageStyles = StyleSheet.create({
     marginTop: 8,
   },
   cancelBtnText: { color: Colors.cancelRed, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
+  duplicateBtn: { alignItems: 'center', paddingVertical: 12 },
+  duplicateBtnText: { color: Colors.terracotta, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
   featuredSection: {
     marginTop: 16,
     paddingTop: 16,
