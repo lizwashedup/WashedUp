@@ -12,6 +12,7 @@ import { FilterBottomSheet } from './FilterBottomSheet';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { getPlanPinColor } from '../lib/planColors';
+import { formatEventDateLA } from '../lib/laDate';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -52,7 +53,7 @@ function formatDateShort(dateStr: string | null, timeStr: string | null): string
   let dayLabel: string;
   if (date.toDateString() === today.toDateString()) dayLabel = 'Tonight';
   else if (date.toDateString() === tomorrow.toDateString()) dayLabel = 'Tomorrow';
-  else dayLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  else dayLabel = formatEventDateLA(dateStr);
 
   if (timeStr) {
     const [h, m] = timeStr.split(':');

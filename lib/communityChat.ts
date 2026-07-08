@@ -10,6 +10,7 @@
  */
 
 import { supabase } from './supabase';
+import { getTodayInLA } from './laDate';
 
 // -- the cards (Chats tab section) ---------------------------------------------
 
@@ -475,8 +476,8 @@ export interface PinnedCommunityEvent {
  * Reads through the existing explore_events public-read policy.
  */
 export async function getPinnedCommunityEvent(communityId: string): Promise<PinnedCommunityEvent | null> {
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const { y, m, d } = getTodayInLA();
+  const todayStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   const { data, error } = await supabase
     .from('explore_events')
     .select('id, title, event_date, start_time, venue, image_url')

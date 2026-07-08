@@ -25,6 +25,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import ProfileButton from '../ProfileButton';
 import { hapticLight } from '../../lib/haptics';
+import { formatEventDateLA } from '../../lib/laDate';
 import { EVENT_CATEGORIES } from '../../lib/creatorEvents';
 import {
   getDiscoverableCommunities,
@@ -73,7 +74,7 @@ export function SceneDiscovery() {
         <Text style={styles.posterTitle} numberOfLines={2}>{e.title}</Text>
         <Text style={styles.posterMeta}>
           {[
-            e.event_date ? new Date(e.event_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : null,
+            e.event_date ? formatEventDateLA(e.event_date) : null,
             e.venue,
           ].filter(Boolean).join('  ')}
         </Text>

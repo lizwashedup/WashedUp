@@ -31,6 +31,7 @@ import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPo
 import { getCommunityPage, getMemberFaces, type CommunityPageEvent } from '../../lib/communityPage';
 import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
 import { getCommunityChatPayload, joinTopic } from '../../lib/communityChat';
+import { formatEventDateLA } from '../../lib/laDate';
 import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
@@ -301,7 +302,7 @@ export default function CommunityPageScreen() {
             {nextEvent && (
               <Text style={styles.quietLine}>
                 next up: {nextEvent.title}
-                {nextEvent.event_date ? `, ${new Date(nextEvent.event_date).toLocaleDateString()}` : ''}
+                {nextEvent.event_date ? `, ${formatEventDateLA(nextEvent.event_date)}` : ''}
               </Text>
             )}
             {membership?.status === 'pending' ? (
@@ -354,7 +355,7 @@ function EventRow({ event, onPress }: { event: CommunityPageEvent; onPress: () =
       <View style={styles.eventText}>
         <Text style={styles.eventTitle} numberOfLines={1}>{event.title}</Text>
         <Text style={styles.eventMeta}>
-          {event.event_date ? new Date(event.event_date).toLocaleDateString() : 'date coming'}
+          {event.event_date ? formatEventDateLA(event.event_date) : 'date coming'}
           {event.venue ? `  ${event.venue}` : ''}
         </Text>
       </View>

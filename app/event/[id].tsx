@@ -26,6 +26,7 @@ import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
+import { formatEventDateLA } from '../../lib/laDate';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -58,14 +59,9 @@ interface LinkedPlan {
   primary_vibe: string | null;
 }
 
-function parseLocalDate(dateStr: string): Date {
-  return new Date(dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00`);
-}
-
 function formatFullDate(dateStr: string | null, timeStr: string | null): string {
   if (!dateStr) return '';
-  const date = parseLocalDate(dateStr);
-  const dayLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const dayLabel = formatEventDateLA(dateStr, { weekday: 'long', month: 'long', day: 'numeric' });
   if (timeStr) {
     let t: string;
     // Handle full ISO timestamps (e.g. "2025-03-22T18:00:00+00:00") and

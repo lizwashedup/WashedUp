@@ -14,6 +14,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCreatorEvents } from '../../lib/creatorMode';
 import { deleteEventTemplate, listEventTemplates } from '../../lib/creatorEvents';
+import { formatEventDateLA } from '../../lib/laDate';
 import { supabase } from '../../lib/supabase';
 
 export default function CreatorEventsScreen() {
@@ -67,7 +68,7 @@ export default function CreatorEventsScreen() {
             <Text style={styles.cardTitle}>{e.title}</Text>
             {/* LIZ COPY */}
             <Text style={styles.cardMeta}>
-              only you see it{e.event_date ? `  ${e.event_date}` : ''}
+              only you see it{e.event_date ? `  ${formatEventDateLA(e.event_date)}` : ''}
             </Text>
           </TouchableOpacity>
         ))}
@@ -105,7 +106,7 @@ export default function CreatorEventsScreen() {
           >
             <Text style={styles.cardTitle}>{e.title}</Text>
             <Text style={styles.cardMeta}>
-              {[e.public_name, e.event_date, e.venue].filter(Boolean).join('  ')}
+              {[e.public_name, formatEventDateLA(e.event_date), e.venue].filter(Boolean).join('  ')}
             </Text>
             <TouchableOpacity
               onPress={() => router.push(`/creator/event-form?duplicateFrom=${e.id}` as never)}
@@ -127,7 +128,7 @@ export default function CreatorEventsScreen() {
             <Text style={styles.cardTitle}>{e.title}</Text>
             <Text style={styles.cardMeta}>
               {e.status.toLowerCase()}
-              {e.event_date ? `  ${e.event_date}` : ''}
+              {e.event_date ? `  ${formatEventDateLA(e.event_date)}` : ''}
             </Text>
             <TouchableOpacity
               onPress={() => router.push(`/creator/event-form?duplicateFrom=${e.id}` as never)}

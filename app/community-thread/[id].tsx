@@ -40,6 +40,7 @@ import {
   type CommunityBroadcast,
 } from '../../lib/communityChat';
 import { getJoinGate } from '../../lib/communityJoin';
+import { formatEventDateLA } from '../../lib/laDate';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { supabase } from '../../lib/supabase';
 
@@ -190,7 +191,7 @@ export default function CommunityThreadScreen() {
             <Text style={styles.pinnedMeta} numberOfLines={1}>
               {[
                 pinnedEvent.event_date
-                  ? new Date(`${pinnedEvent.event_date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                  ? formatEventDateLA(pinnedEvent.event_date)
                   : null,
                 pinnedEvent.venue || null,
               ].filter(Boolean).join(' at ')}

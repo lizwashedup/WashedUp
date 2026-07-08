@@ -102,3 +102,25 @@ export function buildMonthGrid(year: number, month: number): (number | null)[][]
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
   return rows;
 }
+
+/**
+ * Format a date-only string (YYYY-MM-DD, the explore_events.event_date shape)
+ * pinned to Los Angeles regardless of the device timezone. Anchors the day at
+ * UTC noon (always the same calendar day in LA) and formats with an explicit
+ * LA timeZone, so a date-only value can never render off by one. Full ISO
+ * timestamps format directly in LA time. The web/RN parity lane hit the same
+ * bug class on plan cards; both branches should converge on this helper.
+ */
+export function formatEventDateLA(
+  dateStr: string | null | undefined,
+  options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' },
+): string {
+  if (!dateStr) return '';
+  const withTZ: Intl.DateTimeFormatOptions = { timeZone: 'America/Los_Angeles', ...options };
+  if (dateStr.includes('T')) {
+    const parsed = new Date(dateStr);
+    return isNaN(parsed.getTime()) ? '' : parsed.toLocaleDateString('en-US', withTZ);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return '';
+  return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString('en-US', withTZ);
+}
