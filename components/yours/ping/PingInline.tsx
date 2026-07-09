@@ -97,7 +97,11 @@ export default function PingInline({
   return (
     <Animated.View style={[styles.wrap, { opacity }]}>
       <Text style={styles.prompt}>{COPY.pingPrompt}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        onScrollBeginDrag={engage}
+      >
         {top.map((p) => (
           <Pressable
             key={p.user_id}
