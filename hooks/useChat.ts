@@ -126,7 +126,7 @@ export function useChat(key: ConversationKey) {
   useEffect(() => {
     if (!conversationId) return;
     cancelledRef.current = false;
-    fetchMessages();
+    fetchMessages().catch((err) => logError(err, 'useChat.fetchMessages'));
 
     // Event channel name kept byte-identical to before; circles use a distinct name.
     const channelName = kind === 'event' ? `chat:${conversationId}` : `chat:circle:${conversationId}`;
@@ -211,13 +211,24 @@ export function useChat(key: ConversationKey) {
       // byte-identical to before and works against prod, which has no circle_id
       // column until the Circles migration is applied. Only the circle path adds it.
       const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id${kind === 'circle' ? ', circle_id' : ''}`;
-      const [{ data }, { data: { user } }] = await Promise.all([
+      // getUser() contends on the GoTrue auth-token process lock and rejects with
+      // a LockAcquireTimeoutError when it loses the race. It must never reject
+      // this Promise.all: doing so threw away the messages we had already fetched
+      // and rendered an empty thread (Sentry REACT-NATIVE-14). Degrade instead --
+      // show the conversation, skip the read receipt.
+      const [{ data }, user] = await Promise.all([
         supabase
           .from('messages')
           .select(selectCols)
           .eq(parentCol, conversationId)
           .order('created_at', { ascending: true }),
-        supabase.auth.getUser(),
+        supabase.auth
+          .getUser()
+          .then(({ data: d }) => d.user)
+          .catch((err) => {
+            logError(err, 'useChat.fetchMessages.getUser');
+            return null;
+          }),
       ]);
       if (cancelledRef.current) return;
       if (user) {
@@ -284,7 +295,12 @@ export function useChat(key: ConversationKey) {
         if (!cancelledRef.current) setMessages(withReplies);
       } else {
         if (data) {
-          const enriched = await attachSenders(data);
+          // No user: either signed out, or getUser() lost the auth-lock race.
+          // Reuse the last known block list so a lock timeout can never surface
+          // a blocked sender's messages.
+          const blocked = blockedIdsRef.current;
+          const filtered = (data as any[]).filter((msg: any) => !blocked[msg.user_id]);
+          const enriched = await attachSenders(filtered);
           if (!cancelledRef.current) setMessages(enriched);
         }
       }
@@ -537,7 +553,7 @@ export function useChat(key: ConversationKey) {
 
     if (error) {
       logError(error, 'useChat.editMessage');
-      fetchMessages(true);
+      fetchMessages(true).catch((e) => logError(e, 'useChat.fetchMessages'));
       Alert.alert('Could not edit', 'Something went wrong. Please try again.');
     }
   }, [fetchMessages]);
