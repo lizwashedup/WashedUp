@@ -79,6 +79,11 @@ export default function CommunityPageScreen() {
     enabled: isMember,
   });
   const card = chatPayload?.cards.find((c) => c.community_id === id) ?? null;
+  // Event chats never list as joinable rooms: they are attendance-scoped and
+  // RSVP on the event page is the only door (tour part 3; the server half of
+  // this rule is proposal 28's S1). With duplicate event titles, the leaked
+  // rows also opened the WRONG twin's empty chat (the part-4 "empty thread").
+  const rooms = (card?.topics ?? []).filter((t) => !t.explore_event_id);
 
   const handleJoinTopic = async (topicId: string) => {
     setJoiningTopicId(topicId);
@@ -269,10 +274,10 @@ export default function CommunityPageScreen() {
 
         {visibleBlocks.map(renderBlock)}
 
-        {isMember && (card?.topics.length ?? 0) > 0 && (
+        {isMember && rooms.length > 0 && (
           <View style={styles.block}>
             <Text style={styles.blockLabel}>rooms</Text>
-            {card!.topics.map((t) => (
+            {rooms.map((t) => (
               <View key={t.id} style={styles.roomRow}>
                 <Text style={styles.roomName} numberOfLines={1}>{t.name}</Text>
                 {t.joined ? (

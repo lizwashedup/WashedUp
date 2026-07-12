@@ -114,15 +114,32 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
     ...attendee_topics.map((t) => t.id),
   ];
   const previewByTopic = new Map<string, string>();
+  // when you joined each topic: the recency anchor for a chat with no
+  // messages yet. Without it a fresh event chat (RSVP just seated you) has a
+  // null last_message_at and sinks to the very bottom of the unified list,
+  // which read as "the row is missing" on the tour (part 4, bug 2).
+  const topicJoinedAt = new Map<string, string>();
   if (joinedTopicIds.length > 0) {
-    const { data: recent } = await supabase
-      .from('community_topic_messages')
-      .select('topic_id, body, created_at')
-      .in('topic_id', joinedTopicIds)
-      .order('created_at', { ascending: false })
-      .limit(120);
+    const [{ data: recent }, { data: myTopicRows }] = await Promise.all([
+      supabase
+        .from('community_topic_messages')
+        .select('topic_id, body, created_at')
+        .in('topic_id', joinedTopicIds)
+        .order('created_at', { ascending: false })
+        .limit(120),
+      user
+        ? supabase
+            .from('community_topic_members')
+            .select('topic_id, joined_at')
+            .eq('user_id', user.id)
+            .in('topic_id', joinedTopicIds)
+        : Promise.resolve({ data: [] } as any),
+    ]);
     for (const m of (recent ?? []) as { topic_id: string; body: string }[]) {
       if (!previewByTopic.has(m.topic_id)) previewByTopic.set(m.topic_id, m.body);
+    }
+    for (const r of (myTopicRows ?? []) as { topic_id: string; joined_at: string | null }[]) {
+      if (r.joined_at) topicJoinedAt.set(r.topic_id, r.joined_at);
     }
   }
 
@@ -150,9 +167,11 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
         communityId: c.community_id,
         title: t.name,
         secondary: c.name,
-        // LIZ COPY
-        preview: previewByTopic.get(t.id) ?? 'quiet so far',
-        lastAt: t.last_message_at,
+        // LIZ COPY (event chats echo the attendee line: RSVP put you here)
+        preview:
+          previewByTopic.get(t.id) ??
+          (t.explore_event_id ? "you're going. talk it out here." : 'quiet so far'),
+        lastAt: t.last_message_at ?? topicJoinedAt.get(t.id) ?? null,
         unread: t.unread,
         accent: c.accent_color,
       });
