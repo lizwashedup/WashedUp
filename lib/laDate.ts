@@ -73,6 +73,30 @@ export function getLADayParts(when: Date | string | number): { y: number; m: num
   return { y: get('year'), m: get('month') - 1, d: get('day') };
 }
 
+// LA wall-clock parts (day AND time) for any instant. The rehydrate side of
+// laWallTimeToUTC: a stored start_time comes back as the LA calendar day and
+// LA clock time it was composed from, regardless of the device timezone.
+// Reading the day from the UTC side of a timestamp shifts any 5pm-or-later
+// LA time one day forward (the draft/prefill date-shift bug).
+export function getLAWallParts(
+  when: Date | string | number,
+): { y: number; m: number; d: number; hour24: number; minute: number } | null {
+  const date = new Date(when);
+  if (isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', hour12: false,
+  }).formatToParts(date);
+  const get = (k: 'year' | 'month' | 'day' | 'hour' | 'minute') =>
+    Number(parts.find((p) => p.type === k)!.value);
+  return {
+    y: get('year'), m: get('month') - 1, d: get('day'),
+    // Intl reports midnight as 24 with hour12: false on some engines.
+    hour24: get('hour') % 24, minute: get('minute'),
+  };
+}
+
 // Stable key for a calendar day (LA), for marked-day sets + selection compares.
 export function dayKey(y: number, m: number, d: number): string {
   return `${y}-${m}-${d}`;

@@ -8,6 +8,20 @@
  * and can't drift.
  */
 
+import { getLAWallParts } from './laDate';
+
+// The LA calendar day (YYYY-MM-DD) of a stored timestamp. Never the UTC
+// slice: start_time.slice(0, 10) reads the UTC side, which is one day ahead
+// of LA for any 5pm-or-later LA time (the draft/prefill date-shift bug).
+function laDayString(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const w = getLAWallParts(iso);
+  if (!w) return '';
+  const mm = String(w.m + 1).padStart(2, '0');
+  const dd = String(w.d).padStart(2, '0');
+  return `${w.y}-${mm}-${dd}`;
+}
+
 const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
 type AgeRange = (typeof AGE_RANGES)[number];
 
@@ -86,9 +100,8 @@ export function buildDuplicatePostParams(
     prefillCategory: event?.primary_vibe ?? '',
     prefillImageUrl: event?.image_url ?? '',
     prefillStartTime: event?.start_time ?? '',
-    // Date param expects YYYY-MM-DD; sending the full ISO breaks the
-    // receiver's parser (silently no-ops).
-    prefillEventDate: event?.start_time?.slice(0, 10) ?? '',
+    // Date param expects YYYY-MM-DD, taken from the LA side of the timestamp.
+    prefillEventDate: laDayString(event?.start_time),
     prefillEndTime: event?.end_time ?? '',
     prefillDropIn: event?.drop_in === false ? 'false' : 'true',
     prefillAllowDuplicate: event?.allow_duplicate === false ? 'false' : 'true',

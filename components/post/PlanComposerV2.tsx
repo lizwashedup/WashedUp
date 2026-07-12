@@ -47,7 +47,7 @@ import { supabase } from '../../lib/supabase';
 import { checkContent } from '../../lib/contentFilter';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
-import { MONTHS, getTodayInLA, laWallTimeToUTC } from '../../lib/laDate';
+import { MONTHS, getTodayInLA, laWallTimeToUTC, getLAWallParts } from '../../lib/laDate';
 import {
   NEIGHBORHOOD_OPTIONS,
   NEIGHBORHOOD_OTHER,
@@ -324,19 +324,35 @@ export default function PlanComposerV2() {
         .filter((s): s is AgeRange => (AGE_RANGES as readonly string[]).includes(s));
       if (parsed.length > 0) setAgeRanges(parsed);
     }
-    // Date: accepts YYYY-MM-DD or full ISO.
+    // Date: accepts YYYY-MM-DD (already an LA calendar day, split as a plain
+    // string) or full ISO (converted to its LA day). Never parsed through the
+    // device clock: reading the UTC or device-local side of a timestamp
+    // shifts any 5pm-or-later LA time one day forward per reopen (the
+    // draft/prefill date-shift bug, tour part 5).
     if (params.prefillEventDate) {
       const raw = String(params.prefillEventDate);
-      const d = raw.includes('T') ? new Date(raw) : new Date(`${raw}T12:00:00`);
-      if (!isNaN(d.getTime())) {
-        setDateMonth(d.getMonth()); setDateDay(d.getDate()); setDateYear(d.getFullYear()); setDateSelected(true);
+      if (raw.includes('T')) {
+        const w = getLAWallParts(raw);
+        if (w) { setDateMonth(w.m); setDateDay(w.d); setDateYear(w.y); setDateSelected(true); }
+      } else {
+        const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) { setDateYear(Number(m[1])); setDateMonth(Number(m[2]) - 1); setDateDay(Number(m[3])); setDateSelected(true); }
       }
     }
     // Time: from start_time (ISO or HH:MM[:SS]); snap to the picker's minutes.
+    // A full ISO carries both the LA day and the LA clock, so take BOTH from
+    // the LA side: day and time must come from the same wall clock or they
+    // drift apart (the +1 shift paired a UTC day with an LA time).
     if (params.prefillStartTime) {
       const st = String(params.prefillStartTime);
       let hours: number | null = null; let minutes: number | null = null;
-      if (st.includes('T')) { const d = new Date(st); if (!isNaN(d.getTime())) { hours = d.getHours(); minutes = d.getMinutes(); } }
+      if (st.includes('T')) {
+        const w = getLAWallParts(st);
+        if (w) {
+          hours = w.hour24; minutes = w.minute;
+          setDateMonth(w.m); setDateDay(w.d); setDateYear(w.y); setDateSelected(true);
+        }
+      }
       else if (st.includes(':')) { const parts = st.split(':'); hours = parseInt(parts[0], 10); minutes = parseInt(parts[1] ?? '0', 10); }
       if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
         const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
@@ -346,11 +362,12 @@ export default function PlanComposerV2() {
         setTimeHour(displayHour); setTimeMinute(nearestMinute); setTimePeriod(period); setTimeSelected(true);
       }
     }
-    // End time (optional): from end_time (ISO or HH:MM[:SS]); snap to picker.
+    // End time (optional): from end_time (ISO, read on the LA clock, or
+    // HH:MM[:SS]); snap to picker.
     if (params.prefillEndTime) {
       const et = String(params.prefillEndTime);
       let hours: number | null = null; let minutes: number | null = null;
-      if (et.includes('T')) { const d = new Date(et); if (!isNaN(d.getTime())) { hours = d.getHours(); minutes = d.getMinutes(); } }
+      if (et.includes('T')) { const w = getLAWallParts(et); if (w) { hours = w.hour24; minutes = w.minute; } }
       else if (et.includes(':')) { const parts = et.split(':'); hours = parseInt(parts[0], 10); minutes = parseInt(parts[1] ?? '0', 10); }
       if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
         const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
