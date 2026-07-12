@@ -592,10 +592,17 @@ export default function PlanDetailScreen() {
 
     if (!plan.location_text) return;
 
-    Location.geocodeAsync(plan.location_text)
+    // Plans live in LA (the city column is hardcoded), but a bare venue name
+    // through the unbiased geocoder can land anywhere (the tour's Barnsdall
+    // Art Park pin in San Jose). Anchor the query to LA and refuse results
+    // outside the LA basin: no map beats a wrong-city map.
+    Location.geocodeAsync(`${plan.location_text}, Los Angeles, CA`)
       .then((results) => {
-        if (results.length > 0) {
-          setMapCoords({ latitude: results[0].latitude, longitude: results[0].longitude });
+        const hit = results.find(
+          (r) => r.latitude > 33.2 && r.latitude < 34.9 && r.longitude > -119.1 && r.longitude < -117.2,
+        );
+        if (hit) {
+          setMapCoords({ latitude: hit.latitude, longitude: hit.longitude });
         }
       })
       .catch(() => {
@@ -1269,8 +1276,8 @@ export default function PlanDetailScreen() {
       buttons: [
         { text: 'Keep Plan', style: 'cancel' },
         {
+          // muted confirm, never red (C13)
           text: 'Cancel Plan',
-          style: 'destructive',
           onPress: async () => {
             if (!plan || !currentUserId) return;
             try {
@@ -3281,7 +3288,8 @@ const styles = StyleSheet.create({
   creatorCancelLinkText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
-    color: Colors.cancelRed,
+    // muted, never red (C13); the confirm carries the weight
+    color: Colors.textMedium,
     textDecorationLine: 'underline',
   },
   waitlistManageButton: {
@@ -3710,7 +3718,8 @@ const manageStyles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 8,
   },
-  cancelBtnText: { color: Colors.cancelRed, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
+  // muted, never red (C13)
+  cancelBtnText: { color: Colors.textMedium, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
   duplicateBtn: { alignItems: 'center', paddingVertical: 12 },
   duplicateBtnText: { color: Colors.terracotta, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
   featuredSection: {

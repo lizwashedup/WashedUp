@@ -106,9 +106,15 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
         const address = event.venue_address || event.venue;
         if (!address) continue;
         try {
-          const coords = await Location.geocodeAsync(address);
-          if (coords.length > 0) {
-            results.push({ ...event, latitude: coords[0].latitude, longitude: coords[0].longitude });
+          // LA events only: anchor the query and refuse out-of-basin hits
+          // (a bare venue name through the unbiased geocoder can land in
+          // another city entirely; C17)
+          const coords = await Location.geocodeAsync(`${address}, Los Angeles, CA`);
+          const hit = coords.find(
+            (c) => c.latitude > 33.2 && c.latitude < 34.9 && c.longitude > -119.1 && c.longitude < -117.2,
+          );
+          if (hit) {
+            results.push({ ...event, latitude: hit.latitude, longitude: hit.longitude });
           }
         } catch {
           // Skip events that can't be geocoded

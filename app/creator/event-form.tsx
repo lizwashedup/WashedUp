@@ -339,8 +339,8 @@ export default function EventFormScreen() {
       buttons: [
         { text: 'keep it live', style: 'cancel' },
         {
+          // muted confirm, never red (C13); the web console matches
           text: status === 'Cancelled' ? 'cancel it' : 'complete it',
-          style: 'destructive',
           onPress: async () => {
             try {
               await updateOperatorEvent(id, fields, status);
@@ -431,11 +431,13 @@ export default function EventFormScreen() {
             <View style={styles.row}>
               <View style={styles.rowItem}>
                 <Text style={styles.fieldLabel}>date</Text>
-                <TextInput style={styles.input} value={date} onChangeText={setDate} placeholder="2026-07-20" placeholderTextColor={Colors.inkSoft} autoCapitalize="none" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+                {/* instructional placeholders, never value-shaped: an empty
+                    field must read as empty (C18, the dateless edit form) */}
+                <TextInput style={styles.input} value={date} onChangeText={setDate} placeholder="add a date, like 2026-07-20" placeholderTextColor={Colors.inkSoft} autoCapitalize="none" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
               </View>
               <View style={styles.rowItem}>
                 <Text style={styles.fieldLabel}>time</Text>
-                <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="19:30" placeholderTextColor={Colors.inkSoft} autoCapitalize="none" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+                <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="add a time, like 19:30" placeholderTextColor={Colors.inkSoft} autoCapitalize="none" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
               </View>
             </View>
 

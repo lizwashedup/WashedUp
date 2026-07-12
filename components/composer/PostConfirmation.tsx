@@ -41,9 +41,14 @@ export default function PostConfirmation({
   onSeePlans,
 }: PostConfirmationProps) {
   const headline = isFirstPlan ? 'your first plan is out there.' : "it's out there.";
+  // "now someone has to say yes." appears exactly once: in the headline pair
+  // for repeat plans, in the subtitle for a first plan (C15, the doubled
+  // sentence)
   const sub = invitedSomeone
     ? 'your plan is live. the people you invited have been notified.'
-    : "your plan is live. now someone has to say yes.";
+    : isFirstPlan
+      ? 'your plan is live. now someone has to say yes.'
+      : 'your plan is live.';
 
   // The ring scales 0.6 -> 1 with the study's post-confirmation spring.
   const ringScale = useSharedValue(0.6);

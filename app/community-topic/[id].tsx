@@ -205,7 +205,7 @@ export default function CommunityTopicScreen() {
             style={styles.input}
             value={draft}
             onChangeText={setDraft}
-            placeholder={gated ? "hi! i'm from..." : 'say something'}
+            placeholder={gated ? "hi, i'm from..." : 'say something'}
             placeholderTextColor={Colors.inkSoft}
             multiline
             maxLength={4000}

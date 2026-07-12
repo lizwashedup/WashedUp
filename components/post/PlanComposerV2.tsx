@@ -526,10 +526,14 @@ export default function PlanComposerV2() {
     placeSkipEligible: place == null,
   });
 
+  // the preview is a passive readout, so its empty states describe instead
+  // of instruct: "add a day" read like a tappable link and it is not (C19,
+  // Liz's call: genuinely tappable or visually passive, nothing in between).
+  // LIZ COPY
   const whenSummary = dateSelected
     ? `${MONTHS[dateMonth]} ${dateDay}${timeSelected ? ` · ${displayTime(timeHour, timeMinute, timePeriod).toLowerCase()}` : ''}`
-    : 'add a day';
-  const placeSummary = location.trim() ? location.trim().toLowerCase() : 'add a place';
+    : 'no day yet';
+  const placeSummary = location.trim() ? location.trim().toLowerCase() : 'no place yet';
   const peopleSummary = invited.length > 0 ? invited.map((c) => c.name.toLowerCase()).join(', ') : `open to ${groupSize}`;
   const summaryMeta = [whenSummary, placeSummary, peopleSummary].join(' · ');
 

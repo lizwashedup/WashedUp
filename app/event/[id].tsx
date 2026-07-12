@@ -411,8 +411,8 @@ export default function EventDetailScreen() {
           >
             <Heart
               size={18}
-              color={isWishlisted ? Colors.errorRed : Colors.asphalt}
-              fill={isWishlisted ? Colors.errorRed : 'transparent'}
+              color={isWishlisted ? Colors.terracotta : Colors.asphalt}
+              fill={isWishlisted ? Colors.terracotta : 'transparent'}
               strokeWidth={2}
             />
           </TouchableOpacity>
@@ -421,7 +421,7 @@ export default function EventDetailScreen() {
         <View style={styles.content}>
           {event.category && (
             <View style={[styles.detailCategoryPill, { backgroundColor: Colors.terracotta }]}>
-              <Text style={styles.detailCategoryText}>{event.category}</Text>
+              <Text style={styles.detailCategoryText}>{event.category.toLowerCase()}</Text>
             </View>
           )}
 
@@ -483,7 +483,7 @@ export default function EventDetailScreen() {
             </View>
 
             {linkedPlans.length === 0 ? (
-              <Text style={styles.noPlansText}>No one has posted a plan yet. Be the first!</Text>
+              <Text style={styles.noPlansText}>no one has posted a plan yet. go first.</Text>
             ) : (
               linkedPlans.map(plan => {
                 const { text: spotsText, isFull } = getPlanSpotsInfo(plan);
@@ -609,7 +609,8 @@ const styles = StyleSheet.create({
   },
   content: { padding: 20, gap: 12 },
   detailCategoryPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  detailCategoryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.white, textTransform: 'capitalize' },
+  // sentence-lowercase, no transforms (C16 + the lowercase law)
+  detailCategoryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.white },
   title: {
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displayLG,
@@ -640,7 +641,8 @@ const styles = StyleSheet.create({
   planCreatorInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
   planCreatorName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   planVibePill: { backgroundColor: Colors.inputBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  planVibeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.warmGray, textTransform: 'capitalize' },
+  // sentence-lowercase, no transforms (C16 + the lowercase law)
+  planVibeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.warmGray },
   planCardSpacer: { flex: 1 },
   planMenuBtn: { padding: 4, marginRight: 4 },
   planJoinBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 14 },

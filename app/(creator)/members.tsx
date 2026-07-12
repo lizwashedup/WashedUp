@@ -73,7 +73,7 @@ export default function CreatorMembersScreen() {
       message: 'They get a kind note, and they cannot ask again for now.',
       buttons: [
         { text: 'Keep it pending', style: 'cancel' },
-        { text: 'Decline', style: 'destructive', onPress: () => act(() => reviewJoinRequest(m.id, false), m.id) },
+        { text: 'Decline', onPress: () => act(() => reviewJoinRequest(m.id, false), m.id) },
       ],
     });
   };
@@ -85,7 +85,7 @@ export default function CreatorMembersScreen() {
       message: 'They lose access to the community and its chat.',
       buttons: [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => act(() => removeMember(m.id), m.id) },
+        { text: 'Remove', onPress: () => act(() => removeMember(m.id), m.id) },
       ],
     });
   };

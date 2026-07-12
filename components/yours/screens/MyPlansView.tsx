@@ -71,8 +71,8 @@ export default function MyPlansView({ userId }: { userId: string }) {
       buttons: [
         { text: 'keep it', style: 'cancel' },
         {
+          // muted confirm, never red (C13)
           text: 'toss it',
-          style: 'destructive',
           onPress: async () => {
             await supabase.from('events').delete().eq('id', draft.id).eq('status', 'draft');
             queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
