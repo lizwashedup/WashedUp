@@ -29,7 +29,8 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
 import { getCreatorAccess, getBroadcasts, publishCommunity, sendBroadcast } from '../../lib/creatorMode';
-import { createTopic } from '../../lib/communityChat';
+import { createTopic, getCommunityRooms } from '../../lib/communityChat';
+import { formatTimestampLA } from '../../lib/laDate';
 
 export default function CreatorCommunityScreen() {
   const router = useRouter();
@@ -48,15 +49,27 @@ export default function CreatorCommunityScreen() {
     queryFn: () => getBroadcasts(community!.id),
     enabled: !!community,
   });
+  const { data: rooms = [] } = useQuery({
+    queryKey: ['creator-rooms', community?.id],
+    queryFn: () => getCommunityRooms(community!.id),
+    enabled: !!community,
+  });
 
   const handleCreateRoom = async () => {
     if (!community || !roomDraft.trim() || roomBusy) return;
+    const name = roomDraft.trim();
     setRoomBusy(true);
     try {
-      await createTopic(community.id, roomDraft);
+      await createTopic(community.id, name);
       hapticSuccess();
       setRoomDraft('');
       queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+      queryClient.invalidateQueries({ queryKey: ['creator-rooms', community.id] });
+      // LIZ COPY
+      setAlertInfo({
+        title: 'the room is open',
+        message: `${name} is on your page and in your chats. members join from the page.`,
+      });
     } catch (e) {
       setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
@@ -173,7 +186,7 @@ export default function CreatorCommunityScreen() {
               {broadcasts.map((b) => (
                 <View key={b.id} style={styles.broadcastCard}>
                   <Text style={styles.broadcastBody}>{b.body}</Text>
-                  <Text style={styles.broadcastMeta}>{new Date(b.created_at).toLocaleString()}</Text>
+                  <Text style={styles.broadcastMeta}>{formatTimestampLA(b.created_at)}</Text>
                 </View>
               ))}
             </>
@@ -206,6 +219,17 @@ export default function CreatorCommunityScreen() {
             the chat spaces members can join. you make them, members find them
             on your page.
           </Text>
+          {rooms.map((r) => (
+            <TouchableOpacity
+              key={r.id}
+              style={styles.roomRow}
+              onPress={() => router.push(`/community-topic/${r.id}` as never)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.roomRowName} numberOfLines={1}>{r.name}</Text>
+              <Text style={styles.roomRowOpen}>open</Text>
+            </TouchableOpacity>
+          ))}
           <View style={[styles.composer, styles.lastCard]}>
             <TextInput
               style={styles.roomInput}
@@ -333,6 +357,26 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   lastCard: { marginBottom: 40 },
+  roomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+    gap: 10,
+  },
+  roomRowName: {
+    flex: 1,
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+  },
+  roomRowOpen: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   roomInput: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,

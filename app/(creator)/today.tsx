@@ -17,6 +17,7 @@ import {
   getBroadcasts,
   getCreatorEvents,
 } from '../../lib/creatorMode';
+import { formatEventDateLA } from '../../lib/laDate';
 import { supabase } from '../../lib/supabase';
 
 export default function CreatorTodayScreen() {
@@ -81,7 +82,9 @@ export default function CreatorTodayScreen() {
             <Text style={styles.cardTitle}>{nextEvent ? nextEvent.title : 'no events on the calendar'}</Text>
             <Text style={styles.cardMeta}>
               {nextEvent
-                ? [nextEvent.event_date, nextEvent.venue].filter(Boolean).join(' · ')
+                ? [nextEvent.event_date ? formatEventDateLA(nextEvent.event_date) : null, nextEvent.venue]
+                    .filter(Boolean)
+                    .join(' · ')
                 : 'event posting lands with discovery'}
             </Text>
           </View>

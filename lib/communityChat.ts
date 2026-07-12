@@ -265,6 +265,29 @@ export function composeIntroLine(p: IntroPayload): string {
   return `this is ${p.first_name}${from}. ${fragment}: ${p.answer}${punct}`;
 }
 
+/**
+ * The length rule (Liz, part-2 reactions): a short question weaves inline;
+ * a long one breaks the card into two lines, the greeting first, then the
+ * question and answer as their own line. LIZ COPY defaults, gold pass later.
+ */
+export const INTRO_QUESTION_INLINE_MAX = 40;
+
+export interface IntroCardText {
+  lead: string;
+  /** null = the whole intro fits on the inline lead */
+  qa: string | null;
+}
+
+export function composeIntroCard(p: IntroPayload): IntroCardText {
+  const fragment = p.question.trim().replace(/[?.!]+$/, '').toLowerCase();
+  const from = p.area ? `, from ${p.area}` : '';
+  const punct = /[.!?]$/.test(p.answer) ? '' : '.';
+  if (fragment.length <= INTRO_QUESTION_INLINE_MAX) {
+    return { lead: `this is ${p.first_name}${from}. ${fragment}: ${p.answer}${punct}`, qa: null };
+  }
+  return { lead: `this is ${p.first_name}${from}.`, qa: `${fragment}: ${p.answer}${punct}` };
+}
+
 export async function getCommunityBroadcasts(communityId: string): Promise<CommunityBroadcast[]> {
   const { data: { user } } = await supabase.auth.getUser();
   const { data: rows, error } = await supabase
@@ -431,14 +454,41 @@ export async function setTopicNotifications(topicId: string, on: boolean): Promi
   if (error) throw error;
 }
 
-/** Leaders-only creation (RLS enforced; member-created topics stay a Liz call). */
+/**
+ * Leaders-only creation (RLS enforced; member-created topics stay a Liz
+ * call). The creator is subscribed to their own room on the spot: the tour
+ * found a leader's new room absent from her chat lists until she joined it
+ * from the page like a stranger.
+ */
 export async function createTopic(communityId: string, name: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('community_topics')
-    .insert({ community_id: communityId, name: name.trim(), created_by: user.id });
+    .insert({ community_id: communityId, name: name.trim(), created_by: user.id })
+    .select('id')
+    .single();
   if (error) throw error;
+  if (data?.id) await joinTopic(data.id);
+}
+
+/** The community's open rooms (never event topics), for the creator's list. */
+export interface CommunityRoom {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export async function getCommunityRooms(communityId: string): Promise<CommunityRoom[]> {
+  const { data, error } = await supabase
+    .from('community_topics')
+    .select('id, name, created_at')
+    .eq('community_id', communityId)
+    .eq('archived', false)
+    .is('explore_event_id', null)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as CommunityRoom[];
 }
 
 // -- mute (doc 09: mutable, not leavable) ----------------------------------------

@@ -15,6 +15,7 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
+import { formatEventDateLA } from '../../lib/laDate';
 import {
   getCreatorAccess,
   getCommunityMembers,
@@ -119,7 +120,7 @@ export default function CreatorMembersScreen() {
                             {answers ? `${answers.first_name ?? ''} ${answers.last_name ?? ''}`.trim() || (m.name ?? 'someone') : m.name ?? 'someone'}
                           </Text>
                           <Text style={styles.rowMeta}>
-                            asked {new Date(m.created_at).toLocaleDateString()}
+                            asked {formatEventDateLA(m.created_at)}
                             {answers ? '  tap for their answers' : ''}
                           </Text>
                         </View>
@@ -158,7 +159,7 @@ export default function CreatorMembersScreen() {
                         <Text style={styles.answerLine}>zip {answers.zip ?? 'unknown'}</Text>
                         {!!answers.guidelines_accepted_at && (
                           <Text style={styles.answerLine}>
-                            accepted the guidelines {new Date(answers.guidelines_accepted_at).toLocaleDateString()}
+                            accepted the guidelines {formatEventDateLA(String(answers.guidelines_accepted_at))}
                           </Text>
                         )}
                       </View>
@@ -186,7 +187,7 @@ export default function CreatorMembersScreen() {
                   )}
                 </Text>
                 <Text style={styles.rowMeta}>
-                  joined {m.joined_at ? new Date(m.joined_at).toLocaleDateString() : 'recently'}
+                  joined {m.joined_at ? formatEventDateLA(m.joined_at) : 'recently'}
                 </Text>
               </View>
               {m.role === 'member' && (

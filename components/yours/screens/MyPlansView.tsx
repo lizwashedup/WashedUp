@@ -27,6 +27,7 @@ import {
 } from '../../../hooks/useMyPlansData';
 import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
 import { buildDuplicatePostParams } from '../../../lib/duplicatePlan';
+import { formatEventDateLA } from '../../../lib/laDate';
 import { BrandedAlert, type BrandedAlertButton } from '../../BrandedAlert';
 
 const WISHLISTS_TIMEOUT_MS = 8000;
@@ -89,7 +90,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
           <View style={styles.draftBody}>
             <Text style={styles.draftTitle} numberOfLines={1}>{d.title}</Text>
             <Text style={styles.draftMeta} numberOfLines={1}>
-              {new Date(d.start_time).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+              {formatEventDateLA(d.start_time)}
               {'  ·  finish it whenever'}
             </Text>
           </View>

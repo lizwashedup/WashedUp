@@ -21,12 +21,13 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import {
-  composeIntroLine,
+  composeIntroCard,
   getBroadcastReplies,
   sendBroadcastReply,
   toggleBroadcastReaction,
   type CommunityBroadcast,
 } from '../../lib/communityChat';
+import { formatTimestampLA } from '../../lib/laDate';
 
 const REACTION_SET = ['❤️', '🔥', '👏'];
 
@@ -81,17 +82,19 @@ export function BroadcastCard({ broadcast, communityName, onError }: Props) {
   };
 
   // an intro is the community introducing a new member (kind='intro'):
-  // same reactions and reply thread, its own clothes, client-composed line
+  // same reactions and reply thread, its own clothes, client-composed text.
+  // Short questions weave inline; long ones get their own line (part-2 rule).
   const isIntro = broadcast.kind === 'intro';
-  const bodyText = isIntro && broadcast.payload ? composeIntroLine(broadcast.payload) : broadcast.body;
+  const intro = isIntro && broadcast.payload ? composeIntroCard(broadcast.payload) : null;
 
   return (
     <View style={[styles.card, isIntro && styles.cardIntro]}>
       {!!communityName && <Text style={styles.attribution}>{communityName}</Text>}
       {/* LIZ COPY */}
       {isIntro && <Text style={styles.introEyebrow}>just joined</Text>}
-      <Text style={styles.body}>{bodyText}</Text>
-      <Text style={styles.meta}>{new Date(broadcast.created_at).toLocaleString()}</Text>
+      <Text style={styles.body}>{intro ? intro.lead : broadcast.body}</Text>
+      {!!intro?.qa && <Text style={styles.body}>{intro.qa}</Text>}
+      <Text style={styles.meta}>{formatTimestampLA(broadcast.created_at)}</Text>
 
       <View style={styles.reactionRow}>
         {REACTION_SET.map((emoji) => {

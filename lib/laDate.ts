@@ -97,6 +97,22 @@ export function getLAWallParts(
   };
 }
 
+// A full timestamp on the LA clock, warm and short: "Jul 11, 6:03 pm".
+// Replaces bare toLocaleString() (device zone, device locale, seconds).
+export function formatTimestampLA(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const parsed = new Date(iso);
+  if (isNaN(parsed.getTime())) return '';
+  return parsed
+    .toLocaleString('en-US', {
+      timeZone: 'America/Los_Angeles',
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
+    // the space before AM/PM can be a narrow no-break space, so match bare
+    .replace('AM', 'am')
+    .replace('PM', 'pm');
+}
+
 // Stable key for a calendar day (LA), for marked-day sets + selection compares.
 export function dayKey(y: number, m: number, d: number): string {
   return `${y}-${m}-${d}`;

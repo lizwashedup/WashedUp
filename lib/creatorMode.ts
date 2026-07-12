@@ -212,10 +212,14 @@ export interface BroadcastRow {
 }
 
 export async function getBroadcasts(communityId: string): Promise<BroadcastRow[]> {
+  // creator surfaces count and list real announcements only: member messages
+  // and intro cards share this table (kind 'message' / 'intro') but are not
+  // broadcasts (tour part 1 finding 2 + part 2 reaction 4)
   const { data, error } = await supabase
     .from('community_broadcasts')
     .select('id, body, pinned, created_at')
     .eq('community_id', communityId)
+    .eq('kind', 'broadcast')
     .order('created_at', { ascending: false })
     .limit(20);
   if (error) throw error;
