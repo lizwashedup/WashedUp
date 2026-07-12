@@ -7,6 +7,7 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Redirect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { Check, X } from 'lucide-react-native';
@@ -22,6 +23,7 @@ import {
   getCreatorAccess,
   getCommunityMembers,
   getJoinAnswersByMember,
+  isLeaderAccess,
   reviewJoinRequest,
   removeMember,
   type CommunityMemberRow,
@@ -89,6 +91,11 @@ export default function CreatorMembersScreen() {
       ],
     });
   };
+
+  // members is a leader screen: an event-host-only grant never sees it
+  // (doc 34 §1.3). The layout hides the tab; this covers stale pushes and
+  // deep links.
+  if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

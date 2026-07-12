@@ -6,7 +6,7 @@
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -16,6 +16,7 @@ import {
   getCommunityMembers,
   getBroadcasts,
   getCreatorEvents,
+  isLeaderAccess,
 } from '../../lib/creatorMode';
 import { formatEventDateLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
@@ -50,6 +51,11 @@ export default function CreatorTodayScreen() {
   const activeCount = members.filter((m) => m.status === 'active').length;
   const nextEvent = events[0] ?? null;
   const latestBroadcast = broadcasts[0] ?? null;
+
+  // today is a leader screen: an event-host-only grant never sees it
+  // (doc 34 §1.2). The layout already hides the tab; this covers the
+  // landing route, stale pushes, and deep links.
+  if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

@@ -19,7 +19,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -28,7 +28,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
-import { getCreatorAccess, getBroadcasts, publishCommunity, sendBroadcast } from '../../lib/creatorMode';
+import { getCreatorAccess, getBroadcasts, isLeaderAccess, publishCommunity, sendBroadcast } from '../../lib/creatorMode';
 import { createTopic, getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
@@ -121,6 +121,11 @@ export default function CreatorCommunityScreen() {
       setSending(false);
     }
   };
+
+  // community is a leader screen: an event-host-only grant never sees it
+  // (doc 34 §1.3). The layout hides the tab; this covers stale pushes and
+  // deep links.
+  if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

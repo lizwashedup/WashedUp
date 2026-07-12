@@ -32,6 +32,22 @@ export function hasCreatorAccess(a: CreatorAccess | undefined | null): boolean {
   return a.ledCommunities.length > 0 || a.hasLeaderGrant || a.hasEventHostGrant;
 }
 
+/**
+ * The one definition of "leader" for the whole creator shell (doc 34 §1).
+ * Leaders get all five tabs and land on today; an event-host-only grant gets
+ * the two-tab shell (events + menu), lands on events, and must never reach
+ * today/members/community.
+ */
+export function isLeaderAccess(a: CreatorAccess | undefined | null): boolean {
+  if (!a) return false;
+  return a.ledCommunities.length > 0 || a.hasLeaderGrant;
+}
+
+/** Where the creator switch (and any guard bounce) lands this user. */
+export function creatorLandingRoute(a: CreatorAccess | undefined | null): '/(creator)/today' | '/(creator)/events' {
+  return isLeaderAccess(a) ? '/(creator)/today' : '/(creator)/events';
+}
+
 export async function getCreatorAccess(): Promise<CreatorAccess> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: false };

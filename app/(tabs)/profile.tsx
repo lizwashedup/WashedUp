@@ -36,7 +36,7 @@ import { SkeletonProfile } from '../../components/SkeletonCard';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
-import { getCreatorAccess, hasCreatorAccess } from '../../lib/creatorMode';
+import { getCreatorAccess, hasCreatorAccess, creatorLandingRoute, type CreatorAccess } from '../../lib/creatorMode';
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
 import { lastUnauthRedirectAt } from '../../lib/navState';
@@ -67,14 +67,16 @@ export default function ProfileScreen() {
   const queryClient = useQueryClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  // creator mode entry: true when the user leads a community or holds an
-  // approved operator grant (checked server-side too; this only shows the row)
-  const [creatorAccess, setCreatorAccess] = useState(false);
+  // creator mode entry: set when the user leads a community or holds an
+  // approved operator grant (checked server-side too; this only shows the
+  // row). The full access object decides where the switch lands: leaders on
+  // today, event-host-only grants on events (doc 34 §1.1)
+  const [creatorAccess, setCreatorAccess] = useState<CreatorAccess | null>(null);
   useEffect(() => {
     if (!COMMUNITIES_ENABLED) return;
     getCreatorAccess()
-      .then((a) => setCreatorAccess(hasCreatorAccess(a)))
-      .catch(() => setCreatorAccess(false));
+      .then((a) => setCreatorAccess(hasCreatorAccess(a) ? a : null))
+      .catch(() => setCreatorAccess(null));
   }, []);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [showDeleteFlow, setShowDeleteFlow] = useState(false);
@@ -966,7 +968,7 @@ export default function ProfileScreen() {
               {creatorAccess && (
                 <TouchableOpacity
                   style={styles.settingsRow}
-                  onPress={() => router.replace('/(creator)/today')}
+                  onPress={() => router.replace(creatorLandingRoute(creatorAccess))}
                   activeOpacity={0.7}
                 >
                   {/* exact switch copy is Liz's call (doc 00 open question); generic Airbnb-style draft */}

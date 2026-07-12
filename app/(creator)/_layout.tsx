@@ -18,7 +18,7 @@ import { Sun, CalendarDays, Megaphone, UsersRound, Menu } from 'lucide-react-nat
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
-import { getCreatorAccess, hasCreatorAccess } from '../../lib/creatorMode';
+import { getCreatorAccess, hasCreatorAccess, isLeaderAccess } from '../../lib/creatorMode';
 
 export default function CreatorLayout() {
   const insets = useSafeAreaInsets();
@@ -40,7 +40,7 @@ export default function CreatorLayout() {
 
   if (!hasCreatorAccess(access)) return <Redirect href="/(tabs)/profile" />;
 
-  const leader = (access?.ledCommunities.length ?? 0) > 0 || !!access?.hasLeaderGrant;
+  const leader = isLeaderAccess(access);
   const tabBarHeight = Platform.OS === 'ios' ? 52 + insets.bottom : 60;
 
   return (
