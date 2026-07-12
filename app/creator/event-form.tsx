@@ -31,6 +31,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
+import { laWallTimeToUTC } from '../../lib/laDate';
 import { getCreatorAccess } from '../../lib/creatorMode';
 import {
   announceEventToMembers,
@@ -147,7 +148,10 @@ export default function EventFormScreen() {
 
   const showError = (t: string, m: string) => setAlertInfo({ title: t, message: m });
 
-  const collectFields = (): OperatorEventFields | null => {
+  // requireDate: anything headed for Live insists on a date, exactly like
+  // category (the tour published a dateless event straight to Live). Drafts
+  // and templates stay dateless-legal, and cancel/complete never blocks on it.
+  const collectFields = (opts?: { requireDate?: boolean }): OperatorEventFields | null => {
     if (!title.trim()) {
       showError('Almost', 'A title is required.');
       return null;
@@ -155,6 +159,11 @@ export default function EventFormScreen() {
     if (!category) {
       // mirrors the server guard ("Pick a category."), caught here first
       showError('Almost', 'Pick a category.');
+      return null;
+    }
+    if (opts?.requireDate && !date.trim()) {
+      // mirrors the proposed server guard ("Pick a date."), caught here first
+      showError('Almost', 'Pick a date.');
       return null;
     }
     if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
@@ -167,12 +176,18 @@ export default function EventFormScreen() {
     }
     let startTime: string | null = null;
     if (date && time) {
-      const combined = new Date(`${date.trim()}T${time.trim()}:00`);
-      if (isNaN(combined.getTime())) {
+      // the typed date and time are LA wall clock; pin them there instead of
+      // letting the device zone reinterpret them (the LA-date bug family)
+      const dm = date.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const tm = time.trim().match(/^(\d{2}):(\d{2})$/);
+      if (!dm || !tm) {
         showError('Check the date and time', 'That combination did not parse.');
         return null;
       }
-      startTime = combined.toISOString();
+      startTime = laWallTimeToUTC(
+        Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]),
+        Number(tm[1]), Number(tm[2]),
+      ).toISOString();
     }
     return {
       title,
@@ -220,7 +235,7 @@ export default function EventFormScreen() {
   };
 
   const handleSave = async () => {
-    const fields = collectFields();
+    const fields = collectFields({ requireDate: true });
     if (!fields || saving) return;
     setSaving(true);
     try {
@@ -272,7 +287,7 @@ export default function EventFormScreen() {
   };
 
   const handlePublishDraft = async () => {
-    const fields = collectFields();
+    const fields = collectFields({ requireDate: true });
     if (!fields || !id || saving) return;
     setSaving(true);
     try {
