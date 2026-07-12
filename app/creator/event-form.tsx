@@ -33,6 +33,7 @@ import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { laWallTimeToUTC } from '../../lib/laDate';
 import { getCreatorAccess } from '../../lib/creatorMode';
+import { useLedCommunity } from '../../lib/selectedCommunity';
 import {
   announceEventToMembers,
   createOperatorEvent,
@@ -74,7 +75,7 @@ export default function EventFormScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = access?.ledCommunities[0] ?? null;
+  const community = useLedCommunity(access);
 
   const { data: template } = useQuery({
     queryKey: ['event-template', templateId],

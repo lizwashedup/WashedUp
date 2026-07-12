@@ -39,10 +39,13 @@ export async function getCreatorAccess(): Promise<CreatorAccess> {
   const [{ data: memberships }, { data: grants }] = await Promise.all([
     supabase
       .from('community_members')
-      .select('role, communities ( id, handle, name, status )')
+      .select('role, joined_at, communities ( id, handle, name, status )')
       .eq('user_id', user.id)
       .eq('status', 'active')
-      .in('role', ['leader', 'co_leader']),
+      .in('role', ['leader', 'co_leader'])
+      // deterministic order: the oldest-led community is the default the
+      // switcher (lib/selectedCommunity) falls back to
+      .order('joined_at', { ascending: true }),
     supabase
       .from('operator_grants')
       .select('track, status')

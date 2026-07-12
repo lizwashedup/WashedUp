@@ -29,6 +29,7 @@ import { BlockEditorCard } from '../../components/creator/BlockEditorCard';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { getCreatorAccess } from '../../lib/creatorMode';
+import { useLedCommunity } from '../../lib/selectedCommunity';
 import {
   addBlock,
   BLOCK_TYPE_INFO,
@@ -51,7 +52,7 @@ export default function EditPageScreen() {
     queryKey: ['creator-access'],
     queryFn: getCreatorAccess,
   });
-  const community = access?.ledCommunities[0] ?? null;
+  const community = useLedCommunity(access);
 
   const blocksKey = ['community-blocks', community?.id];
   const { data: blocks = [], isLoading, refetch, isRefetching } = useQuery({

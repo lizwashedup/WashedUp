@@ -31,6 +31,8 @@ import { hapticSuccess } from '../../lib/haptics';
 import { getCreatorAccess, getBroadcasts, publishCommunity, sendBroadcast } from '../../lib/creatorMode';
 import { createTopic, getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
+import { useLedCommunity } from '../../lib/selectedCommunity';
+import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 
 export default function CreatorCommunityScreen() {
   const router = useRouter();
@@ -42,7 +44,7 @@ export default function CreatorCommunityScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = access?.ledCommunities[0] ?? null;
+  const community = useLedCommunity(access);
 
   const { data: broadcasts = [], refetch, isRefetching } = useQuery({
     queryKey: ['creator-broadcasts', community?.id],
@@ -129,6 +131,7 @@ export default function CreatorCommunityScreen() {
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
           <Text style={styles.title}>community</Text>
+          <CommunitySwitcher access={access} />
 
           {community?.status === 'draft' && (
             <View style={styles.draftBanner}>

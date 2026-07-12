@@ -11,10 +11,12 @@ import { useQuery } from '@tanstack/react-query';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCommunityMembers, getBroadcasts } from '../../lib/creatorMode';
+import { useLedCommunity } from '../../lib/selectedCommunity';
+import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 
 export default function CreatorMenuScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = access?.ledCommunities[0] ?? null;
+  const community = useLedCommunity(access);
 
   const { data: members = [] } = useQuery({
     queryKey: ['creator-members', community?.id],
@@ -34,6 +36,7 @@ export default function CreatorMenuScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>menu</Text>
+        <CommunitySwitcher access={access} />
 
         {community && (
           <>

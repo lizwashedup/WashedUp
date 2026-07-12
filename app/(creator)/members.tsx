@@ -16,6 +16,8 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import { formatEventDateLA } from '../../lib/laDate';
+import { useLedCommunity } from '../../lib/selectedCommunity';
+import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import {
   getCreatorAccess,
   getCommunityMembers,
@@ -32,7 +34,7 @@ export default function CreatorMembersScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = access?.ledCommunities[0] ?? null;
+  const community = useLedCommunity(access);
 
   const { data: members = [], isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['creator-members', community?.id],
@@ -100,6 +102,7 @@ export default function CreatorMembersScreen() {
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
           <Text style={styles.title}>members</Text>
+          <CommunitySwitcher access={access} />
 
           {pending.length > 0 && (
             <>

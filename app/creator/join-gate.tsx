@@ -30,6 +30,7 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
 import { getCreatorAccess, getJoinGateSettings, updateJoinGateSettings } from '../../lib/creatorMode';
+import { useLedCommunity } from '../../lib/selectedCommunity';
 
 export default function JoinGateScreen() {
   const router = useRouter();
@@ -45,7 +46,7 @@ export default function JoinGateScreen() {
     queryKey: ['creator-access'],
     queryFn: getCreatorAccess,
   });
-  const community = access?.ledCommunities[0] ?? null;
+  const community = useLedCommunity(access);
 
   const settingsKey = ['join-gate', community?.id];
   const { data: settings, isLoading } = useQuery({

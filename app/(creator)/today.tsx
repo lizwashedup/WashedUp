@@ -18,11 +18,13 @@ import {
   getCreatorEvents,
 } from '../../lib/creatorMode';
 import { formatEventDateLA } from '../../lib/laDate';
+import { useLedCommunity } from '../../lib/selectedCommunity';
+import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import { supabase } from '../../lib/supabase';
 
 export default function CreatorTodayScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = access?.ledCommunities[0] ?? null;
+  const community = useLedCommunity(access);
 
   const { data: members = [], refetch: refetchMembers, isRefetching } = useQuery({
     queryKey: ['creator-members', community?.id],
@@ -57,6 +59,7 @@ export default function CreatorTodayScreen() {
       >
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>{community ? community.name.toLowerCase() : 'today'}</Text>
+        <CommunitySwitcher access={access} />
 
         {/* the one thing that needs attention first */}
         <TouchableOpacity
