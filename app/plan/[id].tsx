@@ -193,6 +193,7 @@ interface PlanDetail {
   tickets_url: string | null;
   is_featured: boolean;
   featured_type: 'washedup_event' | 'birthday_party' | null;
+  explore_event_id: string | null;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -293,7 +294,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
-      status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured, featured_type
+      status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured, featured_type,
+      explore_event_id
     `)
     .eq('id', id)
     .single();
@@ -347,6 +349,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     tickets_url: row.tickets_url ?? null,
     is_featured: row.is_featured ?? false,
     featured_type: (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
+    explore_event_id: row.explore_event_id ?? null,
     member_count: row.member_count ?? 0,
     creator,
   };

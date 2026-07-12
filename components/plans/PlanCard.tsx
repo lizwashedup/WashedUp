@@ -197,7 +197,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
         const { data, error } = await supabase
           .from('events')
           .select(
-            'id, title, description, start_time, end_time, drop_in, allow_duplicate, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, target_age_min, target_age_max, tickets_url, neighborhood',
+            'id, title, description, start_time, end_time, drop_in, allow_duplicate, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, target_age_min, target_age_max, tickets_url, neighborhood, explore_event_id',
           )
           .eq('id', plan.id)
           .single();

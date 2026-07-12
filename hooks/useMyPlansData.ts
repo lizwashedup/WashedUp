@@ -34,6 +34,7 @@ export interface PlanDraft {
   tickets_url: string | null;
   drop_in: boolean | null;
   allow_duplicate: boolean | null;
+  explore_event_id: string | null;
 }
 
 export function useMyPlanDrafts(userId: string | null | undefined) {
@@ -43,7 +44,7 @@ export function useMyPlanDrafts(userId: string | null | undefined) {
       if (!userId) return [];
       const { data } = await supabase
         .from('events')
-        .select('id, title, start_time, end_time, description, host_message, location_text, location_lat, location_lng, neighborhood, primary_vibe, image_url, gender_rule, target_age_min, target_age_max, max_invites, tickets_url, drop_in, allow_duplicate')
+        .select('id, title, start_time, end_time, description, host_message, location_text, location_lat, location_lng, neighborhood, primary_vibe, image_url, gender_rule, target_age_min, target_age_max, max_invites, tickets_url, drop_in, allow_duplicate, explore_event_id')
         .eq('creator_user_id', userId)
         .eq('status', 'draft')
         .order('start_time', { ascending: true });

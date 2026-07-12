@@ -161,6 +161,11 @@ export default function PlanComposerV2() {
     prefillGenderPref?: string;
     prefillGroupSize?: string;
     prefillTicketsUrl?: string;
+    // the source explore event of a "find people to go with" spawn (or of a
+    // duplicated/drafted plan that carries one). Written to the plan row so
+    // the DB title-match trigger never has to guess (it guesses wrong with
+    // duplicate titles).
+    prefillExploreEventId?: string;
     duplicatedFromEventId?: string;
     // resuming a saved draft: post updates this row instead of inserting
     draftId?: string;
@@ -179,6 +184,7 @@ export default function PlanComposerV2() {
 
   // ── Core fields ──
   const [title, setTitle] = useState('');
+  const [exploreEventId, setExploreEventId] = useState<string | null>(null);
   const [category, setCategory] = useState<PlanCategory | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
@@ -269,6 +275,7 @@ export default function PlanComposerV2() {
   // LegacyComposer's hydration so "Post your own" carries the source plan over. ──
   useEffect(() => {
     if (params.prefillTitle) setTitle(String(params.prefillTitle));
+    if (params.prefillExploreEventId) setExploreEventId(String(params.prefillExploreEventId));
     if (params.prefillInvitePersonId) {
       setInvited((prev) =>
         prev.some((c) => c.user_id === params.prefillInvitePersonId)
@@ -512,7 +519,7 @@ export default function PlanComposerV2() {
   const canPost = title.trim().length > 0 && dateSelected && timeSelected && category !== null && creatorMessage.trim().length >= MSG_MIN && description.trim().length > 0 && !loading && !imageLoading;
 
   const resetForm = () => {
-    setTitle(''); setCategory(null); setImageUrl(null); setCreatorMessage('');
+    setTitle(''); setExploreEventId(null); setCategory(null); setImageUrl(null); setCreatorMessage('');
     setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
     setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
     setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
@@ -533,6 +540,7 @@ export default function PlanComposerV2() {
       prefillDropIn: undefined, prefillAllowDuplicate: undefined,
       prefillAgeRange: undefined, prefillGenderPref: undefined,
       prefillGroupSize: undefined, prefillTicketsUrl: undefined,
+      prefillExploreEventId: undefined,
       duplicatedFromEventId: undefined,
       draftId: undefined,
     } as never);
@@ -591,6 +599,7 @@ export default function PlanComposerV2() {
       city: 'Los Angeles',
       image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
       neighborhood: neighborhood.trim() || null,
+      explore_event_id: exploreEventId,
     };
     setLoading(true);
     try {
@@ -690,6 +699,7 @@ export default function PlanComposerV2() {
       city: 'Los Angeles',
       image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
       neighborhood: neighborhood.trim() || null,
+      explore_event_id: exploreEventId,
       duplicated_from_event_id: params.duplicatedFromEventId ? String(params.duplicatedFromEventId) : null,
     };
     const inviteIds = invited.map((c) => c.user_id);

@@ -65,6 +65,7 @@ export interface DuplicateSourceEvent {
   gender_rule?: string | null;
   max_invites?: number | null;
   tickets_url?: string | null;
+  explore_event_id?: string | null;
 }
 
 /**
@@ -98,6 +99,10 @@ export function buildDuplicatePostParams(
     prefillGenderPref: event?.gender_rule ?? 'mixed',
     prefillGroupSize: event?.max_invites != null ? String(event.max_invites) : '',
     prefillTicketsUrl: event?.tickets_url ?? '',
+    // Carry the explore-event link explicitly. The DB title-match trigger
+    // (auto_link_explore_event) only guesses when this is null, and with
+    // duplicate titles it guesses wrong (the tour's spawn mislink).
+    prefillExploreEventId: event?.explore_event_id ?? '',
     duplicatedFromEventId: eventId ?? '',
   };
 }
