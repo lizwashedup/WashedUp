@@ -13,6 +13,7 @@ import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { getPlanPinColor } from '../lib/planColors';
 import { formatEventDateLA } from '../lib/laDate';
+import { normalizeTicketPrice } from '../lib/ticketPrice';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -34,7 +35,8 @@ interface SceneEvent {
   venue_address: string | null;
   category: string | null;
   external_url: string | null;
-  ticket_price: string | null;
+  // Postgres numeric: number or numeric string depending on the path (doc 34 2.3)
+  ticket_price: number | string | null;
   plans_count: number;
 }
 
@@ -158,9 +160,9 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
     setSelectedEvent(null);
   }, []);
 
-  const isFree = selectedEvent
-    ? !selectedEvent.ticket_price || selectedEvent.ticket_price.trim() === '' || selectedEvent.ticket_price.trim().toLowerCase() === 'free'
-    : true;
+  // normalizeTicketPrice handles the numeric column arriving as number or
+  // string; the old .trim() chain crashed on a number (doc 34 2.3)
+  const isFree = selectedEvent ? normalizeTicketPrice(selectedEvent.ticket_price) === null : true;
 
   return (
     <View style={styles.container}>

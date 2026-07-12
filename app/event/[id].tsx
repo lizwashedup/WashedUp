@@ -27,6 +27,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
 import { formatEventDateLA } from '../../lib/laDate';
+import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -41,7 +42,9 @@ interface ExploreEvent {
   venue_address: string | null;
   category: string | null;
   external_url: string | null;
-  ticket_price: string | null;
+  // Postgres numeric: arrives as a number or a numeric string depending on
+  // the path; normalizeTicketPrice is the one reading (doc 34 2.3)
+  ticket_price: number | string | null;
   public_name: string | null;
 }
 
@@ -359,7 +362,8 @@ export default function EventDetailScreen() {
     );
   }
 
-  const isFree = !event.ticket_price || (typeof event.ticket_price === 'string' && (event.ticket_price.trim() === '' || event.ticket_price.trim().toLowerCase() === 'free'));
+  const ticketPrice = normalizeTicketPrice(event.ticket_price);
+  const isFree = ticketPrice === null;
 
   const getPlanSpotsInfo = (plan: LinkedPlan): { text: string; isFull: boolean } => {
     const actualCount = memberCountsMap[plan.id] ?? plan.member_count;
@@ -446,10 +450,10 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          {event.ticket_price && (
+          {ticketPrice !== null && (
             <View style={styles.metaRow}>
               <Ticket size={16} color={Colors.warmGray} strokeWidth={2} />
-              <Text style={styles.metaText}>{event.ticket_price}</Text>
+              <Text style={styles.metaText}>{formatTicketPrice(ticketPrice)}</Text>
             </View>
           )}
 
@@ -466,12 +470,15 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          {!isFree && event.external_url && (
+          {/* the link-out shows whenever a link exists (doc 34 2.1): a free
+              event with a reservation link used to show nothing at all */}
+          {event.external_url && (
             <TouchableOpacity
               style={styles.ticketLink}
               onPress={() => openUrl(event.external_url!)}
             >
-              <Text style={styles.ticketLinkText}>Get Tickets</Text>
+              {/* LIZ COPY: priced vs free-with-link labels */}
+              <Text style={styles.ticketLinkText}>{isFree ? 'reserve a spot' : 'get tickets'}</Text>
               <ChevronRight size={16} color={Colors.terracotta} strokeWidth={2} />
             </TouchableOpacity>
           )}
