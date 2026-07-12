@@ -821,9 +821,12 @@ export default function PlanDetailScreen() {
   const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
 
   // Communities: if this plan spawned from a Scene event and that event was
-  // cancelled (a Live-only RLS read comes back empty while the plan is still
-  // in the future), say so plainly. The plan itself is untouched: formed
-  // groups keep their plans and decide for themselves (batch 15 call b).
+  // cancelled, say so plainly. Two read shapes cover everyone: a normal
+  // user's Live-only RLS read comes back EMPTY, while the event's owner or
+  // community leader can still read the row and must check its status (the
+  // tour walked as the leader, so the empty-read-only version could never
+  // show her the banner). The plan itself is untouched: formed groups keep
+  // their plans and decide for themselves (batch 15 call b).
   const { data: sourceEventCancelled = false } = useQuery({
     queryKey: ['plan-source-event-gone', id],
     enabled: COMMUNITIES_ENABLED && !!id && !!plan && !isPastPlan,
@@ -836,10 +839,10 @@ export default function PlanDetailScreen() {
       if (!row?.explore_event_id) return false;
       const { data: ev } = await supabase
         .from('explore_events')
-        .select('id')
+        .select('id, status')
         .eq('id', row.explore_event_id)
         .maybeSingle();
-      return !ev;
+      return !ev || ev.status === 'Cancelled';
     },
   });
   // Next Time! uses the end_time-aware "past" check so users can still

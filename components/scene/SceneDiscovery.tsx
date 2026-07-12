@@ -25,8 +25,8 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import ProfileButton from '../ProfileButton';
 import { hapticLight } from '../../lib/haptics';
-import { formatEventDateLA } from '../../lib/laDate';
 import { EVENT_CATEGORIES } from '../../lib/creatorEvents';
+import { EventPoster } from './EventPoster';
 import {
   getDiscoverableCommunities,
   getSceneEvents,
@@ -34,7 +34,6 @@ import {
 } from '../../lib/sceneDiscovery';
 import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 
-const POSTER_RATIO = 0.56;
 const RAIL_CARD_WIDTH = 220;
 const RAIL_COVER_HEIGHT = 110;
 
@@ -52,35 +51,17 @@ export function SceneDiscovery() {
     queryFn: getDiscoverableCommunities,
   });
 
-  const filtered = category ? events.filter((e) => e.category === category) : events;
-  const usedCategories = EVENT_CATEGORIES.filter((c) => events.some((e) => e.category === c));
+  // pilot-era rows carry capitalized categories ('Community'); compare and
+  // display on the lowercase side so the chips match every era
+  const filtered = category
+    ? events.filter((e) => e.category?.toLowerCase() === category)
+    : events;
+  const usedCategories = EVENT_CATEGORIES.filter((c) =>
+    events.some((e) => e.category?.toLowerCase() === c),
+  );
 
   const renderEvent = (e: SceneEvent) => (
-    <TouchableOpacity
-      key={e.id}
-      style={styles.poster}
-      onPress={() => router.push(`/event/${e.id}` as never)}
-      activeOpacity={0.85}
-    >
-      {e.image_url ? (
-        <Image source={{ uri: e.image_url }} style={[styles.posterImage, { height: (width - 40) * POSTER_RATIO }]} contentFit="cover" />
-      ) : (
-        <View style={[styles.posterImage, styles.posterFallback, { height: (width - 40) * POSTER_RATIO }]}>
-          <Text style={styles.posterFallbackText}>{e.title.slice(0, 1).toLowerCase()}</Text>
-        </View>
-      )}
-      <View style={styles.posterBody}>
-        {!!e.category && <Text style={styles.posterCategory}>{e.category}</Text>}
-        <Text style={styles.posterTitle} numberOfLines={2}>{e.title}</Text>
-        <Text style={styles.posterMeta}>
-          {[
-            e.event_date ? formatEventDateLA(e.event_date) : null,
-            e.venue,
-          ].filter(Boolean).join('  ')}
-        </Text>
-        {!!e.public_name && <Text style={styles.posterBy}>put on by {e.public_name}</Text>}
-      </View>
-    </TouchableOpacity>
+    <EventPoster key={e.id} event={e} width={width} onPress={() => router.push(`/event/${e.id}` as never)} />
   );
 
   return (
@@ -229,33 +210,6 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
   chipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   chipTextOn: { color: Colors.white },
-  poster: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  posterImage: { width: '100%' },
-  posterFallback: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
-  posterFallbackText: { fontFamily: Fonts.display, fontSize: FontSizes.displayLG, color: Colors.terracotta },
-  posterBody: { padding: 14 },
-  posterCategory: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-    letterSpacing: 1.5,
-    marginBottom: 4,
-  },
-  posterTitle: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displayMD,
-    lineHeight: LineHeights.displayMD,
-    color: Colors.darkWarm,
-  },
-  posterMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 6 },
-  posterBy: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 4 },
   emptyLine: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
