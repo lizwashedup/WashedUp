@@ -18,6 +18,7 @@ import {
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
+    AppState,
     Dimensions,
     Keyboard,
     Linking,
@@ -41,6 +42,10 @@ import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
+import { usePostHog } from 'posthog-react-native';
+import { getPushPermissionStatus, registerForPushNotifications } from '../../hooks/usePushNotifications';
+import { maybeShowNotifReenable, recordNotifReenableShown } from '../../lib/notifReenablePrompt';
+import NotificationReenableModal from '../../components/NotificationReenableModal';
 import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
 // Lazy so a circle component's module-scope code (its StyleSheet) is never
 // evaluated for non-circle users on this universally-reachable shipped screen.
@@ -475,6 +480,60 @@ export default function PlanDetailScreen() {
   const [shareAfterJoinVisible, setShareAfterJoinVisible] = useState(false);
   const [pingPlanId, setPingPlanId] = useState<string | null>(null);
   const pendingNavRef = React.useRef<(() => void) | null>(null);
+
+  // ── Post-join "re-enable notifications" soft-prompt (lever #1) ────────────
+  // Shown after the share sheet closes for a joiner whose OS notifications are
+  // off. Reuses pendingNavRef: the prompt defers the post-join nav until it's
+  // dismissed, exactly like the ping moment, and is mutually exclusive with it
+  // (pinging is pointless if you can't receive the push). Gate + persistence
+  // live in lib/notifReenablePrompt; permission helpers in usePushNotifications.
+  const posthog = usePostHog();
+  const [notifReenableVisible, setNotifReenableVisible] = useState(false);
+  const [notifReenableDenied, setNotifReenableDenied] = useState(false);
+
+  const closeNotifReenableAndContinue = useCallback(() => {
+    setNotifReenableVisible(false);
+    const nav = pendingNavRef.current;
+    pendingNavRef.current = null;
+    nav?.();
+  }, []);
+
+  const handleNotifReenableEnable = useCallback(async () => {
+    const status = await getPushPermissionStatus();
+    if (status === 'denied') {
+      // Hard denial: the native dialog is a silent no-op, so Settings is the
+      // only path. Leave the modal open; the AppState effect below handles the
+      // return-from-Settings regrant.
+      posthog?.capture?.('notif_reenable_settings_opened', { route: 'settings' });
+      Linking.openSettings();
+      return;
+    }
+    posthog?.capture?.('notif_reenable_settings_opened', { route: 'native_prompt' });
+    const token = await registerForPushNotifications({ prompt: true, userId: currentUserId ?? undefined });
+    if (token) posthog?.capture?.('notif_reenable_regranted');
+    closeNotifReenableAndContinue();
+  }, [currentUserId, posthog, closeNotifReenableAndContinue]);
+
+  const handleNotifReenableDismiss = useCallback(() => {
+    // Cooldown + lifetime count were already written at show time.
+    closeNotifReenableAndContinue();
+  }, [closeNotifReenableAndContinue]);
+
+  // Returned from Settings: if permission is now granted, refresh the token,
+  // record the conversion, and continue the deferred nav.
+  useEffect(() => {
+    if (!notifReenableVisible) return;
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state !== 'active') return;
+      const status = await getPushPermissionStatus();
+      if (status === 'granted') {
+        posthog?.capture?.('notif_reenable_regranted');
+        registerForPushNotifications({ prompt: false, userId: currentUserId ?? undefined }).catch(() => {});
+        closeNotifReenableAndContinue();
+      }
+    });
+    return () => sub.remove();
+  }, [notifReenableVisible, currentUserId, posthog, closeNotifReenableAndContinue]);
   const [isOnWaitlist, setIsOnWaitlist] = useState(false);
   const [waitlistLoading, setWaitlistLoading] = useState(false);
   const [brandedAlert, setBrandedAlert] = useState<{
@@ -2131,13 +2190,29 @@ export default function PlanDetailScreen() {
               router.push(`/(tabs)/chats/${id}` as any);
             }
           };
-          if (YOURS_PAGE_ENABLED) {
-            // Ping moment before chat / ticket prompt (spec: after join).
-            pendingNavRef.current = runRest;
-            setPingPlanId(id as string);
-          } else {
-            runRest();
-          }
+          const showPingOrNav = () => {
+            if (YOURS_PAGE_ENABLED) {
+              // Ping moment before chat / ticket prompt (spec: after join).
+              pendingNavRef.current = runRest;
+              setPingPlanId(id as string);
+            } else {
+              runRest();
+            }
+          };
+          // A joiner with notifications off gets the re-enable ask instead of
+          // the ping moment (pinging is useless if they can't receive it). The
+          // prompt reuses pendingNavRef to continue the same nav chain on close.
+          maybeShowNotifReenable()
+            .then(async (show) => {
+              if (!show) { showPingOrNav(); return; }
+              const status = await getPushPermissionStatus();
+              await recordNotifReenableShown();
+              pendingNavRef.current = runRest;
+              setNotifReenableDenied(status === 'denied');
+              setNotifReenableVisible(true);
+              posthog?.capture?.('notif_reenable_shown', { permission_status: status });
+            })
+            .catch(() => showPingOrNav());
         }}
         planTitle={plan?.title || ''}
         planId={id as string}
@@ -2156,6 +2231,13 @@ export default function PlanDetailScreen() {
           }}
         />
       )}
+
+      <NotificationReenableModal
+        visible={notifReenableVisible}
+        deniedMode={notifReenableDenied}
+        onEnable={handleNotifReenableEnable}
+        onDismiss={handleNotifReenableDismiss}
+      />
 
       {/* Ticket Prompt Modal — shown after joining a ticketed event */}
       <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => { setTicketModalVisible(false); router.push(`/(tabs)/chats/${id}` as any); }} statusBarTranslucent>
