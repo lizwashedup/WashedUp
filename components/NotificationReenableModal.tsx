@@ -17,7 +17,7 @@ import { hapticLight } from '../lib/haptics';
 // PushPrimerModal: the parent (app/plan/[id].tsx) owns persistence, the
 // permission call, and the denied-vs-undetermined branch. When deniedMode is
 // true the OS has already recorded a hard denial, so the native dialog is a
-// silent no-op and the only path forward is the Settings deep-link — hence the
+// silent no-op and the only path forward is the Settings deep-link, so the
 // button label changes rather than pretending the in-app prompt can re-ask.
 interface Props {
   visible: boolean;
@@ -59,8 +59,9 @@ export default function NotificationReenableModal({ visible, deniedMode, onEnabl
           <Text style={styles.heading}>Know the moment someone's in</Text>
 
           <Text style={styles.body}>
-            Turn on notifications and we'll tell you the second someone joins a
-            plan you're in, so you never miss the group coming together.
+            {deniedMode
+              ? "Notifications are off, so you're missing it when people join your plans. Turn them back on in Settings and we'll keep you posted."
+              : "Turn on notifications and we'll tell you the second someone joins a plan you're in, so you never miss the group coming together."}
           </Text>
 
           <TouchableOpacity style={styles.primaryButton} onPress={enable} activeOpacity={0.85}>

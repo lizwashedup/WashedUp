@@ -44,7 +44,7 @@ import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
 import { usePostHog } from 'posthog-react-native';
 import { getPushPermissionStatus, registerForPushNotifications } from '../../hooks/usePushNotifications';
-import { maybeShowNotifReenable, recordNotifReenableShown } from '../../lib/notifReenablePrompt';
+import { decideNotifReenable, recordNotifReenableShown, type NotifReenableDecision } from '../../lib/notifReenablePrompt';
 import NotificationReenableModal from '../../components/NotificationReenableModal';
 import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
 // Lazy so a circle component's module-scope code (its StyleSheet) is never
@@ -490,8 +490,15 @@ export default function PlanDetailScreen() {
   const posthog = usePostHog();
   const [notifReenableVisible, setNotifReenableVisible] = useState(false);
   const [notifReenableDenied, setNotifReenableDenied] = useState(false);
+  // Decision made at join success (reliable), presented after the share sheet.
+  const postJoinNotifDecisionRef = React.useRef<NotifReenableDecision>('skip');
+  // True only while an ask is actually on screen. Guards the regrant event +
+  // token refresh so the AppState re-check can't fire for an already-granted
+  // user on every foreground (which would inflate the regrant metric).
+  const askOutstandingRef = React.useRef(false);
 
   const closeNotifReenableAndContinue = useCallback(() => {
+    askOutstandingRef.current = false;
     setNotifReenableVisible(false);
     const nav = pendingNavRef.current;
     pendingNavRef.current = null;
@@ -510,7 +517,7 @@ export default function PlanDetailScreen() {
     }
     posthog?.capture?.('notif_reenable_settings_opened', { route: 'native_prompt' });
     const token = await registerForPushNotifications({ prompt: true, userId: currentUserId ?? undefined });
-    if (token) posthog?.capture?.('notif_reenable_regranted');
+    if (token && askOutstandingRef.current) posthog?.capture?.('notif_reenable_regranted');
     closeNotifReenableAndContinue();
   }, [currentUserId, posthog, closeNotifReenableAndContinue]);
 
@@ -519,12 +526,12 @@ export default function PlanDetailScreen() {
     closeNotifReenableAndContinue();
   }, [closeNotifReenableAndContinue]);
 
-  // Returned from Settings: if permission is now granted, refresh the token,
-  // record the conversion, and continue the deferred nav.
+  // Returned from Settings while an ask is outstanding: if permission is now
+  // granted, record the conversion once, refresh the token, continue the nav.
   useEffect(() => {
     if (!notifReenableVisible) return;
     const sub = AppState.addEventListener('change', async (state) => {
-      if (state !== 'active') return;
+      if (state !== 'active' || !askOutstandingRef.current) return;
       const status = await getPushPermissionStatus();
       if (status === 'granted') {
         posthog?.capture?.('notif_reenable_regranted');
@@ -1050,6 +1057,14 @@ export default function PlanDetailScreen() {
       // Clear local waitlist state since the trigger deleted the row
       setIsOnWaitlist(false);
       setWaitlistNotified(false);
+
+      // Decide the post-join notification ask here (a reliable point), not off
+      // the share sheet's close callback, which some dismissal paths skip. The
+      // verdict is presented once the share sheet closes.
+      postJoinNotifDecisionRef.current = 'skip';
+      decideNotifReenable(currentUserId)
+        .then((d) => { postJoinNotifDecisionRef.current = d; })
+        .catch(() => { postJoinNotifDecisionRef.current = 'skip'; });
 
       setShareAfterJoinVisible(true);
     },
@@ -2199,20 +2214,29 @@ export default function PlanDetailScreen() {
               runRest();
             }
           };
-          // A joiner with notifications off gets the re-enable ask instead of
-          // the ping moment (pinging is useless if they can't receive it). The
-          // prompt reuses pendingNavRef to continue the same nav chain on close.
-          maybeShowNotifReenable()
-            .then(async (show) => {
-              if (!show) { showPingOrNav(); return; }
-              const status = await getPushPermissionStatus();
-              await recordNotifReenableShown();
-              pendingNavRef.current = runRest;
-              setNotifReenableDenied(status === 'denied');
-              setNotifReenableVisible(true);
-              posthog?.capture?.('notif_reenable_shown', { permission_status: status });
-            })
-            .catch(() => showPingOrNav());
+          // Present the decision made at join success. A push-disabled joiner
+          // in the treatment group gets the re-enable ask INSTEAD of the ping
+          // moment (pinging is useless if they can't receive it), reusing
+          // pendingNavRef to continue the same nav chain on close. 'held' is the
+          // holdout control slice (none in v1); log its exposure for a future
+          // shown-vs-held denominator, then fall through to the normal flow.
+          const decision = postJoinNotifDecisionRef.current;
+          postJoinNotifDecisionRef.current = 'skip';
+          if (decision === 'show') {
+            getPushPermissionStatus()
+              .then(async (status) => {
+                await recordNotifReenableShown();
+                pendingNavRef.current = runRest;
+                askOutstandingRef.current = true;
+                setNotifReenableDenied(status === 'denied');
+                setNotifReenableVisible(true);
+                posthog?.capture?.('notif_reenable_shown', { permission_status: status });
+              })
+              .catch(() => showPingOrNav());
+          } else {
+            if (decision === 'held') posthog?.capture?.('notif_reenable_control_exposure');
+            showPingOrNav();
+          }
         }}
         planTitle={plan?.title || ''}
         planId={id as string}

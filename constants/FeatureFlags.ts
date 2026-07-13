@@ -104,10 +104,11 @@ export const PHONE_CANONICAL_ENABLED =
  * at the OS level, a soft modal asks them to turn them back on (deep-linking to
  * Settings for hard-denied users, since the native dialog no-ops there).
  *
- * Ships OFF (committed default false). Uses the additive-override idiom: an
- * EAS build with the env var unset ships the committed default and can never
- * silently ship ON. Flip the committed default to true only after real-device
- * testing on iOS + Android and Liz's go-ahead.
+ * Ships OFF (committed default false). Prod control is the server-driven
+ * `remote_flags` row 'notif_reenable_prompt' (enabled / rollout_pct /
+ * holdout_pct); this env var is only the OFFLINE FALLBACK for `enabled` when
+ * that read fails, and a local force-ON for device testing. An EAS build with
+ * the var unset ships the committed default and can never silently ship ON.
  */
 const NOTIF_REENABLE_COMMITTED_DEFAULT = false;
 export const NOTIF_REENABLE_PROMPT_ENABLED =
