@@ -45,7 +45,7 @@ export default function CommunityPageScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { width } = useWindowDimensions();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, preview } = useLocalSearchParams<{ id: string; preview?: string }>();
   const [popupOpen, setPopupOpen] = useState(false);
 
   const { data: page, isLoading, refetch, isRefetching } = useQuery({
@@ -63,7 +63,16 @@ export default function CommunityPageScreen() {
     queryFn: () => getJoinGate(id!),
     enabled: !!id,
   });
-  const isMember = membership?.status === 'active';
+  // preview (doc 37 §2, Liz's pull-forward): a leader can force the page to
+  // render as a stranger or as a plain member, client-side only. RLS knows
+  // who they are, so without this a leader can never see the lock view. The
+  // param is honored ONLY for an active leader/co_leader of THIS community;
+  // anyone else gets their real projection.
+  const isLeaderHere =
+    membership?.status === 'active' && (membership.role === 'leader' || membership.role === 'co_leader');
+  const previewMode =
+    isLeaderHere && (preview === 'visitor' || preview === 'member') ? preview : null;
+  const isMember = previewMode ? previewMode === 'member' : membership?.status === 'active';
   const { data: faces = [] } = useQuery({
     queryKey: ['community-faces', id],
     queryFn: () => getMemberFaces(id!),
@@ -86,6 +95,11 @@ export default function CommunityPageScreen() {
   const rooms = (card?.topics ?? []).filter((t) => !t.explore_event_id);
 
   const handleJoinTopic = async (topicId: string) => {
+    if (previewMode) {
+      // LIZ COPY
+      setAlertInfo({ title: 'just a preview', message: 'joining works for real members.' });
+      return;
+    }
     setJoiningTopicId(topicId);
     try {
       await joinTopic(topicId);
@@ -260,6 +274,19 @@ export default function CommunityPageScreen() {
         )}
       </View>
 
+      {previewMode && (
+        <View style={styles.previewBar}>
+          {/* LIZ COPY */}
+          <Text style={styles.previewBarText}>
+            {previewMode === 'visitor' ? 'how a visitor sees it' : 'how a member sees it'}
+          </Text>
+          <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+            {/* LIZ COPY */}
+            <Text style={styles.previewBarDone}>done</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
@@ -321,7 +348,14 @@ export default function CommunityPageScreen() {
             ) : (
               <TouchableOpacity
                 style={[styles.joinBtn, { backgroundColor: accent }]}
-                onPress={() => setPopupOpen(true)}
+                onPress={() => {
+                  if (previewMode) {
+                    // LIZ COPY
+                    setAlertInfo({ title: 'just a preview', message: 'the ask to join button works for visitors.' });
+                    return;
+                  }
+                  setPopupOpen(true);
+                }}
               >
                 <Text style={styles.joinBtnText}>ask to join</Text>
               </TouchableOpacity>
@@ -380,6 +414,20 @@ const styles = StyleSheet.create({
   },
   chatLink: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   chatLinkText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  // preview banner: neutral status strip, quiet on purpose; "done" is the
+  // standard ghost link (the gold exception list stays closed)
+  previewBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.inputBg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  previewBarText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  previewBarDone: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   content: { padding: 20, paddingBottom: 60 },
   name: {
     fontFamily: Fonts.display,

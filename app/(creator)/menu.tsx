@@ -71,6 +71,31 @@ export default function CreatorMenuScreen() {
 
         {community && (
           <>
+            {/* preview (doc 37 §2): the page as others see it, client-forced */}
+            {/* LIZ COPY */}
+            <Text style={styles.sectionLabel}>your page</Text>
+            <View style={styles.previewCard}>
+              <TouchableOpacity
+                style={styles.previewRow}
+                onPress={() => router.push(`/community/${community.id}?preview=visitor` as never)}
+                activeOpacity={0.7}
+              >
+                {/* LIZ COPY */}
+                <Text style={styles.previewText}>see it as a visitor</Text>
+                <ChevronRight size={16} color={Colors.warmGray} strokeWidth={2} />
+              </TouchableOpacity>
+              <View style={styles.previewDivider} />
+              <TouchableOpacity
+                style={styles.previewRow}
+                onPress={() => router.push(`/community/${community.id}?preview=member` as never)}
+                activeOpacity={0.7}
+              >
+                {/* LIZ COPY */}
+                <Text style={styles.previewText}>see it as a member</Text>
+                <ChevronRight size={16} color={Colors.warmGray} strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.sectionLabel}>numbers</Text>
             <View style={styles.statsCard}>
               <Stat label="members" value={activeCount} />
@@ -136,6 +161,22 @@ const styles = StyleSheet.create({
   organizerBody: { flex: 1 },
   organizerName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
   organizerMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  previewCard: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 28,
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  previewDivider: { height: 1, backgroundColor: Colors.border, marginHorizontal: 16 },
+  previewText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   statsCard: {
     flexDirection: 'row',
     backgroundColor: Colors.cardBg,

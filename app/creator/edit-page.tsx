@@ -152,6 +152,25 @@ export default function EditPageScreen() {
               visitors see, in this order.
             </Text>
 
+            {/* preview (doc 37 §2): see the page as others do, before and
+                after publishing; the page forces the projection client-side */}
+            <View style={styles.previewRow}>
+              <TouchableOpacity
+                onPress={() => router.push(`/community/${community.id}?preview=visitor` as never)}
+                hitSlop={8}
+              >
+                {/* LIZ COPY */}
+                <Text style={styles.previewLink}>see it as a visitor</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.push(`/community/${community.id}?preview=member` as never)}
+                hitSlop={8}
+              >
+                {/* LIZ COPY */}
+                <Text style={styles.previewLink}>see it as a member</Text>
+              </TouchableOpacity>
+            </View>
+
             {blocks.map((block, i) => (
               <BlockEditorCard
                 key={block.id}
@@ -236,6 +255,8 @@ const styles = StyleSheet.create({
     lineHeight: LineHeights.bodySM,
     marginBottom: 16,
   },
+  previewRow: { flexDirection: 'row', gap: 20, marginBottom: 16 },
+  previewLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   emptyCard: {
     borderRadius: 16,
     borderWidth: 1,
