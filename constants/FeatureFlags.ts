@@ -97,3 +97,23 @@ export const PHONE_CANONICAL_ENABLED =
     : process.env.EXPO_PUBLIC_PHONE_CANONICAL_ENABLED === 'false'
       ? false
       : PHONE_CANONICAL_COMMITTED_DEFAULT;
+
+/**
+ * Post-join "re-enable notifications" soft-prompt (lever #1 of the push
+ * reachability work). When a user joins a plan but has notifications disabled
+ * at the OS level, a soft modal asks them to turn them back on (deep-linking to
+ * Settings for hard-denied users, since the native dialog no-ops there).
+ *
+ * Ships OFF (committed default false). Prod control is the server-driven
+ * `remote_flags` row 'notif_reenable_prompt' (enabled / rollout_pct /
+ * holdout_pct); this env var is only the OFFLINE FALLBACK for `enabled` when
+ * that read fails, and a local force-ON for device testing. An EAS build with
+ * the var unset ships the committed default and can never silently ship ON.
+ */
+const NOTIF_REENABLE_COMMITTED_DEFAULT = false;
+export const NOTIF_REENABLE_PROMPT_ENABLED =
+  process.env.EXPO_PUBLIC_NOTIF_REENABLE_PROMPT_ENABLED === 'true'
+    ? true
+    : process.env.EXPO_PUBLIC_NOTIF_REENABLE_PROMPT_ENABLED === 'false'
+      ? false
+      : NOTIF_REENABLE_COMMITTED_DEFAULT;
