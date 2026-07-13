@@ -58,7 +58,13 @@ export default function CreatorEventsScreen() {
           <Text style={styles.postBtnText}>put on an event</Text>
         </TouchableOpacity>
 
-        {drafts.length > 0 && <Text style={styles.sectionLabel}>drafts</Text>}
+        {/* drafts and templates keep a visible home even when empty, so
+            "save it as a draft/template" has somewhere to point (doc 34 3.4) */}
+        <Text style={styles.sectionLabel}>drafts</Text>
+        {drafts.length === 0 && (
+          /* LIZ COPY */
+          <Text style={styles.sectionHint}>events you save before publishing land here. only you see them.</Text>
+        )}
         {drafts.map((e) => (
           <TouchableOpacity
             key={e.id}
@@ -73,8 +79,10 @@ export default function CreatorEventsScreen() {
           </TouchableOpacity>
         ))}
 
-        {templates.length > 0 && (
-          <Text style={[styles.sectionLabel, drafts.length > 0 && styles.sectionGap]}>templates</Text>
+        <Text style={[styles.sectionLabel, styles.sectionGap]}>templates</Text>
+        {templates.length === 0 && (
+          /* LIZ COPY */
+          <Text style={styles.sectionHint}>save any event as a template and it lives here, ready to put on again.</Text>
         )}
         {templates.map((t) => (
           <TouchableOpacity
@@ -95,9 +103,7 @@ export default function CreatorEventsScreen() {
           </TouchableOpacity>
         ))}
 
-        {live.length > 0 && (
-          <Text style={[styles.sectionLabel, (drafts.length > 0 || templates.length > 0) && styles.sectionGap]}>live</Text>
-        )}
+        {live.length > 0 && <Text style={[styles.sectionLabel, styles.sectionGap]}>live</Text>}
         {live.map((e) => (
           <TouchableOpacity
             key={e.id}
@@ -141,7 +147,7 @@ export default function CreatorEventsScreen() {
         ))}
 
         {events.length === 0 && (
-          <Text style={styles.empty}>your first event goes here.</Text>
+          <Text style={[styles.empty, styles.sectionGap]}>your first event goes here.</Text>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -176,6 +182,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   sectionGap: { marginTop: 12 },
+  sectionHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.tertiary },
   card: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
