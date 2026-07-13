@@ -31,7 +31,11 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
-import { laWallTimeToUTC } from '../../lib/laDate';
+import { formatEventDateLA, getLAWallParts, isBeforeTodayLA, laWallTimeToUTC } from '../../lib/laDate';
+import CollapsibleCalendar from '../../components/composer/CollapsibleCalendar';
+import TimePicker from '../../components/composer/TimePicker';
+import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
+import EventPlaceSearch from '../../components/creator/EventPlaceSearch';
 import { getCreatorAccess } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import {
@@ -47,6 +51,14 @@ import {
 } from '../../lib/creatorEvents';
 
 const POSTER_HEIGHT = 160;
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** 'YYYY-MM-DD' <-> the calendar's CalendarDay (month 0-based). */
+function parseDateString(s: string): CalendarDay | null {
+  const m = s.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? { year: Number(m[1]), month: Number(m[2]) - 1, day: Number(m[3]) } : null;
+}
 
 export default function EventFormScreen() {
   const router = useRouter();
@@ -131,8 +143,11 @@ export default function EventFormScreen() {
       setImageUrl(existing.image_url);
       setDate(existing.event_date);
       if (existing.start_time) {
-        const d = new Date(existing.start_time);
-        setTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+        // seed on the LA clock, never the device clock: getHours() on a
+        // non-LA phone shifted the stored time on every untouched re-save
+        // (the LA-date bug family)
+        const wall = getLAWallParts(existing.start_time);
+        if (wall) setTime(`${pad2(wall.hour24)}:${pad2(wall.minute)}`);
       }
       setVenue(existing.venue);
       setVenueAddress(existing.venue_address);
@@ -149,9 +164,10 @@ export default function EventFormScreen() {
 
   const showError = (t: string, m: string) => setAlertInfo({ title: t, message: m });
 
-  // requireDate: anything headed for Live insists on a date, exactly like
-  // category (the tour published a dateless event straight to Live). Drafts
-  // and templates stay dateless-legal, and cancel/complete never blocks on it.
+  // requireDate: anything headed for Live insists on a real upcoming date,
+  // exactly like category (the tour published a dateless event straight to
+  // Live; doc 34 3.3 adds the past-date guard). Drafts and templates stay
+  // dateless-legal, and cancel/complete never blocks on it.
   const collectFields = (opts?: { requireDate?: boolean }): OperatorEventFields | null => {
     if (!title.trim()) {
       showError('Almost', 'A title is required.');
@@ -170,6 +186,15 @@ export default function EventFormScreen() {
     if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
       showError('Check the date', 'Use the YYYY-MM-DD shape, like 2026-07-20.');
       return null;
+    }
+    if (opts?.requireDate && date) {
+      const day = parseDateString(date);
+      if (day && isBeforeTodayLA(day.year, day.month, day.day)) {
+        // LIZ COPY: the calendar refuses past days; this catches a stale
+        // seeded date on its way to Live
+        showError('Check the date', 'That day already happened. Pick one coming up.');
+        return null;
+      }
     }
     if (time && !/^\d{2}:\d{2}$/.test(time.trim())) {
       showError('Check the time', 'Use the HH:MM shape, like 19:30.');
@@ -370,6 +395,17 @@ export default function EventFormScreen() {
 
   const loadingEdit = (editing || !!duplicateFrom) && !seeded;
 
+  // The pickers speak CalendarDay and 12-hour parts; the form's canonical
+  // state stays the RPC shapes ('YYYY-MM-DD' and 'HH:MM', LA wall clock),
+  // so the laWallTimeToUTC pipeline below is untouched (doc 34 3.1).
+  const parsedDay = parseDateString(date);
+  const dayIsPast = !!parsedDay && isBeforeTodayLA(parsedDay.year, parsedDay.month, parsedDay.day);
+  const timeMatch = time.trim().match(/^(\d{2}):(\d{2})$/);
+  const hour24 = timeMatch ? Number(timeMatch[1]) : 19;
+  const timeHour = ((hour24 + 11) % 12) + 1;
+  const timeMinute = timeMatch ? timeMatch[2] : '00';
+  const timePeriod: 'AM' | 'PM' = hour24 >= 12 ? 'PM' : 'AM';
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -428,19 +464,47 @@ export default function EventFormScreen() {
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
-            <View style={styles.row}>
-              <View style={styles.rowItem}>
-                <Text style={styles.fieldLabel}>date</Text>
-                {/* instructional placeholders, never value-shaped: an empty
-                    field must read as empty (C18, the dateless edit form) */}
-                <TextInput style={styles.input} value={date} onChangeText={setDate} placeholder="add a date, like 2026-07-20" placeholderTextColor={Colors.inkSoft} autoCapitalize="none" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
-              </View>
-              <View style={styles.rowItem}>
-                <Text style={styles.fieldLabel}>time</Text>
-                <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="add a time, like 19:30" placeholderTextColor={Colors.inkSoft} autoCapitalize="none" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
-              </View>
+            <Text style={styles.fieldLabel}>date</Text>
+            {/* the calendar refuses past days; a stored past date shows in
+                the placeholder instead of pinning the calendar to a month it
+                can never leave (doc 34 3.1 + 3.3) */}
+            <View style={styles.pickerBlock}>
+              <CollapsibleCalendar
+                selected={dayIsPast ? null : parsedDay}
+                onSelect={(d) => setDate(`${d.year}-${pad2(d.month + 1)}-${pad2(d.day)}`)}
+                /* LIZ COPY */
+                placeholder={dayIsPast ? `it was ${formatEventDateLA(date.trim())}. pick a new day` : 'pick a day'}
+              />
             </View>
 
+            <View style={styles.pickerBlock}>
+              <TimePicker
+                hour={timeHour}
+                minute={timeMinute}
+                period={timePeriod}
+                selected={!!timeMatch}
+                onChange={(hour, minute, period) => {
+                  const h = period === 'PM' ? (hour % 12) + 12 : hour % 12;
+                  setTime(`${pad2(h)}:${minute}`);
+                }}
+              />
+              {!!timeMatch && (
+                <TouchableOpacity onPress={() => { hapticLight(); setTime(''); }} hitSlop={8}>
+                  {/* LIZ COPY: a set time stays optional, so it must be removable */}
+                  <Text style={styles.clearTimeLink}>no set time</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <Text style={styles.fieldLabel}>where</Text>
+            {/* the search fills venue and address (coordinates ride
+                proposal 35); the fields below stay editable */}
+            <EventPlaceSearch
+              onPick={(p) => {
+                setVenue(p.venue);
+                setVenueAddress(p.address);
+              }}
+            />
             <Text style={styles.fieldLabel}>venue</Text>
             <TextInput style={styles.input} value={venue} onChangeText={setVenue} maxLength={120} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
             <Text style={styles.fieldLabel}>address</Text>
@@ -601,8 +665,14 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   inputMultiline: { minHeight: 90, textAlignVertical: 'top' },
-  row: { flexDirection: 'row', gap: 10 },
-  rowItem: { flex: 1 },
+  pickerBlock: { marginBottom: 14 },
+  clearTimeLink: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.tertiary,
+    marginTop: 8,
+    alignSelf: 'flex-end',
+  },
   poster: { width: '100%', height: POSTER_HEIGHT, borderRadius: 16, marginBottom: 14 },
   posterAdd: {
     height: POSTER_HEIGHT,
