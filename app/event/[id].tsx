@@ -28,6 +28,7 @@ import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
 import { formatEventDateLA } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
+import { getOrganizerProfiles } from '../../lib/organizerProfile';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -46,6 +47,8 @@ interface ExploreEvent {
   // the path; normalizeTicketPrice is the one reading (doc 34 2.3)
   ticket_price: number | string | null;
   public_name: string | null;
+  community_id: string | null;
+  host_user_id: string | null;
 }
 
 interface LinkedPlan {
@@ -134,7 +137,7 @@ export default function EventDetailScreen() {
     queryFn: async (): Promise<ExploreEvent | null> => {
       const { data, error } = await supabase
         .from('explore_events')
-        .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name')
+        .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -235,6 +238,20 @@ export default function EventDetailScreen() {
     queryKey: ['event-rsvp-count', id],
     queryFn: () => getRsvpCount(id!),
     enabled: COMMUNITIES_ENABLED && !!id,
+  });
+
+  // proposal 36: a STANDALONE listing with no per-event public_name override
+  // fronts with the host's organizer profile (name + logo). Community events
+  // keep fronting with the community; public_name always wins when set.
+  const { data: organizer = null } = useQuery({
+    queryKey: ['organizer-profile-of', event?.host_user_id],
+    queryFn: async () => {
+      const map = await getOrganizerProfiles([event!.host_user_id!]);
+      return map.get(event!.host_user_id!) ?? null;
+    },
+    enabled:
+      COMMUNITIES_ENABLED && !!event && !event.community_id && !!event.host_user_id && !event.public_name,
+    staleTime: 60_000,
   });
 
   const goFindPeople = useCallback(() => {
@@ -365,6 +382,12 @@ export default function EventDetailScreen() {
   const ticketPrice = normalizeTicketPrice(event.ticket_price);
   const isFree = ticketPrice === null;
 
+  // the byline: per-event public_name override wins; a standalone listing
+  // falls back to the organizer profile, whose logo only shows when the
+  // name is actually the profile's (an override means a different brand)
+  const bylineName = event.public_name || (!event.community_id ? organizer?.display_name ?? null : null);
+  const bylineLogo = !event.public_name && !event.community_id ? organizer?.logo_url ?? null : null;
+
   const getPlanSpotsInfo = (plan: LinkedPlan): { text: string; isFull: boolean } => {
     const actualCount = memberCountsMap[plan.id] ?? plan.member_count;
     const capped = capDisplayCount(actualCount);
@@ -431,9 +454,14 @@ export default function EventDetailScreen() {
 
           <Text style={styles.title}>{event.title}</Text>
 
-          {COMMUNITIES_ENABLED && !!event.public_name && (
-            /* LIZ COPY (decision 16): bylines say put on by, never hosted by */
-            <Text style={styles.putOnBy}>put on by {event.public_name}</Text>
+          {COMMUNITIES_ENABLED && !!bylineName && (
+            <View style={styles.putOnByRow}>
+              {!!bylineLogo && (
+                <Image source={{ uri: bylineLogo }} style={styles.putOnByLogo} contentFit="cover" />
+              )}
+              {/* LIZ COPY (decision 16): bylines say put on by, never hosted by */}
+              <Text style={styles.putOnBy}>put on by {bylineName}</Text>
+            </View>
           )}
 
           <View style={styles.metaRow}>
@@ -693,10 +721,11 @@ const styles = StyleSheet.create({
   },
   rsvpButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta },
   rsvpButtonTextGoing: { color: Colors.brandDeep },
+  putOnByRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  putOnByLogo: { width: 18, height: 18, borderRadius: 5 },
   putOnBy: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
     color: Colors.warmGray,
-    marginBottom: 8,
   },
 });

@@ -8,6 +8,7 @@
 
 import { supabase } from './supabase';
 import { laWallTimeToUTC } from './laDate';
+import { getOrganizerProfiles } from './organizerProfile';
 
 /**
  * When an event stops being "upcoming", mirroring proposal 28's S3 clock:
@@ -48,15 +49,19 @@ export interface SceneEvent {
   external_url: string | null;
   public_name: string | null;
   community_id: string | null;
+  host_user_id: string | null;
   // proposal 35: the organizer's place-picker pin, null on legacy rows
   latitude: number | null;
   longitude: number | null;
+  // proposal 36: byline fallback for standalone listings with no
+  // public_name override; resolved here, one batched read
+  organizer_name?: string | null;
 }
 
 export async function getSceneEvents(): Promise<SceneEvent[]> {
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, description, image_url, event_date, start_time, end_time, venue, category, ticket_price, external_url, public_name, community_id, latitude, longitude')
+    .select('id, title, description, image_url, event_date, start_time, end_time, venue, category, ticket_price, external_url, public_name, community_id, host_user_id, latitude, longitude')
     .eq('status', 'Live')
     .limit(60);
   if (error) throw error;
@@ -64,7 +69,7 @@ export async function getSceneEvents(): Promise<SceneEvent[]> {
   // Past events roll off (the server cron catches up hourly; the feed never
   // waits for it) and the soonest upcoming event leads. Dateless rows sink
   // to the end: they cannot be ranked.
-  return ((data ?? []) as SceneEvent[])
+  const events = ((data ?? []) as SceneEvent[])
     .filter((e) => {
       const clock = eventClockMs(e);
       return clock === null || clock > now - ROLL_OFF_GRACE_MS;
@@ -77,6 +82,18 @@ export async function getSceneEvents(): Promise<SceneEvent[]> {
       if (cb === null) return -1;
       return ca - cb;
     });
+
+  // proposal 36: standalone listings with no public_name override front
+  // with the host's organizer profile. One batched read; pre-apply (or on
+  // any error) the map is empty and bylines simply stay off.
+  const needsOrganizer = events.filter((e) => !e.community_id && !e.public_name && e.host_user_id);
+  if (needsOrganizer.length > 0) {
+    const profiles = await getOrganizerProfiles(needsOrganizer.map((e) => e.host_user_id!));
+    for (const e of needsOrganizer) {
+      e.organizer_name = profiles.get(e.host_user_id!)?.display_name ?? null;
+    }
+  }
+  return events;
 }
 
 export interface DiscoverableCommunity {

@@ -47,7 +47,11 @@ export function EventPoster({ event: e, width, onPress }: EventPosterProps) {
             e.venue,
           ].filter(Boolean).join('  ')}
         </Text>
-        {!!e.public_name && <Text style={styles.posterBy}>put on by {e.public_name}</Text>}
+        {/* public_name override wins; standalone listings fall back to the
+            organizer profile name (proposal 36) */}
+        {!!(e.public_name || e.organizer_name) && (
+          <Text style={styles.posterBy}>put on by {e.public_name ?? e.organizer_name}</Text>
+        )}
       </View>
     </TouchableOpacity>
   );

@@ -8,9 +8,12 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
+import { Image } from 'expo-image';
+import { ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCommunityMembers, getBroadcasts } from '../../lib/creatorMode';
+import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 
@@ -29,6 +32,11 @@ export default function CreatorMenuScreen() {
     enabled: !!community,
   });
 
+  const { data: organizerProfile = null } = useQuery({
+    queryKey: ['organizer-profile'],
+    queryFn: getMyOrganizerProfile,
+  });
+
   const activeCount = members.filter((m) => m.status === 'active').length;
   const pendingCount = members.filter((m) => m.status === 'pending').length;
 
@@ -37,6 +45,29 @@ export default function CreatorMenuScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>menu</Text>
         <CommunitySwitcher access={access} />
+
+        {/* the organizer identity (proposal 36): one card, one editor */}
+        {/* LIZ COPY */}
+        <Text style={styles.sectionLabel}>your organizer profile</Text>
+        <TouchableOpacity
+          style={styles.organizerCard}
+          onPress={() => router.push('/creator/organizer-profile')}
+          activeOpacity={0.8}
+        >
+          {organizerProfile?.logo_url ? (
+            <Image source={{ uri: organizerProfile.logo_url }} style={styles.organizerLogo} contentFit="cover" />
+          ) : null}
+          <View style={styles.organizerBody}>
+            <Text style={styles.organizerName}>
+              {organizerProfile ? organizerProfile.display_name : 'set up your organizer profile'}
+            </Text>
+            {/* LIZ COPY */}
+            <Text style={styles.organizerMeta}>
+              {organizerProfile ? 'the name your events wear' : 'the name your events wear. takes a minute.'}
+            </Text>
+          </View>
+          <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
+        </TouchableOpacity>
 
         {community && (
           <>
@@ -90,6 +121,21 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginBottom: 6,
   },
+  organizerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 16,
+    marginBottom: 28,
+  },
+  organizerLogo: { width: 40, height: 40, borderRadius: 10 },
+  organizerBody: { flex: 1 },
+  organizerName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
+  organizerMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
   statsCard: {
     flexDirection: 'row',
     backgroundColor: Colors.cardBg,
