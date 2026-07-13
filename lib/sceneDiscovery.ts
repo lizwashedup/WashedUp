@@ -48,12 +48,15 @@ export interface SceneEvent {
   external_url: string | null;
   public_name: string | null;
   community_id: string | null;
+  // proposal 35: the organizer's place-picker pin, null on legacy rows
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export async function getSceneEvents(): Promise<SceneEvent[]> {
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, description, image_url, event_date, start_time, end_time, venue, category, ticket_price, external_url, public_name, community_id')
+    .select('id, title, description, image_url, event_date, start_time, end_time, venue, category, ticket_price, external_url, public_name, community_id, latitude, longitude')
     .eq('status', 'Live')
     .limit(60);
   if (error) throw error;

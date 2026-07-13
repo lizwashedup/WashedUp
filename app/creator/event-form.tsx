@@ -46,6 +46,7 @@ import {
   getOperatorEvent,
   pickAndUploadEventImage,
   saveEventTemplate,
+  setOperatorEventCoords,
   updateOperatorEvent,
   type OperatorEventFields,
 } from '../../lib/creatorEvents';
@@ -73,6 +74,10 @@ export default function EventFormScreen() {
   const [time, setTime] = useState('');
   const [venue, setVenue] = useState('');
   const [venueAddress, setVenueAddress] = useState('');
+  // proposal 35: the place pick's coordinates. Typing in venue or address by
+  // hand clears them (a hand-typed place makes the old pin a lie); they ride
+  // their own RPC after create/save, never the full-overwrite payload.
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [category, setCategory] = useState('');
   const [externalUrl, setExternalUrl] = useState('');
   const [ticketPrice, setTicketPrice] = useState('');
@@ -128,6 +133,10 @@ export default function EventFormScreen() {
       setImageUrl(existing.image_url);
       setVenue(existing.venue);
       setVenueAddress(existing.venue_address);
+      // same event, same place: the pin travels with the duplicate
+      if (existing.latitude != null && existing.longitude != null) {
+        setCoords({ lat: existing.latitude, lng: existing.longitude });
+      }
       setCategory(existing.category);
       setExternalUrl(existing.external_url);
       setTicketPrice(existing.ticket_price);
@@ -151,6 +160,9 @@ export default function EventFormScreen() {
       }
       setVenue(existing.venue);
       setVenueAddress(existing.venue_address);
+      if (existing.latitude != null && existing.longitude != null) {
+        setCoords({ lat: existing.latitude, lng: existing.longitude });
+      }
       setCategory(existing.category);
       setExternalUrl(existing.external_url);
       setTicketPrice(existing.ticket_price);
@@ -236,6 +248,18 @@ export default function EventFormScreen() {
     queryClient.invalidateQueries({ queryKey: ['operator-event', id] });
   };
 
+  // proposal 35: persist (or clear) the pick's coordinates after the row
+  // saves. Best-effort by design, a pin never blocks a save; a fresh row
+  // with no pick has nothing to store or clear, so skip the round trip.
+  const syncCoords = async (eventId: string) => {
+    if (!editing && !coords) return;
+    try {
+      await setOperatorEventCoords(eventId, coords?.lat ?? null, coords?.lng ?? null);
+    } catch {
+      // the event saved; the pin can be re-picked on the next edit
+    }
+  };
+
   const offerAnnounce = (eventId: string) => {
     // LIZ COPY (taste call 9): opt-in, never automatic
     setAlertInfo({
@@ -267,12 +291,14 @@ export default function EventFormScreen() {
     try {
       if (editing && id) {
         await updateOperatorEvent(id, fields, null);
+        await syncCoords(id);
         hapticSuccess();
         afterSave();
         router.back();
       } else {
         const communityId = fromCommunity && community ? community.id : null;
         const newId = await createOperatorEvent(fields, communityId);
+        await syncCoords(newId);
         hapticSuccess();
         afterSave();
         if (communityId) {
@@ -298,9 +324,11 @@ export default function EventFormScreen() {
     try {
       if (editing && id) {
         await updateOperatorEvent(id, fields, null);
+        await syncCoords(id);
       } else {
         const communityId = fromCommunity && community ? community.id : null;
-        await createOperatorEvent(fields, communityId, false);
+        const newId = await createOperatorEvent(fields, communityId, false);
+        await syncCoords(newId);
       }
       hapticSuccess();
       afterSave();
@@ -318,6 +346,7 @@ export default function EventFormScreen() {
     setSaving(true);
     try {
       await updateOperatorEvent(id, fields, 'Live');
+      await syncCoords(id);
       hapticSuccess();
       afterSave();
       queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
@@ -497,18 +526,32 @@ export default function EventFormScreen() {
             </View>
 
             <Text style={styles.fieldLabel}>where</Text>
-            {/* the search fills venue and address (coordinates ride
-                proposal 35); the fields below stay editable */}
+            {/* the search fills venue and address and pins the coordinates
+                (proposal 35); the fields below stay editable, and typing in
+                them by hand drops the pin so it never lies */}
             <EventPlaceSearch
               onPick={(p) => {
                 setVenue(p.venue);
                 setVenueAddress(p.address);
+                setCoords(p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
               }}
             />
             <Text style={styles.fieldLabel}>venue</Text>
-            <TextInput style={styles.input} value={venue} onChangeText={setVenue} maxLength={120} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            <TextInput
+              style={styles.input}
+              value={venue}
+              onChangeText={(v) => { setVenue(v); setCoords(null); }}
+              maxLength={120}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
             <Text style={styles.fieldLabel}>address</Text>
-            <TextInput style={styles.input} value={venueAddress} onChangeText={setVenueAddress} maxLength={200} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            <TextInput
+              style={styles.input}
+              value={venueAddress}
+              onChangeText={(v) => { setVenueAddress(v); setCoords(null); }}
+              maxLength={200}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
 
             <Text style={styles.fieldLabel}>category</Text>
             <View style={styles.chipWrap}>

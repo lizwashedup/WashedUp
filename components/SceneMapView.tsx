@@ -38,6 +38,9 @@ interface SceneEvent {
   // Postgres numeric: number or numeric string depending on the path (doc 34 2.3)
   ticket_price: number | string | null;
   plans_count: number;
+  // proposal 35: the organizer's place-picker pin, null on legacy rows
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 interface GeocodedEvent extends SceneEvent {
@@ -105,6 +108,12 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
       const results: GeocodedEvent[] = [];
       for (const event of events) {
         if (cancelled) return;
+        // proposal 35: a stored pin is the organizer's own pick, so it wins
+        // outright; geocoding stays as the legacy-row fallback
+        if (event.latitude != null && event.longitude != null) {
+          results.push({ ...event, latitude: event.latitude, longitude: event.longitude });
+          continue;
+        }
         const address = event.venue_address || event.venue;
         if (!address) continue;
         try {

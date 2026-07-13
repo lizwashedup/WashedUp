@@ -51,12 +51,17 @@ export interface OperatorEventRow extends OperatorEventFields {
   status: string;
   community_id: string | null;
   host_user_id: string | null;
+  // proposal 35: place-picker coordinates, null on legacy rows; not part of
+  // OperatorEventFields because they ride their own RPC, never the
+  // full-overwrite payload
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export async function getOperatorEvent(eventId: string): Promise<OperatorEventRow | null> {
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id')
+    .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id, latitude, longitude')
     .eq('id', eventId)
     .maybeSingle();
   if (error) throw error;
@@ -78,7 +83,27 @@ export async function getOperatorEvent(eventId: string): Promise<OperatorEventRo
     status: data.status,
     community_id: data.community_id ?? null,
     host_user_id: data.host_user_id ?? null,
+    latitude: data.latitude ?? null,
+    longitude: data.longitude ?? null,
   };
+}
+
+/**
+ * Proposal 35: coordinates ride their own owner-or-leader RPC right after a
+ * create or save, never the full-overwrite payload. A null pair clears them
+ * (venue retyped by hand). Server insists they travel as a pair.
+ */
+export async function setOperatorEventCoords(
+  eventId: string,
+  lat: number | null,
+  lng: number | null,
+): Promise<void> {
+  const { error } = await supabase.rpc('operator_set_explore_event_coords', {
+    p_event_id: eventId,
+    p_latitude: lat,
+    p_longitude: lng,
+  });
+  if (error) throw error;
 }
 
 export async function createOperatorEvent(
