@@ -11,6 +11,7 @@
 
 import { supabase } from './supabase';
 import { isAdmin } from '../constants/Admin';
+import { areaFromZip } from './zipAreas';
 import { isViewingAsEventHost } from './viewAs';
 import type { OperatorGrantStatus, OperatorTrack } from './operatorApplications';
 
@@ -165,21 +166,67 @@ export async function reviewJoinRequest(memberRowId: string, approve: boolean): 
 }
 
 /**
- * Private join answers for the leader's request review
- * (community_member_answers RLS scopes them to the leader). Keyed by the
- * membership row id. NOTE (Liz's call, doc 13): the members tab DISPLAYS
- * only name, area-from-zip, and the intro; email and raw zip stay stored
- * but are withheld from the view.
+ * The join-answer CARD a leader sees on pending requests: name, AREA
+ * (never the raw zip), the intro answer, and the guidelines timestamp.
+ * Email and raw zip stay stored, washedup-only (Liz's call, doc 13; the
+ * 30a v1.3 disclosure promise).
+ *
+ * This is the proposal-42 self-flipping bridge: it reads the
+ * get_join_answer_cards projection first (which is the ONLY leader read
+ * once 42 lands and the raw table read goes dark), and until 42 applies
+ * it falls back to the current leader RLS table read, shaping the same
+ * card client-side (area via the zipAreas mirror). Keyed by the
+ * membership row id.
  */
-export async function getJoinAnswersByMember(
+export interface JoinAnswerCard {
+  first_name: string | null;
+  last_name: string | null;
+  area: string | null;
+  intro_answer: string | null;
+  guidelines_accepted_at: string | null;
+}
+
+export async function getJoinAnswerCards(
   communityId: string,
-): Promise<Map<string, Record<string, string>>> {
-  const { data, error } = await supabase
+): Promise<Map<string, JoinAnswerCard>> {
+  const { data, error } = await supabase.rpc('get_join_answer_cards', {
+    p_community_id: communityId,
+  });
+  if (!error) {
+    return new Map(
+      ((data ?? []) as (JoinAnswerCard & { member_id: string })[]).map((c) => [
+        c.member_id,
+        {
+          first_name: c.first_name ?? null,
+          last_name: c.last_name ?? null,
+          area: c.area ?? null,
+          intro_answer: c.intro_answer ?? null,
+          guidelines_accepted_at: c.guidelines_accepted_at ?? null,
+        },
+      ]),
+    );
+  }
+  // pre-42 fallback: the leader RLS table read still works; same card shape
+  const { data: rows, error: tableError } = await supabase
     .from('community_member_answers')
     .select('member_id, answers')
     .eq('community_id', communityId);
-  if (error) throw error;
-  return new Map((data ?? []).map((r: any) => [r.member_id, r.answers ?? {}]));
+  if (tableError) throw tableError;
+  return new Map(
+    (rows ?? []).map((r: any) => {
+      const a = (r.answers ?? {}) as Record<string, string>;
+      return [
+        r.member_id,
+        {
+          first_name: a.first_name ?? null,
+          last_name: a.last_name ?? null,
+          area: areaFromZip(a.zip),
+          intro_answer: a.intro_answer ?? null,
+          guidelines_accepted_at: a.guidelines_accepted_at ?? null,
+        },
+      ];
+    }),
+  );
 }
 
 // -- join gate settings (doc 09: welcome message, intro question, guidelines) --

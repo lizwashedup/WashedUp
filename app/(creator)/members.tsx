@@ -17,13 +17,12 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import { formatEventDateLA } from '../../lib/laDate';
-import { areaFromZip } from '../../lib/zipAreas';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import {
   getCreatorAccess,
   getCommunityMembers,
-  getJoinAnswersByMember,
+  getJoinAnswerCards,
   isLeaderAccess,
   reviewJoinRequest,
   removeMember,
@@ -46,9 +45,11 @@ export default function CreatorMembersScreen() {
   });
 
   // private join answers, leader-eyes-only by RLS (community_member_answers)
+  // the proposal-42 bridge: the projection RPC once 42 lands, the leader
+  // table read until then — one card shape either way, never email/raw zip
   const { data: answersByMember } = useQuery({
-    queryKey: ['join-answers', community?.id],
-    queryFn: () => getJoinAnswersByMember(community!.id),
+    queryKey: ['join-answer-cards', community?.id],
+    queryFn: () => getJoinAnswerCards(community!.id),
     enabled: !!community,
   });
 
@@ -165,14 +166,13 @@ export default function CreatorMembersScreen() {
                             <Text style={styles.answerIntro}>{answers.intro_answer}</Text>
                           </>
                         )}
-                        {/* email and raw zip are withheld from the leader
-                            view (Liz's call, doc 13): name, AREA, and the
-                            intro only. Display-only; the stored answers and
-                            the RPC contract are untouched. Unknown zip ->
-                            the line simply does not render (intro-card
-                            treatment). */}
-                        {!!areaFromZip(answers.zip) && (
-                          <Text style={styles.answerLine}>from {areaFromZip(answers.zip)}</Text>
+                        {/* email and raw zip never reach this view (Liz's
+                            call, doc 13; server-enforced once proposal 42
+                            lands): name, AREA, and the intro only. Unknown
+                            zip -> the line simply does not render (the
+                            intro-card treatment). */}
+                        {!!answers.area && (
+                          <Text style={styles.answerLine}>from {answers.area}</Text>
                         )}
                         {!!answers.guidelines_accepted_at && (
                           <Text style={styles.answerLine}>
