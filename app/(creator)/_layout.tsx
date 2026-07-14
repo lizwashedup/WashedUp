@@ -12,16 +12,19 @@
 
 import { Redirect, Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ActivityIndicator, Platform, View } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Sun, CalendarDays, Megaphone, UsersRound, Menu } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { getCreatorAccess, hasCreatorAccess, isLeaderAccess } from '../../lib/creatorMode';
+import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
 
 export default function CreatorLayout() {
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
+  const viewingAsEventHost = useViewAsEventHost();
   const { data: access, isLoading } = useQuery({
     queryKey: ['creator-access'],
     queryFn: getCreatorAccess,
@@ -44,6 +47,7 @@ export default function CreatorLayout() {
   const tabBarHeight = Platform.OS === 'ios' ? 52 + insets.bottom : 60;
 
   return (
+    <View style={styles.shell}>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -104,5 +108,48 @@ export default function CreatorLayout() {
         }}
       />
     </Tabs>
+      {/* admin view-as (doc 00 7-13): a quiet floating pill names the mode
+          with a one-tap exit; the override itself lives in getCreatorAccess */}
+      {viewingAsEventHost && (
+        <View style={[styles.viewAsPill, { bottom: tabBarHeight + 12 }]}>
+          {/* LIZ COPY */}
+          <Text style={styles.viewAsText}>viewing as an event host</Text>
+          <TouchableOpacity
+            onPress={() => {
+              setViewAsEventHost(false);
+              queryClient.invalidateQueries({ queryKey: ['creator-access'] });
+            }}
+            hitSlop={10}
+          >
+            {/* LIZ COPY */}
+            <Text style={styles.viewAsDone}>done</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  shell: { flex: 1 },
+  viewAsPill: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    shadowColor: Colors.shadowBlack,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  viewAsText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  viewAsDone: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+});

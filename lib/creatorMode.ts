@@ -10,6 +10,8 @@
  */
 
 import { supabase } from './supabase';
+import { isAdmin } from '../constants/Admin';
+import { isViewingAsEventHost } from './viewAs';
 import type { OperatorGrantStatus, OperatorTrack } from './operatorApplications';
 
 export interface LedCommunity {
@@ -51,6 +53,13 @@ export function creatorLandingRoute(a: CreatorAccess | undefined | null): '/(cre
 export async function getCreatorAccess(): Promise<CreatorAccess> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: false };
+
+  // admin view-as (doc 00 7-13): force the event-host-only shape at the one
+  // place every creator surface reads from. Admin-gated here too, so the
+  // override is inert even if the flag were somehow flipped for anyone else.
+  if (isViewingAsEventHost() && isAdmin(user.id)) {
+    return { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: true };
+  }
 
   const [{ data: memberships }, { data: grants }] = await Promise.all([
     supabase
@@ -156,9 +165,11 @@ export async function reviewJoinRequest(memberRowId: string, approve: boolean): 
 }
 
 /**
- * Private join answers for the leader's request review (email and zip are
- * leader-eyes-only; community_member_answers RLS enforces it). Keyed by the
- * membership row id.
+ * Private join answers for the leader's request review
+ * (community_member_answers RLS scopes them to the leader). Keyed by the
+ * membership row id. NOTE (Liz's call, doc 13): the members tab DISPLAYS
+ * only name, area-from-zip, and the intro; email and raw zip stay stored
+ * but are withheld from the view.
  */
 export async function getJoinAnswersByMember(
   communityId: string,

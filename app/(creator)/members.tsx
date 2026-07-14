@@ -17,6 +17,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import { formatEventDateLA } from '../../lib/laDate';
+import { areaFromZip } from '../../lib/zipAreas';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import {
@@ -164,9 +165,15 @@ export default function CreatorMembersScreen() {
                             <Text style={styles.answerIntro}>{answers.intro_answer}</Text>
                           </>
                         )}
-                        <Text style={styles.answerLabel}>only you see these</Text>
-                        <Text style={styles.answerLine}>{answers.email ?? 'no email'}</Text>
-                        <Text style={styles.answerLine}>zip {answers.zip ?? 'unknown'}</Text>
+                        {/* email and raw zip are withheld from the leader
+                            view (Liz's call, doc 13): name, AREA, and the
+                            intro only. Display-only; the stored answers and
+                            the RPC contract are untouched. Unknown zip ->
+                            the line simply does not render (intro-card
+                            treatment). */}
+                        {!!areaFromZip(answers.zip) && (
+                          <Text style={styles.answerLine}>from {areaFromZip(answers.zip)}</Text>
+                        )}
                         {!!answers.guidelines_accepted_at && (
                           <Text style={styles.answerLine}>
                             accepted the guidelines {formatEventDateLA(String(answers.guidelines_accepted_at))}

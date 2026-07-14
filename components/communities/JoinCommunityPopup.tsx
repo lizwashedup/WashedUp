@@ -167,11 +167,16 @@ export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Prop
               </Text>
             </TouchableOpacity>
 
-            {/* LIZ COPY: the fine print, what stays private vs public */}
+            {/* LIZ COPY: the just-in-time disclosure (legal review 7-13);
+                counsel's template finalizes the wording. Says what is
+                collected, who receives it (an independent operator, not
+                washedup), and what it may be used for. */}
             <Text style={styles.finePrint}>
-              your answers go to whoever runs {gate.name}. only your introduction
-              and your general area become public, woven into a short hello in
-              the community chat when you are approved. never your zip.
+              your name, email, zip, and answers go to whoever runs {gate.name},
+              an independent operator, to be used only for running this
+              community. only your introduction and your general area become
+              public, woven into a short hello in the community chat when you
+              are approved. never your zip.
             </Text>
 
             {!!problem && <Text style={styles.problem}>{problem}</Text>}

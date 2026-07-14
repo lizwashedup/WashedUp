@@ -7,14 +7,17 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
+import { isAdmin } from '../../constants/Admin';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCommunityMembers, getBroadcasts } from '../../lib/creatorMode';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { useLedCommunity } from '../../lib/selectedCommunity';
+import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
+import { supabase } from '../../lib/supabase';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 
 export default function CreatorMenuScreen() {
@@ -35,6 +38,16 @@ export default function CreatorMenuScreen() {
   const { data: organizerProfile = null } = useQuery({
     queryKey: ['organizer-profile'],
     queryFn: getMyOrganizerProfile,
+  });
+
+  // admin view-as (doc 00 7-13): the toggle is invisible to non-admins and
+  // hides while active (the shell pill carries the exit)
+  const queryClient = useQueryClient();
+  const viewingAsEventHost = useViewAsEventHost();
+  const { data: myUserId = null } = useQuery({
+    queryKey: ['my-user-id'],
+    queryFn: async () => (await supabase.auth.getUser()).data.user?.id ?? null,
+    staleTime: Infinity,
   });
 
   const activeCount = members.filter((m) => m.status === 'active').length;
@@ -115,6 +128,22 @@ export default function CreatorMenuScreen() {
         <Text style={styles.switchHint}>
           your plans, chats, and people are exactly where you left them.
         </Text>
+
+        {isAdmin(myUserId) && !viewingAsEventHost && (
+          <TouchableOpacity
+            style={styles.adminViewAs}
+            onPress={() => {
+              setViewAsEventHost(true);
+              queryClient.invalidateQueries({ queryKey: ['creator-access'] });
+              // land exactly where a real event host lands
+              router.replace('/(creator)/events');
+            }}
+            hitSlop={8}
+          >
+            {/* LIZ COPY (admin-only) */}
+            <Text style={styles.adminViewAsText}>view as an event host</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -204,4 +233,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 10,
   },
+  adminViewAs: { alignItems: 'center', marginTop: 28 },
+  adminViewAsText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary },
 });
