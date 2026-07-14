@@ -9,6 +9,7 @@
 import { supabase } from './supabase';
 import { laWallTimeToUTC } from './laDate';
 import { getOrganizerProfiles } from './organizerProfile';
+import { getLeaderCards } from './communityLeader';
 
 /**
  * When an event stops being "upcoming", mirroring proposal 28's S3 clock:
@@ -56,6 +57,12 @@ export interface SceneEvent {
   // proposal 36: byline fallback for standalone listings with no
   // public_name override; resolved here, one batched read
   organizer_name?: string | null;
+  // the people-first pack corner chip, one grammar: person = face
+  // (community events, via the proposal-41 leader card), business = logo
+  // (standalone via the organizer profile). Never both; a public_name
+  // override means a different brand, so no chip at all then.
+  organizer_logo?: string | null;
+  leader_avatar_url?: string | null;
 }
 
 export async function getSceneEvents(): Promise<SceneEvent[]> {
@@ -84,13 +91,26 @@ export async function getSceneEvents(): Promise<SceneEvent[]> {
     });
 
   // proposal 36: standalone listings with no public_name override front
-  // with the host's organizer profile. One batched read; pre-apply (or on
-  // any error) the map is empty and bylines simply stay off.
+  // with the host's organizer profile (name for the byline, logo for the
+  // corner chip). One batched read; on any error the map is empty and
+  // bylines/chips simply stay off.
   const needsOrganizer = events.filter((e) => !e.community_id && !e.public_name && e.host_user_id);
   if (needsOrganizer.length > 0) {
     const profiles = await getOrganizerProfiles(needsOrganizer.map((e) => e.host_user_id!));
     for (const e of needsOrganizer) {
-      e.organizer_name = profiles.get(e.host_user_id!)?.display_name ?? null;
+      const p = profiles.get(e.host_user_id!);
+      e.organizer_name = p?.display_name ?? null;
+      e.organizer_logo = p?.logo_url ?? null;
+    }
+  }
+
+  // the people-first pack: community events wear the leader's face as the
+  // corner chip (proposal 41, live-resolved). Same graceful degrade.
+  const communityEvents = events.filter((e) => e.community_id);
+  if (communityEvents.length > 0) {
+    const cards = await getLeaderCards(communityEvents.map((e) => e.community_id));
+    for (const e of communityEvents) {
+      e.leader_avatar_url = cards.get(e.community_id!)?.avatar_url ?? null;
     }
   }
   return events;

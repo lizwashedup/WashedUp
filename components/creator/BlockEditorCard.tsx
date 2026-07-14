@@ -274,7 +274,13 @@ export function BlockEditorCard({
         style={[styles.input, multiline && styles.inputMultiline]}
         value={text}
         onChangeText={setText}
-        placeholder={block.block_type === 'about' ? 'what this community is' : 'the note itself'}
+        placeholder={
+          block.block_type === 'about'
+            ? 'what this community is'
+            : block.block_type === 'founder'
+              ? 'why you started this, in your own words' /* LIZ COPY */
+              : 'the note itself'
+        }
         placeholderTextColor={Colors.inkSoft}
         multiline={multiline}
         maxLength={4000}
@@ -363,6 +369,7 @@ export function BlockEditorCard({
       case 'header':
         return renderHeaderEditor();
       case 'about':
+      case 'founder':
         return renderTextEditor(true, false);
       case 'pinned':
         return renderTextEditor(true, true);

@@ -32,6 +32,7 @@ import {
   getSceneEvents,
   type SceneEvent,
 } from '../../lib/sceneDiscovery';
+import { getLeaderCards } from '../../lib/communityLeader';
 import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 
 const RAIL_CARD_WIDTH = 220;
@@ -49,6 +50,16 @@ export function SceneDiscovery() {
   const { data: communities = [], refetch: refetchCommunities } = useQuery({
     queryKey: ['scene-communities'],
     queryFn: getDiscoverableCommunities,
+  });
+
+  // the people-first pack (decision 15 made visible): community cards lead
+  // with the leader's face, live-resolved from her profile. Pre-apply (or on
+  // any error) the map is empty and cards simply show no face.
+  const communityIdsKey = communities.map((c) => c.id).sort().join(',');
+  const { data: leaderCards = new Map() } = useQuery({
+    queryKey: ['leader-cards', communityIdsKey],
+    queryFn: () => getLeaderCards(communities.map((c) => c.id)),
+    enabled: communities.length > 0,
   });
 
   // pilot-era rows carry capitalized categories ('Community'); compare and
@@ -103,7 +114,16 @@ export function SceneDiscovery() {
                     {isHouseCommunity(c.handle) && (
                       <Text style={styles.houseMark}>{HOUSE_MARK_LABEL}</Text>
                     )}
-                    <Text style={styles.railName} numberOfLines={1}>{c.name}</Text>
+                    <View style={styles.railNameRow}>
+                      {!!leaderCards.get(c.id)?.avatar_url && (
+                        <Image
+                          source={{ uri: leaderCards.get(c.id)!.avatar_url! }}
+                          style={styles.railFace}
+                          contentFit="cover"
+                        />
+                      )}
+                      <Text style={styles.railName} numberOfLines={1}>{c.name}</Text>
+                    </View>
                     <Text style={styles.railMeta} numberOfLines={1}>
                       {c.member_count} in
                       {c.next_event_title ? `  next: ${c.next_event_title}` : ''}
@@ -196,7 +216,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 2,
   },
-  railName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  railNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  railFace: { width: 28, height: 28, borderRadius: 14 },
+  railName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, flexShrink: 1 },
   railMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary, marginTop: 2 },
   chipRow: { gap: 8, marginBottom: 14 },
   chip: {

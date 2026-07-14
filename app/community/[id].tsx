@@ -29,6 +29,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
 import { getCommunityPage, getMemberFaces, type CommunityPageEvent } from '../../lib/communityPage';
+import { getLeaderCards } from '../../lib/communityLeader';
 import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
 import { getCommunityChatPayload, joinTopic } from '../../lib/communityChat';
 import { formatEventDateLA } from '../../lib/laDate';
@@ -38,7 +39,9 @@ import { hapticSuccess } from '../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import type { CommunityBlock } from '../../lib/communityBlocks';
 
-const LOCK_VIEW_BLOCKS = ['cover', 'header', 'about'];
+// founder rides the lock view (the people-first pack): "who is behind it"
+// is the trust question a stranger at the door is asking
+const LOCK_VIEW_BLOCKS = ['cover', 'header', 'about', 'founder'];
 const COVER_HEIGHT_RATIO = 0.56;
 
 export default function CommunityPageScreen() {
@@ -62,6 +65,14 @@ export default function CommunityPageScreen() {
     queryKey: ['community-gate', id],
     queryFn: () => getJoinGate(id!),
     enabled: !!id,
+  });
+  // the leader's public card (proposal 41): live-resolved face + name for
+  // the header and the founder block; empty pre-apply, faces just stay off
+  const { data: leaderCard = null } = useQuery({
+    queryKey: ['leader-card', id],
+    queryFn: async () => (await getLeaderCards([id!])).get(id!) ?? null,
+    enabled: !!id,
+    staleTime: 60_000,
   });
   // preview (doc 37 §2, Liz's pull-forward): a leader can force the page to
   // render as a stranger or as a plain member, client-side only. RLS knows
@@ -250,6 +261,31 @@ export default function CommunityPageScreen() {
           </View>
         );
       }
+      case 'founder': {
+        // the people-first pack: the leader's live-resolved face + her own
+        // "why i started this". Face and name come from the leader card
+        // (proposal 41), NEVER stored in the block; the text is hers.
+        const text = typeof block.content.text === 'string' ? block.content.text : '';
+        if (!leaderCard && !text) return null;
+        return (
+          <View key={block.id} style={styles.block}>
+            {/* LIZ COPY */}
+            <Text style={styles.blockLabel}>why i started this</Text>
+            <View style={styles.founderRow}>
+              {!!leaderCard?.avatar_url && (
+                <Image source={{ uri: leaderCard.avatar_url }} style={styles.founderFace} contentFit="cover" />
+              )}
+              {!!leaderCard?.display_name && (
+                /* decision 16: the locked role grammar */
+                <Text style={styles.founderName}>
+                  {leaderCard.display_name.toLowerCase()} · community creator
+                </Text>
+              )}
+            </View>
+            {!!text && <Text style={styles.bodyText}>{text}</Text>}
+          </View>
+        );
+      }
       default:
         return null;
     }
@@ -294,7 +330,14 @@ export default function CommunityPageScreen() {
         {isHouseCommunity(page.community.handle) && (
           <Text style={styles.houseMark}>{HOUSE_MARK_LABEL}</Text>
         )}
-        <Text style={[styles.name, { color: accent }]}>{page.community.name}</Text>
+        {/* the header leads with the leader's face (people-first pack),
+            live-resolved from her profile; no face pre-apply, never broken */}
+        <View style={styles.nameRow}>
+          {!!leaderCard?.avatar_url && (
+            <Image source={{ uri: leaderCard.avatar_url }} style={styles.headerFace} contentFit="cover" />
+          )}
+          <Text style={[styles.name, styles.nameInRow, { color: accent }]}>{page.community.name}</Text>
+        </View>
         {!!page.community.description && !isMember && (
           <Text style={styles.description}>{page.community.description}</Text>
         )}
@@ -412,6 +455,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  nameInRow: { flexShrink: 1 },
+  headerFace: { width: 44, height: 44, borderRadius: 22 },
+  founderRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  founderFace: { width: 56, height: 56, borderRadius: 28 },
+  founderName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
   chatLink: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   chatLinkText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   // preview banner: neutral status strip, quiet on purpose; "done" is the

@@ -24,6 +24,11 @@ interface EventPosterProps {
 export function EventPoster({ event: e, width, onPress }: EventPosterProps) {
   const [imageBroken, setImageBroken] = useState(false);
   const posterHeight = (width - 40) * POSTER_RATIO;
+  // one corner slot, one grammar (the people-first pack): a community event
+  // wears the leader's FACE, a standalone brand listing wears the organizer
+  // LOGO, never both; nothing when neither resolves
+  const chipUrl = e.community_id ? e.leader_avatar_url : e.organizer_logo;
+  const chipIsFace = !!e.community_id;
   return (
     <TouchableOpacity style={styles.poster} onPress={onPress} activeOpacity={0.85}>
       {e.image_url && !imageBroken ? (
@@ -37,6 +42,13 @@ export function EventPoster({ event: e, width, onPress }: EventPosterProps) {
         <View style={[styles.posterImage, styles.posterFallback, { height: posterHeight }]}>
           <Text style={styles.posterFallbackText}>{e.title.slice(0, 1).toLowerCase()}</Text>
         </View>
+      )}
+      {!!chipUrl && (
+        <Image
+          source={{ uri: chipUrl }}
+          style={[styles.cornerChip, chipIsFace ? styles.cornerChipFace : styles.cornerChipLogo]}
+          contentFit="cover"
+        />
       )}
       <View style={styles.posterBody}>
         {!!e.category && <Text style={styles.posterCategory}>{e.category.toLowerCase()}</Text>}
@@ -85,4 +97,16 @@ const styles = StyleSheet.create({
   },
   posterMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 6 },
   posterBy: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 4 },
+  cornerChip: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderWidth: 1.5,
+    borderColor: Colors.white,
+    backgroundColor: Colors.cardBg,
+  },
+  cornerChipFace: { borderRadius: 16 },
+  cornerChipLogo: { borderRadius: 8 },
 });

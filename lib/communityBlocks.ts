@@ -14,6 +14,8 @@
  *   gallery:      { images: string[] }
  *   links:        { links: { label: string; url: string }[] }
  *   pinned:       { title?: string; text: string }
+ *   founder:      { text: string }   (the face + name are LIVE-RESOLVED
+ *                 from the leader's profile via proposal 41, never stored)
  *
  * Image uploads target the community-media bucket (folder = community id,
  * leader-gated by storage policy). That bucket rides a HELD migration; until
@@ -30,6 +32,7 @@ import { uploadBase64ToStorage } from './uploadPhoto';
 export type CommunityBlockType =
   | 'cover'
   | 'header'
+  | 'founder'
   | 'about'
   | 'events_auto'
   | 'members_auto'
@@ -63,6 +66,13 @@ export const BLOCK_TYPE_INFO: Record<
   header: {
     label: 'header',
     hint: 'your one-liner and logo, under your community name.',
+    auto: false,
+  },
+  founder: {
+    // LIZ COPY (the people-first pack): the leader's face rides in
+    // automatically from her profile; only the words are written here
+    label: 'why i started this',
+    hint: 'your face and a few honest lines. the photo comes from your profile on its own.',
     auto: false,
   },
   about: {
@@ -101,6 +111,7 @@ export const BLOCK_TYPE_INFO: Record<
 export const BLOCK_TYPE_ORDER: CommunityBlockType[] = [
   'cover',
   'header',
+  'founder',
   'about',
   'events_auto',
   'members_auto',
@@ -117,6 +128,7 @@ export function defaultContentFor(type: CommunityBlockType): Record<string, unkn
     case 'header':
       return {};
     case 'about':
+    case 'founder':
       return { text: '' };
     case 'links':
       return { links: [] };

@@ -64,6 +64,27 @@ export default function EditPageScreen() {
   const usedTypes = new Set(blocks.map((b) => b.block_type));
   const availableTypes = BLOCK_TYPE_ORDER.filter((t) => !usedTypes.has(t));
 
+  // the founder block is ON BY DEFAULT (the people-first pack): the first
+  // time a leader opens the editor and no founder block exists, one is
+  // seeded automatically (visible, appended; reorder is theirs). A page
+  // never invents a block, because a leader may have hidden a real one —
+  // the editor is the only place that knows hidden from absent. Pre-apply
+  // (enum value not live yet) the insert fails quietly and retries on the
+  // next visit; one attempt per mount.
+  const founderSeedTried = React.useRef(false);
+  React.useEffect(() => {
+    if (isLoading || !community || founderSeedTried.current) return;
+    if (blocks.some((b) => b.block_type === 'founder')) return;
+    founderSeedTried.current = true;
+    const nextPosition = blocks.length > 0 ? Math.max(...blocks.map((b) => b.position)) + 1 : 0;
+    addBlock(community.id, 'founder', nextPosition)
+      .then(() => invalidate())
+      .catch(() => {
+        /* proposal 41 not applied yet; the add sheet still offers it */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, community?.id, blocks]);
+
   const showError = (title: string, message: string) => setAlertInfo({ title, message });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: blocksKey });
 
