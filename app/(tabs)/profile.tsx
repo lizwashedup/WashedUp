@@ -546,7 +546,12 @@ export default function ProfileScreen() {
               <Text style={styles.deleteTitle}>Are you sure?</Text>
               <Text style={styles.deleteBody}>
                 Deleting your account is permanent and cannot be undone.{'\n\n'}
-                All your plans, chats, and profile data will be permanently removed.
+                All your plans, chats, and profile data will be permanently removed.{'\n\n'}
+                {/* doc 45: the exact records-may-remain sentence — LIZ COPY
+                    may warm the words AROUND it, never this substance */}
+                some limited records — transactions, consent, fraud-prevention,
+                security, tax, and legal compliance — may remain after deletion
+                for the retention periods described in our privacy policy.
               </Text>
               <TouchableOpacity
                 style={styles.deleteNextBtn}

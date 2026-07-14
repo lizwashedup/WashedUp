@@ -183,7 +183,8 @@ export function TermsCheck({ checked, onToggle }: { checked: boolean; onToggle: 
       </View>
       <Text style={styles.termsText}>
         i agree to the{' '}
-        <Text style={styles.termsLink} onPress={() => Linking.openURL('https://washedup.app/terms')}>
+        {/* repointed to the real creator-terms page (web built it; doc 43) */}
+        <Text style={styles.termsLink} onPress={() => Linking.openURL('https://washedup.app/creator-terms')}>
           creator terms
         </Text>
       </Text>
