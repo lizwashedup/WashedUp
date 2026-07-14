@@ -14,6 +14,7 @@ import Colors from '../../constants/Colors';
 import { isAdmin } from '../../constants/Admin';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCommunityMembers, getBroadcasts } from '../../lib/creatorMode';
+import { getLeaderCards } from '../../lib/communityLeader';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
@@ -39,6 +40,14 @@ export default function CreatorMenuScreen() {
     queryKey: ['organizer-profile'],
     queryFn: getMyOrganizerProfile,
   });
+  // slice 0: the identity card wears the leader's own face as the chip
+  // (live-resolved via the 41 read; ingredient, never the whole card)
+  const { data: leaderCard = null } = useQuery({
+    queryKey: ['leader-card', community?.id],
+    queryFn: async () => (await getLeaderCards([community!.id])).get(community!.id) ?? null,
+    enabled: !!community,
+    staleTime: 60_000,
+  });
 
   // admin view-as (doc 00 7-13): the toggle is invisible to non-admins and
   // hides while active (the shell pill carries the exit)
@@ -56,31 +65,76 @@ export default function CreatorMenuScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
+        {/* LIZ COPY */}
+        <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>menu</Text>
+
+        {/* slice 0 (doc 43 track B): the identity card — who you are here.
+            community mark + the leader's face chip for a community;
+            organizer logo (monogram fallback) for an event host. The face
+            is an ingredient, never the whole card; event hosts get the
+            organizer profile editor, never a public /o page (guardrail). */}
+        <View style={styles.identityCard}>
+          <View style={styles.identityMarkWrap}>
+            {community ? (
+              <>
+                <View style={styles.identityMark}>
+                  <Text style={styles.identityMarkLetter}>{community.name.slice(0, 1).toLowerCase()}</Text>
+                </View>
+                {!!leaderCard?.avatar_url && (
+                  <Image source={{ uri: leaderCard.avatar_url }} style={styles.identityFaceChip} contentFit="cover" />
+                )}
+              </>
+            ) : organizerProfile?.logo_url ? (
+              <Image source={{ uri: organizerProfile.logo_url }} style={styles.identityMark} contentFit="cover" />
+            ) : (
+              <View style={styles.identityMark}>
+                <Text style={styles.identityMarkLetter}>
+                  {(organizerProfile?.display_name ?? 'w').slice(0, 1).toLowerCase()}
+                </Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.identityBody}>
+            <Text style={styles.identityName} numberOfLines={1}>
+              {community
+                ? community.name.toLowerCase()
+                : organizerProfile
+                  ? organizerProfile.display_name.toLowerCase()
+                  : 'your organizer profile'}
+            </Text>
+            <TouchableOpacity
+              onPress={() =>
+                community
+                  ? router.push(`/community/${community.id}` as never)
+                  : router.push('/creator/organizer-profile')
+              }
+              hitSlop={8}
+            >
+              {/* LIZ COPY */}
+              <Text style={styles.identityLink}>
+                {community
+                  ? 'view your public page'
+                  : organizerProfile
+                    ? 'edit your organizer profile'
+                    : 'set it up. takes a minute.'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
         <CommunitySwitcher access={access} />
 
-        {/* the organizer identity (proposal 36): one card, one editor */}
-        {/* LIZ COPY */}
-        <Text style={styles.sectionLabel}>your organizer profile</Text>
+        {/* switch back rides directly beneath the identity card (slice 0) */}
         <TouchableOpacity
-          style={styles.organizerCard}
-          onPress={() => router.push('/creator/organizer-profile')}
-          activeOpacity={0.8}
+          style={styles.switchBtn}
+          onPress={() => router.replace('/(tabs)/profile')}
+          activeOpacity={0.85}
         >
-          {organizerProfile?.logo_url ? (
-            <Image source={{ uri: organizerProfile.logo_url }} style={styles.organizerLogo} contentFit="cover" />
-          ) : null}
-          <View style={styles.organizerBody}>
-            <Text style={styles.organizerName}>
-              {organizerProfile ? organizerProfile.display_name : 'set up your organizer profile'}
-            </Text>
-            {/* LIZ COPY */}
-            <Text style={styles.organizerMeta}>
-              {organizerProfile ? 'the name your events wear' : 'the name your events wear. takes a minute.'}
-            </Text>
-          </View>
-          <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
+          <Text style={styles.switchBtnText}>switch back to you</Text>
         </TouchableOpacity>
+        <Text style={styles.switchHint}>
+          your plans, chats, and people are exactly where you left them.
+        </Text>
 
         {community && (
           <>
@@ -115,19 +169,33 @@ export default function CreatorMenuScreen() {
               <Stat label="waiting" value={pendingCount} />
               <Stat label="broadcasts" value={broadcasts.length} />
             </View>
+
+            {/* leaders also put on standalone events, so the organizer
+                identity (proposal 36) keeps a quiet row; for event hosts
+                the identity card above IS this entry */}
+            {/* LIZ COPY */}
+            <Text style={styles.sectionLabel}>your organizer profile</Text>
+            <TouchableOpacity
+              style={styles.organizerCard}
+              onPress={() => router.push('/creator/organizer-profile')}
+              activeOpacity={0.8}
+            >
+              {organizerProfile?.logo_url ? (
+                <Image source={{ uri: organizerProfile.logo_url }} style={styles.organizerLogo} contentFit="cover" />
+              ) : null}
+              <View style={styles.organizerBody}>
+                <Text style={styles.organizerName}>
+                  {organizerProfile ? organizerProfile.display_name : 'set up your organizer profile'}
+                </Text>
+                {/* LIZ COPY */}
+                <Text style={styles.organizerMeta}>
+                  {organizerProfile ? 'the name your standalone events wear' : 'the name your standalone events wear. takes a minute.'}
+                </Text>
+              </View>
+              <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
+            </TouchableOpacity>
           </>
         )}
-
-        <TouchableOpacity
-          style={styles.switchBtn}
-          onPress={() => router.replace('/(tabs)/profile')}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.switchBtnText}>switch back to you</Text>
-        </TouchableOpacity>
-        <Text style={styles.switchHint}>
-          your plans, chats, and people are exactly where you left them.
-        </Text>
 
         {isAdmin(myUserId) && !viewingAsEventHost && (
           <TouchableOpacity
@@ -161,6 +229,52 @@ function Stat({ label, value }: { label: string; value: number }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   content: { padding: 20 },
+  kicker: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1.5,
+  },
+  identityCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 16,
+    marginBottom: 12,
+  },
+  identityMarkWrap: { width: 56, height: 56 },
+  identityMark: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    backgroundColor: Colors.accentSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  identityMarkLetter: { fontFamily: Fonts.display, fontSize: FontSizes.displayMD, color: Colors.terracotta },
+  identityFaceChip: {
+    position: 'absolute',
+    right: -6,
+    bottom: -6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    borderColor: Colors.white,
+  },
+  identityBody: { flex: 1 },
+  identityName: {
+    fontFamily: Fonts.display,
+    fontSize: FontSizes.displaySM,
+    color: Colors.darkWarm,
+    marginBottom: 3,
+  },
+  identityLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   title: {
     fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
@@ -232,6 +346,7 @@ const styles = StyleSheet.create({
     color: Colors.tertiary,
     textAlign: 'center',
     marginTop: 10,
+    marginBottom: 28,
   },
   adminViewAs: { alignItems: 'center', marginTop: 28 },
   adminViewAsText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary },

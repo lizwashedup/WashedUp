@@ -36,7 +36,8 @@ import { SkeletonProfile } from '../../components/SkeletonCard';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
-import { getCreatorAccess, hasCreatorAccess, creatorLandingRoute, type CreatorAccess } from '../../lib/creatorMode';
+import { getCreatorAccess, hasCreatorAccess, creatorLandingRoute, isLeaderAccess, type CreatorAccess } from '../../lib/creatorMode';
+import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
 import { lastUnauthRedirectAt } from '../../lib/navState';
@@ -72,10 +73,26 @@ export default function ProfileScreen() {
   // row). The full access object decides where the switch lands: leaders on
   // today, event-host-only grants on events (doc 34 §1.1)
   const [creatorAccess, setCreatorAccess] = useState<CreatorAccess | null>(null);
+  // slice 0 (doc 43 track B): the switch label is context-aware — the
+  // community's name for leaders, the organizer name for event hosts,
+  // the generic line only when neither resolves
+  const [switchName, setSwitchName] = useState<string | null>(null);
   useEffect(() => {
     if (!COMMUNITIES_ENABLED) return;
     getCreatorAccess()
-      .then((a) => setCreatorAccess(hasCreatorAccess(a) ? a : null))
+      .then(async (a) => {
+        if (!hasCreatorAccess(a)) {
+          setCreatorAccess(null);
+          return;
+        }
+        setCreatorAccess(a);
+        if (isLeaderAccess(a) && a.ledCommunities[0]) {
+          setSwitchName(a.ledCommunities[0].name);
+        } else {
+          const organizer = await getMyOrganizerProfile().catch(() => null);
+          setSwitchName(organizer?.display_name ?? null);
+        }
+      })
       .catch(() => setCreatorAccess(null));
   }, []);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
@@ -971,9 +988,12 @@ export default function ProfileScreen() {
                   onPress={() => router.replace(creatorLandingRoute(creatorAccess))}
                   activeOpacity={0.7}
                 >
-                  {/* exact switch copy is Liz's call (doc 00 open question); generic Airbnb-style draft */}
+                  {/* LIZ COPY (slice 0): context-aware switch, named when a
+                      name exists */}
                   <Text style={[styles.settingsLabel, { color: Colors.terracotta, fontFamily: Fonts.sansBold }]}>
-                    switch to your community & events
+                    {switchName
+                      ? `switch to ${switchName.toLowerCase()} & your events`
+                      : 'switch to your community & events'}
                   </Text>
                   <Ionicons name="chevron-forward" size={16} color={Colors.terracotta} />
                 </TouchableOpacity>

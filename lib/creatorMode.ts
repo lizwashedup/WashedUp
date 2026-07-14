@@ -323,6 +323,7 @@ export interface CommunityEventRow {
   venue: string | null;
   status: string;
   public_name: string | null;
+  image_url: string | null;
 }
 
 /**
@@ -339,7 +340,7 @@ export async function getCreatorEvents(
   if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, event_date, venue, status, public_name')
+    .select('id, title, event_date, venue, status, public_name, image_url')
     .or(ors.join(','))
     .order('event_date', { ascending: true });
   if (error) throw error;
