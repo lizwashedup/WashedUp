@@ -7,6 +7,7 @@
  */
 
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Modal,
   View,
@@ -34,6 +35,7 @@ import {
   validateJoinAnswers,
   type JoinGate,
 } from '../../lib/communityJoin';
+import { getLeaderCards } from '../../lib/communityLeader';
 
 interface Props {
   visible: boolean;
@@ -55,6 +57,16 @@ export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Prop
 
   const introQuestion = gate.introQuestion ?? FALLBACK_INTRO_QUESTION;
   const guidelinesUrl = gate.guidelinesUrl ?? FALLBACK_GUIDELINES_URL;
+
+  // the 30a v1.3 disclosure names the operator literally through the
+  // proposal-41 leader card (world-callable, works pre-join); until 41 is
+  // live the card resolves empty and the role-based interim stands
+  const { data: operatorName = null } = useQuery({
+    queryKey: ['leader-card-name', gate.communityId],
+    queryFn: async () =>
+      (await getLeaderCards([gate.communityId])).get(gate.communityId)?.display_name ?? null,
+    staleTime: 60_000,
+  });
 
   const handleSend = async () => {
     const answers = {
@@ -167,16 +179,23 @@ export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Prop
               </Text>
             </TouchableOpacity>
 
-            {/* LIZ COPY: the just-in-time disclosure (legal review 7-13);
-                counsel's template finalizes the wording. Says what is
-                collected, who receives it (an independent operator, not
-                washedup), and what it may be used for. */}
+            {/* LIZ COPY (house-lowercased): the 30a v1.3 just-in-time
+                disclosure, counsel's adopted template. The operator name
+                resolves through the proposal-41 leader card and falls back
+                to the role-based interim until 41 is live. The withhold
+                promise line becomes literally TRUE at the API layer when
+                proposal 42 rides the convergence — both are launch gates,
+                so the flag never flips ahead of them. The template's
+                [learn about the operator] and [privacy policy] links land
+                with the privacy-policy gate. */}
             <Text style={styles.finePrint}>
-              your name, email, zip, and answers go to whoever runs {gate.name},
-              an independent operator, to be used only for running this
-              community. only your introduction and your general area become
-              public, woven into a short hello in the community chat when you
-              are approved. never your zip.
+              before you apply, {operatorName ? operatorName.toLowerCase() : `whoever runs ${gate.name}`},
+              the independent operator of this community, will receive your
+              display name, general area (city or neighborhood), and your
+              answers below to review your request, administer and moderate
+              the community, keep it safe, and communicate with you in
+              washedup. the operator will not receive your email address,
+              phone number, raw zip code, or precise location.
             </Text>
 
             {!!problem && <Text style={styles.problem}>{problem}</Text>}
