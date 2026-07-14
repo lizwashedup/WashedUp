@@ -71,8 +71,60 @@ export function SceneDiscovery() {
     events.some((e) => e.category?.toLowerCase() === c),
   );
 
-  const renderEvent = (e: SceneEvent) => (
+  const renderFeatured = (e: SceneEvent) => (
     <EventPoster key={e.id} event={e} width={width} onPress={() => router.push(`/event/${e.id}` as never)} />
+  );
+  const renderCompact = (e: SceneEvent) => (
+    <EventPoster
+      key={e.id}
+      event={e}
+      width={width}
+      variant="compact"
+      onPress={() => router.push(`/event/${e.id}` as never)}
+    />
+  );
+
+  // slice 1 (doc 37): the communities rail lives BETWEEN feed sections —
+  // one featured card, a couple of compact cards, the rail, then the rest
+  const communitiesRail = communities.length > 0 && (
+    <>
+      <Text style={[styles.sectionLabel, styles.sectionGap]}>communities</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
+        {communities.map((c) => (
+          <TouchableOpacity
+            key={c.id}
+            style={styles.railCard}
+            onPress={() => router.push(`/community/${c.id}` as never)}
+            activeOpacity={0.85}
+          >
+            {c.cover_image ? (
+              <Image source={{ uri: c.cover_image }} style={styles.railCover} contentFit="cover" />
+            ) : (
+              <View style={[styles.railCover, { backgroundColor: c.accent_color ?? Colors.accentSubtle }]} />
+            )}
+            <View style={styles.railBody}>
+              {isHouseCommunity(c.handle) && (
+                <Text style={styles.houseMark}>{HOUSE_MARK_LABEL}</Text>
+              )}
+              <View style={styles.railNameRow}>
+                {!!leaderCards.get(c.id)?.avatar_url && (
+                  <Image
+                    source={{ uri: leaderCards.get(c.id)!.avatar_url! }}
+                    style={styles.railFace}
+                    contentFit="cover"
+                  />
+                )}
+                <Text style={styles.railName} numberOfLines={1}>{c.name}</Text>
+              </View>
+              <Text style={styles.railMeta} numberOfLines={1}>
+                {c.member_count} in
+                {c.next_event_title ? `  next: ${c.next_event_title}` : ''}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </>
   );
 
   return (
@@ -94,50 +146,9 @@ export function SceneDiscovery() {
           />
         }
       >
-        {communities.length > 0 && (
-          <>
-            <Text style={styles.sectionLabel}>communities</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
-              {communities.map((c) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={styles.railCard}
-                  onPress={() => router.push(`/community/${c.id}` as never)}
-                  activeOpacity={0.85}
-                >
-                  {c.cover_image ? (
-                    <Image source={{ uri: c.cover_image }} style={styles.railCover} contentFit="cover" />
-                  ) : (
-                    <View style={[styles.railCover, { backgroundColor: c.accent_color ?? Colors.accentSubtle }]} />
-                  )}
-                  <View style={styles.railBody}>
-                    {isHouseCommunity(c.handle) && (
-                      <Text style={styles.houseMark}>{HOUSE_MARK_LABEL}</Text>
-                    )}
-                    <View style={styles.railNameRow}>
-                      {!!leaderCards.get(c.id)?.avatar_url && (
-                        <Image
-                          source={{ uri: leaderCards.get(c.id)!.avatar_url! }}
-                          style={styles.railFace}
-                          contentFit="cover"
-                        />
-                      )}
-                      <Text style={styles.railName} numberOfLines={1}>{c.name}</Text>
-                    </View>
-                    <Text style={styles.railMeta} numberOfLines={1}>
-                      {c.member_count} in
-                      {c.next_event_title ? `  next: ${c.next_event_title}` : ''}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </>
-        )}
-
-        <Text style={[styles.sectionLabel, communities.length > 0 && styles.sectionGap]}>
-          happening in LA
-        </Text>
+        <Text style={styles.sectionLabel}>happening in LA</Text>
+        {/* the IA fix (doc 37): this row is the CATEGORY axis only —
+            source (community vs standalone) lives on each card's byline */}
         {usedCategories.length > 1 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
             {[null, ...usedCategories].map((c) => (
@@ -153,11 +164,20 @@ export function SceneDiscovery() {
         )}
 
         {filtered.length === 0 ? (
-          <Text style={styles.emptyLine}>
-            the calendar is filling up. check back in a beat.
-          </Text>
+          <>
+            <Text style={styles.emptyLine}>
+              the calendar is filling up. check back in a beat.
+            </Text>
+            {communitiesRail}
+          </>
         ) : (
-          filtered.map(renderEvent)
+          <>
+            {renderFeatured(filtered[0])}
+            {filtered.slice(1, 3).map(renderCompact)}
+            {communitiesRail}
+            {filtered.length > 3 && <View style={styles.sectionGap} />}
+            {filtered.slice(3).map(renderCompact)}
+          </>
         )}
 
         {/* the supply funnel: every browser is a possible creator. quiet,
