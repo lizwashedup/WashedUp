@@ -1,62 +1,69 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   Animated,
   Dimensions,
-  Keyboard,
+  Share,
+  Linking,
   ScrollView,
 } from 'react-native';
-import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { hapticLight, hapticSuccess } from '../../../lib/haptics';
 import ProfileButton from '../../../components/ProfileButton';
 import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
 import { SceneDiscovery } from '../../../components/scene/SceneDiscovery';
+import { markSceneStageSeen, SCENE_BADGE_KEY } from '../../../lib/sceneStage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+const APPLY_URL = 'https://washedup.app/creator/apply';
 
-const PLACEHOLDERS = [
-  'Rooftop movie nights...',
-  'Sunrise hikes in Griffith...',
-  'Jazz bars in West Hollywood...',
-  'Taco crawls through East LA...',
-  'Beach bonfires at sunset...',
-];
+// LIZ COPY: the pre-written share sentence (the apply link rides along)
+const SHARE_MESSAGE = `washedup is looking for founding hosts, the people who already bring LA together. thought of you: ${APPLY_URL}`;
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 // COMMUNITIES_ENABLED is a compile-time constant, so this branch is stable
-// for the app's lifetime: flag off ships the coming-soon page byte-identical
-// to today; flag on ships discovery (doc 10 phase 5).
+// for the app's lifetime: flag off ships the coming-soon page; flag on ships
+// discovery (doc 10 phase 5).
 export default function ScenePage() {
+  const queryClient = useQueryClient();
+
+  // Stamp the current coming-soon stage as seen on every Scene open so the
+  // tab dot clears (lib/sceneStage.ts). Runs for both branches: a flag-on
+  // build simply has no dot left to clear.
+  useFocusEffect(
+    useCallback(() => {
+      markSceneStageSeen().finally(() => {
+        queryClient.invalidateQueries({ queryKey: SCENE_BADGE_KEY });
+      });
+    }, [queryClient]),
+  );
+
   if (COMMUNITIES_ENABLED) return <SceneDiscovery />;
   return <SceneComingSoon />;
 }
 
+// The founding-host recruiting page (stage 1 of the coming-soon run-up).
+// Replaced the wish box at the 2026-07-15 directive: scene_suggestions
+// stops receiving (existing rows untouched); the photo, header, and the
+// plans nudge stay exactly as they were.
 function SceneComingSoon() {
   const [userId, setUserId] = useState<string | null>(null);
-  const [suggestion, setSuggestion] = useState('');
-  const [submitState, setSubmitState] = useState<'idle' | 'success'>('idle');
   const [onWaitlist, setOnWaitlist] = useState(false);
   const [userCount, setUserCount] = useState(0);
-  const [placeholderIndex, setPlaceholderIndex] = useState(0);
-  const [inputFocused, setInputFocused] = useState(false);
 
-  const shakeAnim = useRef(new Animated.Value(0)).current;
   const notifyScale = useRef(new Animated.Value(1)).current;
-  const placeholderOpacity = useRef(new Animated.Value(1)).current;
-
 
   // Auth
   useEffect(() => {
@@ -83,26 +90,6 @@ function SceneComingSoon() {
     })();
   }, [userId]);
 
-  // Rotating placeholder
-  useEffect(() => {
-    if (inputFocused) return;
-    const interval = setInterval(() => {
-      Animated.timing(placeholderOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => {
-        setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDERS.length);
-        Animated.timing(placeholderOpacity, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }).start();
-      });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [inputFocused]);
-
   const handleNotify = useCallback(async () => {
     if (!userId || onWaitlist) return;
     hapticSuccess();
@@ -116,27 +103,17 @@ function SceneComingSoon() {
     } catch {}
   }, [userId, onWaitlist]);
 
-  const handleSubmit = useCallback(async () => {
-    if (!userId) return;
-    const text = suggestion.trim();
-    if (!text) {
-      Animated.sequence([
-        Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
-      ]).start();
-      return;
-    }
-    hapticSuccess();
-    Keyboard.dismiss();
-    setSuggestion('');
-    setSubmitState('success');
-    try {
-      await supabase.from('scene_suggestions').insert({ user_id: userId, suggestion: text });
-    } catch {}
-    setTimeout(() => setSubmitState('idle'), 2000);
-  }, [userId, suggestion]);
+  const handleApply = useCallback(() => {
+    hapticLight();
+    // The application lives on the web (washedup.app/creator/apply); the
+    // system browser owns it so this OTA carries no new in-app surface.
+    Linking.openURL(APPLY_URL).catch(() => {});
+  }, []);
+
+  const handleShare = useCallback(() => {
+    hapticLight();
+    Share.share({ message: SHARE_MESSAGE }).catch(() => {});
+  }, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -152,8 +129,6 @@ function SceneComingSoon() {
         decelerationRate="normal"
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
       >
         {/* Hero: photo with gradient fade */}
         <View style={styles.hero}>
@@ -163,7 +138,7 @@ function SceneComingSoon() {
             style={styles.heroPhoto}
             contentFit="cover"
           />
-          {/* Gradient fade to cream at bottom — stacked opacity bands */}
+          {/* Gradient fade to cream at bottom: stacked opacity bands */}
           <View style={[styles.heroFadeBand, { bottom: 80, opacity: 0.15 }]} />
           <View style={[styles.heroFadeBand, { bottom: 60, opacity: 0.3 }]} />
           <View style={[styles.heroFadeBand, { bottom: 40, opacity: 0.5 }]} />
@@ -177,49 +152,32 @@ function SceneComingSoon() {
           />
         </View>
 
-        {/* Headline + subtext */}
-        <Text style={styles.headline}>Your LA</Text>
+        {/* LIZ COPY: the founding-host lead (exact copy from the directive) */}
+        <Text style={styles.kicker}>the people behind LA</Text>
+        <Text style={styles.headline}>Make something worth showing up for.</Text>
         <Text style={styles.subtext}>
-          We're brand new, and hand-picking the best of LA for the washedup community. We would love your help to make the Scene of Los Angeles.
+          We're building the city's most human social calendar, starting with the people who already bring others together.
         </Text>
 
-        {/* Suggestion card */}
+        {/* Founding-host card */}
         <View style={styles.card}>
-          <Text style={styles.cardHeadline}>What do you want to do?</Text>
-          <Text style={styles.cardSubtext}>in LA that would be nicer with people to go with</Text>
+          {/* LIZ COPY */}
+          <Text style={styles.cardKicker}>founding host applications</Text>
+          <Text style={styles.cardTitle}>Run a community? Host events?</Text>
+          <Text style={styles.cardSubtext}>
+            Bring your people to washedup. We'll help the right Angelenos discover what you're building.
+          </Text>
 
-          <View style={styles.inputWrapper}>
-            <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
-              <TextInput
-                style={styles.input}
-                value={suggestion}
-                onChangeText={setSuggestion}
-                onFocus={() => setInputFocused(true)}
-                onBlur={() => setInputFocused(false)}
-                maxLength={200}
-                returnKeyType="done"
-                onSubmitEditing={handleSubmit}
-                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              />
-            </Animated.View>
-            {!suggestion && !inputFocused && (
-              <Animated.Text
-                style={[styles.placeholderOverlay, { opacity: placeholderOpacity }]}
-                pointerEvents="none"
-              >
-                {PLACEHOLDERS[placeholderIndex]}
-              </Animated.Text>
-            )}
-          </View>
+          <TouchableOpacity style={styles.applyBtn} onPress={handleApply} activeOpacity={0.85}>
+            {/* LIZ COPY */}
+            <Text style={styles.applyBtnText}>{'Apply as a founding host →'}</Text>
+          </TouchableOpacity>
+          {/* LIZ COPY */}
+          <Text style={styles.quietLine}>2 minutes · no commitment</Text>
 
-          <TouchableOpacity
-            style={styles.submitBtn}
-            onPress={handleSubmit}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.submitBtnText}>
-              {submitState === 'success' ? 'Thanks! \u2713' : 'Submit'}
-            </Text>
+          <TouchableOpacity onPress={handleShare} activeOpacity={0.7} style={styles.shareLinkWrap}>
+            {/* LIZ COPY */}
+            <Text style={styles.shareLink}>{'Know someone who should see this? Send it to them →'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -233,7 +191,7 @@ function SceneComingSoon() {
             activeOpacity={0.7}
             style={styles.nudgeLinkWrap}
           >
-            <Text style={styles.nudgeLink}>{'Browse Plans \u2192'}</Text>
+            <Text style={styles.nudgeLink}>{'Browse Plans →'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -258,7 +216,7 @@ function SceneComingSoon() {
               color={Colors.terracotta}
             />
             <Text style={styles.notifyText}>
-              {onWaitlist ? "You're on the list \u2713" : 'Notify me when Scene drops'}
+              {onWaitlist ? "You're on the list ✓" : 'Notify me when Scene drops'}
             </Text>
           </TouchableOpacity>
         </Animated.View>
@@ -321,15 +279,26 @@ const styles = StyleSheet.create({
   },
 
   // ── Copy ──
-  headline: {
-    fontFamily: Fonts.displayBold, // weight lives in the face; a fontWeight override would faux-bold on Android
-    fontSize: 30,
-    color: Colors.darkWarm,
+  kicker: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1.5,
     textAlign: 'center',
     marginTop: 20,
   },
+  headline: {
+    fontFamily: Fonts.displayBold, // weight lives in the face; a fontWeight override would faux-bold on Android
+    fontSize: FontSizes.displayLG,
+    lineHeight: LineHeights.displayLG,
+    color: Colors.darkWarm,
+    textAlign: 'center',
+    maxWidth: 320,
+    marginTop: 8,
+  },
   subtext: {
-    fontSize: 15,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
     color: Colors.secondary,
     textAlign: 'center',
     lineHeight: 22,
@@ -352,71 +321,82 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.terracotta,
   },
-  // ── Card ──
+
+  // ── Founding-host card ──
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.cardBg,
     borderRadius: 16,
     borderWidth: 0,
     borderTopWidth: 2,
-    borderTopColor: '#B5522E',
+    borderTopColor: Colors.terracotta,
     padding: 24,
     marginTop: 24,
     marginHorizontal: 24,
     alignSelf: 'stretch',
-    shadowColor: '#2C1810',
+    shadowColor: Colors.darkWarm,
     shadowOpacity: 0.06,
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 12,
     elevation: 3,
   },
-  cardHeadline: {
-    fontSize: 16,
-    fontWeight: '700',
+  cardKicker: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+    letterSpacing: 1.5,
+    textAlign: 'center',
+  },
+  cardTitle: {
+    fontFamily: Fonts.displayBold,
+    fontSize: FontSizes.displayMD,
+    lineHeight: LineHeights.displayMD,
     color: Colors.darkWarm,
     textAlign: 'center',
+    marginTop: 6,
   },
   cardSubtext: {
-    fontSize: 13,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
     color: Colors.secondary,
     textAlign: 'center',
-    marginTop: 4,
+    lineHeight: 19,
+    marginTop: 6,
   },
-  inputWrapper: {
-    marginTop: 16,
-    position: 'relative',
-  },
-  input: {
-    backgroundColor: '#FAF5EC',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 14,
-    color: Colors.darkWarm,
-    height: 44,
-    borderWidth: 1,
-    borderColor: '#E8DDD0',
-  },
-  placeholderOverlay: {
-    position: 'absolute',
-    left: 14,
-    top: 13,
-    fontSize: 14,
-    color: Colors.secondary,
-    opacity: 0.5,
-  },
-  submitBtn: {
-    backgroundColor: '#B5522E',
-    borderRadius: 10,
-    height: 40,
-    width: '50%',
+  applyBtn: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    alignSelf: 'center',
-    marginTop: 14,
+    alignSelf: 'stretch',
+    marginTop: 16,
+    shadowColor: Colors.terracotta,
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 8,
+    elevation: 3,
   },
-  submitBtnText: {
+  applyBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
     color: Colors.white,
-    fontSize: 14,
-    fontWeight: '600',
+  },
+  quietLine: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  shareLinkWrap: {
+    marginTop: 14,
+    paddingVertical: 4,
+  },
+  shareLink: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+    textAlign: 'center',
   },
 
   // ── Nudge ──
