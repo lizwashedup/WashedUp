@@ -88,7 +88,15 @@ export function SceneDiscovery() {
   // Liz's second pass (doc 37 amended): the rail lives at the TOP of the
   // feed, directly under the filter row — reference placement — with the
   // reference card anatomy (cover, overlapping face chip, by-line, member
-  // threshold, the creator's one-line message)
+  // threshold, the creator's one-line message).
+  //
+  // THE EMPTY-STATE RULE (Liz, 2026-07-15): zero ACTIVE communities means
+  // this entire block — header, rail, see-all — disappears; the invite
+  // card below the feed survives regardless (it is the recruiting
+  // surface). A furnishing community never shows here because the
+  // discovery read is active-only by construction, so the shelf never
+  // reads as a ghost town: launch day is events + the invite card until
+  // the first community flips active.
   const communitiesRail = communities.length > 0 && (
     <>
       <View style={styles.railHeader}>
