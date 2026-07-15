@@ -29,8 +29,13 @@ import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../l
 import { formatEventDateLA } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
+import { getLeaderCards } from '../../lib/communityLeader';
+import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const HERO_HEIGHT = 280;
+// social proof threshold (doc 37): under this, never show a raw count
+const GOING_COUNT_THRESHOLD = 5;
 
 interface ExploreEvent {
   id: string;
@@ -254,6 +259,29 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
+  // slice 2 (doc 37): a COMMUNITY event fronts with the community — its
+  // name in the byline, the leader's face as the chip (the 41 read). A
+  // public_name override still wins and wears neither image.
+  const { data: eventCommunity = null } = useQuery({
+    queryKey: ['event-community', event?.community_id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('communities')
+        .select('id, name')
+        .eq('id', event!.community_id!)
+        .maybeSingle();
+      return (data as { id: string; name: string } | null) ?? null;
+    },
+    enabled: COMMUNITIES_ENABLED && !!event?.community_id && !event?.public_name,
+    staleTime: 60_000,
+  });
+  const { data: eventLeaderCard = null } = useQuery({
+    queryKey: ['leader-card', event?.community_id],
+    queryFn: async () => (await getLeaderCards([event!.community_id!])).get(event!.community_id!) ?? null,
+    enabled: COMMUNITIES_ENABLED && !!event?.community_id && !event?.public_name,
+    staleTime: 60_000,
+  });
+
   const goFindPeople = useCallback(() => {
     if (!event) return;
     hapticMedium();
@@ -353,9 +381,9 @@ export default function EventDetailScreen() {
         <View style={styles.centered}>
           {!id ? (
             <>
-              <Text style={styles.emptyText}>Event not found</Text>
+              <Text style={styles.emptyText}>this event is not around anymore.</Text>
               <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
-                <Text style={styles.goBackText}>Go Back</Text>
+                <Text style={styles.goBackText}>go back</Text>
               </TouchableOpacity>
             </>
           ) : (
@@ -370,9 +398,9 @@ export default function EventDetailScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.centered}>
-          <Text style={styles.emptyText}>Event not found</Text>
+          <Text style={styles.emptyText}>this event is not around anymore.</Text>
           <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
-            <Text style={styles.goBackText}>Go Back</Text>
+            <Text style={styles.goBackText}>go back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -382,11 +410,17 @@ export default function EventDetailScreen() {
   const ticketPrice = normalizeTicketPrice(event.ticket_price);
   const isFree = ticketPrice === null;
 
-  // the byline: per-event public_name override wins; a standalone listing
-  // falls back to the organizer profile, whose logo only shows when the
-  // name is actually the profile's (an override means a different brand)
-  const bylineName = event.public_name || (!event.community_id ? organizer?.display_name ?? null : null);
-  const bylineLogo = !event.public_name && !event.community_id ? organizer?.logo_url ?? null : null;
+  // the byline grammar (slice 2): public_name override wins and wears
+  // neither image; a community event fronts with the COMMUNITY name and
+  // the leader's FACE; a standalone listing fronts with the organizer
+  // profile name and LOGO. person = face, business = logo, never both.
+  const bylineName =
+    event.public_name ||
+    (event.community_id ? eventCommunity?.name ?? null : organizer?.display_name ?? null);
+  const bylineFace =
+    !event.public_name && event.community_id ? eventLeaderCard?.avatar_url ?? null : null;
+  const bylineLogo =
+    !event.public_name && !event.community_id ? organizer?.logo_url ?? null : null;
 
   const getPlanSpotsInfo = (plan: LinkedPlan): { text: string; isFull: boolean } => {
     const actualCount = memberCountsMap[plan.id] ?? plan.member_count;
@@ -402,11 +436,21 @@ export default function EventDetailScreen() {
     <View style={styles.container}>
       <ScrollView decelerationRate="normal" showsVerticalScrollIndicator={false}>
         <View style={styles.heroContainer}>
-          <Image
-            source={event.image_url ? { uri: event.image_url } : require('../../assets/images/plan-placeholder.png')}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-          />
+          {event.image_url ? (
+            <Image source={{ uri: event.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          ) : (
+            // slice 2: the generated branded poster is the hero fallback —
+            // a designed card, not a photo, so its words are legible by
+            // construction; the circle controls stay (non-load-bearing marks)
+            <GeneratedPoster
+              title={event.title}
+              category={event.category}
+              venue={event.venue}
+              height={HERO_HEIGHT}
+              topPadding={insets.top}
+              hideCategory
+            />
+          )}
 
           <TouchableOpacity
             style={[styles.circleButton, { top: insets.top + 8, left: 16 }]}
@@ -456,6 +500,9 @@ export default function EventDetailScreen() {
 
           {COMMUNITIES_ENABLED && !!bylineName && (
             <View style={styles.putOnByRow}>
+              {!!bylineFace && (
+                <Image source={{ uri: bylineFace }} style={styles.putOnByFace} contentFit="cover" />
+              )}
               {!!bylineLogo && (
                 <Image source={{ uri: bylineLogo }} style={styles.putOnByLogo} contentFit="cover" />
               )}
@@ -485,11 +532,33 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          {COMMUNITIES_ENABLED && rsvpCount !== null && rsvpCount > 0 && (
+          {/* social proof, threshold logic (doc 37): a real count only from
+              five up — never "1 person going"; below that, the invitation */}
+          {COMMUNITIES_ENABLED && rsvpCount !== null && (
             <View style={styles.metaRow}>
               <Users size={16} color={Colors.warmGray} strokeWidth={2} />
-              <Text style={styles.metaText}>{rsvpCount} going</Text>
+              <Text style={styles.metaText}>
+                {rsvpCount >= GOING_COUNT_THRESHOLD
+                  ? `${rsvpCount} going`
+                  : /* LIZ COPY */ 'new event · be one of the first'}
+              </Text>
             </View>
+          )}
+
+          {/* the link-out is the one thing the link-first launch depends on
+              (doc 37: prominence): a full-width button above the fold,
+              shown whenever a link exists, labeled by context */}
+          {event.external_url && (
+            <TouchableOpacity
+              style={styles.ticketBtn}
+              onPress={() => openUrl(event.external_url!)}
+              activeOpacity={0.85}
+            >
+              <Ticket size={18} color={Colors.terracotta} strokeWidth={2} />
+              {/* LIZ COPY: priced vs free-with-link labels */}
+              <Text style={styles.ticketBtnText}>{isFree ? 'reserve a spot' : 'get tickets'}</Text>
+              <ChevronRight size={16} color={Colors.terracotta} strokeWidth={2} />
+            </TouchableOpacity>
           )}
 
           {event.description && (
@@ -498,23 +567,11 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          {/* the link-out shows whenever a link exists (doc 34 2.1): a free
-              event with a reservation link used to show nothing at all */}
-          {event.external_url && (
-            <TouchableOpacity
-              style={styles.ticketLink}
-              onPress={() => openUrl(event.external_url!)}
-            >
-              {/* LIZ COPY: priced vs free-with-link labels */}
-              <Text style={styles.ticketLinkText}>{isFree ? 'reserve a spot' : 'get tickets'}</Text>
-              <ChevronRight size={16} color={Colors.terracotta} strokeWidth={2} />
-            </TouchableOpacity>
-          )}
-
           <View style={styles.plansSection}>
             <View style={styles.plansSectionHeader}>
               <Users size={18} color={Colors.asphalt} strokeWidth={2} />
-              <Text style={styles.plansSectionTitle}>People Going With washedup</Text>
+              {/* the lowercase law */}
+            <Text style={styles.plansSectionTitle}>people going with washedup</Text>
             </View>
 
             {linkedPlans.length === 0 ? (
@@ -539,7 +596,7 @@ export default function EventDetailScreen() {
                           </Text>
                         </View>
                       )}
-                      <Text style={styles.planCreatorName}>{plan.creator_name ?? 'Someone'} posted</Text>
+                      <Text style={styles.planCreatorName}>{plan.creator_name ?? 'someone'} posted</Text>
                       {plan.primary_vibe && (
                         <View style={styles.planVibePill}>
                           <Text style={styles.planVibeText}>{plan.primary_vibe}</Text>
@@ -566,7 +623,7 @@ export default function EventDetailScreen() {
                           styles.planJoinBtnText,
                           isFull && styles.planJoinBtnTextFull,
                         ]}>
-                          {isFull ? 'Full' : 'Join'}
+                          {isFull ? 'full' : 'join'}
                         </Text>
                       </View>
                     </View>
@@ -597,7 +654,7 @@ export default function EventDetailScreen() {
           </TouchableOpacity>
         )}
         <TouchableOpacity style={styles.postPlanButton} onPress={goFindPeople}>
-          <Text style={styles.postPlanButtonText}>Find People to Go With</Text>
+          <Text style={styles.postPlanButtonText}>find people to go with</Text>
         </TouchableOpacity>
       </View>
 
@@ -627,7 +684,7 @@ const styles = StyleSheet.create({
   emptyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.textMedium, textAlign: 'center' },
   goBackBtn: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 },
   goBackText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  heroContainer: { width: SCREEN_WIDTH, height: 280, position: 'relative' },
+  heroContainer: { width: SCREEN_WIDTH, height: HERO_HEIGHT, position: 'relative' },
   circleButton: {
     position: 'absolute',
     width: 40,
@@ -656,8 +713,20 @@ const styles = StyleSheet.create({
   metaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, flex: 1, lineHeight: 20 },
   descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg },
   descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, lineHeight: 22 },
-  ticketLink: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingVertical: 8 },
-  ticketLinkText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  // the secondary-button pattern: outline terracotta, never competing with
+  // the sticky bar's primary CTA
+  ticketBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 13,
+    marginTop: 4,
+  },
+  ticketBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   plansSection: { marginTop: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
   plansSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   plansSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
@@ -722,6 +791,7 @@ const styles = StyleSheet.create({
   rsvpButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta },
   rsvpButtonTextGoing: { color: Colors.brandDeep },
   putOnByRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  putOnByFace: { width: 20, height: 20, borderRadius: 10 },
   putOnByLogo: { width: 18, height: 18, borderRadius: 5 },
   putOnBy: {
     fontFamily: Fonts.sansMedium,

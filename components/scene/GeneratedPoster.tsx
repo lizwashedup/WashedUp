@@ -28,6 +28,7 @@ const CATEGORY_GROUNDS: Record<string, { bg: string; ink: string }> = {
   markets: { bg: Colors.pinBooks, ink: Colors.cream },
 };
 const DEFAULT_GROUND = { bg: Colors.terracotta, ink: Colors.cream };
+const POSTER_PADDING = 18;
 
 interface GeneratedPosterProps {
   title: string;
@@ -36,9 +37,13 @@ interface GeneratedPosterProps {
   height: number;
   /** compact = the small square thumb: ground + initial, no words */
   compact?: boolean;
+  /** hero usage: extra top padding so the words clear the status bar */
+  topPadding?: number;
+  /** hero usage: the page shows its own category pill, skip the label */
+  hideCategory?: boolean;
 }
 
-export function GeneratedPoster({ title, category, venue, height, compact }: GeneratedPosterProps) {
+export function GeneratedPoster({ title, category, venue, height, compact, topPadding = 0, hideCategory }: GeneratedPosterProps) {
   const ground = CATEGORY_GROUNDS[category?.toLowerCase() ?? ''] ?? DEFAULT_GROUND;
   if (compact) {
     return (
@@ -50,8 +55,8 @@ export function GeneratedPoster({ title, category, venue, height, compact }: Gen
     );
   }
   return (
-    <View style={[styles.poster, { backgroundColor: ground.bg, height }]}>
-      {!!category && (
+    <View style={[styles.poster, { backgroundColor: ground.bg, height, paddingTop: POSTER_PADDING + topPadding }]}>
+      {!!category && !hideCategory && (
         <Text style={[styles.category, { color: ground.ink }]}>{category.toLowerCase()}</Text>
       )}
       <View style={styles.spacer} />
@@ -68,7 +73,7 @@ export function GeneratedPoster({ title, category, venue, height, compact }: Gen
 }
 
 const styles = StyleSheet.create({
-  poster: { width: '100%', padding: 18 },
+  poster: { width: '100%', padding: POSTER_PADDING },
   category: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.caption,
