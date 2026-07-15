@@ -32,6 +32,8 @@ import { getOrganizerProfiles } from '../../lib/organizerProfile';
 import { eventKickerLabel } from '../../lib/sceneDiscovery';
 import { getLeaderCards } from '../../lib/communityLeader';
 import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
+import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
+import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 280;
@@ -237,6 +239,10 @@ export default function EventDetailScreen() {
 
   // -- just-join RSVPs + the doc 09 smart popup (flag-gated additions) ----------
   const [rsvpBusy, setRsvpBusy] = useState(false);
+  // proposal 49 (legal v4.0): the Independent Activity Notice before the
+  // caller's FIRST rsvp under the terms version in force. Dormant until 49
+  // applies; once an assent row exists the sheet never returns.
+  const [noticeVisible, setNoticeVisible] = useState(false);
   const { data: myRsvp = null } = useQuery({
     queryKey: ['event-rsvp', id, userId],
     queryFn: () => getMyRsvp(id!),
@@ -312,30 +318,8 @@ export default function EventDetailScreen() {
     queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
   }, [queryClient, id]);
 
-  const handleCountMeIn = useCallback(async () => {
-    if (!id || rsvpBusy) return;
-    if (myRsvp === 'going') {
-      // LIZ COPY
-      setAlertInfo({
-        title: 'not going anymore?',
-        message: 'no pressure either way.',
-        buttons: [
-          { text: 'still going', style: 'cancel' },
-          {
-            text: 'take me off',
-            onPress: async () => {
-              try {
-                await setRsvp(id, false);
-                invalidateRsvp();
-              } catch {
-                hapticError();
-              }
-            },
-          },
-        ],
-      });
-      return;
-    }
+  const proceedWithRsvp = useCallback(async () => {
+    if (!id) return;
     setRsvpBusy(true);
     try {
       await setRsvp(id, true);
@@ -376,7 +360,64 @@ export default function EventDetailScreen() {
     } finally {
       setRsvpBusy(false);
     }
-  }, [id, rsvpBusy, myRsvp, linkedPlans, memberCountsMap, invalidateRsvp, goFindPeople]);
+  }, [id, linkedPlans, memberCountsMap, invalidateRsvp, goFindPeople]);
+
+  // the organizer name exactly as the byline renders it, for the notice and
+  // its evidence snapshot (doc 13: show the organizer's display name)
+  const noticeOrganizerName =
+    event?.public_name ||
+    (event?.community_id ? eventCommunity?.name : organizer?.display_name) ||
+    'the organizer';
+
+  const handleCountMeIn = useCallback(async () => {
+    if (!id || rsvpBusy) return;
+    if (myRsvp === 'going') {
+      // LIZ COPY
+      setAlertInfo({
+        title: 'not going anymore?',
+        message: 'no pressure either way.',
+        buttons: [
+          { text: 'still going', style: 'cancel' },
+          {
+            text: 'take me off',
+            onPress: async () => {
+              try {
+                await setRsvp(id, false);
+                invalidateRsvp();
+              } catch {
+                hapticError();
+              }
+            },
+          },
+        ],
+      });
+      return;
+    }
+    // proposal 49: first rsvp under the terms version in force shows the
+    // Independent Activity Notice; the rsvp proceeds only once the assent
+    // is recorded (fail CLOSED after 49 is live; dormant before it)
+    const { needsAssent } = await getParticipationNoticeStatus();
+    if (needsAssent) {
+      setNoticeVisible(true);
+      return;
+    }
+    await proceedWithRsvp();
+  }, [id, rsvpBusy, myRsvp, invalidateRsvp, proceedWithRsvp]);
+
+  const handleNoticeAgree = useCallback(async () => {
+    if (!id) return false;
+    const ok = await recordParticipationAssent({
+      listingType: 'explore_event',
+      listingId: id,
+      organizerUserId: event?.host_user_id ?? null,
+      organizerName: noticeOrganizerName,
+      action: 'rsvp',
+    });
+    if (!ok) return false;
+    setNoticeVisible(false);
+    await proceedWithRsvp();
+    return true;
+  }, [id, event?.host_user_id, noticeOrganizerName, proceedWithRsvp]);
 
   if (!id || isLoading) {
     return (
@@ -675,6 +716,13 @@ export default function EventDetailScreen() {
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
+      />
+
+      <ParticipationNotice
+        visible={noticeVisible}
+        organizerName={noticeOrganizerName}
+        onAgree={handleNoticeAgree}
+        onClose={() => setNoticeVisible(false)}
       />
     </View>
   );
