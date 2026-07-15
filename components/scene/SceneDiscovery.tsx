@@ -18,7 +18,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import Colors from '../../constants/Colors';
@@ -27,15 +26,15 @@ import ProfileButton from '../ProfileButton';
 import { hapticLight } from '../../lib/haptics';
 import { EVENT_CATEGORIES } from '../../lib/creatorEvents';
 import { EventPoster } from './EventPoster';
+import { CommunityCard } from './CommunityCard';
 import {
   getDiscoverableCommunities,
   getSceneEvents,
   type SceneEvent,
 } from '../../lib/sceneDiscovery';
 import { getLeaderCards } from '../../lib/communityLeader';
-import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 
-const RAIL_CARD_WIDTH = 220;
+const RAIL_CARD_WIDTH = 260;
 const RAIL_COVER_HEIGHT = 110;
 // size follows importance: this many lead events render full-size
 const FULL_SIZE_COUNT = 3;
@@ -86,44 +85,28 @@ export function SceneDiscovery() {
     />
   );
 
-  // slice 1 (doc 37): the communities rail lives BETWEEN feed sections —
-  // one featured card, a couple of compact cards, the rail, then the rest
+  // Liz's second pass (doc 37 amended): the rail lives at the TOP of the
+  // feed, directly under the filter row — reference placement — with the
+  // reference card anatomy (cover, overlapping face chip, by-line, member
+  // threshold, the creator's one-line message)
   const communitiesRail = communities.length > 0 && (
     <>
-      <Text style={[styles.sectionLabel, styles.sectionGap]}>communities</Text>
+      <View style={styles.railHeader}>
+        <Text style={styles.sectionLabel}>communities</Text>
+        <TouchableOpacity onPress={() => router.push('/communities' as never)} hitSlop={8}>
+          {/* LIZ COPY */}
+          <Text style={styles.seeAll}>see all</Text>
+        </TouchableOpacity>
+      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
         {communities.map((c) => (
-          <TouchableOpacity
+          <CommunityCard
             key={c.id}
-            style={styles.railCard}
+            community={c}
+            leaderCard={leaderCards.get(c.id) ?? null}
+            width={RAIL_CARD_WIDTH}
             onPress={() => router.push(`/community/${c.id}` as never)}
-            activeOpacity={0.85}
-          >
-            {c.cover_image ? (
-              <Image source={{ uri: c.cover_image }} style={styles.railCover} contentFit="cover" />
-            ) : (
-              <View style={[styles.railCover, { backgroundColor: c.accent_color ?? Colors.accentSubtle }]} />
-            )}
-            <View style={styles.railBody}>
-              {isHouseCommunity(c.handle) && (
-                <Text style={styles.houseMark}>{HOUSE_MARK_LABEL}</Text>
-              )}
-              <View style={styles.railNameRow}>
-                {!!leaderCards.get(c.id)?.avatar_url && (
-                  <Image
-                    source={{ uri: leaderCards.get(c.id)!.avatar_url! }}
-                    style={styles.railFace}
-                    contentFit="cover"
-                  />
-                )}
-                <Text style={styles.railName} numberOfLines={1}>{c.name}</Text>
-              </View>
-              <Text style={styles.railMeta} numberOfLines={1}>
-                {c.member_count} in
-                {c.next_event_title ? `  next: ${c.next_event_title}` : ''}
-              </Text>
-            </View>
-          </TouchableOpacity>
+          />
         ))}
       </ScrollView>
     </>
@@ -148,7 +131,6 @@ export function SceneDiscovery() {
           />
         }
       >
-        <Text style={styles.sectionLabel}>happening in LA</Text>
         {/* the IA fix (doc 37): this row is the CATEGORY axis only —
             source (community vs standalone) lives on each card's byline */}
         {usedCategories.length > 1 && (
@@ -165,23 +147,20 @@ export function SceneDiscovery() {
           </ScrollView>
         )}
 
+        {communitiesRail}
+
+        <Text style={[styles.sectionLabel, communities.length > 0 ? styles.sectionGap : undefined]}>happening in LA</Text>
         {filtered.length === 0 ? (
-          <>
-            <Text style={styles.emptyLine}>
-              the calendar is filling up. check back in a beat.
-            </Text>
-            {communitiesRail}
-          </>
+          <Text style={styles.emptyLine}>
+            the calendar is filling up. check back in a beat.
+          </Text>
         ) : (
           <>
-            {/* size follows importance, never source (Liz's slice-1 review,
-                now a standing rule): the first few events render full-size
-                whatever put them on; compact is the deeper-feed rhythm, not
-                a tier community events live in. Attribution, not size, marks
-                the source (byline + corner chip). */}
+            {/* size follows importance, never source (standing rule): the
+                first few events render full-size whatever put them on;
+                compact is the deeper-feed rhythm. Attribution, not size,
+                marks the source (byline + corner chip). */}
             {filtered.slice(0, FULL_SIZE_COUNT).map(renderFeatured)}
-            {communitiesRail}
-            {filtered.length > FULL_SIZE_COUNT && <View style={styles.sectionGap} />}
             {filtered.slice(FULL_SIZE_COUNT).map(renderCompact)}
           </>
         )}
@@ -224,28 +203,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionGap: { marginTop: 24 },
+  railHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  seeAll: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta, marginBottom: 10 },
   rail: { gap: 12 },
-  railCard: {
-    width: RAIL_CARD_WIDTH,
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
-  },
-  railCover: { width: '100%', height: RAIL_COVER_HEIGHT },
-  railBody: { padding: 12 },
-  houseMark: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-    letterSpacing: 1,
-    marginBottom: 2,
-  },
-  railNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  railFace: { width: 28, height: 28, borderRadius: 14 },
-  railName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, flexShrink: 1 },
-  railMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary, marginTop: 2 },
   chipRow: { gap: 8, marginBottom: 14 },
   chip: {
     borderRadius: 999,

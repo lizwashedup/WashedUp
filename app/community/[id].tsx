@@ -37,6 +37,7 @@ import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
+import { MEMBER_COUNT_THRESHOLD } from '../../lib/socialProof';
 import type { CommunityBlock } from '../../lib/communityBlocks';
 
 // founder rides the lock view (the people-first pack): "who is behind it"
@@ -216,7 +217,12 @@ export default function CommunityPageScreen() {
               ))}
             </View>
             {page.memberCount !== null && (
-              <Text style={styles.quietLine}>{page.memberCount} in the community</Text>
+              /* social-proof threshold: warmth under five. LIZ COPY */
+              <Text style={styles.quietLine}>
+                {page.memberCount >= MEMBER_COUNT_THRESHOLD
+                  ? `${page.memberCount} in the community`
+                  : 'founding members'}
+              </Text>
             )}
           </View>
         );
@@ -372,7 +378,12 @@ export default function CommunityPageScreen() {
         {!isMember && (
           <View style={styles.lockFooter}>
             {page.memberCount !== null && (
-              <Text style={styles.quietLine}>{page.memberCount} in the community</Text>
+              /* social-proof threshold: warmth under five. LIZ COPY */
+              <Text style={styles.quietLine}>
+                {page.memberCount >= MEMBER_COUNT_THRESHOLD
+                  ? `${page.memberCount} in the community`
+                  : 'founding members'}
+              </Text>
             )}
             {nextEvent && (
               <Text style={styles.quietLine}>
@@ -438,7 +449,7 @@ function EventRow({ event, onPress }: { event: CommunityPageEvent; onPress: () =
         <Text style={styles.eventTitle} numberOfLines={1}>{event.title}</Text>
         <Text style={styles.eventMeta}>
           {event.event_date ? formatEventDateLA(event.event_date) : 'date coming'}
-          {event.venue ? `  ${event.venue}` : ''}
+          {event.venue ? ` · ${event.venue}` : ''}
         </Text>
       </View>
     </TouchableOpacity>

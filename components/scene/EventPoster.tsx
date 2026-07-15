@@ -63,7 +63,7 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
             {[
               e.event_date ? formatEventDateLA(e.event_date) : null,
               e.venue,
-            ].filter(Boolean).join('  ')}
+            ].filter(Boolean).join(' · ')}
           </Text>
           {!!(e.public_name || e.organizer_name) && (
             <Text style={styles.posterBy} numberOfLines={1}>
@@ -103,7 +103,7 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
           {[
             e.event_date ? formatEventDateLA(e.event_date) : null,
             e.venue,
-          ].filter(Boolean).join('  ')}
+          ].filter(Boolean).join(' · ')}
         </Text>
         {/* public_name override wins; standalone listings fall back to the
             organizer profile name (proposal 36) */}

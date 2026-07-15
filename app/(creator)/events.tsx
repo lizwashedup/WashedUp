@@ -101,10 +101,10 @@ export default function CreatorEventsScreen() {
         <Text style={styles.cardTitle} numberOfLines={1}>{e.title}</Text>
         <Text style={styles.cardMeta} numberOfLines={1}>
           {opts?.draft
-            ? /* LIZ COPY */ `only you see it${e.event_date ? `  ${formatEventDateLA(e.event_date)}` : ''}`
+            ? /* LIZ COPY */ `only you see it${e.event_date ? ` · ${formatEventDateLA(e.event_date)}` : ''}`
             : opts?.past
-              ? `${e.status.toLowerCase()}${e.event_date ? `  ${formatEventDateLA(e.event_date)}` : ''}`
-              : [formatEventDateLA(e.event_date ?? ''), e.venue].filter(Boolean).join('  ')}
+              ? `${e.status.toLowerCase()}${e.event_date ? ` · ${formatEventDateLA(e.event_date)}` : ''}`
+              : [formatEventDateLA(e.event_date ?? ''), e.venue].filter(Boolean).join(' · ')}
         </Text>
         {!!e.public_name && !opts?.draft && (
           <Text style={styles.cardByline} numberOfLines={1}>put on by {e.public_name}</Text>

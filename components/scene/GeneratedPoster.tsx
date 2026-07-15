@@ -68,7 +68,9 @@ export function GeneratedPoster({ title, category, venue, height, compact, topPa
 }
 
 const styles = StyleSheet.create({
-  poster: { width: '100%', padding: POSTER_PADDING },
+  // the text block sits centered in the ground, never floating over dead
+  // space (Liz's second pass)
+  poster: { width: '100%', padding: POSTER_PADDING, justifyContent: 'center' },
   title: {
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displayMD,

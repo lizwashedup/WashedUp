@@ -121,6 +121,10 @@ export interface DiscoverableCommunity {
   handle: string;
   name: string;
   description: string | null;
+  // proposal 46: the creator's one-line card message; absent until 46
+  // applies, when the discovery RPC starts returning it (self-flipping —
+  // the card falls back to the trimmed description meanwhile)
+  tagline?: string | null;
   accent_color: string | null;
   cover_image: string | null;
   member_count: number;
