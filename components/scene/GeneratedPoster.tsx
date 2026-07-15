@@ -1,14 +1,14 @@
 /**
- * The generated branded fallback poster (doc 37, slice 1): composed from
- * title, category, and venue when an event has no photo — nobody gets
- * punished in discovery for not having a photographer. Replaces the C7
- * monogram slab.
- *
- * Not a photo, so the no-text-over-photos rule does not apply: this is a
- * designed card where the words ARE the poster. Every ground comes from
- * the house pin palette with a deterministic ink that stays legible on it
- * (light grounds take the dark ink, everything else takes cream) — no
- * computed colors, no new hexes.
+ * The generated branded fallback poster (doc 37, slice 1; recomposed per
+ * Liz's slice-1 review): the event TITLE leads in the display serif, the
+ * venue line rides under it, and the CATEGORY never prints on the poster
+ * — category appears exactly once per card, small, as the card-body
+ * kicker (now a standing rule, doc 37 amended). The category still picks
+ * the GROUND: every ground comes from the house pin palette with a
+ * deterministic ink that stays legible on it (light grounds take the
+ * dark ink, everything else takes cream) — no computed colors, no new
+ * hexes. Not a photo, so the no-text-over-photos rule does not apply:
+ * this is a designed card where the words ARE the poster.
  */
 
 import React from 'react';
@@ -37,13 +37,12 @@ interface GeneratedPosterProps {
   height: number;
   /** compact = the small square thumb: ground + initial, no words */
   compact?: boolean;
-  /** hero usage: extra top padding so the words clear the status bar */
+  /** hero usage: extra top padding so the title clears the status bar
+   *  and the floating controls */
   topPadding?: number;
-  /** hero usage: the page shows its own category pill, skip the label */
-  hideCategory?: boolean;
 }
 
-export function GeneratedPoster({ title, category, venue, height, compact, topPadding = 0, hideCategory }: GeneratedPosterProps) {
+export function GeneratedPoster({ title, category, venue, height, compact, topPadding = 0 }: GeneratedPosterProps) {
   const ground = CATEGORY_GROUNDS[category?.toLowerCase() ?? ''] ?? DEFAULT_GROUND;
   if (compact) {
     return (
@@ -56,10 +55,6 @@ export function GeneratedPoster({ title, category, venue, height, compact, topPa
   }
   return (
     <View style={[styles.poster, { backgroundColor: ground.bg, height, paddingTop: POSTER_PADDING + topPadding }]}>
-      {!!category && !hideCategory && (
-        <Text style={[styles.category, { color: ground.ink }]}>{category.toLowerCase()}</Text>
-      )}
-      <View style={styles.spacer} />
       <Text style={[styles.title, { color: ground.ink }]} numberOfLines={3}>
         {title}
       </Text>
@@ -74,13 +69,6 @@ export function GeneratedPoster({ title, category, venue, height, compact, topPa
 
 const styles = StyleSheet.create({
   poster: { width: '100%', padding: POSTER_PADDING },
-  category: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    letterSpacing: 1.5,
-    opacity: 0.85,
-  },
-  spacer: { flex: 1 },
   title: {
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displayMD,

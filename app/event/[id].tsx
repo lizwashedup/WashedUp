@@ -34,6 +34,8 @@ import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 280;
+// the hero's generated title must clear the floating circle controls
+const HERO_CONTROLS_CLEARANCE = 56;
 // social proof threshold (doc 37): under this, never show a raw count
 const GOING_COUNT_THRESHOLD = 5;
 
@@ -447,8 +449,7 @@ export default function EventDetailScreen() {
               category={event.category}
               venue={event.venue}
               height={HERO_HEIGHT}
-              topPadding={insets.top}
-              hideCategory
+              topPadding={insets.top + HERO_CONTROLS_CLEARANCE}
             />
           )}
 

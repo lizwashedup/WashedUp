@@ -37,6 +37,8 @@ import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 
 const RAIL_CARD_WIDTH = 220;
 const RAIL_COVER_HEIGHT = 110;
+// size follows importance: this many lead events render full-size
+const FULL_SIZE_COUNT = 3;
 
 export function SceneDiscovery() {
   const router = useRouter();
@@ -172,11 +174,15 @@ export function SceneDiscovery() {
           </>
         ) : (
           <>
-            {renderFeatured(filtered[0])}
-            {filtered.slice(1, 3).map(renderCompact)}
+            {/* size follows importance, never source (Liz's slice-1 review,
+                now a standing rule): the first few events render full-size
+                whatever put them on; compact is the deeper-feed rhythm, not
+                a tier community events live in. Attribution, not size, marks
+                the source (byline + corner chip). */}
+            {filtered.slice(0, FULL_SIZE_COUNT).map(renderFeatured)}
             {communitiesRail}
-            {filtered.length > 3 && <View style={styles.sectionGap} />}
-            {filtered.slice(3).map(renderCompact)}
+            {filtered.length > FULL_SIZE_COUNT && <View style={styles.sectionGap} />}
+            {filtered.slice(FULL_SIZE_COUNT).map(renderCompact)}
           </>
         )}
 
