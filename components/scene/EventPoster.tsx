@@ -12,7 +12,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { formatEventDateLA } from '../../lib/laDate';
 import { GeneratedPoster } from './GeneratedPoster';
-import type { SceneEvent } from '../../lib/sceneDiscovery';
+import { eventKickerLabel, type SceneEvent } from '../../lib/sceneDiscovery';
 
 const POSTER_RATIO = 0.56;
 const COMPACT_THUMB = 84;
@@ -57,7 +57,7 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
           )}
         </View>
         <View style={styles.compactBody}>
-          {!!e.category && <Text style={styles.posterCategory}>{e.category.toLowerCase()}</Text>}
+          {!!eventKickerLabel(e) && <Text style={styles.posterCategory}>{eventKickerLabel(e)}</Text>}
           <Text style={styles.compactTitle} numberOfLines={2}>{e.title}</Text>
           <Text style={styles.posterMetaCompact} numberOfLines={1}>
             {[
@@ -97,7 +97,7 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
         />
       )}
       <View style={styles.posterBody}>
-        {!!e.category && <Text style={styles.posterCategory}>{e.category.toLowerCase()}</Text>}
+        {!!eventKickerLabel(e) && <Text style={styles.posterCategory}>{eventKickerLabel(e)}</Text>}
         <Text style={styles.posterTitle} numberOfLines={2}>{e.title}</Text>
         <Text style={styles.posterMeta}>
           {[

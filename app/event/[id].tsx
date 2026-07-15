@@ -29,6 +29,7 @@ import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../l
 import { formatEventDateLA } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
+import { eventKickerLabel } from '../../lib/sceneDiscovery';
 import { getLeaderCards } from '../../lib/communityLeader';
 import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 
@@ -491,9 +492,9 @@ export default function EventDetailScreen() {
         </View>
 
         <View style={styles.content}>
-          {event.category && (
+          {!!eventKickerLabel(event) && (
             <View style={[styles.detailCategoryPill, { backgroundColor: Colors.terracotta }]}>
-              <Text style={styles.detailCategoryText}>{event.category.toLowerCase()}</Text>
+              <Text style={styles.detailCategoryText}>{eventKickerLabel(event)}</Text>
             </View>
           )}
 

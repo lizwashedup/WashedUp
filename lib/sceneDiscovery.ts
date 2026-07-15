@@ -132,6 +132,21 @@ export interface DiscoverableCommunity {
   next_event_date: string | null;
 }
 
+/**
+ * The card-label grammar (Liz's law, 2026-07-15): a community event wears
+ * "community"; a standalone listing wears its category; a community event
+ * may ADD its category alongside the community label when the leader
+ * picked one — "community · markets" — the leader's choice, never
+ * required. One rule, every card.
+ */
+export function eventKickerLabel(e: Pick<SceneEvent, 'community_id' | 'category'>): string | null {
+  const cat = e.category?.toLowerCase() ?? null;
+  if (e.community_id) {
+    return cat && cat !== 'community' ? `community · ${cat}` : 'community';
+  }
+  return cat;
+}
+
 export async function getDiscoverableCommunities(): Promise<DiscoverableCommunity[]> {
   const { data, error } = await supabase.rpc('get_discoverable_communities');
   if (error) throw error;
