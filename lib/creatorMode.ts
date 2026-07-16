@@ -346,3 +346,38 @@ export async function getCreatorEvents(
   if (error) throw error;
   return (data ?? []) as CommunityEventRow[];
 }
+
+// -- stage 2: name your community (the creation wiring) -------------------------
+
+/**
+ * The one client door to community creation (create_community RPC, live on
+ * prod: grant-gated definer, born DRAFT, seats the leader membership, seeds
+ * the five starter blocks). The publish control stays the existing
+ * publish-your-page flow; nothing here opens a page.
+ */
+export async function createCommunity(handle: string, name: string): Promise<string> {
+  const { data, error } = await supabase.rpc('create_community', {
+    p_handle: handle,
+    p_name: name,
+    p_description: null,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/**
+ * A starting handle from the community name, matching the DB shape
+ * (^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$): lowercase, hyphens between words,
+ * 3-40 chars. The user edits it freely; validation is the regex below.
+ */
+export function suggestHandle(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/g, '');
+}
+
+export const HANDLE_SHAPE = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;

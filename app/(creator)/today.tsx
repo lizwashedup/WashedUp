@@ -57,6 +57,35 @@ export default function CreatorTodayScreen() {
   // landing route, stale pushes, and deep links.
   if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
 
+  // stage 2 entry state: an approved leader who has not started their
+  // community yet gets the one door (setup-community -> create_community),
+  // never the empty triage cards.
+  if (access && access.hasLeaderGrant && access.ledCommunities.length === 0) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {/* LIZ COPY */}
+          <Text style={styles.kicker}>creator mode</Text>
+          {/* LIZ COPY */}
+          <Text style={styles.title}>you're in.</Text>
+          {/* LIZ COPY */}
+          <Text style={styles.entryText}>
+            your application was approved. first thing: give your community its name and
+            its page. it stays a draft only you can see until you open it.
+          </Text>
+          <TouchableOpacity
+            style={styles.entryBtn}
+            onPress={() => router.push('/creator/setup-community' as never)}
+            activeOpacity={0.85}
+          >
+            {/* LIZ COPY: the locked vocabulary */}
+            <Text style={styles.entryBtnText}>start your community</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -143,6 +172,21 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   cardAttention: { borderColor: Colors.gold, borderWidth: 1.5 },
+  entryText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    lineHeight: 21,
+    color: Colors.secondary,
+    marginBottom: 16,
+  },
+  entryBtn: {
+    backgroundColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  entryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
   cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
 });
