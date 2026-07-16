@@ -26,6 +26,8 @@ export interface CommunityPageEvent {
   event_date: string | null;
   venue: string | null;
   image_url: string | null;
+  // category picks the generated-poster ground when there is no photo
+  category: string | null;
   ticket_price: number | null;
   public_name: string | null;
 }
@@ -55,7 +57,7 @@ export async function getCommunityPage(communityId: string): Promise<CommunityPa
       .order('position', { ascending: true }),
     supabase
       .from('explore_events')
-      .select('id, title, event_date, venue, image_url, ticket_price, public_name')
+      .select('id, title, event_date, venue, image_url, category, ticket_price, public_name')
       .eq('community_id', communityId)
       .eq('status', 'Live')
       .order('event_date', { ascending: true })
