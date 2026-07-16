@@ -56,12 +56,14 @@ export default function NotificationReenableModal({ visible, deniedMode, onEnabl
             contentFit="contain"
           />
 
-          <Text style={styles.heading}>Know the moment someone's in</Text>
+          <Text style={styles.heading}>
+            {deniedMode ? "You're missing the good part" : 'Be there when it comes together'}
+          </Text>
 
           <Text style={styles.body}>
             {deniedMode
-              ? "Notifications are off, so you're missing it when people join your plans. Turn them back on in Settings and we'll keep you posted."
-              : "Turn on notifications and we'll tell you the second someone joins a plan you're in, so you never miss the group coming together."}
+              ? "Notifications are off, so right now you hear about plans after they've already come together. Flip them on in Settings and you'll know the second someone's in."
+              : "Turn on notifications and you'll know the second someone joins a plan you're in. No more hearing the group made moves without you."}
           </Text>
 
           <TouchableOpacity style={styles.primaryButton} onPress={enable} activeOpacity={0.85}>
