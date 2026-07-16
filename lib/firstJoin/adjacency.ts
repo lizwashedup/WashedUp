@@ -23,7 +23,8 @@ const RAW_ADJACENCY: Record<string, string[]> = {
   'DTLA': ['Echo Park', 'Boyle Heights', 'Lincoln Heights', 'Koreatown', 'Huntington Park'],
   'Eagle Rock': ['Highland Park', 'Glassell Park', 'Glendale', 'Pasadena'],
   'East Hollywood': ['Hollywood', 'Los Feliz', 'Silver Lake', 'Koreatown', 'Larchmont'],
-  'Echo Park': ['Silver Lake', 'DTLA', 'Lincoln Heights'],
+  // Koreatown edge approved in review: the Westlake gap does not break practical adjacency.
+  'Echo Park': ['Silver Lake', 'DTLA', 'Lincoln Heights', 'Koreatown'],
   'El Segundo': ['Manhattan Beach', 'Westchester', 'Playa Vista'],
   'Encino': ['Sherman Oaks', 'San Fernando Valley'],
   'Glendale': ['Burbank', 'Atwater Village', 'Eagle Rock', 'Glassell Park', 'Pasadena'],
@@ -53,7 +54,8 @@ const RAW_ADJACENCY: Record<string, string[]> = {
   'Sherman Oaks': ['Studio City', 'Encino', 'North Hollywood', 'San Fernando Valley'],
   'Silver Lake': ['Echo Park', 'Los Feliz', 'Atwater Village', 'East Hollywood'],
   'South Pasadena': ['Pasadena', 'Highland Park'],
-  'Studio City': ['Sherman Oaks', 'North Hollywood', 'Burbank', 'San Fernando Valley'],
+  // Hollywood edge approved in review: the Cahuenga pass connects the two in practice.
+  'Studio City': ['Sherman Oaks', 'North Hollywood', 'Burbank', 'San Fernando Valley', 'Hollywood'],
   'Torrance': ['Redondo Beach', 'Long Beach'],
   'Venice': ['Santa Monica', 'Mar Vista', 'Marina Del Rey'],
   'West Adams': ['Mid-City', 'Culver City', 'Inglewood'],

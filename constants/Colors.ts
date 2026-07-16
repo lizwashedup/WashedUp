@@ -145,6 +145,14 @@ const brand = {
   surveyScrim: 'rgba(44,24,16,0.42)',            // darkWarm @ 42%, warm dim behind the post-plan survey sheet (never system gray-black)
   surveyChipFill: 'rgba(197,165,90,0.28)',       // gold #C5A55A @ 28%, the "added"/"made" fill on survey keep chips + attendance tag (reads filled, not outlined)
   surveyQuietBg: '#F5EDDD',                       // creamWarm, light inline toast for quiet request-sent / failure lines (dark card stays exclusive to mutual celebrations)
+
+  // ── First-join system (spec b1/b4) ───────────────────────────────────────
+  // The ONE permitted green in the app: the factual "past the minimum" pill on
+  // first-join surfaces, per spec b4. Gold stays the success/affirmation color
+  // everywhere else; do not reach for this green on any other surface.
+  pastMinimumGreen: '#2E7D32',
+  pastMinimumGreenTint: 'rgba(46,125,50,0.12)',   // pill fill behind the green text
+  spotsLeftGoldFill: 'rgba(197,165,90,0.22)',     // gold #C5A55A tint: honest-scarcity pill fill (glow, not alarm; never red)
 } as const;
 
 // ── Interest category accent colors (phone auth onboarding) ───────────────
