@@ -97,7 +97,7 @@ export default function FirstWeekStep() {
           <ActivityIndicator color={Colors.terracotta} />
         </View>
       ) : (
-        <YourFirstWeekScreen userId={gate.userId} onWishlist={handleWishlist} onLater={handleLater} />
+        <YourFirstWeekScreen userId={gate.userId} onWishlist={handleWishlist} onLater={handleLater} onBack={handleLater} />
       )}
       {saveFailed && (
         <BrandedAlert

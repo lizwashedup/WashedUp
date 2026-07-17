@@ -4,10 +4,14 @@
  */
 
 export const FirstJoinDesign = {
-  // Card shell (white card, tight rhythm: the card must read in two seconds)
+  // Card shell (white card, tight rhythm: the card must read in two seconds;
+  // the whole card is tappable, and 3 cards + header + footer must fit one
+  // 6.1" screen with no scrolling)
   cardRadius: 20, // rounded-2xl
-  cardPadding: 14,
-  cardGap: 12, // image column to text column, and content to button
+  cardPadding: 16,
+  imageTextGap: 12, // image column to text column
+  contentRowGap: 8, // between text rows (fit-reduced from 10 per the fit rule)
+  buttonTopGap: 12, // content block to button
   cardShadowOpacity: 0.16, // one soft warm shadow (Colors.warmShadow carries the tint)
   cardShadowRadius: 12,
   cardShadowOffsetY: 4,
@@ -15,8 +19,8 @@ export const FirstJoinDesign = {
 
   // Plan image (left) and its imageless fallback: the brand three-wave
   // element, terracotta on the warm block, centered, ~40% of block width.
-  imageSize: 84,
-  imageRadius: 14,
+  imageSize: 56,
+  imageRadius: 12,
   brandWavesWidthRatio: 0.4,
   brandWavesAspect: 400 / 227, // washedup-waves.png intrinsic w/h
 
@@ -25,7 +29,7 @@ export const FirstJoinDesign = {
   emptyMarkAspect: 384 / 512, // washedup-mark.png intrinsic w/h
 
   // Creator row
-  creatorAvatarSize: 24,
+  creatorAvatarSize: 18,
   creatorRowGap: 8,
 
   // Facts row ("{n} going" + gold scarcity pill when true)
@@ -35,31 +39,45 @@ export const FirstJoinDesign = {
   pillPaddingV: 4,
   pillIconSize: 12,
 
-  // CTA: rounded-xl block button per the approved reference (NOT a stadium
-  // pill), ~52pt tall, DM Sans 600. Warm shadow 0 2px 8px terracotta @ 30%.
-  buttonRadius: 14,
-  buttonHeight: 52,
+  // CTA: 44pt tall (Apple HIG minimum touch target), borderRadius 12,
+  // DM Sans 600 at 15, inset from card edges by the card padding.
+  // Warm shadow 0 2px 8px terracotta @ 30%.
+  buttonRadius: 12,
+  buttonHeight: 44,
+  buttonFontSize: 15,
   ctaShadowOpacity: 0.3,
   ctaShadowRadius: 8,
   ctaShadowOffsetY: 2,
 
+  // Card type scale (tight but legible; title stays the loudest element)
+  titleSize: 16,
+  titleLineHeight: 20,
+  creatorTextSize: 13,
+  creatorTextLineHeight: 18,
+  metaTextSize: 12,
+  metaTextLineHeight: 16,
+  factsTextSize: 13,
+  factsTextLineHeight: 17,
+
   // Small gaps
-  contentGap: 4, // between title / creator / meta lines
   pillIconGap: 3, // check icon to pill label
   avatarRingWidth: 1.5, // parchment ring separating clustered faces
 
-  // Screen
+  // Screen (everything from header to wishlist link fits 390x844 unscrolled)
   screenPaddingH: 20,
-  screenGap: 16, // between stacked cards
+  screenGap: 10, // between stacked cards
   headlineSize: 32, // Cormorant italic, spec b3
-  headlineLineHeight: 40,
+  headlineLineHeight: 38,
+  headlineTopGap: 2,
+  sublineSize: 12,
+  sublineLineHeight: 16,
   psCaptionSize: 12, // DM Sans 12, spec b3 caption line
-  sublineTopGap: 8,
-  sectionTopGap: 24,
-  captionTopGap: 20,
-  ghostTopGap: 12,
-  laterTopGap: 16,
-  laterBottomGap: 32,
+  sublineTopGap: 4,
+  sectionTopGap: 12,
+  captionTopGap: 10,
+  ghostTopGap: 4,
+  laterTopGap: 2,
+  laterBottomGap: 8,
 
   // Confirmation screen
   checkBadgeSize: 28,

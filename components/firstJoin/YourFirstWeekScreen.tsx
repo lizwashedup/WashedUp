@@ -1,7 +1,8 @@
 /**
  * YourFirstWeek: the final onboarding surface (spec a2/b3). Shows exactly
  * three plans from the ranking service; the primary action navigates to the
- * plan detail page (never auto-joins). Skippable via "later", never blocking.
+ * plan detail page (never auto-joins). Skippable via the header back arrow,
+ * never blocking.
  *
  * Step 2 scope: the screen itself, mounted behind /dev/first-join only.
  * Onboarding wiring, the wishlist write, and real impression logging are
@@ -18,6 +19,7 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { FIRST_JOIN_COPY as COPY } from '../../lib/firstJoin/copy';
 import { logFirstJoinPrompt } from '../../lib/firstJoin/logImpressions';
 import { useFirstJoinCandidates } from '../../hooks/useFirstJoinCandidates';
+import ProgressHead from '../onboarding/ProgressHead';
 import { FirstJoinPlanCard, FirstJoinCardPlan } from './FirstJoinPlanCard';
 
 // Full W-over-waves mark, pixel-exact from the official branding export
@@ -30,6 +32,8 @@ interface YourFirstWeekScreenProps {
   onWishlist?: () => void;
   /** Skip link. Stub until step 2b. */
   onLater?: () => void;
+  /** Header back arrow; same non-blocking exit as "later". */
+  onBack?: () => void;
   /** Dev-harness override: render these plans instead of live data. */
   overridePlans?: FirstJoinCardPlan[];
   /** Dev-harness override: force the empty/fallback state. */
@@ -40,6 +44,7 @@ export function YourFirstWeekScreen({
   userId,
   onWishlist,
   onLater,
+  onBack,
   overridePlans,
   overrideEmpty,
 }: YourFirstWeekScreenProps) {
@@ -75,14 +80,19 @@ export function YourFirstWeekScreen({
     onWishlist?.();
   };
 
-  const handleLater = () => {
+  // The header back arrow is the skip affordance (founder design pass 7-16
+  // dropped the "later" text link); it logs the same 'later' action.
+  const handleBack = () => {
     if (userId) logFirstJoinPrompt({ userId, shownEventIds: plans.map((p) => p.id), action: 'later' });
-    onLater?.();
+    (onBack ?? onLater)?.();
   };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* Final onboarding step: a nearly-done progress bar pulls the last
+            action along (goal-gradient); back is the same non-blocking exit. */}
+        <ProgressHead step={5} totalSteps={5} onBack={handleBack} />
         <Text style={styles.headline}>{COPY.headline}</Text>
         <Text style={styles.subline}>{COPY.subline}</Text>
 
@@ -128,11 +138,6 @@ export function YourFirstWeekScreen({
           </>
         )}
 
-        {!loading && (
-          <Pressable onPress={handleLater} testID="first-join-later">
-            <Text style={styles.laterText}>{COPY.later}</Text>
-          </Pressable>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -153,12 +158,12 @@ const styles = StyleSheet.create({
     fontSize: D.headlineSize,
     lineHeight: D.headlineLineHeight,
     color: Colors.terracotta,
-    marginTop: D.sectionTopGap,
+    marginTop: D.headlineTopGap,
   },
   subline: {
     fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    lineHeight: LineHeights.bodyMD,
+    fontSize: D.sublineSize,
+    lineHeight: D.sublineLineHeight,
     color: Colors.secondary,
     marginTop: D.sublineTopGap,
   },
@@ -187,14 +192,6 @@ const styles = StyleSheet.create({
   },
   ghostButtonPressed: {
     color: Colors.brandPressed,
-  },
-  laterText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.warmGray,
-    textAlign: 'center',
-    marginTop: D.laterTopGap,
-    paddingVertical: D.sublineTopGap,
   },
   emptyCenterer: {
     flex: 1,
@@ -250,7 +247,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontFamily: Fonts.sansSemibold,
-    fontSize: FontSizes.bodyMD,
+    fontSize: D.buttonFontSize,
     color: Colors.cream,
   },
   emptyCtaSpacing: {

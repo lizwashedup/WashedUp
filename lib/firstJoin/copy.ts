@@ -30,8 +30,6 @@ export const FIRST_JOIN_COPY = {
   psCaption: "ps. most people come alone. that's the point.",
   /** Text-only wishlist capture button under the cards. */
   wishlistPrompt: 'tell me when something opens near me',
-  /** Small skip link. Never block. */
-  later: 'later',
 
   // ── Empty / fallback state ─────────────────────────────────────────────────
   emptyBody: 'plans near you are filling up. want a tap on the shoulder when one opens?',

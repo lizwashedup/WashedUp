@@ -197,7 +197,7 @@ export default function OnboardingPhotoScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <View style={styles.container}>
-        <ProgressHead step={4} totalSteps={4} onBack={() => router.replace('/onboarding/referral')} />
+        <ProgressHead step={4} totalSteps={5} onBack={() => router.replace('/onboarding/referral')} />
 
         <View style={styles.gap20} />
         <Text style={styles.heading}>

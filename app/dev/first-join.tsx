@@ -112,6 +112,7 @@ export default function FirstJoinDevScreen() {
           // goes where the real screen goes (needs a signed-in session to land).
           onWishlist={() => router.push('/dev/first-join?state=confirm' as never)}
           onLater={() => router.replace('/(tabs)/explore')}
+          onBack={() => router.replace('/(tabs)/explore')}
         />
       </>
     );

@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cardBg,
     borderRadius: D.cardRadius,
     padding: D.cardPadding,
-    gap: D.cardGap,
+    gap: D.imageTextGap,
     marginTop: D.sectionTopGap,
     shadowColor: Colors.warmShadow,
     shadowOpacity: D.cardShadowOpacity,
@@ -221,7 +221,7 @@ const styles = StyleSheet.create({
   },
   ctaText: {
     fontFamily: Fonts.sansSemibold,
-    fontSize: FontSizes.bodyLG,
+    fontSize: D.buttonFontSize,
     color: Colors.cream,
   },
   footer: {
