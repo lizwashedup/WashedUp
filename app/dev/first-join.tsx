@@ -15,7 +15,7 @@
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect, Stack, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
 import Colors from '../../constants/Colors';
 import { FirstJoinDesign as D } from '../../constants/FirstJoinDesign';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -91,8 +91,10 @@ export default function FirstJoinDevScreen() {
         <WishlistConfirmation
           neighborhood="Echo Park"
           vibeTags={['Music', 'Outdoors', 'Food']}
-          onContinue={() => console.log('[firstJoin dev] continue tap (stub)')}
-          onEditPreferences={() => console.log('[firstJoin dev] edit preferences tap (stub)')}
+          // Same destinations as the real first-week-confirm route, so the
+          // harness demonstrates the flow (needs a signed-in session to land).
+          onContinue={() => router.replace('/(tabs)/explore')}
+          onEditPreferences={() => router.push('/(tabs)/profile' as never)}
         />
       </>
     );
@@ -106,8 +108,10 @@ export default function FirstJoinDevScreen() {
           userId={state === 'live' ? liveUserId : 'dev-harness-user'}
           overridePlans={state === 'screen' ? FIXTURE_PLANS : undefined}
           overrideEmpty={state === 'empty'}
-          onWishlist={() => console.log('[firstJoin dev] wishlist tap (stub)')}
-          onLater={() => console.log('[firstJoin dev] later tap (stub)')}
+          // Harness never writes: wishlist tap shows the confirm preview, later
+          // goes where the real screen goes (needs a signed-in session to land).
+          onWishlist={() => router.push('/dev/first-join?state=confirm' as never)}
+          onLater={() => router.replace('/(tabs)/explore')}
         />
       </>
     );
