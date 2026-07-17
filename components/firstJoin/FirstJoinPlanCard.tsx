@@ -144,18 +144,25 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
           </View>
         )}
         <Text style={styles.goingText}>{COPY.going(plan.memberCount)}</Text>
-        {showSpotsPill && spotsLeft !== null && (
-          <View style={styles.spotsPill}>
-            <Text style={styles.spotsPillText}>{COPY.spotsLeft(spotsLeft)}</Text>
-          </View>
-        )}
-        {pastMinimum && (
-          <View style={styles.minimumPill}>
-            <Ionicons name="checkmark" size={D.pillIconSize} color={Colors.pastMinimumGreen} />
-            <Text style={styles.minimumPillText}>{COPY.pastMinimum}</Text>
-          </View>
-        )}
       </View>
+
+      {/* Pills always live on their own row below the proof row (review ruling:
+          one rule, every card, every width; no conditional wrapping). */}
+      {(showSpotsPill || pastMinimum) && (
+        <View style={styles.pillRow}>
+          {showSpotsPill && spotsLeft !== null && (
+            <View style={styles.spotsPill}>
+              <Text style={styles.spotsPillText}>{COPY.spotsLeft(spotsLeft)}</Text>
+            </View>
+          )}
+          {pastMinimum && (
+            <View style={styles.minimumPill}>
+              <Ionicons name="checkmark" size={D.pillIconSize} color={Colors.pastMinimumGreen} />
+              <Text style={styles.minimumPillText}>{COPY.pastMinimum}</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Bare Pressable, fill on the inner View (Pressable pills don't paint reliably). */}
       <Pressable onPress={handleLetsGo} testID={`first-join-lets-go-${plan.id}`}>
@@ -251,7 +258,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: D.proofRowGap,
-    flexWrap: 'wrap',
+  },
+  pillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: D.proofRowGap,
   },
   avatarCluster: {
     flexDirection: 'row',

@@ -39,4 +39,22 @@ export const FIRST_JOIN_COPY = {
   emptyBody: 'plans near you are filling up. want a tap on the shoulder when one opens?',
   /** Single terracotta button on the empty state: same wishlist capture action. */
   emptyCta: 'tell me when something opens near me',
+
+  // ── Wishlist confirmation screen ───────────────────────────────────────────
+  confirmHeadline: "you're on the list",
+  confirmSubline: "we'll tap you on the shoulder when something opens near you.",
+  /** Section label on the "watching for" card. */
+  watchingFor: 'watching for',
+  /** Chip next to the neighborhood name. */
+  nearby: 'nearby',
+  /** Fallback when the profile has no neighborhood. */
+  watchingAnywhere: 'anywhere in la',
+  editPreferences: 'edit preferences',
+  confirmCta: 'take me to scene',
+  confirmFooter: 'you can change this anytime in notifications',
+
+  // ── Wishlist save failure (facts only: never confirm an unsaved list) ──────
+  saveFailedTitle: "couldn't save that",
+  saveFailedBody: 'something went wrong on our end. try again in a moment.',
+  saveFailedOk: 'ok',
 } as const;

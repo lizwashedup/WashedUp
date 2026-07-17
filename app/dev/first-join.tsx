@@ -3,10 +3,11 @@
  * any user flow; onboarding wiring is step 2b after visual sign-off.
  *
  * States via query param:
- *   /dev/first-join              → fixture cards alone (card review)
- *   /dev/first-join?state=screen → YourFirstWeek screen on fixture data
- *   /dev/first-join?state=empty  → YourFirstWeek empty/fallback state
- *   /dev/first-join?state=live   → YourFirstWeek screen on live data
+ *   /dev/first-join               → fixture cards alone (card review)
+ *   /dev/first-join?state=screen  → YourFirstWeek screen on fixture data
+ *   /dev/first-join?state=empty   → YourFirstWeek empty/fallback state
+ *   /dev/first-join?state=confirm → wishlist confirmation on fixture data
+ *   /dev/first-join?state=live    → YourFirstWeek screen on live data
  *
  * Fixture avatar/plan imagery is dev-harness-only placeholder (never ships);
  * production surfaces render real user photos per spec b5.
@@ -19,6 +20,7 @@ import Colors from '../../constants/Colors';
 import { FirstJoinDesign as D } from '../../constants/FirstJoinDesign';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { FirstJoinPlanCard, FirstJoinCardPlan } from '../../components/firstJoin/FirstJoinPlanCard';
+import { WishlistConfirmation } from '../../components/firstJoin/WishlistConfirmation';
 import { YourFirstWeekScreen } from '../../components/firstJoin/YourFirstWeekScreen';
 import { supabase } from '../../lib/supabase';
 
@@ -91,6 +93,20 @@ export default function FirstJoinDevScreen() {
   }, [state]);
 
   if (!__DEV__) return <Redirect href="/(tabs)/plans" />;
+
+  if (state === 'confirm') {
+    return (
+      <>
+        <Stack.Screen options={{ headerShown: false }} />
+        <WishlistConfirmation
+          neighborhood="Echo Park"
+          vibeTags={['Music', 'Outdoors', 'Food']}
+          onContinue={() => console.log('[firstJoin dev] continue tap (stub)')}
+          onEditPreferences={() => console.log('[firstJoin dev] edit preferences tap (stub)')}
+        />
+      </>
+    );
+  }
 
   if (state === 'screen' || state === 'empty' || state === 'live') {
     return (

@@ -178,7 +178,10 @@ export default function OnboardingPhotoScreen() {
       // Push permission is no longer cold-fired here. The root pre-permission
       // primer (app/_layout.tsx) shows a context screen first, and covers
       // existing users / reinstalls / new-device installs, not just this step.
-      router.replace('/(tabs)/plans');
+      // Onboarding ends on a join prompt, not a browse: the final step shows
+      // three joinable plans (first-join spec a2). ?from=onboarding is the
+      // gate; only this transition may mount it.
+      router.replace('/onboarding/first-week?from=onboarding');
     } catch (e: unknown) {
       setAlertInfo({
         title: 'upload failed',

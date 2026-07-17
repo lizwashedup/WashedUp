@@ -52,8 +52,14 @@ export function YourFirstWeekScreen({
     const key = plans.map((p) => p.id).join(',');
     if (loggedKeyRef.current === key) return;
     loggedKeyRef.current = key;
-    logFirstJoinPrompt({ userId, shownEventIds: plans.map((p) => p.id), action: 'shown' });
-  }, [userId, loading, plans]);
+    logFirstJoinPrompt({
+      userId,
+      shownEventIds: plans.map((p) => p.id),
+      action: 'shown',
+      tier: query.data?.tier,
+      scoreBreakdowns: query.data?.scoreSnapshots,
+    });
+  }, [userId, loading, plans, query.data]);
 
   const handleCardTap = (planId: string) => {
     if (!userId) return;
@@ -83,18 +89,20 @@ export function YourFirstWeekScreen({
         )}
 
         {!loading && empty && (
-          <View style={styles.emptyWrap} testID="first-join-empty">
-            <View style={styles.emptyIconCircle}>
-              <Ionicons name="notifications-outline" size={D.emptyIconSize} color={Colors.terracotta} />
+          <View style={styles.emptyCenterer} testID="first-join-empty">
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="notifications-outline" size={D.emptyIconSize} color={Colors.terracotta} />
+              </View>
+              <Text style={styles.emptyBody}>{COPY.emptyBody}</Text>
+              <Pressable onPress={handleWishlist} testID="first-join-empty-cta">
+                {({ pressed }) => (
+                  <View style={[styles.primaryButton, styles.emptyCtaSpacing, pressed && styles.primaryButtonPressed]}>
+                    <Text style={styles.primaryButtonText}>{COPY.emptyCta}</Text>
+                  </View>
+                )}
+              </Pressable>
             </View>
-            <Text style={styles.emptyBody}>{COPY.emptyBody}</Text>
-            <Pressable onPress={handleWishlist} testID="first-join-empty-cta">
-              {({ pressed }) => (
-                <View style={[styles.primaryButton, styles.emptyCtaSpacing, pressed && styles.primaryButtonPressed]}>
-                  <Text style={styles.primaryButtonText}>{COPY.emptyCta}</Text>
-                </View>
-              )}
-            </Pressable>
           </View>
         )}
 
@@ -132,6 +140,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cream,
   },
   scroll: {
+    flexGrow: 1, // lets the empty state center vertically in the viewport
     paddingHorizontal: D.screenPaddingH,
     paddingBottom: D.laterBottomGap,
   },
@@ -183,9 +192,20 @@ const styles = StyleSheet.create({
     marginTop: D.laterTopGap,
     paddingVertical: D.sublineTopGap,
   },
-  emptyWrap: {
+  emptyCenterer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  emptyCard: {
     alignItems: 'center',
-    marginTop: D.emptyTopGap,
+    backgroundColor: Colors.cardBg,
+    borderRadius: D.cardRadius,
+    padding: D.emptyCardPadding,
+    shadowColor: Colors.warmShadow,
+    shadowOpacity: D.cardShadowOpacity,
+    shadowRadius: D.cardShadowRadius,
+    shadowOffset: { width: 0, height: D.cardShadowOffsetY },
+    elevation: D.cardElevationAndroid,
   },
   emptyIconCircle: {
     width: D.emptyIconCircle,

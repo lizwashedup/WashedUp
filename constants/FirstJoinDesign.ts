@@ -62,7 +62,15 @@ export const FirstJoinDesign = {
   laterTopGap: 16,
   laterBottomGap: 32,
 
+  // Confirmation screen
+  checkBadgeSize: 28,
+  checkBadgeIconSize: 16,
+  checkBadgeOffset: 2,
+  watchingIconSize: 16,
+  watchingLabelSpacing: 1.5, // house section-header letter spacing
+
   // Empty state
+  emptyCardPadding: 28,
   emptyIconCircle: 96,
   emptyIconSize: 40,
   emptyTopGap: 64,

@@ -1,15 +1,27 @@
 /**
  * Impression/choice logging for first-join surfaces (spec a2): each showing of
- * the three cards should write user_id + shown_event_ids + action to a
- * `first_join_prompts` table so conversion per ranking weight is measurable.
+ * the three cards writes user_id + shown_event_ids + action (plus the fallback
+ * tier and per-weight score breakdowns) to first_join_prompts, so conversion
+ * per ranking weight is measurable.
  *
- * STUB: `first_join_prompts` does not exist on prod yet (verified 2026-07-16)
- * and migrations are gated. This no-ops until the table ships in step 2b with
- * an approved migration; the call sites are already wired so flipping this on
- * is a one-file change.
+ * STUB, shaped to the final schema in
+ * supabase/migrations/20260716000100_first_join_prompts_and_area_wishlists.sql
+ * (awaiting approval; NOT applied). Once it lands, flip
+ * FIRST_JOIN_PROMPTS_TABLE_READY to true: that is the whole swap.
  */
+import { supabase } from '../supabase';
+import type { FirstJoinScoreBreakdown, FirstJoinTier } from './types';
+
+/** Flip to true once the gated first_join_prompts migration is applied. */
+export const FIRST_JOIN_PROMPTS_TABLE_READY = false;
 
 export type FirstJoinPromptAction = 'shown' | 'card_tap' | 'wishlist' | 'later' | 'rebook_offer';
+
+export interface FirstJoinScoreSnapshot {
+  event_id: string;
+  score: number;
+  breakdown: FirstJoinScoreBreakdown;
+}
 
 export interface FirstJoinPromptLog {
   userId: string;
@@ -17,11 +29,26 @@ export interface FirstJoinPromptLog {
   action: FirstJoinPromptAction;
   /** The tapped plan, when the action is card_tap. */
   eventId?: string;
+  /** Which fallback tier produced the card set. */
+  tier?: FirstJoinTier;
+  /** Per-weight contributions as computed at render time. */
+  scoreBreakdowns?: FirstJoinScoreSnapshot[];
 }
 
 export async function logFirstJoinPrompt(entry: FirstJoinPromptLog): Promise<void> {
-  if (__DEV__) {
-    console.log('[firstJoin] prompt log (stub, table pending migration):', entry);
+  if (!FIRST_JOIN_PROMPTS_TABLE_READY) {
+    if (__DEV__) {
+      console.log('[firstJoin] prompt log (stub, migration pending):', entry);
+    }
+    return;
   }
-  // Intentionally a no-op in production until first_join_prompts exists.
+  const { error } = await supabase.from('first_join_prompts').insert({
+    user_id: entry.userId,
+    shown_event_ids: entry.shownEventIds,
+    action: entry.action,
+    event_id: entry.eventId ?? null,
+    tier: entry.tier ?? null,
+    score_breakdowns: entry.scoreBreakdowns ?? null,
+  });
+  if (error) console.warn('[firstJoin] prompt log failed:', error.message);
 }

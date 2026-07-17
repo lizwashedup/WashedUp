@@ -9,6 +9,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getFirstJoinCandidates } from '../lib/firstJoin';
 import type { FirstJoinTier } from '../lib/firstJoin';
+import type { FirstJoinScoreSnapshot } from '../lib/firstJoin/logImpressions';
 import { supabase } from '../lib/supabase';
 import type { FirstJoinCardPlan } from '../components/firstJoin/FirstJoinPlanCard';
 
@@ -16,6 +17,8 @@ export interface FirstJoinFeed {
   plans: FirstJoinCardPlan[];
   tier: FirstJoinTier;
   showWishlistPrompt: boolean;
+  /** Per-weight contributions at render time, for first_join_prompts logging. */
+  scoreSnapshots: FirstJoinScoreSnapshot[];
 }
 
 async function fetchAttendeePhotos(eventIds: string[]): Promise<Record<string, { profile_photo_url: string | null }[]>> {
@@ -69,7 +72,13 @@ export function useFirstJoinCandidates(userId: string | null) {
         attendees: attendeesByEvent[c.event.id] ?? [],
       }));
 
-      return { plans, tier: result.tier, showWishlistPrompt: result.showWishlistPrompt };
+      const scoreSnapshots: FirstJoinScoreSnapshot[] = result.candidates.map((c) => ({
+        event_id: c.event.id,
+        score: c.score,
+        breakdown: c.breakdown,
+      }));
+
+      return { plans, tier: result.tier, showWishlistPrompt: result.showWishlistPrompt, scoreSnapshots };
     },
   });
 }
