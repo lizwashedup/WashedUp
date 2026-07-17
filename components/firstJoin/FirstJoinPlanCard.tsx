@@ -46,25 +46,10 @@ interface FirstJoinPlanCardProps {
   onLetsGo?: (planId: string) => void;
 }
 
-// Lowercase-keyed vibe → on-brand line icon for the no-image fallback (spec b1:
-// vibe illustration on the warm empty-state ground, never big platform emoji).
-const VIBE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  music: 'musical-notes-outline',
-  food: 'restaurant-outline',
-  art: 'color-palette-outline',
-  outdoors: 'leaf-outline',
-  comedy: 'happy-outline',
-  film: 'film-outline',
-  fitness: 'barbell-outline',
-  nightlife: 'moon-outline',
-  wellness: 'flower-outline',
-  books: 'book-outline',
-  sports: 'basketball-outline',
-  gaming: 'game-controller-outline',
-  tech: 'hardware-chip-outline',
-  business: 'briefcase-outline',
-};
-const VIBE_ICON_FALLBACK: keyof typeof Ionicons.glyphMap = 'sparkles-outline';
+// Imageless plans show the brand's three-wave element (founder decision 7-16:
+// no per-vibe icon art). Pixel-exact crop from the official branding export;
+// provenance in assets/images/brand/README.md.
+const BRAND_WAVES = require('../../assets/images/brand/washedup-waves.png');
 
 export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
   const router = useRouter();
@@ -80,7 +65,6 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
   // Honest scarcity only: nearly full AND already past its bar (spec a3/b2).
   const showSpotsPill = spotsLeft !== null && spotsLeft > 0 && spotsLeft <= SPOTS_PILL_MAX && pastMinimum;
 
-  const vibeIcon = VIBE_ICONS[plan.primary_vibe?.toLowerCase() ?? ''] ?? VIBE_ICON_FALLBACK;
   const creatorName = plan.creatorName?.toLowerCase() ?? null;
 
   return (
@@ -91,7 +75,7 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
           <Image source={{ uri: plan.image_url }} style={styles.planImage} contentFit="cover" cachePolicy="memory-disk" />
         ) : (
           <View style={styles.vibeFallback}>
-            <Ionicons name={vibeIcon} size={D.vibeIconSize} color={Colors.terracotta} />
+            <Image source={BRAND_WAVES} style={styles.brandWaves} contentFit="contain" />
           </View>
         )}
 
@@ -169,6 +153,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.emptyIconBg,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  brandWaves: {
+    width: D.imageSize * D.brandWavesWidthRatio,
+    height: (D.imageSize * D.brandWavesWidthRatio) / D.brandWavesAspect,
   },
   content: {
     flex: 1,

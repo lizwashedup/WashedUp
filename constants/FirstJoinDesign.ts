@@ -13,10 +13,16 @@ export const FirstJoinDesign = {
   cardShadowOffsetY: 4,
   cardElevationAndroid: 3,
 
-  // Plan image (left) and its vibe-illustration fallback
+  // Plan image (left) and its imageless fallback: the brand three-wave
+  // element, terracotta on the warm block, centered, ~40% of block width.
   imageSize: 84,
   imageRadius: 14,
-  vibeIconSize: 30,
+  brandWavesWidthRatio: 0.4,
+  brandWavesAspect: 400 / 227, // washedup-waves.png intrinsic w/h
+
+  // Empty state: the full W-over-waves mark inside the icon circle.
+  emptyMarkHeight: 52,
+  emptyMarkAspect: 384 / 512, // washedup-mark.png intrinsic w/h
 
   // Creator row
   creatorAvatarSize: 24,

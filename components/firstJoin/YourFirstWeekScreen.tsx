@@ -11,7 +11,7 @@
 import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import Colors from '../../constants/Colors';
 import { FirstJoinDesign as D } from '../../constants/FirstJoinDesign';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
@@ -19,6 +19,10 @@ import { FIRST_JOIN_COPY as COPY } from '../../lib/firstJoin/copy';
 import { logFirstJoinPrompt } from '../../lib/firstJoin/logImpressions';
 import { useFirstJoinCandidates } from '../../hooks/useFirstJoinCandidates';
 import { FirstJoinPlanCard, FirstJoinCardPlan } from './FirstJoinPlanCard';
+
+// Full W-over-waves mark, pixel-exact from the official branding export
+// (provenance: assets/images/brand/README.md).
+const BRAND_MARK = require('../../assets/images/brand/washedup-mark.png');
 
 interface YourFirstWeekScreenProps {
   userId: string | null;
@@ -92,7 +96,7 @@ export function YourFirstWeekScreen({
           <View style={styles.emptyCenterer} testID="first-join-empty">
             <View style={styles.emptyCard}>
               <View style={styles.emptyIconCircle}>
-                <Ionicons name="notifications-outline" size={D.emptyIconSize} color={Colors.terracotta} />
+                <Image source={BRAND_MARK} style={styles.emptyMark} contentFit="contain" />
               </View>
               <Text style={styles.emptyBody}>{COPY.emptyBody}</Text>
               <Pressable onPress={handleWishlist} testID="first-join-empty-cta">
@@ -214,6 +218,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.emptyIconBg,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  emptyMark: {
+    height: D.emptyMarkHeight,
+    width: D.emptyMarkHeight * D.emptyMarkAspect,
   },
   emptyBody: {
     fontFamily: Fonts.sans,
