@@ -16,6 +16,7 @@ import { withTimeout } from '../../lib/withTimeout';
 import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
 import SunriseIcon from '../../components/yours/icons/SunriseIcon';
 import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
+import { SCENE_STAGE, getSeenSceneStage, SCENE_BADGE_KEY } from '../../lib/sceneStage';
 
 function PostTabIcon() {
   return (
@@ -177,6 +178,15 @@ export default function TabLayout() {
     refetchInterval: 60_000,
   });
 
+  // Scene stage dot: shows when a new coming-soon stage lands via OTA,
+  // clears on the first Scene open (stamped by ScenePage's focus effect,
+  // which invalidates this key). Local-only, so no userId gate or poll.
+  const { data: sceneStageUnseen = false } = useQuery({
+    queryKey: SCENE_BADGE_KEY,
+    queryFn: async () => (await getSeenSceneStage()) < SCENE_STAGE,
+    staleTime: Infinity,
+  });
+
   return (
     <Tabs
       screenOptions={{
@@ -220,7 +230,12 @@ export default function TabLayout() {
         options={{
           title: 'Scene',
           tabBarLabel: 'Scene',
-          tabBarIcon: ({ color }) => <Ionicons name="compass-outline" size={26} color={color} />,
+          tabBarIcon: ({ color }) => (
+            <View>
+              <Ionicons name="compass-outline" size={26} color={color} />
+              {sceneStageUnseen && <View style={styles.sceneStageDot} />}
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
@@ -293,6 +308,17 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
+  // Same anatomy as inviteDot below: the house tab-corner notification dot
+  // (CLAUDE.md: badge dots are the primary accent).
+  sceneStageDot: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.terracotta,
+  },
   inviteDot: {
     position: 'absolute',
     top: -2,

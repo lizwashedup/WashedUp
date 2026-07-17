@@ -73,6 +73,46 @@ export function getLADayParts(when: Date | string | number): { y: number; m: num
   return { y: get('year'), m: get('month') - 1, d: get('day') };
 }
 
+// LA wall-clock parts (day AND time) for any instant. The rehydrate side of
+// laWallTimeToUTC: a stored start_time comes back as the LA calendar day and
+// LA clock time it was composed from, regardless of the device timezone.
+// Reading the day from the UTC side of a timestamp shifts any 5pm-or-later
+// LA time one day forward (the draft/prefill date-shift bug).
+export function getLAWallParts(
+  when: Date | string | number,
+): { y: number; m: number; d: number; hour24: number; minute: number } | null {
+  const date = new Date(when);
+  if (isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', hour12: false,
+  }).formatToParts(date);
+  const get = (k: 'year' | 'month' | 'day' | 'hour' | 'minute') =>
+    Number(parts.find((p) => p.type === k)!.value);
+  return {
+    y: get('year'), m: get('month') - 1, d: get('day'),
+    // Intl reports midnight as 24 with hour12: false on some engines.
+    hour24: get('hour') % 24, minute: get('minute'),
+  };
+}
+
+// A full timestamp on the LA clock, warm and short: "Jul 11, 6:03 pm".
+// Replaces bare toLocaleString() (device zone, device locale, seconds).
+export function formatTimestampLA(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const parsed = new Date(iso);
+  if (isNaN(parsed.getTime())) return '';
+  return parsed
+    .toLocaleString('en-US', {
+      timeZone: 'America/Los_Angeles',
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
+    // the space before AM/PM can be a narrow no-break space, so match bare
+    .replace('AM', 'am')
+    .replace('PM', 'pm');
+}
+
 // Stable key for a calendar day (LA), for marked-day sets + selection compares.
 export function dayKey(y: number, m: number, d: number): string {
   return `${y}-${m}-${d}`;
@@ -101,4 +141,26 @@ export function buildMonthGrid(year: number, month: number): (number | null)[][]
   const rows: (number | null)[][] = [];
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
   return rows;
+}
+
+/**
+ * Format a date-only string (YYYY-MM-DD, the explore_events.event_date shape)
+ * pinned to Los Angeles regardless of the device timezone. Anchors the day at
+ * UTC noon (always the same calendar day in LA) and formats with an explicit
+ * LA timeZone, so a date-only value can never render off by one. Full ISO
+ * timestamps format directly in LA time. The web/RN parity lane hit the same
+ * bug class on plan cards; both branches should converge on this helper.
+ */
+export function formatEventDateLA(
+  dateStr: string | null | undefined,
+  options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' },
+): string {
+  if (!dateStr) return '';
+  const withTZ: Intl.DateTimeFormatOptions = { timeZone: 'America/Los_Angeles', ...options };
+  if (dateStr.includes('T')) {
+    const parsed = new Date(dateStr);
+    return isNaN(parsed.getTime()) ? '' : parsed.toLocaleDateString('en-US', withTZ);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return '';
+  return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString('en-US', withTZ);
 }
