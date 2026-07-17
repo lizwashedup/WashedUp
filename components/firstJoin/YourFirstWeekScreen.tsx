@@ -227,9 +227,10 @@ const styles = StyleSheet.create({
   primaryButton: {
     backgroundColor: Colors.terracotta,
     borderRadius: D.buttonRadius,
-    paddingVertical: D.buttonPaddingV,
+    height: D.buttonHeight,
     paddingHorizontal: D.cardPadding,
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: Colors.terracotta,
     shadowOpacity: D.ctaShadowOpacity,
     shadowRadius: D.ctaShadowRadius,
@@ -240,7 +241,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.brandPressed,
   },
   primaryButtonText: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: Fonts.sansSemibold,
     fontSize: FontSizes.bodyMD,
     color: Colors.cream,
   },

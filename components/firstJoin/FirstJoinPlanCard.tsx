@@ -1,10 +1,17 @@
 /**
- * FirstJoinPlanCard: one of the three "your first week" cards (spec a2/b3).
+ * FirstJoinPlanCard: one of the three "your first week" cards (spec a2/b3,
+ * design correction 2026-07-16). Reads in two seconds: photo, title, who,
+ * when and where, n going, button.
+ *
+ * Cut by founder decision (7-16): the green "past the minimum" pill, the
+ * avatar face cluster (the "{n} going" number carries the proof), and the
+ * gold big-room tag (the ranking service keeps the big-room bonus and slot-1
+ * ordering; it just gets no visual callout).
  *
  * "let's go" NAVIGATES to the existing plan detail page. It never calls a join
  * mutation; joining happens only through the plan page's own commitment flow.
- * Every fact on the card (going count, spots left, past the minimum) is true
- * at render time; the pills disappear rather than stretch the truth.
+ * The facts shown (going count, spots left) are true at render time; the
+ * scarcity pill disappears rather than stretch the truth.
  */
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -29,11 +36,8 @@ export interface FirstJoinCardPlan {
   memberCount: number;
   max_invites: number | null;
   min_invites: number | null;
-  /** Slot-1 big-room plan from the ranking service; carries the gold tag. */
-  bigRoom: boolean;
   creatorName: string | null;
   creatorPhotoUrl: string | null;
-  attendees: { profile_photo_url: string | null }[];
 }
 
 interface FirstJoinPlanCardProps {
@@ -77,11 +81,11 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
   const showSpotsPill = spotsLeft !== null && spotsLeft > 0 && spotsLeft <= SPOTS_PILL_MAX && pastMinimum;
 
   const vibeIcon = VIBE_ICONS[plan.primary_vibe?.toLowerCase() ?? ''] ?? VIBE_ICON_FALLBACK;
-  const attendees = plan.attendees.slice(0, D.proofAvatarMax);
   const creatorName = plan.creatorName?.toLowerCase() ?? null;
 
   return (
     <View style={styles.card} testID={`first-join-card-${plan.id}`}>
+      {/* Image left, text right; text never wraps around the image. */}
       <View style={styles.topRow}>
         {plan.image_url ? (
           <Image source={{ uri: plan.image_url }} style={styles.planImage} contentFit="cover" cachePolicy="memory-disk" />
@@ -92,11 +96,6 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
         )}
 
         <View style={styles.content}>
-          {plan.bigRoom && (
-            <View style={styles.bigRoomTag}>
-              <Text style={styles.bigRoomTagText}>{COPY.bigRoomTag}</Text>
-            </View>
-          )}
           <Text style={styles.title} numberOfLines={2}>
             {plan.title}
           </Text>
@@ -117,52 +116,16 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
           <Text style={styles.metaText} numberOfLines={1}>
             {formatFirstJoinMeta(plan.start_time, plan.neighborhood)}
           </Text>
-        </View>
-      </View>
-
-      <View style={styles.proofRow}>
-        {attendees.length > 0 && (
-          <View style={styles.avatarCluster}>
-            {attendees.map((a, i) =>
-              a.profile_photo_url ? (
-                <Image
-                  key={i}
-                  source={{ uri: a.profile_photo_url }}
-                  style={[styles.proofAvatar, i > 0 && styles.proofAvatarOverlap, { zIndex: D.proofAvatarMax - i }]}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                />
-              ) : (
-                <View
-                  key={i}
-                  style={[styles.proofAvatar, styles.avatarPlaceholder, i > 0 && styles.proofAvatarOverlap, { zIndex: D.proofAvatarMax - i }]}
-                >
-                  <Ionicons name="person" size={D.pillIconSize} color={Colors.tertiary} />
-                </View>
-              ),
+          <View style={styles.factsRow}>
+            <Text style={styles.goingText}>{COPY.going(plan.memberCount)}</Text>
+            {showSpotsPill && spotsLeft !== null && (
+              <View style={styles.spotsPill}>
+                <Text style={styles.spotsPillText}>{COPY.spotsLeft(spotsLeft)}</Text>
+              </View>
             )}
           </View>
-        )}
-        <Text style={styles.goingText}>{COPY.going(plan.memberCount)}</Text>
-      </View>
-
-      {/* Pills always live on their own row below the proof row (review ruling:
-          one rule, every card, every width; no conditional wrapping). */}
-      {(showSpotsPill || pastMinimum) && (
-        <View style={styles.pillRow}>
-          {showSpotsPill && spotsLeft !== null && (
-            <View style={styles.spotsPill}>
-              <Text style={styles.spotsPillText}>{COPY.spotsLeft(spotsLeft)}</Text>
-            </View>
-          )}
-          {pastMinimum && (
-            <View style={styles.minimumPill}>
-              <Ionicons name="checkmark" size={D.pillIconSize} color={Colors.pastMinimumGreen} />
-              <Text style={styles.minimumPillText}>{COPY.pastMinimum}</Text>
-            </View>
-          )}
         </View>
-      )}
+      </View>
 
       {/* Bare Pressable, fill on the inner View (Pressable pills don't paint reliably). */}
       <Pressable onPress={handleLetsGo} testID={`first-join-lets-go-${plan.id}`}>
@@ -180,7 +143,7 @@ const SPOTS_PILL_MAX = 3; // gold scarcity pill threshold (spec a2)
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: Colors.parchment,
+    backgroundColor: Colors.cardBg,
     borderRadius: D.cardRadius,
     padding: D.cardPadding,
     gap: D.cardGap,
@@ -210,18 +173,6 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     gap: D.contentGap,
-  },
-  bigRoomTag: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.spotsLeftGoldFill,
-    borderRadius: D.tagRadius,
-    paddingHorizontal: D.tagPaddingH,
-    paddingVertical: D.tagPaddingV,
-  },
-  bigRoomTagText: {
-    fontFamily: Fonts.sansSemibold,
-    fontSize: FontSizes.caption,
-    color: Colors.brandDeep,
   },
   title: {
     fontFamily: Fonts.sansSemibold,
@@ -254,29 +205,10 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
   },
-  proofRow: {
+  factsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: D.proofRowGap,
-  },
-  pillRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: D.proofRowGap,
-  },
-  avatarCluster: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  proofAvatar: {
-    width: D.proofAvatarSize,
-    height: D.proofAvatarSize,
-    borderRadius: D.proofAvatarSize / 2,
-    borderWidth: D.avatarRingWidth,
-    borderColor: Colors.parchment,
-  },
-  proofAvatarOverlap: {
-    marginLeft: -D.proofAvatarOverlap,
   },
   goingText: {
     fontFamily: Fonts.sansMedium,
@@ -294,25 +226,12 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.brandDeep,
   },
-  minimumPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: D.pillIconGap,
-    backgroundColor: Colors.pastMinimumGreenTint,
-    borderRadius: D.pillRadius,
-    paddingHorizontal: D.pillPaddingH,
-    paddingVertical: D.pillPaddingV,
-  },
-  minimumPillText: {
-    fontFamily: Fonts.sansSemibold,
-    fontSize: FontSizes.caption,
-    color: Colors.pastMinimumGreen,
-  },
   letsGoButton: {
     backgroundColor: Colors.terracotta,
     borderRadius: D.buttonRadius,
-    paddingVertical: D.buttonPaddingV,
+    height: D.buttonHeight,
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: Colors.terracotta,
     shadowOpacity: D.ctaShadowOpacity,
     shadowRadius: D.ctaShadowRadius,
@@ -323,7 +242,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.brandPressed,
   },
   letsGoText: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: Fonts.sansSemibold,
     fontSize: FontSizes.bodyLG,
     color: Colors.cream,
   },

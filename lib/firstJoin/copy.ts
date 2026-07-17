@@ -12,16 +12,14 @@
 
 export const FIRST_JOIN_COPY = {
   // ── FirstJoinPlanCard ──────────────────────────────────────────────────────
-  /** Gold tag on the slot-1 big-room plan. Factual: describes the room, promises nothing. */
-  bigRoomTag: 'biggest plan this week',
+  // Cut by founder decision (7-16): the big-room tag and the "past the
+  // minimum" pill. The "{n} going" number carries the proof.
   /** Creator row: "sofia's plan". Name is lowercased at render. */
   creatorPlan: (firstName: string) => `${firstName}'s plan`,
-  /** Proof row count. Always true at render time (real event_members count). */
+  /** Facts row count. Always true at render time (real event_members count). */
   going: (n: number) => `${n} going`,
   /** Gold pill. Only rendered when spots left <= 3 AND past the minimum (honest scarcity). */
   spotsLeft: (n: number) => (n === 1 ? '1 spot left' : `${n} spots left`),
-  /** Green pill. Only rendered when member_count >= min_invites. A fact, not a promise. */
-  pastMinimum: 'past the minimum',
   /** Primary CTA. Going somewhere together, never "join event". Navigates, never joins. */
   letsGo: "let's go",
 

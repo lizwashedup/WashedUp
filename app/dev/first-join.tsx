@@ -24,17 +24,13 @@ import { WishlistConfirmation } from '../../components/firstJoin/WishlistConfirm
 import { YourFirstWeekScreen } from '../../components/firstJoin/YourFirstWeekScreen';
 import { supabase } from '../../lib/supabase';
 
-const FIXTURE_AVATARS = [1, 2, 3, 4, 5, 6].map((i) => ({
-  profile_photo_url: `https://i.pravatar.cc/96?img=${i + 10}`,
-}));
-
 // Next Saturday/Tuesday-ish instants; exact weekday label just needs to render.
 const FIXTURE_SATURDAY = '2026-07-19T02:30:00Z'; // sat 7:30 pm LA
 const FIXTURE_TUESDAY = '2026-07-22T02:00:00Z'; // tue 7:00 pm LA
 
 const FIXTURE_PLANS: FirstJoinCardPlan[] = [
   {
-    // Slot 1: big room. Gold tag, both pills, full avatar cluster, real image.
+    // Slot 1 (big room in the service; no visual callout): scarcity pill + image.
     id: 'fixture-big-room',
     title: 'griffith park sunset hike',
     start_time: FIXTURE_SATURDAY,
@@ -44,13 +40,11 @@ const FIXTURE_PLANS: FirstJoinCardPlan[] = [
     memberCount: 7,
     max_invites: 9,
     min_invites: 4,
-    bigRoom: true,
     creatorName: 'Sofia',
     creatorPhotoUrl: 'https://i.pravatar.cc/96?img=32',
-    attendees: FIXTURE_AVATARS,
   },
   {
-    // No image → vibe illustration fallback; past minimum but plenty of room.
+    // No image → vibe illustration fallback; roomy plan, no scarcity pill.
     id: 'fixture-vibe-fallback',
     title: 'sunday picnic at echo park lake',
     start_time: FIXTURE_TUESDAY,
@@ -60,13 +54,11 @@ const FIXTURE_PLANS: FirstJoinCardPlan[] = [
     memberCount: 4,
     max_invites: 12,
     min_invites: 3,
-    bigRoom: false,
     creatorName: 'Marlowe',
     creatorPhotoUrl: 'https://i.pravatar.cc/96?img=47',
-    attendees: FIXTURE_AVATARS.slice(0, 4),
   },
   {
-    // Sparse plan: no pills (not past minimum), placeholder faces.
+    // Sparse plan: small count, no pill, placeholder creator avatar.
     id: 'fixture-sparse',
     title: 'ktown karaoke night',
     start_time: FIXTURE_TUESDAY,
@@ -76,10 +68,8 @@ const FIXTURE_PLANS: FirstJoinCardPlan[] = [
     memberCount: 2,
     max_invites: 8,
     min_invites: 4,
-    bigRoom: false,
     creatorName: 'Ren',
     creatorPhotoUrl: null,
-    attendees: [{ profile_photo_url: null }, { profile_photo_url: null }],
   },
 ];
 

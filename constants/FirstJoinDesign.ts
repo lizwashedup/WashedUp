@@ -4,10 +4,10 @@
  */
 
 export const FirstJoinDesign = {
-  // Card shell
+  // Card shell (white card, tight rhythm: the card must read in two seconds)
   cardRadius: 20, // rounded-2xl
-  cardPadding: 16,
-  cardGap: 12, // vertical rhythm between card sections
+  cardPadding: 14,
+  cardGap: 12, // image column to text column, and content to button
   cardShadowOpacity: 0.16, // one soft warm shadow (Colors.warmShadow carries the tint)
   cardShadowRadius: 12,
   cardShadowOffsetY: 4,
@@ -22,24 +22,17 @@ export const FirstJoinDesign = {
   creatorAvatarSize: 24,
   creatorRowGap: 8,
 
-  // Proof row (avatar cluster + facts)
-  proofAvatarSize: 22,
-  proofAvatarOverlap: 7,
-  proofAvatarMax: 6,
+  // Facts row ("{n} going" + gold scarcity pill when true)
   proofRowGap: 8,
   pillRadius: 999,
   pillPaddingH: 10,
   pillPaddingV: 4,
   pillIconSize: 12,
 
-  // Gold big-room tag
-  tagRadius: 999,
-  tagPaddingH: 10,
-  tagPaddingV: 3,
-
-  // CTA (warm shadow per house button style: 0 2px 8px terracotta @ 30%)
-  buttonRadius: 999, // pill, house style
-  buttonPaddingV: 13,
+  // CTA: rounded-xl block button per the approved reference (NOT a stadium
+  // pill), ~52pt tall, DM Sans 600. Warm shadow 0 2px 8px terracotta @ 30%.
+  buttonRadius: 14,
+  buttonHeight: 52,
   ctaShadowOpacity: 0.3,
   ctaShadowRadius: 8,
   ctaShadowOffsetY: 2,

@@ -206,8 +206,9 @@ const styles = StyleSheet.create({
   ctaButton: {
     backgroundColor: Colors.terracotta,
     borderRadius: D.buttonRadius,
-    paddingVertical: D.buttonPaddingV,
+    height: D.buttonHeight,
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: D.sectionTopGap,
     shadowColor: Colors.terracotta,
     shadowOpacity: D.ctaShadowOpacity,
@@ -219,7 +220,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.brandPressed,
   },
   ctaText: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: Fonts.sansSemibold,
     fontSize: FontSizes.bodyLG,
     color: Colors.cream,
   },
