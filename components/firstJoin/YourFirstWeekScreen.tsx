@@ -80,8 +80,12 @@ export function YourFirstWeekScreen({
     onWishlist?.();
   };
 
-  // The header back arrow is the skip affordance (founder design pass 7-16
-  // dropped the "later" text link); it logs the same 'later' action.
+  // Two non-blocking exits, one meaning: the header back arrow and the
+  // "later" link both log the same 'later' action and leave for Scene.
+  const handleLater = () => {
+    if (userId) logFirstJoinPrompt({ userId, shownEventIds: plans.map((p) => p.id), action: 'later' });
+    onLater?.();
+  };
   const handleBack = () => {
     if (userId) logFirstJoinPrompt({ userId, shownEventIds: plans.map((p) => p.id), action: 'later' });
     (onBack ?? onLater)?.();
@@ -135,9 +139,11 @@ export function YourFirstWeekScreen({
                 </Text>
               )}
             </Pressable>
+            <Pressable onPress={handleLater} testID="first-join-later">
+              <Text style={styles.laterText}>{COPY.later}</Text>
+            </Pressable>
           </>
         )}
-
       </ScrollView>
     </SafeAreaView>
   );
@@ -188,10 +194,17 @@ const styles = StyleSheet.create({
     color: Colors.terracotta,
     textAlign: 'center',
     marginTop: D.ghostTopGap,
-    paddingVertical: D.sublineTopGap,
+    paddingVertical: D.ghostPadV,
   },
   ghostButtonPressed: {
     color: Colors.brandPressed,
+  },
+  laterText: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.warmGray,
+    textAlign: 'center',
+    marginTop: D.laterTopGap,
   },
   emptyCenterer: {
     flex: 1,

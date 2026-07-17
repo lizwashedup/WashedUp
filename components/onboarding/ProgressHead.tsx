@@ -89,18 +89,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  // Lowercase across the whole onboarding flow (founder ruling 7-17): the
+  // label reads "step 5 of 5", matching the app's lowercase voice.
   stepLabel: {
     fontFamily: Fonts.sansSemibold,
     fontSize: 11,
     letterSpacing: 1.4,
-    textTransform: 'uppercase',
     color: Colors.brand,
   },
   percentLabel: {
     fontFamily: Fonts.sansSemibold,
     fontSize: 11,
     letterSpacing: 1.4,
-    textTransform: 'uppercase',
     color: Colors.brand,
   },
   track: {

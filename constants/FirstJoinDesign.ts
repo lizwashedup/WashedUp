@@ -63,21 +63,22 @@ export const FirstJoinDesign = {
   pillIconGap: 3, // check icon to pill label
   avatarRingWidth: 1.5, // parchment ring separating clustered faces
 
-  // Screen (everything from header to wishlist link fits 390x844 unscrolled)
+  // Screen (everything from header to the later link fits 390x844 unscrolled)
   screenPaddingH: 20,
-  screenGap: 10, // between stacked cards
+  screenGap: 9, // between stacked cards
   headlineSize: 32, // Cormorant italic, spec b3
-  headlineLineHeight: 38,
-  headlineTopGap: 2,
+  headlineLineHeight: 36,
+  headlineTopGap: 0,
   sublineSize: 12,
   sublineLineHeight: 16,
   psCaptionSize: 12, // DM Sans 12, spec b3 caption line
-  sublineTopGap: 4,
-  sectionTopGap: 12,
-  captionTopGap: 10,
-  ghostTopGap: 4,
+  sublineTopGap: 2,
+  sectionTopGap: 10,
+  captionTopGap: 6,
+  ghostTopGap: 2,
+  ghostPadV: 4, // tap padding on the wishlist text button
   laterTopGap: 2,
-  laterBottomGap: 8,
+  laterBottomGap: 6,
 
   // Confirmation screen
   checkBadgeSize: 28,
