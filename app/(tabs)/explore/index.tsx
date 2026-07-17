@@ -29,7 +29,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const APPLY_URL = 'https://washedup.app/creator/apply';
 
 // LIZ COPY: the pre-written share sentence (the apply link rides along)
-const SHARE_MESSAGE = `washedup is looking for founding hosts, the people who already bring LA together. thought of you: ${APPLY_URL}`;
+const SHARE_MESSAGE = `washedup is looking for founding partners, the people who already bring LA together. thought of you: ${APPLY_URL}`;
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ export default function ScenePage() {
   return <SceneComingSoon />;
 }
 
-// The founding-host recruiting page (stage 1 of the coming-soon run-up).
+// The founding-partner recruiting page (stage 1 of the coming-soon run-up).
 // Replaced the wish box at the 2026-07-15 directive: scene_suggestions
 // stops receiving (existing rows untouched); the photo, header, and the
 // plans nudge stay exactly as they were.
@@ -152,25 +152,25 @@ function SceneComingSoon() {
           />
         </View>
 
-        {/* LIZ COPY: the founding-host lead (exact copy from the directive) */}
+        {/* LIZ COPY: the founding-partner lead (exact copy from the directive) */}
         <Text style={styles.kicker}>the people behind LA</Text>
         <Text style={styles.headline}>Make something worth showing up for.</Text>
         <Text style={styles.subtext}>
           We're building the city's most human social calendar, starting with the people who already bring others together.
         </Text>
 
-        {/* Founding-host card */}
+        {/* Founding-partner card */}
         <View style={styles.card}>
           {/* LIZ COPY */}
-          <Text style={styles.cardKicker}>founding host applications</Text>
-          <Text style={styles.cardTitle}>Run a community? Host events?</Text>
+          <Text style={styles.cardKicker}>founding partner applications</Text>
+          <Text style={styles.cardTitle}>Run a community? Put on events?</Text>
           <Text style={styles.cardSubtext}>
             Bring your people to washedup. We'll help the right Angelenos discover what you're building.
           </Text>
 
           <TouchableOpacity style={styles.applyBtn} onPress={handleApply} activeOpacity={0.85}>
             {/* LIZ COPY */}
-            <Text style={styles.applyBtnText}>{'Apply as a founding host →'}</Text>
+            <Text style={styles.applyBtnText}>{'Apply as a founding partner →'}</Text>
           </TouchableOpacity>
           {/* LIZ COPY */}
           <Text style={styles.quietLine}>2 minutes · no commitment</Text>
@@ -322,7 +322,7 @@ const styles = StyleSheet.create({
     color: Colors.terracotta,
   },
 
-  // ── Founding-host card ──
+  // ── Founding-partner card ──
   card: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
