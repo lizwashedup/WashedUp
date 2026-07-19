@@ -105,7 +105,9 @@ export default function FirstJoinDevScreen() {
       <>
         <Stack.Screen options={{ headerShown: false }} />
         <YourFirstWeekScreen
-          userId={state === 'live' ? liveUserId : 'dev-harness-user'}
+          // Fixture states pass null so live impression logging never fires
+          // from the harness (the table is real now); only state=live logs.
+          userId={state === 'live' ? liveUserId : null}
           overridePlans={state === 'screen' ? FIXTURE_PLANS : undefined}
           overrideEmpty={state === 'empty'}
           // Harness never writes: wishlist tap shows the confirm preview, later
