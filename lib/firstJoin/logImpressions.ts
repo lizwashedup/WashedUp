@@ -4,16 +4,14 @@
  * tier and per-weight score breakdowns) to first_join_prompts, so conversion
  * per ranking weight is measurable.
  *
- * STUB, shaped to the final schema in
- * supabase/migrations/20260716000100_first_join_prompts_and_area_wishlists.sql
- * (awaiting approval; NOT applied). Once it lands, flip
- * FIRST_JOIN_PROMPTS_TABLE_READY to true: that is the whole swap.
+ * Schema: supabase/migrations/20260716000100_first_join_prompts_and_area_wishlists.sql,
+ * applied to prod 2026-07-18 with Liz's approval.
  */
 import { supabase } from '../supabase';
 import type { FirstJoinScoreBreakdown, FirstJoinTier } from './types';
 
-/** Flip to true once the gated first_join_prompts migration is applied. */
-export const FIRST_JOIN_PROMPTS_TABLE_READY = false;
+/** Migration applied to prod 2026-07-18 (Liz-approved); logging is live. */
+export const FIRST_JOIN_PROMPTS_TABLE_READY = true;
 
 export type FirstJoinPromptAction = 'shown' | 'card_tap' | 'wishlist' | 'later' | 'rebook_offer';
 

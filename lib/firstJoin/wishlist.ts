@@ -7,17 +7,15 @@
  *  2. A demand-signal row (neighborhood + vibe snapshot at raise-hand time,
  *     the a4b creator-side "9 people near silver lake" surface). The existing
  *     `wishlists` table is the EVENT-save feature (user_id + event_id, no
- *     area/vibe columns; verified on prod 2026-07-16), so this row needs the
- *     gated migration in supabase/migrations/. Until it is approved and
- *     applied, AREA_WISHLIST_TABLE_READY stays false and the insert is
- *     skipped: flipping the constant is the one-line swap.
+ *     area/vibe columns; verified on prod 2026-07-16), so this row lives in
+ *     area_wishlists (migration applied 2026-07-18 with Liz's approval).
  *
  * Deps are injected so the write path unit-tests without the supabase client.
  */
 import { supabase } from '../supabase';
 
-/** Flip to true once the gated area_wishlists migration is applied. */
-export const AREA_WISHLIST_TABLE_READY = false;
+/** Migration applied to prod 2026-07-18 (Liz-approved); demand rows live. */
+export const AREA_WISHLIST_TABLE_READY = true;
 
 export interface AreaWishlistDeps {
   setPushNewPlansArea(userId: string): Promise<{ error: { message: string } | null }>;

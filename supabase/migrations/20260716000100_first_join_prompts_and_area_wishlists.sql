@@ -1,7 +1,8 @@
 -- First-join system instrumentation + area wishlist demand signal (spec a2).
--- PROPOSAL: written on feature/first-join-system, NOT applied. Apply only
--- with explicit approval. Runs in one transaction with an embedded self-test
--- (house rule: never strip the in-transaction self-test on apply).
+-- APPLIED to prod 2026-07-18 (Liz-approved, as written, self-test passed:
+-- 2 tables, 5-value enum, RLS + 4 policies, touch trigger, no test rows left).
+-- Runs in one transaction with an embedded self-test (house rule: never
+-- strip the in-transaction self-test on apply).
 --
 -- Table 1: first_join_prompts. Every showing of the "your first week" cards
 -- logs user_id + shown_event_ids + action, so first-week join conversion is
