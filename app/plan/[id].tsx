@@ -37,6 +37,7 @@ import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-nat
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
+import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
 import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
@@ -55,6 +56,7 @@ import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
+import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import LinkifiedText from '../../components/LinkifiedText';
@@ -440,6 +442,8 @@ export default function PlanDetailScreen() {
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
+  const [noticeVisible, setNoticeVisible] = useState(false);
+  const [noticeJoinMessage, setNoticeJoinMessage] = useState<string | undefined>(undefined);
   const [showDuplicateSheet, setShowDuplicateSheet] = useState(false);
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
   const [manageModalVisible, setManageModalVisible] = useState(false);
@@ -1034,6 +1038,41 @@ export default function PlanDetailScreen() {
       setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
     },
   });
+
+  // the creator name exactly as the byline renders it, for the notice and
+  // its evidence snapshot (doc 13: show the organizer's display name)
+  const noticeOrganizerName = plan?.creator?.first_name_display ?? 'Someone';
+
+  // proposal 49: first join under the terms version in force shows the
+  // Independent Activity Notice; the join proceeds only once the assent
+  // is recorded (fail CLOSED after 49 is live; dormant before it). The
+  // join modal closes before the notice shows: two sibling Modals cannot
+  // be visible at once on iOS, and joinMessage survives in state.
+  const requestJoin = useCallback(async (message?: string) => {
+    const { needsAssent } = await getParticipationNoticeStatus();
+    if (needsAssent) {
+      setNoticeJoinMessage(message);
+      setJoinModalVisible(false);
+      setNoticeVisible(true);
+      return;
+    }
+    joinMutation.mutate(message);
+  }, [joinMutation]);
+
+  const handleNoticeAgree = useCallback(async () => {
+    if (!id) return false;
+    const ok = await recordParticipationAssent({
+      listingType: 'plan',
+      listingId: id,
+      organizerUserId: plan?.creator_user_id ?? null,
+      organizerName: noticeOrganizerName,
+      action: 'join',
+    });
+    if (!ok) return false;
+    setNoticeVisible(false);
+    joinMutation.mutate(noticeJoinMessage);
+    return true;
+  }, [id, plan?.creator_user_id, noticeOrganizerName, noticeJoinMessage, joinMutation]);
 
   // ─── Leave ───────────────────────────────────────────────────────────────────
 
@@ -2025,7 +2064,7 @@ export default function PlanDetailScreen() {
               // the group): join directly, no greeting modal. Strangers on an
               // open circle plan keep the modal, exactly like a normal plan.
               if (isCirclePlan && circleViewerIsMember) {
-                joinMutation.mutate(undefined);
+                requestJoin(undefined);
               } else {
                 setJoinModalVisible(true);
               }
@@ -2086,7 +2125,7 @@ export default function PlanDetailScreen() {
 
             <TouchableOpacity
               style={[joinStyles.joinBtn, (!joinConfirmed || !joinMessage.trim()) && joinStyles.joinBtnDisabled]}
-              onPress={() => joinMutation.mutate(joinMessage)}
+              onPress={() => requestJoin(joinMessage)}
               disabled={!joinConfirmed || !joinMessage.trim() || joinMutation.isPending}
               activeOpacity={0.85}
             >
@@ -2764,6 +2803,13 @@ export default function PlanDetailScreen() {
           setShowReport(true);
         }}
         onBlock={(uid, uname) => blockUser(uid, uname, () => router.back())}
+      />
+
+      <ParticipationNotice
+        visible={noticeVisible}
+        organizerName={noticeOrganizerName}
+        onAgree={handleNoticeAgree}
+        onClose={() => setNoticeVisible(false)}
       />
     </SafeAreaView>
   );
