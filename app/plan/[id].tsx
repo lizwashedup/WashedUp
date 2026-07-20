@@ -442,8 +442,9 @@ export default function PlanDetailScreen() {
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
-  const [noticeVisible, setNoticeVisible] = useState(false);
-  const [noticeJoinMessage, setNoticeJoinMessage] = useState<string | undefined>(undefined);
+  const [noticePending, setNoticePending] = useState<
+    { action: 'join'; message?: string } | { action: 'exception' } | null
+  >(null);
   const [showDuplicateSheet, setShowDuplicateSheet] = useState(false);
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
   const [manageModalVisible, setManageModalVisible] = useState(false);
@@ -1043,24 +1044,34 @@ export default function PlanDetailScreen() {
   // its evidence snapshot (doc 13: show the organizer's display name)
   const noticeOrganizerName = plan?.creator?.first_name_display ?? 'Someone';
 
-  // proposal 49: first join under the terms version in force shows the
-  // Independent Activity Notice; the join proceeds only once the assent
+  // proposal 49: every path that ends in plan membership shows the
+  // Independent Activity Notice first (Cowork ruling: entry route is
+  // irrelevant to the evidence purpose) and proceeds only once the assent
   // is recorded (fail CLOSED after 49 is live; dormant before it). The
-  // join modal closes before the notice shows: two sibling Modals cannot
-  // be visible at once on iOS, and joinMessage survives in state.
+  // pending action is stashed while the sheet is up; the join modal
+  // closes first because two sibling Modals cannot be visible at once on
+  // iOS, and joinMessage survives in state.
   const requestJoin = useCallback(async (message?: string) => {
     const { needsAssent } = await getParticipationNoticeStatus();
     if (needsAssent) {
-      setNoticeJoinMessage(message);
       setJoinModalVisible(false);
-      setNoticeVisible(true);
+      setNoticePending({ action: 'join', message });
       return;
     }
     joinMutation.mutate(message);
   }, [joinMutation]);
 
+  const requestAcceptException = useCallback(async () => {
+    const { needsAssent } = await getParticipationNoticeStatus();
+    if (needsAssent) {
+      setNoticePending({ action: 'exception' });
+      return;
+    }
+    acceptExceptionMutation.mutate();
+  }, [acceptExceptionMutation]);
+
   const handleNoticeAgree = useCallback(async () => {
-    if (!id) return false;
+    if (!id || !noticePending) return false;
     const ok = await recordParticipationAssent({
       listingType: 'plan',
       listingId: id,
@@ -1069,10 +1080,14 @@ export default function PlanDetailScreen() {
       action: 'join',
     });
     if (!ok) return false;
-    setNoticeVisible(false);
-    joinMutation.mutate(noticeJoinMessage);
+    setNoticePending(null);
+    if (noticePending.action === 'join') {
+      joinMutation.mutate(noticePending.message);
+    } else {
+      acceptExceptionMutation.mutate();
+    }
     return true;
-  }, [id, plan?.creator_user_id, noticeOrganizerName, noticeJoinMessage, joinMutation]);
+  }, [id, plan?.creator_user_id, noticeOrganizerName, noticePending, joinMutation, acceptExceptionMutation]);
 
   // ─── Leave ───────────────────────────────────────────────────────────────────
 
@@ -1929,7 +1944,7 @@ export default function PlanDetailScreen() {
                 style={styles.exceptionAcceptBtn}
                 activeOpacity={0.85}
                 disabled={acceptExceptionMutation.isPending || declineExceptionMutation.isPending}
-                onPress={() => acceptExceptionMutation.mutate()}
+                onPress={() => requestAcceptException()}
               >
                 <Text style={styles.exceptionAcceptText}>Join the plan</Text>
               </TouchableOpacity>
@@ -2806,10 +2821,10 @@ export default function PlanDetailScreen() {
       />
 
       <ParticipationNotice
-        visible={noticeVisible}
+        visible={noticePending !== null}
         organizerName={noticeOrganizerName}
         onAgree={handleNoticeAgree}
-        onClose={() => setNoticeVisible(false)}
+        onClose={() => setNoticePending(null)}
       />
     </SafeAreaView>
   );
