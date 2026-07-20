@@ -10,6 +10,7 @@ import Colors from '../../../constants/Colors';
 import { WishlistConfirmation } from '../../../components/firstJoin/WishlistConfirmation';
 import { getUserBounded } from '../../../lib/authGate';
 import { PLANS_ROUTE, SCENE_ROUTE } from '../../../lib/firstJoin/onboardingGate';
+import { updateVibeTags } from '../../../lib/firstJoin/wishlist';
 import { supabase } from '../../../lib/supabase';
 
 interface WatchingProfile {
@@ -19,6 +20,22 @@ interface WatchingProfile {
 
 export default function FirstWeekConfirm() {
   const [profile, setProfile] = useState<WatchingProfile | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // Chip tap = the vibe edit surface (founder 7-19). Optimistic toggle;
+  // revert on a failed write so the chips never lie about what's saved.
+  const handleToggleVibe = (tag: string) => {
+    if (!userId || !profile) return;
+    const has = profile.vibeTags.some((t) => t.toLowerCase() === tag.toLowerCase());
+    const next = has
+      ? profile.vibeTags.filter((t) => t.toLowerCase() !== tag.toLowerCase())
+      : [...profile.vibeTags, tag];
+    const prev = profile;
+    setProfile({ ...profile, vibeTags: next });
+    updateVibeTags(userId, next).then(({ ok }) => {
+      if (!ok) setProfile(prev);
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +52,7 @@ export default function FirstWeekConfirm() {
         .eq('id', user.id)
         .maybeSingle();
       if (cancelled) return;
+      setUserId(user.id);
       setProfile({
         neighborhood: data?.neighborhood ?? null,
         vibeTags: data?.vibe_tags ?? [],
@@ -65,6 +83,7 @@ export default function FirstWeekConfirm() {
         <WishlistConfirmation
           neighborhood={profile.neighborhood}
           vibeTags={profile.vibeTags}
+          onToggleVibe={handleToggleVibe}
           onContinue={() => router.replace(PLANS_ROUTE)}
           onEditPreferences={() => router.push('/(tabs)/profile?openEdit=true' as never)}
         />

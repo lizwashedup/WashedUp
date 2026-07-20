@@ -93,3 +93,50 @@ export const supabaseAreaWishlistDeps: AreaWishlistDeps = {
 export function saveAreaWishlist(userId: string): Promise<AreaWishlistResult> {
   return saveAreaWishlistWithDeps(userId, supabaseAreaWishlistDeps);
 }
+
+// ─── Vibe tags (confirmation-screen chips, founder ruling 7-19) ──────────────
+// No onboarding step: the confirmation chips are the vibe edit surface.
+// A toggle writes profiles.vibe_tags and refreshes the area_wishlists
+// snapshot so the demand signal tracks the new picks.
+
+export interface VibeTagsDeps {
+  setVibeTags(userId: string, tags: string[]): Promise<{ error: { message: string } | null }>;
+  refreshDemandSnapshot(userId: string): Promise<{ error: { message: string } | null }>;
+  tableReady: boolean;
+}
+
+export async function updateVibeTagsWithDeps(
+  userId: string,
+  tags: string[],
+  deps: VibeTagsDeps,
+): Promise<{ ok: boolean }> {
+  if (!userId) return { ok: false };
+  try {
+    const { error } = await deps.setVibeTags(userId, tags);
+    if (error) {
+      console.warn('[updateVibeTags] profile update failed:', error.message);
+      return { ok: false };
+    }
+    if (deps.tableReady) {
+      const { error: snapErr } = await deps.refreshDemandSnapshot(userId);
+      if (snapErr) console.warn('[updateVibeTags] snapshot refresh failed:', snapErr.message);
+    }
+    return { ok: true };
+  } catch (err) {
+    console.warn('[updateVibeTags]', err instanceof Error ? err.message : err);
+    return { ok: false };
+  }
+}
+
+export const supabaseVibeTagsDeps: VibeTagsDeps = {
+  async setVibeTags(userId, tags) {
+    const { error } = await supabase.from('profiles').update({ vibe_tags: tags }).eq('id', userId);
+    return { error };
+  },
+  refreshDemandSnapshot: (userId) => supabaseAreaWishlistDeps.upsertDemandSignal(userId),
+  tableReady: AREA_WISHLIST_TABLE_READY,
+};
+
+export function updateVibeTags(userId: string, tags: string[]): Promise<{ ok: boolean }> {
+  return updateVibeTagsWithDeps(userId, tags, supabaseVibeTagsDeps);
+}

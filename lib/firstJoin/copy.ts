@@ -49,7 +49,9 @@ export const FIRST_JOIN_COPY = {
   /** Fallback when the profile has no neighborhood. */
   watchingAnywhere: 'anywhere in la',
   editPreferences: 'edit preferences',
-  confirmCta: 'take me to plans',
+  /** Shown above the vibe chips when the profile has none yet. */
+  vibePickerLabel: "pick a few things you're into",
+  confirmCta: 'show me plans',
   confirmFooter: 'you can change this anytime in your profile.',
 
   // ── Wishlist save failure (facts only: never confirm an unsaved list) ──────

@@ -8,6 +8,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { PLAN_CATEGORIES } from '../../constants/Categories';
 import Colors from '../../constants/Colors';
 import { FirstJoinDesign as D } from '../../constants/FirstJoinDesign';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
@@ -19,20 +20,30 @@ const BRAND_MARK = require('../../assets/images/brand/washedup-mark.png');
 
 interface WishlistConfirmationProps {
   neighborhood: string | null;
+  /** The viewer's current picks; chips render selected when included here. */
   vibeTags: string[];
-  /** "take me to scene". */
+  /** Chip tap: the confirmation chips are the vibe edit surface (founder
+   * 7-19, no onboarding step). Omit to render chips inert. */
+  onToggleVibe?: (tag: string) => void;
+  /** "show me plans". */
   onContinue: () => void;
-  /** "edit preferences" link (routes to existing notification settings). */
+  /** "edit preferences" link (deep-links to the profile edit modal). */
   onEditPreferences: () => void;
 }
+
+// Pickable vibes = what creators tag plans with (minus Other), so picks feed
+// the ranking's vibe match directly. Stored capitalized, shown lowercase.
+const PICKABLE_VIBES = PLAN_CATEGORIES.filter((c) => c !== 'Other');
 
 export function WishlistConfirmation({
   neighborhood,
   vibeTags,
+  onToggleVibe,
   onContinue,
   onEditPreferences,
 }: WishlistConfirmationProps) {
   const areaLabel = neighborhood ? neighborhood.toLowerCase() : COPY.watchingAnywhere;
+  const selected = new Set(vibeTags.map((t) => t.toLowerCase()));
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -54,15 +65,23 @@ export function WishlistConfirmation({
                 <Text style={styles.nearbyChipText}>{COPY.nearby}</Text>
               </View>
             </View>
-            {vibeTags.length > 0 && (
-              <View style={styles.vibeRow}>
-                {vibeTags.map((tag) => (
-                  <View key={tag} style={styles.vibeChip}>
-                    <Text style={styles.vibeChipText}>{tag.toLowerCase()}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+            {vibeTags.length === 0 && <Text style={styles.vibePickerLabel}>{COPY.vibePickerLabel}</Text>}
+            <View style={styles.vibeRow}>
+              {PICKABLE_VIBES.map((tag) => {
+                const isOn = selected.has(tag.toLowerCase());
+                return (
+                  <Pressable
+                    key={tag}
+                    onPress={onToggleVibe ? () => onToggleVibe(tag) : undefined}
+                    testID={`first-join-vibe-${tag.toLowerCase()}`}
+                  >
+                    <View style={[styles.vibeChip, isOn && styles.vibeChipOn]}>
+                      <Text style={[styles.vibeChipText, isOn && styles.vibeChipTextOn]}>{tag.toLowerCase()}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
             <Pressable onPress={onEditPreferences} testID="first-join-edit-preferences">
               {({ pressed }) => (
                 <Text style={[styles.editLink, pressed && styles.editLinkPressed]}>{COPY.editPreferences}</Text>
@@ -174,16 +193,27 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: D.proofRowGap,
   },
+  vibePickerLabel: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+  },
   vibeChip: {
     backgroundColor: Colors.inputBg,
     borderRadius: D.pillRadius,
     paddingHorizontal: D.pillPaddingH,
     paddingVertical: D.pillPaddingV,
   },
+  vibeChipOn: {
+    backgroundColor: Colors.accentSubtle,
+  },
   vibeChipText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
     color: Colors.quoteText,
+  },
+  vibeChipTextOn: {
+    color: Colors.terracotta,
   },
   editLink: {
     fontFamily: Fonts.sansSemibold,

@@ -3,7 +3,7 @@
  * never duplicate anything), the pending-migration gate, and the
  * never-throw contract.
  */
-import { saveAreaWishlistWithDeps, AreaWishlistDeps } from '../wishlist';
+import { saveAreaWishlistWithDeps, updateVibeTagsWithDeps, AreaWishlistDeps, VibeTagsDeps } from '../wishlist';
 
 function mkDeps(overrides: Partial<AreaWishlistDeps> = {}): AreaWishlistDeps & {
   flagCalls: string[];
@@ -95,5 +95,60 @@ describe('saveAreaWishlistWithDeps', () => {
     const result = await saveAreaWishlistWithDeps('', deps);
     expect(result.ok).toBe(false);
     expect(deps.flagCalls).toEqual([]);
+  });
+});
+
+describe('updateVibeTagsWithDeps', () => {
+  const mkVibeDeps = (overrides: Partial<VibeTagsDeps> = {}) => {
+    const writes: string[][] = [];
+    const snapshots: string[] = [];
+    return {
+      writes,
+      snapshots,
+      deps: {
+        async setVibeTags(_userId: string, tags: string[]) {
+          writes.push(tags);
+          return { error: null };
+        },
+        async refreshDemandSnapshot(userId: string) {
+          snapshots.push(userId);
+          return { error: null };
+        },
+        tableReady: true,
+        ...overrides,
+      } as VibeTagsDeps,
+    };
+  };
+
+  it('writes the tags and refreshes the demand snapshot', async () => {
+    const { deps, writes, snapshots } = mkVibeDeps();
+    const result = await updateVibeTagsWithDeps('user-1', ['Music', 'Film'], deps);
+    expect(result.ok).toBe(true);
+    expect(writes).toEqual([['Music', 'Film']]);
+    expect(snapshots).toEqual(['user-1']);
+  });
+
+  it('skips the snapshot while the table gate is off', async () => {
+    const { deps, snapshots } = mkVibeDeps({ tableReady: false });
+    expect((await updateVibeTagsWithDeps('user-1', ['Music'], deps)).ok).toBe(true);
+    expect(snapshots).toEqual([]);
+  });
+
+  it('fails soft when the profile write errors and never snapshots', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const { deps, snapshots } = mkVibeDeps({
+      async setVibeTags() {
+        return { error: { message: 'rls denied' } };
+      },
+    });
+    expect((await updateVibeTagsWithDeps('user-1', ['Music'], deps)).ok).toBe(false);
+    expect(snapshots).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('rejects a missing user id', async () => {
+    const { deps, writes } = mkVibeDeps();
+    expect((await updateVibeTagsWithDeps('', ['Music'], deps)).ok).toBe(false);
+    expect(writes).toEqual([]);
   });
 });

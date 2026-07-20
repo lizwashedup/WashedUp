@@ -83,6 +83,7 @@ const FIXTURE_PLANS: FirstJoinCardPlan[] = [
 export default function FirstJoinDevScreen() {
   const { state } = useLocalSearchParams<{ state?: string }>();
   const [liveUserId, setLiveUserId] = useState<string | null>(null);
+  const [harnessVibes, setHarnessVibes] = useState<string[]>([]);
 
   useEffect(() => {
     if (state !== 'live') return;
@@ -97,7 +98,14 @@ export default function FirstJoinDevScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <WishlistConfirmation
           neighborhood="Echo Park"
-          vibeTags={['Music', 'Outdoors', 'Food']}
+          // Starts empty to demo the picker; toggles are local-state only
+          // (the harness never writes).
+          vibeTags={harnessVibes}
+          onToggleVibe={(tag) =>
+            setHarnessVibes((prev) =>
+              prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+            )
+          }
           // Same destinations as the real first-week-confirm route, so the
           // harness demonstrates the flow (needs a signed-in session to land).
           // The wishlist capture is about plans, so it exits to Plans.
