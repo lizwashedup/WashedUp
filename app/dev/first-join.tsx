@@ -24,52 +24,56 @@ import { WishlistConfirmation } from '../../components/firstJoin/WishlistConfirm
 import { YourFirstWeekScreen } from '../../components/firstJoin/YourFirstWeekScreen';
 import { supabase } from '../../lib/supabase';
 
-// Next Saturday/Tuesday-ish instants; exact weekday label just needs to render.
-const FIXTURE_SATURDAY = '2026-07-19T02:30:00Z'; // sat 7:30 pm LA
-const FIXTURE_TUESDAY = '2026-07-22T02:00:00Z'; // tue 7:00 pm LA
-
+// REAL plans, snapshotted from prod 2026-07-19, so every card tap opens a
+// real, loadable plan page (events are public-read; fixture ids dead-ended
+// on "couldn't load this plan"). Display values are frozen at snapshot time
+// for deterministic review; refresh this block when the plans wrap.
 const FIXTURE_PLANS: FirstJoinCardPlan[] = [
   {
-    // Slot 1 (big room in the service; no visual callout): scarcity pill + image.
-    id: 'fixture-big-room',
-    title: 'griffith park sunset hike',
-    start_time: FIXTURE_SATURDAY,
-    neighborhood: 'Los Feliz',
-    image_url: 'https://picsum.photos/seed/washedup-hike/320/320',
-    primary_vibe: 'Outdoors',
-    memberCount: 7,
-    max_invites: 9,
-    min_invites: 4,
-    creatorName: 'Sofia',
-    creatorPhotoUrl: 'https://i.pravatar.cc/96?img=32',
-  },
-  {
-    // No image → vibe illustration fallback; roomy plan, no scarcity pill.
-    id: 'fixture-vibe-fallback',
-    title: 'sunday picnic at echo park lake',
-    start_time: FIXTURE_TUESDAY,
-    neighborhood: 'Echo Park',
-    image_url: null,
-    primary_vibe: 'Food',
-    memberCount: 4,
-    max_invites: 12,
+    // Image-left variant (real event photo).
+    id: 'd36fd4c0-d155-4bc8-8eba-21649b01c126',
+    title: 'Walk Silverlake Reservoir & Picnic',
+    start_time: '2026-07-25T00:30:00Z',
+    neighborhood: 'Silver Lake',
+    image_url:
+      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/event-images/a9f3c004-073b-4dfd-b942-d0cd288a7aec/1784408589649.jpg?t=1784408590455',
+    primary_vibe: 'outdoors',
+    memberCount: 1,
+    max_invites: 7,
     min_invites: 3,
-    creatorName: 'Marlowe',
-    creatorPhotoUrl: 'https://i.pravatar.cc/96?img=47',
+    creatorName: 'Dani',
+    creatorPhotoUrl:
+      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/profile-photos/a9f3c004-073b-4dfd-b942-d0cd288a7aec/profile.jpg?t=1784164260276',
   },
   {
-    // Sparse plan: small count, no pill, placeholder creator avatar.
-    id: 'fixture-sparse',
-    title: 'ktown karaoke night',
-    start_time: FIXTURE_TUESDAY,
-    neighborhood: 'Koreatown',
+    // Brand-waves fallback variant (no event photo); full room.
+    id: '8f341f06-e83a-4121-ad33-81d0f02c3fac',
+    title: 'Pub trivia at a British bar!',
+    start_time: '2026-07-21T03:00:00Z',
+    neighborhood: 'Studio City',
     image_url: null,
-    primary_vibe: 'Nightlife',
-    memberCount: 2,
-    max_invites: 8,
-    min_invites: 4,
-    creatorName: 'Ren',
-    creatorPhotoUrl: null,
+    primary_vibe: 'nightlife',
+    memberCount: 4,
+    max_invites: 4,
+    min_invites: 3,
+    creatorName: 'Anna',
+    creatorPhotoUrl:
+      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/profile-photos/e2975ad6-0d90-4c49-9950-1f8f5bbf07d9/1780941279632.jpg?t=1780941280962',
+  },
+  {
+    // Sparse variant: 1 going, no pill.
+    id: '85a31d78-ec20-40a6-9d7d-3e0f13116e25',
+    title: 'Evil Dead Burn at AMC Century City',
+    start_time: '2026-07-23T03:15:00Z',
+    neighborhood: 'Century City',
+    image_url: null,
+    primary_vibe: 'film',
+    memberCount: 1,
+    max_invites: 5,
+    min_invites: 3,
+    creatorName: 'Zach',
+    creatorPhotoUrl:
+      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/profile-photos/5de0c01f-3803-46fd-b46a-9dac7aea49d9/1779343323841.jpg?t=1779343324557',
   },
 ];
 
