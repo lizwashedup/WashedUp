@@ -10,8 +10,8 @@ export const FirstJoinDesign = {
   cardRadius: 20, // rounded-2xl
   cardPadding: 16,
   imageTextGap: 12, // image column to text column
-  contentRowGap: 8, // between text rows (fit-reduced from 10 per the fit rule)
-  buttonTopGap: 12, // content block to button
+  contentRowGap: 7, // between text rows (fit-reduced per the fit rule)
+  buttonTopGap: 10, // content block to button
   cardShadowOpacity: 0.16, // one soft warm shadow (Colors.warmShadow carries the tint)
   cardShadowRadius: 12,
   cardShadowOffsetY: 4,
@@ -19,7 +19,7 @@ export const FirstJoinDesign = {
 
   // Plan image (left) and its imageless fallback: the brand three-wave
   // element, terracotta on the warm block, centered, ~40% of block width.
-  imageSize: 56,
+  imageSize: 52,
   imageRadius: 12,
   brandWavesWidthRatio: 0.4,
   brandWavesAspect: 400 / 227, // washedup-waves.png intrinsic w/h

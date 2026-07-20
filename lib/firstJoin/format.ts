@@ -5,6 +5,8 @@
  * Everything is lowercased per the first-join voice rules (spec b4).
  */
 
+import { NEIGHBORHOOD_OTHER } from '../../constants/Neighborhoods';
+
 const META_SEPARATOR = ' · '; // middle dot
 
 /** "sat" in LA time. */
@@ -14,6 +16,15 @@ export function laWeekdayLower(startTimeIso: string): string {
   return d
     .toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short' })
     .toLowerCase();
+}
+
+/** "sat, jul 26" in LA time (real date on the card, founder ruling 7-19). */
+export function laDateLower(startTimeIso: string): string {
+  const d = new Date(startTimeIso);
+  if (Number.isNaN(d.getTime())) return '';
+  const weekday = d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short' });
+  const monthDay = d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric' });
+  return `${weekday}, ${monthDay}`.toLowerCase();
 }
 
 /** "5:30 pm" in LA time. */
@@ -31,9 +42,12 @@ export function laTimeLower(startTimeIso: string): string {
     .replace(/[\u202f\u00a0]/g, " "); // some JS engines emit a narrow no-break space before am/pm
 }
 
-/** "sat · 5:30 pm · echo park"; neighborhood segment drops out when null. */
+/**
+ * "sat, jul 26 · 7:00 am · los feliz". The neighborhood segment drops out
+ * when null or "Other": never print "other" (founder ruling 7-19).
+ */
 export function formatFirstJoinMeta(startTimeIso: string, neighborhood: string | null): string {
-  const segments = [laWeekdayLower(startTimeIso), laTimeLower(startTimeIso)];
-  if (neighborhood) segments.push(neighborhood.toLowerCase());
+  const segments = [laDateLower(startTimeIso), laTimeLower(startTimeIso)];
+  if (neighborhood && neighborhood !== NEIGHBORHOOD_OTHER) segments.push(neighborhood.toLowerCase());
   return segments.filter(Boolean).join(META_SEPARATOR);
 }

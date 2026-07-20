@@ -62,6 +62,8 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
   const showSpotsPill = spotsLeft !== null && spotsLeft > 0 && spotsLeft <= SPOTS_PILL_MAX && pastMinimum;
 
   const creatorName = plan.creatorName?.toLowerCase() ?? null;
+  // A count below 2 is anti-proof: hide the line entirely (founder ruling 7-19).
+  const showGoing = plan.memberCount >= GOING_COUNT_MIN;
 
   return (
     // The whole card navigates; the button inside is the explicit affordance.
@@ -79,7 +81,7 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
             )}
 
             <View style={styles.content}>
-              <Text style={styles.title} numberOfLines={1}>
+              <Text style={styles.title} numberOfLines={2}>
                 {plan.title}
               </Text>
               {creatorName && (
@@ -99,14 +101,16 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
               <Text style={styles.metaText} numberOfLines={1}>
                 {formatFirstJoinMeta(plan.start_time, plan.neighborhood)}
               </Text>
-              <View style={styles.factsRow}>
-                <Text style={styles.goingText}>{COPY.going(plan.memberCount)}</Text>
-                {showSpotsPill && spotsLeft !== null && (
-                  <View style={styles.spotsPill}>
-                    <Text style={styles.spotsPillText}>{COPY.spotsLeft(spotsLeft)}</Text>
-                  </View>
-                )}
-              </View>
+              {(showGoing || showSpotsPill) && (
+                <View style={styles.factsRow}>
+                  {showGoing && <Text style={styles.goingText}>{COPY.going(plan.memberCount)}</Text>}
+                  {showSpotsPill && spotsLeft !== null && (
+                    <View style={styles.spotsPill}>
+                      <Text style={styles.spotsPillText}>{COPY.spotsLeft(spotsLeft)}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
           </View>
 
@@ -125,6 +129,7 @@ export function FirstJoinPlanCard({ plan, onLetsGo }: FirstJoinPlanCardProps) {
 }
 
 const SPOTS_PILL_MAX = 3; // gold scarcity pill threshold (spec a2)
+const GOING_COUNT_MIN = 2; // never render a going count below this
 const CARD_PRESSED_OPACITY = 0.96; // whole-card press feedback, subtle
 
 const styles = StyleSheet.create({
