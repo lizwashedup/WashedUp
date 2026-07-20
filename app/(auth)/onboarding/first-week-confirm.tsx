@@ -9,7 +9,7 @@ import { router, Stack } from 'expo-router';
 import Colors from '../../../constants/Colors';
 import { WishlistConfirmation } from '../../../components/firstJoin/WishlistConfirmation';
 import { getUserBounded } from '../../../lib/authGate';
-import { SCENE_ROUTE } from '../../../lib/firstJoin/onboardingGate';
+import { PLANS_ROUTE, SCENE_ROUTE } from '../../../lib/firstJoin/onboardingGate';
 import { supabase } from '../../../lib/supabase';
 
 interface WatchingProfile {
@@ -48,7 +48,7 @@ export default function FirstWeekConfirm() {
   // Back skips the ceremony, not the outcome: the wishlist is already saved.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      router.replace(SCENE_ROUTE);
+      router.replace(PLANS_ROUTE);
       return true;
     });
     return () => sub.remove();
@@ -65,7 +65,7 @@ export default function FirstWeekConfirm() {
         <WishlistConfirmation
           neighborhood={profile.neighborhood}
           vibeTags={profile.vibeTags}
-          onContinue={() => router.replace(SCENE_ROUTE)}
+          onContinue={() => router.replace(PLANS_ROUTE)}
           onEditPreferences={() => router.push('/(tabs)/profile' as never)}
         />
       )}

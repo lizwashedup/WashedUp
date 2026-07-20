@@ -9,8 +9,12 @@
 
 export const FIRST_WEEK_FROM_PARAM = 'onboarding';
 
-/** Where "later", back, and the confirmation CTA land. */
+/** Where "later" and back land from the first-week screen. */
 export const SCENE_ROUTE = '/(tabs)/explore' as const;
+
+/** Where the wishlist confirmation lands: the capture is about plans opening
+ * near you, so its exit goes to Plans (founder ruling 7-19). */
+export const PLANS_ROUTE = '/(tabs)/plans' as const;
 
 export type FirstWeekAccess =
   | { kind: 'show' }

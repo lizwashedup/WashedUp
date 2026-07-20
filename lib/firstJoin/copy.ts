@@ -48,7 +48,7 @@ export const FIRST_JOIN_COPY = {
   /** Fallback when the profile has no neighborhood. */
   watchingAnywhere: 'anywhere in la',
   editPreferences: 'edit preferences',
-  confirmCta: 'take me to scene',
+  confirmCta: 'take me to plans',
   confirmFooter: 'you can change this anytime in notifications',
 
   // ── Wishlist save failure (facts only: never confirm an unsaved list) ──────

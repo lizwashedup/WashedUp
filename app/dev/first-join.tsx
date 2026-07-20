@@ -93,7 +93,8 @@ export default function FirstJoinDevScreen() {
           vibeTags={['Music', 'Outdoors', 'Food']}
           // Same destinations as the real first-week-confirm route, so the
           // harness demonstrates the flow (needs a signed-in session to land).
-          onContinue={() => router.replace('/(tabs)/explore')}
+          // The wishlist capture is about plans, so it exits to Plans.
+          onContinue={() => router.replace('/(tabs)/plans')}
           onEditPreferences={() => router.push('/(tabs)/profile' as never)}
         />
       </>
