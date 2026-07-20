@@ -35,8 +35,9 @@ export const FIRST_JOIN_COPY = {
 
   // ── Empty / fallback state ─────────────────────────────────────────────────
   emptyBody: 'plans near you are filling up. want a tap on the shoulder when one opens?',
-  /** Single terracotta button on the empty state: same wishlist capture action. */
-  emptyCta: 'tell me when something opens near me',
+  /** Single terracotta button: the body above asks the question, the button
+   * answers it. Button labels are 1-3 words, never wrap (CLAUDE.md rule). */
+  emptyCta: 'tell me',
 
   // ── Wishlist confirmation screen ───────────────────────────────────────────
   confirmHeadline: "you're on the list",
@@ -49,7 +50,7 @@ export const FIRST_JOIN_COPY = {
   watchingAnywhere: 'anywhere in la',
   editPreferences: 'edit preferences',
   confirmCta: 'take me to plans',
-  confirmFooter: 'you can change this anytime in notifications',
+  confirmFooter: 'you can change this anytime in your profile.',
 
   // ── Wishlist save failure (facts only: never confirm an unsaved list) ──────
   saveFailedTitle: "couldn't save that",

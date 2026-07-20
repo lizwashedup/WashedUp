@@ -102,7 +102,9 @@ export default function FirstJoinDevScreen() {
           // harness demonstrates the flow (needs a signed-in session to land).
           // The wishlist capture is about plans, so it exits to Plans.
           onContinue={() => router.replace('/(tabs)/plans')}
-          onEditPreferences={() => router.push('/(tabs)/profile' as never)}
+          // Deep-links into the edit modal (where neighborhood + vibes live);
+          // polish-track: replace with an in-place preferences sheet later.
+          onEditPreferences={() => router.push('/(tabs)/profile?openEdit=true' as never)}
         />
       </>
     );

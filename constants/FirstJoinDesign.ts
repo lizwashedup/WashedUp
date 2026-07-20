@@ -86,8 +86,8 @@ export const FirstJoinDesign = {
   watchingIconSize: 16,
   watchingLabelSpacing: 1.5, // house section-header letter spacing
 
-  // Empty state (padding sized so the wishlist CTA stays one line at 390pt)
-  emptyCardPadding: 18,
+  // Empty state (CTA also auto-shrinks to one line on narrow screens)
+  emptyCardPadding: 14,
   emptyIconCircle: 96,
   emptyIconSize: 40,
   emptyTopGap: 64,

@@ -66,7 +66,7 @@ export default function FirstWeekConfirm() {
           neighborhood={profile.neighborhood}
           vibeTags={profile.vibeTags}
           onContinue={() => router.replace(PLANS_ROUTE)}
-          onEditPreferences={() => router.push('/(tabs)/profile' as never)}
+          onEditPreferences={() => router.push('/(tabs)/profile?openEdit=true' as never)}
         />
       )}
     </>

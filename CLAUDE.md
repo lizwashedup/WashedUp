@@ -95,6 +95,12 @@ Always reference Fonts.* from `constants/Typography.ts`. Do not add new font fam
 - Secondary: transparent background, 1.5px #B5522E border, #B5522E text
 - Ghost: #B5522E text only, no background or border
 
+### Button labels (permanent rule, founder 2026-07-19)
+Button labels are 1 to 3 words and must NEVER wrap, at any width or text
+size. Conversational copy belongs in body text above the button, never on
+the button itself. Text links (ghost text, no fill) may run long; filled
+buttons may not.
+
 ### Tabs pattern
 - Full-width underline tabs, not pill bubbles
 - Active: #2C1810 text, 2.5px #B5522E underline
