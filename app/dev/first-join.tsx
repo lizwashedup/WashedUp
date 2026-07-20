@@ -25,43 +25,31 @@ import { YourFirstWeekScreen } from '../../components/firstJoin/YourFirstWeekScr
 import { supabase } from '../../lib/supabase';
 
 // REAL plans, snapshotted from prod 2026-07-19, so every card tap opens a
-// real, loadable plan page (events are public-read; fixture ids dead-ended
-// on "couldn't load this plan"). Display values are frozen at snapshot time
-// for deterministic review; refresh this block when the plans wrap.
+// real, loadable plan page (events are public-read). Founder ruling 7-19:
+// a first-week card must NEVER lead to a plan the viewer can't join, so
+// harness fixtures are gender_rule='mixed' with no age gate (any viewer,
+// signed in or out, can open and join them). The production screen gets
+// this guarantee from the ranking service's eligibility filter. Display
+// values frozen at snapshot; refresh this block when the plans wrap.
 const FIXTURE_PLANS: FirstJoinCardPlan[] = [
   {
     // Image-left variant (real event photo).
-    id: 'd36fd4c0-d155-4bc8-8eba-21649b01c126',
-    title: 'Walk Silverlake Reservoir & Picnic',
-    start_time: '2026-07-25T00:30:00Z',
-    neighborhood: 'Silver Lake',
+    id: 'd69a82d3-4909-4565-87ed-94e07148598b',
+    title: 'US Open of Surf July 25-29',
+    start_time: '2026-07-25T14:00:00Z',
+    neighborhood: 'Other',
     image_url:
-      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/event-images/a9f3c004-073b-4dfd-b942-d0cd288a7aec/1784408589649.jpg?t=1784408590455',
+      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/event-images/b3c31332-3fde-42fe-bfa9-9f23dfa1d543/1783532259149.jpg?t=1783532259878',
     primary_vibe: 'outdoors',
-    memberCount: 1,
+    memberCount: 2,
     max_invites: 7,
     min_invites: 3,
-    creatorName: 'Dani',
+    creatorName: 'Wendell',
     creatorPhotoUrl:
-      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/profile-photos/a9f3c004-073b-4dfd-b942-d0cd288a7aec/profile.jpg?t=1784164260276',
+      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/profile-photos/b3c31332-3fde-42fe-bfa9-9f23dfa1d543/1783530196579.jpg?t=1783530197096',
   },
   {
-    // Brand-waves fallback variant (no event photo); full room.
-    id: '8f341f06-e83a-4121-ad33-81d0f02c3fac',
-    title: 'Pub trivia at a British bar!',
-    start_time: '2026-07-21T03:00:00Z',
-    neighborhood: 'Studio City',
-    image_url: null,
-    primary_vibe: 'nightlife',
-    memberCount: 4,
-    max_invites: 4,
-    min_invites: 3,
-    creatorName: 'Anna',
-    creatorPhotoUrl:
-      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/profile-photos/e2975ad6-0d90-4c49-9950-1f8f5bbf07d9/1780941279632.jpg?t=1780941280962',
-  },
-  {
-    // Sparse variant: 1 going, no pill.
+    // Brand-waves fallback variant (no event photo).
     id: '85a31d78-ec20-40a6-9d7d-3e0f13116e25',
     title: 'Evil Dead Burn at AMC Century City',
     start_time: '2026-07-23T03:15:00Z',
@@ -74,6 +62,21 @@ const FIXTURE_PLANS: FirstJoinCardPlan[] = [
     creatorName: 'Zach',
     creatorPhotoUrl:
       'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/profile-photos/5de0c01f-3803-46fd-b46a-9dac7aea49d9/1779343323841.jpg?t=1779343324557',
+  },
+  {
+    // Sparse variant: 1 going, no pill.
+    id: '8cf1a24e-1906-4247-bd5c-97d614db2c61',
+    title: 'Ruck',
+    start_time: '2026-07-25T14:45:00Z',
+    neighborhood: 'Beach Cities',
+    image_url: null,
+    primary_vibe: 'wellness',
+    memberCount: 1,
+    max_invites: 7,
+    min_invites: 3,
+    creatorName: 'Toni',
+    creatorPhotoUrl:
+      'https://upstjumasqblszevlgik.supabase.co/storage/v1/object/public/profile-photos/9dfe4cf4-045a-4124-aaca-94c8d3ebaa46/1783492950566.jpg?t=1783492951500',
   },
 ];
 

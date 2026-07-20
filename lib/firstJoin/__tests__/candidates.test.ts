@@ -165,3 +165,57 @@ describe('getFirstJoinCandidatesWithDeps', () => {
     expect((await getFirstJoinCandidatesWithDeps('viewer-1', 0, deps)).showWishlistPrompt).toBe(true);
   });
 });
+
+// Founder ruling (2026-07-19): a first-week card must NEVER lead to a plan the
+// viewer cannot join. The plan page's own gate (app/plan/[id].tsx isEligible)
+// is restated here as the invariant, and the service's output is checked
+// against it for every gender rule and age gate. If the plan page's rules ever
+// change, this test is the tripwire to update the service filter in lockstep.
+describe('invariant: never show a plan the viewer cannot join', () => {
+  const GENDER_RULES = ['mixed', 'women_only', 'men_only', 'nonbinary_only'] as const;
+  const VIEWER_GENDERS = ['woman', 'man', 'non_binary', null] as const;
+
+  const planPageAllows = (
+    rule: string | null,
+    gender: string | null,
+    ageMin: number | null,
+    ageMax: number | null,
+    age: number | null,
+  ): boolean => {
+    if (rule === 'women_only' && gender !== 'woman') return false;
+    if (rule === 'men_only' && gender !== 'man') return false;
+    if (rule === 'nonbinary_only' && gender !== 'non_binary') return false;
+    if (age !== null) {
+      if (ageMin !== null && age < ageMin) return false;
+      if (ageMax !== null && age > ageMax) return false;
+    }
+    return true;
+  };
+
+  it.each(VIEWER_GENDERS)(
+    'viewer gender %s only ever receives plans the plan page will let them join',
+    async (gender) => {
+      const pool = [
+        ...GENDER_RULES.map((rule) => mkEvent({ id: `g-${rule}`, gender_rule: rule })),
+        mkEvent({ id: 'age-30plus', target_age_min: 30 }),
+        mkEvent({ id: 'age-under-25', target_age_max: 25 }),
+        mkEvent({ id: 'age-band-ok', target_age_min: 25, target_age_max: 30 }),
+      ];
+      // Default viewer birthday makes them 28 at the fixed NOW.
+      const viewer = mkViewer({ gender: gender as never });
+      const deps = mkDeps({
+        fetchViewer: async () => viewer,
+        fetchCandidateEvents: async () => pool,
+      });
+      const result = await getFirstJoinCandidatesWithDeps('viewer-1', 10, deps);
+      expect(result.candidates.length).toBeGreaterThan(0);
+      for (const c of result.candidates) {
+        expect(
+          planPageAllows(c.event.gender_rule, gender, c.event.target_age_min, c.event.target_age_max, 28),
+        ).toBe(true);
+      }
+      // Filtering, not emptying: the open-to-everyone plan is always offered.
+      expect(result.candidates.some((c) => c.event.id === 'g-mixed')).toBe(true);
+    },
+  );
+});
