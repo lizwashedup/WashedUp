@@ -129,9 +129,9 @@ The "gold is decorative only" rule has several intentional exceptions where gold
 - **Gold eyebrow text on the post-plan survey celebration toast** (`PostPlanSurveyV3`, `toastEyebrow`, `Colors.gold`). The one place gold is *text*: a small uppercase eyebrow on the dark warm toast ("You both said yes." moment). On the dark ground, gold reads as candlelight, not as a link or CTA; the toast is a celebration, exactly the warm-affirmation register gold owns in this system. Do not use gold text on light backgrounds anywhere.
 - **`goldenAmber` #F2A32D — the featured/live accent** (`Colors.goldenAmber` + `goldenAmberTint15`). A deliberate second warm accent reserved EXCLUSIVELY for editorial "this is happening" markers: the FEATURED pill label, the "happening now" tag, and their tint fills (PlanCard, FeaturedEventCard, plan detail). It is NOT a CTA color and never appears on buttons or links — terracotta keeps that job. Do not reach for goldenAmber outside featured/live markers.
 
-- **Wishlist-confirmation check badge on the first-join flow** (`WishlistConfirmation`; `Colors.pastMinimumGreen` #2E7D32). The ONE permitted green in the app, per the step-2b approved mockup: the small check accent on the "you're on the list" bell icon. It is information ("this preference saved"), not a success celebration, which is why it does not use gold: gold on the first-join cards means honest scarcity ("2 spots left", `spotsLeftGoldFill`), and one color carrying both meanings would blur both. The former green "past the minimum" pill was CUT by founder decision (2026-07-16); do not reintroduce it. Never use this green anywhere else, never for text, never for CTAs.
-
 Do not extend these exceptions to additional buttons or surfaces without writing it here first.
+
+Green is not in the palette anywhere: the first-join "past the minimum" pill (2026-07-16) and the wishlist-confirmation check badge (2026-07-19) were both cut by founder decision. Gold is the system's success color; do not reintroduce green.
 
 ## General Rules
 

@@ -6,11 +6,16 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
 import { FirstJoinDesign as D } from '../../constants/FirstJoinDesign';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { FIRST_JOIN_COPY as COPY } from '../../lib/firstJoin/copy';
+
+// Full W-over-waves mark, same asset as the empty state (provenance:
+// assets/images/brand/README.md).
+const BRAND_MARK = require('../../assets/images/brand/washedup-mark.png');
 
 interface WishlistConfirmationProps {
   neighborhood: string | null;
@@ -34,10 +39,7 @@ export function WishlistConfirmation({
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.centerBlock}>
           <View style={styles.iconCircle}>
-            <Ionicons name="notifications-outline" size={D.emptyIconSize} color={Colors.terracotta} />
-            <View style={styles.checkBadge}>
-              <Ionicons name="checkmark" size={D.checkBadgeIconSize} color={Colors.white} />
-            </View>
+            <Image source={BRAND_MARK} style={styles.brandMark} contentFit="contain" />
           </View>
 
           <Text style={styles.headline}>{COPY.confirmHeadline}</Text>
@@ -105,23 +107,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkBadge: {
-    position: 'absolute',
-    right: D.checkBadgeOffset,
-    bottom: D.checkBadgeOffset,
-    width: D.checkBadgeSize,
-    height: D.checkBadgeSize,
-    borderRadius: D.checkBadgeSize / 2,
-    backgroundColor: Colors.pastMinimumGreen,
-    borderWidth: D.avatarRingWidth,
-    borderColor: Colors.cream,
-    alignItems: 'center',
-    justifyContent: 'center',
+  brandMark: {
+    height: D.emptyMarkHeight,
+    width: D.emptyMarkHeight * D.emptyMarkAspect,
   },
   headline: {
-    fontFamily: Fonts.displayItalic,
-    fontSize: D.headlineSize,
-    lineHeight: D.headlineLineHeight,
+    fontFamily: Fonts.sansSemibold,
+    fontSize: D.confirmHeadlineSize,
+    lineHeight: D.confirmHeadlineLineHeight,
     color: Colors.terracotta,
     marginTop: D.captionTopGap,
     textAlign: 'center',

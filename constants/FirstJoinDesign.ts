@@ -80,10 +80,9 @@ export const FirstJoinDesign = {
   laterTopGap: 2,
   laterBottomGap: 6,
 
-  // Confirmation screen
-  checkBadgeSize: 28,
-  checkBadgeIconSize: 16,
-  checkBadgeOffset: 2,
+  // Confirmation screen (headline is DM Sans 600, not display italic: founder 7-19)
+  confirmHeadlineSize: 24,
+  confirmHeadlineLineHeight: 30,
   watchingIconSize: 16,
   watchingLabelSpacing: 1.5, // house section-header letter spacing
 

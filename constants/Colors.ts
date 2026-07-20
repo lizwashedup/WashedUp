@@ -147,11 +147,9 @@ const brand = {
   surveyQuietBg: '#F5EDDD',                       // creamWarm, light inline toast for quiet request-sent / failure lines (dark card stays exclusive to mutual celebrations)
 
   // ── First-join system (spec b1/b4) ───────────────────────────────────────
-  // The ONE permitted green in the app: the check accent on the wishlist
-  // confirmation bell ("you're on the list"). The former "past the minimum"
-  // pill was cut by founder decision 7-16. Gold stays the success/affirmation
-  // color everywhere else; do not reach for this green on any other surface.
-  pastMinimumGreen: '#2E7D32',
+  // No green anywhere: the pill (7-16) and the confirmation check badge
+  // (7-19) were both cut by founder decision. Gold is the system's
+  // success/affirmation color.
   spotsLeftGoldFill: 'rgba(197,165,90,0.22)',     // gold #C5A55A tint: honest-scarcity pill fill (glow, not alarm; never red)
 } as const;
 
