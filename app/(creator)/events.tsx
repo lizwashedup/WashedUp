@@ -118,8 +118,17 @@ export default function CreatorEventsScreen() {
             <Text style={styles.cardAction}>put it on again</Text>
           </TouchableOpacity>
         ) : (
-          /* LIZ COPY */
-          <Text style={styles.cardActionQuiet}>{opts?.draft ? 'keep shaping it' : 'manage'}</Text>
+          <View style={styles.cardActionRow}>
+            {/* LIZ COPY */}
+            <Text style={styles.cardActionQuiet}>{opts?.draft ? 'keep shaping it' : 'manage'}</Text>
+            <TouchableOpacity
+              onPress={() => router.push(`/creator/tickets?id=${e.id}` as never)}
+              hitSlop={8}
+            >
+              {/* copy to the taste gate (launch sprint 7-21) */}
+              <Text style={styles.cardAction}>tickets</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
     </TouchableOpacity>
@@ -268,5 +277,6 @@ const styles = StyleSheet.create({
     color: Colors.tertiary,
     marginTop: 6,
   },
+  cardActionRow: { flexDirection: 'row', alignItems: 'baseline', gap: 14 },
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, marginTop: 8 },
 });
