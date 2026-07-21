@@ -28,7 +28,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
-import { formatEventDateLA } from '../../lib/laDate';
+import { formatEventDateLA, getTodayInLA } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
 import { eventKickerLabel } from '../../lib/sceneDiscovery';
@@ -46,6 +46,10 @@ const GOING_COUNT_THRESHOLD = 5;
 // a listing with a date but no time still deserves a calendar entry;
 // evening is the house default for LA events
 const DEFAULT_EVENT_START_TIME = '19:00:00';
+// §4c more-from rail: poster cards, soonest first
+const MORE_FROM_RAIL_LIMIT = 6;
+const MORE_CARD_WIDTH = 150;
+const MORE_CARD_POSTER_HEIGHT = 120;
 
 interface ExploreEvent {
   id: string;
@@ -114,6 +118,25 @@ function eventStartIso(dateStr: string | null, timeStr: string | null): string |
     return `${dateStr}T${timeStr}`;
   }
   return `${dateStr}T${DEFAULT_EVENT_START_TIME}`;
+}
+
+// §4c: the follow/rail entity is the FRONTING entity — the community, or
+// the standalone organizer profile; a public_name override fronts as
+// itself and carries neither follow nor rail (the proposal-36 grammar)
+type FrontingTarget = { kind: 'community' | 'organizer'; id: string };
+
+interface MoreFromEvent {
+  id: string;
+  title: string;
+  event_date: string | null;
+  venue: string | null;
+  image_url: string | null;
+  category: string | null;
+}
+
+function laTodayIsoDate(): string {
+  const t = getTodayInLA();
+  return `${t.y}-${String(t.m + 1).padStart(2, '0')}-${String(t.d).padStart(2, '0')}`;
 }
 
 function venueMapsUrl(venue: string, address: string | null): string {
@@ -312,6 +335,36 @@ export default function EventDetailScreen() {
     queryKey: ['leader-card', event?.community_id],
     queryFn: async () => (await getLeaderCards([event!.community_id!])).get(event!.community_id!) ?? null,
     enabled: COMMUNITIES_ENABLED && !!event?.community_id && !event?.public_name,
+    staleTime: 60_000,
+  });
+
+  const frontingTarget: FrontingTarget | null =
+    !event || event.public_name
+      ? null
+      : event.community_id
+        ? { kind: 'community', id: event.community_id }
+        : event.host_user_id
+          ? { kind: 'organizer', id: event.host_user_id }
+          : null;
+
+  // §4c (doc 69 A6): more from the same fronting entity — upcoming Live
+  // listings, soonest first, this one excluded
+  const { data: moreEvents = [] } = useQuery({
+    queryKey: ['more-from', frontingTarget?.kind, frontingTarget?.id, id],
+    queryFn: async () => {
+      const col = frontingTarget!.kind === 'community' ? 'community_id' : 'host_user_id';
+      const { data } = await supabase
+        .from('explore_events')
+        .select('id, title, event_date, venue, image_url, category')
+        .eq(col, frontingTarget!.id)
+        .eq('status', 'Live')
+        .gte('event_date', laTodayIsoDate())
+        .neq('id', id!)
+        .order('event_date', { ascending: true })
+        .limit(MORE_FROM_RAIL_LIMIT);
+      return (data ?? []) as MoreFromEvent[];
+    },
+    enabled: COMMUNITIES_ENABLED && !!frontingTarget && !!id,
     staleTime: 60_000,
   });
 
@@ -755,6 +808,51 @@ export default function EventDetailScreen() {
               })
             )}
           </View>
+
+          {/* §4c (doc 69 A6): the more-from rail closes the page */}
+          {COMMUNITIES_ENABLED && moreEvents.length > 0 && !!bylineName && (
+            <View style={styles.moreSection}>
+              {/* copy to the taste gate (doc 69 Q5) */}
+              <Text style={styles.moreSectionTitle}>more put on by {bylineName}</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.moreRail}
+              >
+                {moreEvents.map((ev) => (
+                  <TouchableOpacity
+                    key={ev.id}
+                    style={styles.moreCard}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      hapticLight();
+                      router.push(`/event/${ev.id}`);
+                    }}
+                  >
+                    {ev.image_url ? (
+                      <Image source={{ uri: ev.image_url }} style={styles.moreCardImage} contentFit="cover" />
+                    ) : (
+                      <View style={styles.moreCardImage}>
+                        <GeneratedPoster
+                          title={ev.title}
+                          category={ev.category}
+                          venue={ev.venue}
+                          height={MORE_CARD_POSTER_HEIGHT}
+                          compact
+                        />
+                      </View>
+                    )}
+                    <Text style={styles.moreCardTitle} numberOfLines={2}>{ev.title}</Text>
+                    {!!ev.event_date && (
+                      <Text style={styles.moreCardMeta}>
+                        {formatEventDateLA(ev.event_date, { weekday: 'short', month: 'short', day: 'numeric' })}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
         </View>
       </ScrollView>
 
@@ -852,6 +950,19 @@ const styles = StyleSheet.create({
   infoCardBody: { flex: 1, gap: 2 },
   infoCardText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   infoCardHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  moreSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
+  moreSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
+  moreRail: { gap: 10 },
+  moreCard: { width: MORE_CARD_WIDTH, gap: 6 },
+  moreCardImage: {
+    width: MORE_CARD_WIDTH,
+    height: MORE_CARD_POSTER_HEIGHT,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: Colors.inputBg,
+  },
+  moreCardTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
+  moreCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
   metaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, flex: 1, lineHeight: 20 },
   descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg },
   descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, lineHeight: 22 },
