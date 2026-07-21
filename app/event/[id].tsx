@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Dimensions,
+  Platform,
   Share,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +26,7 @@ import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import { showAddToCalendar } from '../../lib/addToCalendar';
 import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
 import { formatEventDateLA } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
@@ -41,6 +43,9 @@ const HERO_HEIGHT = 280;
 const HERO_CONTROLS_CLEARANCE = 56;
 // social proof threshold (doc 37): under this, never show a raw count
 const GOING_COUNT_THRESHOLD = 5;
+// a listing with a date but no time still deserves a calendar entry;
+// evening is the house default for LA events
+const DEFAULT_EVENT_START_TIME = '19:00:00';
 
 interface ExploreEvent {
   id: string;
@@ -97,6 +102,25 @@ function formatFullDate(dateStr: string | null, timeStr: string | null): string 
     return `${dayLabel} at ${t}`;
   }
   return dayLabel;
+}
+
+// start_time is a full ISO timestamp OR a plain HH:MM[:SS] string (see
+// formatFullDate); addToCalendar needs one parseable datetime
+function eventStartIso(dateStr: string | null, timeStr: string | null): string | null {
+  if (!dateStr) return null;
+  if (timeStr) {
+    const ts = new Date(timeStr);
+    if (!isNaN(ts.getTime())) return timeStr;
+    return `${dateStr}T${timeStr}`;
+  }
+  return `${dateStr}T${DEFAULT_EVENT_START_TIME}`;
+}
+
+function venueMapsUrl(venue: string, address: string | null): string {
+  const query = encodeURIComponent(address ? `${venue} ${address}` : venue);
+  return Platform.OS === 'ios'
+    ? `https://maps.apple.com/?q=${query}`
+    : `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
 export default function EventDetailScreen() {
@@ -554,18 +578,72 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          <View style={styles.metaRow}>
-            <Calendar size={16} color={Colors.warmGray} strokeWidth={2} />
-            <Text style={styles.metaText}>{formatFullDate(event.event_date, event.start_time)}</Text>
-          </View>
-
-          {event.venue && (
-            <View style={styles.metaRow}>
-              <MapPin size={16} color={Colors.warmGray} strokeWidth={2} />
-              <Text style={styles.metaText}>
-                {event.venue}{event.venue_address ? ` · ${event.venue_address}` : ''}
-              </Text>
+          {/* §4c (doc 69 A1): date/time and venue become tappable cards —
+              calendar card adds the event, venue card opens the maps app.
+              Flag off renders today's meta rows byte for byte (one reveal
+              at the August moment, Cowork ruling). */}
+          {COMMUNITIES_ENABLED ? (
+            <View style={styles.infoCards}>
+              {!!event.event_date && (
+                <TouchableOpacity
+                  style={styles.infoCard}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    hapticLight();
+                    const startIso = eventStartIso(event.event_date, event.start_time);
+                    if (startIso) {
+                      showAddToCalendar(event.title, startIso, null, event.venue ?? undefined);
+                    }
+                  }}
+                >
+                  <Calendar size={18} color={Colors.terracotta} strokeWidth={2} />
+                  <View style={styles.infoCardBody}>
+                    <Text style={styles.infoCardText}>{formatFullDate(event.event_date, event.start_time)}</Text>
+                    {/* copy to the taste gate (doc 69 Q5) */}
+                    <Text style={styles.infoCardHint}>add to calendar</Text>
+                  </View>
+                  <ChevronRight size={16} color={Colors.textLight} strokeWidth={2} />
+                </TouchableOpacity>
+              )}
+              {event.venue && (
+                <TouchableOpacity
+                  style={styles.infoCard}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    hapticLight();
+                    openUrl(venueMapsUrl(event.venue!, event.venue_address));
+                  }}
+                >
+                  <MapPin size={18} color={Colors.terracotta} strokeWidth={2} />
+                  <View style={styles.infoCardBody}>
+                    <Text style={styles.infoCardText}>{event.venue}</Text>
+                    {event.venue_address ? (
+                      <Text style={styles.infoCardHint}>{event.venue_address}</Text>
+                    ) : (
+                      /* copy to the taste gate (doc 69 Q5) */
+                      <Text style={styles.infoCardHint}>open in maps</Text>
+                    )}
+                  </View>
+                  <ChevronRight size={16} color={Colors.textLight} strokeWidth={2} />
+                </TouchableOpacity>
+              )}
             </View>
+          ) : (
+            <>
+              <View style={styles.metaRow}>
+                <Calendar size={16} color={Colors.warmGray} strokeWidth={2} />
+                <Text style={styles.metaText}>{formatFullDate(event.event_date, event.start_time)}</Text>
+              </View>
+
+              {event.venue && (
+                <View style={styles.metaRow}>
+                  <MapPin size={16} color={Colors.warmGray} strokeWidth={2} />
+                  <Text style={styles.metaText}>
+                    {event.venue}{event.venue_address ? ` · ${event.venue_address}` : ''}
+                  </Text>
+                </View>
+              )}
+            </>
           )}
 
           {ticketPrice !== null && (
@@ -760,6 +838,20 @@ const styles = StyleSheet.create({
     lineHeight: 34,
   },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  infoCards: { gap: 8 },
+  infoCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.inputBg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  infoCardBody: { flex: 1, gap: 2 },
+  infoCardText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  infoCardHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
   metaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, flex: 1, lineHeight: 20 },
   descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg },
   descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, lineHeight: 22 },
