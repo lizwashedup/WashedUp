@@ -19,10 +19,9 @@ function isMissingSchema(code: string | undefined): boolean {
 
 // ─── the §3 money math ───────────────────────────────────────────────────
 // Normative formula (doc 61 §3): commission C = round(F × bps / 10000);
-// buyer total T = (F + 30) / (1 − 0.029), rounded UP to the cent. The §3
-// worked-examples table disagrees with this formula by 1-3 cents on its
-// $20 and $50 rows; the formula sentence is the law until Cowork rules —
-// flagged in doc 00 (2026-07-21). Checkout must match this to the cent.
+// buyer total T = (F + 30) / (1 − 0.029), rounded UP to the cent.
+// Cowork ruling 2026-07-21: the formula is the law (the §3 table was
+// wrong and has been corrected). Checkout must match this to the cent.
 export const STRIPE_FIXED_FEE_CENTS = 30;
 export const STRIPE_RATE = 0.029;
 // founding partner default; the organizer's locked row bps wins when readable
@@ -166,10 +165,9 @@ export async function getMyPayoutState(userId: string): Promise<PayoutState> {
   };
 }
 
-// The onboarding edge function is the ticketing lane's next deploy; this
-// name is native's declared contract (logged in doc 00 2026-07-21) — the
-// lane deploys to it or rules a rename before checkout goes live.
-export const ONBOARDING_EDGE_FN = 'stripe-organizer-onboarding';
+// The onboarding edge function name is Cowork's ruling (2026-07-21):
+// the ticketing lane deploys to this exact slug.
+export const ONBOARDING_EDGE_FN = 'ticket-connect-onboarding';
 
 export async function requestOnboardingLink(): Promise<string | null> {
   try {
