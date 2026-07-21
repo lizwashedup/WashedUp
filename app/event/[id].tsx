@@ -31,6 +31,13 @@ import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../l
 import { formatEventDateLA, getTodayInLA } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
+import {
+  getFollowState,
+  getFollowerCount,
+  recordFollow,
+  removeFollow,
+  type FollowTarget,
+} from '../../lib/organizerFollows';
 import { eventKickerLabel } from '../../lib/sceneDiscovery';
 import { getLeaderCards } from '../../lib/communityLeader';
 import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
@@ -119,11 +126,6 @@ function eventStartIso(dateStr: string | null, timeStr: string | null): string |
   }
   return `${dateStr}T${DEFAULT_EVENT_START_TIME}`;
 }
-
-// §4c: the follow/rail entity is the FRONTING entity — the community, or
-// the standalone organizer profile; a public_name override fronts as
-// itself and carries neither follow nor rail (the proposal-36 grammar)
-type FrontingTarget = { kind: 'community' | 'organizer'; id: string };
 
 interface MoreFromEvent {
   id: string;
@@ -338,7 +340,10 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
-  const frontingTarget: FrontingTarget | null =
+  // §4c: the follow/rail entity is the FRONTING entity — the community,
+  // or the standalone organizer profile; a public_name override fronts
+  // as itself and carries neither follow nor rail (the proposal-36 grammar)
+  const frontingTarget: FollowTarget | null =
     !event || event.public_name
       ? null
       : event.community_id
@@ -366,6 +371,36 @@ export default function EventDetailScreen() {
     },
     enabled: COMMUNITIES_ENABLED && !!frontingTarget && !!id,
     staleTime: 60_000,
+  });
+
+  // §4c (doc 69 B1/B2): dormant until proposal 68 applies — a missing
+  // table reads as available:false and the affordance never renders
+  const { data: followState } = useQuery({
+    queryKey: ['organizer-follow', frontingTarget?.kind, frontingTarget?.id, userId],
+    queryFn: () => getFollowState(frontingTarget!, userId!),
+    enabled: COMMUNITIES_ENABLED && !!frontingTarget && !!userId,
+    staleTime: 30_000,
+  });
+  const { data: followerCount = null } = useQuery({
+    queryKey: ['follower-count', frontingTarget?.kind, frontingTarget?.id],
+    queryFn: () => getFollowerCount(frontingTarget!),
+    enabled: COMMUNITIES_ENABLED && !!frontingTarget,
+    staleTime: 60_000,
+  });
+  const followMutation = useMutation({
+    mutationFn: async () => {
+      if (!frontingTarget || !userId || !followState) throw new Error('not ready');
+      const ok = followState.following
+        ? await removeFollow(frontingTarget, userId)
+        : await recordFollow(frontingTarget, userId);
+      if (!ok) throw new Error('follow write failed');
+    },
+    onSuccess: () => {
+      hapticSuccess();
+      queryClient.invalidateQueries({ queryKey: ['organizer-follow'] });
+      queryClient.invalidateQueries({ queryKey: ['follower-count'] });
+    },
+    onError: () => hapticError(),
   });
 
   const goFindPeople = useCallback(() => {
@@ -741,6 +776,51 @@ export default function EventDetailScreen() {
             </View>
           )}
 
+          {/* §4c (doc 69 B2): the fronting-entity card with the inline
+              follow (Dice pattern) sits after the about block. The pill
+              renders only when 68 is live (followState.available) and the
+              viewer is signed in; the count obeys the doc-37 threshold. */}
+          {COMMUNITIES_ENABLED && !!frontingTarget && !!bylineName && (
+            <View style={styles.entityCard}>
+              {!!bylineFace && (
+                <Image source={{ uri: bylineFace }} style={styles.entityCardImage} contentFit="cover" />
+              )}
+              {!!bylineLogo && (
+                <Image source={{ uri: bylineLogo }} style={styles.entityCardImage} contentFit="cover" />
+              )}
+              {!bylineFace && !bylineLogo && (
+                <View style={[styles.entityCardImage, styles.entityCardImageFallback]}>
+                  <Text style={styles.entityCardInitial}>{bylineName[0]?.toUpperCase() ?? '?'}</Text>
+                </View>
+              )}
+              <View style={styles.entityCardBody}>
+                {/* LIZ COPY (decision 16): put on by, never hosted by */}
+                <Text style={styles.entityCardKicker}>put on by</Text>
+                <Text style={styles.entityCardName}>{bylineName}</Text>
+                {followerCount !== null && followerCount >= GOING_COUNT_THRESHOLD && (
+                  /* copy to the taste gate (doc 69 Q5) */
+                  <Text style={styles.entityCardMeta}>{followerCount} following</Text>
+                )}
+              </View>
+              {!!userId && !!followState?.available && (
+                <TouchableOpacity
+                  style={[styles.followPill, followState.following && styles.followPillOn]}
+                  onPress={() => {
+                    hapticLight();
+                    followMutation.mutate();
+                  }}
+                  disabled={followMutation.isPending}
+                  activeOpacity={0.85}
+                >
+                  {/* copy to the taste gate (doc 69 Q5) */}
+                  <Text style={[styles.followPillText, followState.following && styles.followPillTextOn]}>
+                    {followState.following ? 'following' : 'follow'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
           <View style={styles.plansSection}>
             <View style={styles.plansSectionHeader}>
               <Users size={18} color={Colors.asphalt} strokeWidth={2} />
@@ -950,6 +1030,28 @@ const styles = StyleSheet.create({
   infoCardBody: { flex: 1, gap: 2 },
   infoCardText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   infoCardHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  entityCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.inputBg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 8,
+  },
+  entityCardImage: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' },
+  entityCardImageFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
+  entityCardInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta },
+  entityCardBody: { flex: 1, gap: 2 },
+  entityCardKicker: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
+  entityCardName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  entityCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  followPill: { borderWidth: 1.5, borderColor: Colors.terracotta, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
+  followPillOn: { borderColor: Colors.border },
+  followPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  followPillTextOn: { color: Colors.textMedium },
   moreSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
   moreSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
   moreRail: { gap: 10 },
