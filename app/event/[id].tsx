@@ -206,6 +206,13 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
+  // THE CHAT LAW (docs 09 + 21, doc 00 2026-07-21): a community event's
+  // conversation is its OWN chat (rsvp enrolls via the 7-07 trigger) and
+  // the find-people/plans module NEVER renders on it; organizational and
+  // standalone events keep rsvp + find-people + the doc-09 smart popup
+  // exactly as built. Flag off, community events do not exist visibly.
+  const isCommunityEvent = COMMUNITIES_ENABLED && !!event?.community_id;
+
   const { data: linkedPlans = [] } = useQuery({
     queryKey: ['event-plans', id],
     queryFn: async (): Promise<LinkedPlan[]> => {
@@ -227,7 +234,22 @@ export default function EventDetailScreen() {
         creator_photo: p.profiles?.profile_photo_url ?? null,
       }));
     },
-    enabled: !!id,
+    enabled: !!id && !!event && !isCommunityEvent,
+    staleTime: 60_000,
+  });
+
+  // the community event's own chat: the topic row keyed by this event
+  const { data: eventTopicId = null } = useQuery({
+    queryKey: ['event-topic', id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('community_topics')
+        .select('id')
+        .eq('explore_event_id', id!)
+        .maybeSingle();
+      return (data?.id as string | undefined) ?? null;
+    },
+    enabled: isCommunityEvent && !!id,
     staleTime: 60_000,
   });
 
@@ -428,6 +450,7 @@ export default function EventDetailScreen() {
     // going in or out of a community event adds or removes its chat
     queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
     queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
+    queryClient.invalidateQueries({ queryKey: ['event-topic', id] });
   }, [queryClient, id]);
 
   const proceedWithRsvp = useCallback(async () => {
@@ -437,8 +460,10 @@ export default function EventDetailScreen() {
       await setRsvp(id, true);
       hapticSuccess();
       invalidateRsvp();
-      // the smart popup: one nudge per event, never again once answered
-      if (!(await wasNudged(id))) {
+      // the smart popup: one nudge per event, never again once answered.
+      // NEVER on a community event (the chat law): its conversation is
+      // the event chat the rsvp just enrolled them in, not a plan.
+      if (!isCommunityEvent && !(await wasNudged(id))) {
         await markNudged(id);
         const openPlans = linkedPlans.filter((p) => {
           const actualCount = memberCountsMap[p.id] ?? p.member_count;
@@ -472,7 +497,7 @@ export default function EventDetailScreen() {
     } finally {
       setRsvpBusy(false);
     }
-  }, [id, linkedPlans, memberCountsMap, invalidateRsvp, goFindPeople]);
+  }, [id, isCommunityEvent, linkedPlans, memberCountsMap, invalidateRsvp, goFindPeople]);
 
   // the organizer name exactly as the byline renders it, for the notice and
   // its evidence snapshot (doc 13: show the organizer's display name)
@@ -821,6 +846,9 @@ export default function EventDetailScreen() {
             </View>
           )}
 
+          {/* the chat law: the plans module NEVER renders on a community
+              event — its conversation is the event chat */}
+          {!isCommunityEvent && (
           <View style={styles.plansSection}>
             <View style={styles.plansSectionHeader}>
               <Users size={18} color={Colors.asphalt} strokeWidth={2} />
@@ -888,6 +916,7 @@ export default function EventDetailScreen() {
               })
             )}
           </View>
+          )}
 
           {/* §4c (doc 69 A6): the more-from rail closes the page */}
           {COMMUNITIES_ENABLED && moreEvents.length > 0 && !!bylineName && (
@@ -952,9 +981,26 @@ export default function EventDetailScreen() {
             )}
           </TouchableOpacity>
         )}
-        <TouchableOpacity style={styles.postPlanButton} onPress={goFindPeople}>
-          <Text style={styles.postPlanButtonText}>find people to go with</Text>
-        </TouchableOpacity>
+        {/* the chat law: find-people never renders on a community event —
+            the chat affordance takes its place once the viewer is going */}
+        {isCommunityEvent ? (
+          myRsvp === 'going' && !!eventTopicId && (
+            <TouchableOpacity
+              style={styles.postPlanButton}
+              onPress={() => {
+                hapticMedium();
+                router.push(`/community-thread/${eventTopicId}`);
+              }}
+            >
+              {/* copy to the taste gate (doc 69 Q5) */}
+              <Text style={styles.postPlanButtonText}>open the chat</Text>
+            </TouchableOpacity>
+          )
+        ) : (
+          <TouchableOpacity style={styles.postPlanButton} onPress={goFindPeople}>
+            <Text style={styles.postPlanButtonText}>find people to go with</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {reportTarget && (
