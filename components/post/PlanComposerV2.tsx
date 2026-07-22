@@ -47,12 +47,13 @@ import { supabase } from '../../lib/supabase';
 import { checkContent } from '../../lib/contentFilter';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
-import { MONTHS, getTodayInLA, laWallTimeToUTC } from '../../lib/laDate';
+import { MONTHS, getTodayInLA, laWallTimeToUTC, getLAWallParts } from '../../lib/laDate';
 import {
   NEIGHBORHOOD_OPTIONS,
   NEIGHBORHOOD_OTHER,
 } from '../../constants/Neighborhoods';
 import { PLAN_CATEGORIES, type PlanCategory } from '../../constants/Categories';
+import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { COPY } from '../yours/state/constants';
 import { useAuthUserId } from '../yours/state/useAuthUserId';
 import type { MyFace } from '../../hooks/useMyFace';
@@ -160,7 +161,14 @@ export default function PlanComposerV2() {
     prefillGenderPref?: string;
     prefillGroupSize?: string;
     prefillTicketsUrl?: string;
+    // the source explore event of a "find people to go with" spawn (or of a
+    // duplicated/drafted plan that carries one). Written to the plan row so
+    // the DB title-match trigger never has to guess (it guesses wrong with
+    // duplicate titles).
+    prefillExploreEventId?: string;
     duplicatedFromEventId?: string;
+    // resuming a saved draft: post updates this row instead of inserting
+    draftId?: string;
   }>();
 
   // ── Profile (gender options) ──
@@ -176,6 +184,7 @@ export default function PlanComposerV2() {
 
   // ── Core fields ──
   const [title, setTitle] = useState('');
+  const [exploreEventId, setExploreEventId] = useState<string | null>(null);
   const [category, setCategory] = useState<PlanCategory | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
@@ -266,6 +275,7 @@ export default function PlanComposerV2() {
   // LegacyComposer's hydration so "Post your own" carries the source plan over. ──
   useEffect(() => {
     if (params.prefillTitle) setTitle(String(params.prefillTitle));
+    if (params.prefillExploreEventId) setExploreEventId(String(params.prefillExploreEventId));
     if (params.prefillInvitePersonId) {
       setInvited((prev) =>
         prev.some((c) => c.user_id === params.prefillInvitePersonId)
@@ -314,19 +324,35 @@ export default function PlanComposerV2() {
         .filter((s): s is AgeRange => (AGE_RANGES as readonly string[]).includes(s));
       if (parsed.length > 0) setAgeRanges(parsed);
     }
-    // Date: accepts YYYY-MM-DD or full ISO.
+    // Date: accepts YYYY-MM-DD (already an LA calendar day, split as a plain
+    // string) or full ISO (converted to its LA day). Never parsed through the
+    // device clock: reading the UTC or device-local side of a timestamp
+    // shifts any 5pm-or-later LA time one day forward per reopen (the
+    // draft/prefill date-shift bug, tour part 5).
     if (params.prefillEventDate) {
       const raw = String(params.prefillEventDate);
-      const d = raw.includes('T') ? new Date(raw) : new Date(`${raw}T12:00:00`);
-      if (!isNaN(d.getTime())) {
-        setDateMonth(d.getMonth()); setDateDay(d.getDate()); setDateYear(d.getFullYear()); setDateSelected(true);
+      if (raw.includes('T')) {
+        const w = getLAWallParts(raw);
+        if (w) { setDateMonth(w.m); setDateDay(w.d); setDateYear(w.y); setDateSelected(true); }
+      } else {
+        const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) { setDateYear(Number(m[1])); setDateMonth(Number(m[2]) - 1); setDateDay(Number(m[3])); setDateSelected(true); }
       }
     }
     // Time: from start_time (ISO or HH:MM[:SS]); snap to the picker's minutes.
+    // A full ISO carries both the LA day and the LA clock, so take BOTH from
+    // the LA side: day and time must come from the same wall clock or they
+    // drift apart (the +1 shift paired a UTC day with an LA time).
     if (params.prefillStartTime) {
       const st = String(params.prefillStartTime);
       let hours: number | null = null; let minutes: number | null = null;
-      if (st.includes('T')) { const d = new Date(st); if (!isNaN(d.getTime())) { hours = d.getHours(); minutes = d.getMinutes(); } }
+      if (st.includes('T')) {
+        const w = getLAWallParts(st);
+        if (w) {
+          hours = w.hour24; minutes = w.minute;
+          setDateMonth(w.m); setDateDay(w.d); setDateYear(w.y); setDateSelected(true);
+        }
+      }
       else if (st.includes(':')) { const parts = st.split(':'); hours = parseInt(parts[0], 10); minutes = parseInt(parts[1] ?? '0', 10); }
       if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
         const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
@@ -336,11 +362,12 @@ export default function PlanComposerV2() {
         setTimeHour(displayHour); setTimeMinute(nearestMinute); setTimePeriod(period); setTimeSelected(true);
       }
     }
-    // End time (optional): from end_time (ISO or HH:MM[:SS]); snap to picker.
+    // End time (optional): from end_time (ISO, read on the LA clock, or
+    // HH:MM[:SS]); snap to picker.
     if (params.prefillEndTime) {
       const et = String(params.prefillEndTime);
       let hours: number | null = null; let minutes: number | null = null;
-      if (et.includes('T')) { const d = new Date(et); if (!isNaN(d.getTime())) { hours = d.getHours(); minutes = d.getMinutes(); } }
+      if (et.includes('T')) { const w = getLAWallParts(et); if (w) { hours = w.hour24; minutes = w.minute; } }
       else if (et.includes(':')) { const parts = et.split(':'); hours = parseInt(parts[0], 10); minutes = parseInt(parts[1] ?? '0', 10); }
       if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
         const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
@@ -499,17 +526,21 @@ export default function PlanComposerV2() {
     placeSkipEligible: place == null,
   });
 
+  // the preview is a passive readout, so its empty states describe instead
+  // of instruct: "add a day" read like a tappable link and it is not (C19,
+  // Liz's call: genuinely tappable or visually passive, nothing in between).
+  // LIZ COPY
   const whenSummary = dateSelected
     ? `${MONTHS[dateMonth]} ${dateDay}${timeSelected ? ` · ${displayTime(timeHour, timeMinute, timePeriod).toLowerCase()}` : ''}`
-    : 'add a day';
-  const placeSummary = location.trim() ? location.trim().toLowerCase() : 'add a place';
+    : 'no day yet';
+  const placeSummary = location.trim() ? location.trim().toLowerCase() : 'no place yet';
   const peopleSummary = invited.length > 0 ? invited.map((c) => c.name.toLowerCase()).join(', ') : `open to ${groupSize}`;
   const summaryMeta = [whenSummary, placeSummary, peopleSummary].join(' · ');
 
   const canPost = title.trim().length > 0 && dateSelected && timeSelected && category !== null && creatorMessage.trim().length >= MSG_MIN && description.trim().length > 0 && !loading && !imageLoading;
 
   const resetForm = () => {
-    setTitle(''); setCategory(null); setImageUrl(null); setCreatorMessage('');
+    setTitle(''); setExploreEventId(null); setCategory(null); setImageUrl(null); setCreatorMessage('');
     setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
     setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
     setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
@@ -530,8 +561,95 @@ export default function PlanComposerV2() {
       prefillDropIn: undefined, prefillAllowDuplicate: undefined,
       prefillAgeRange: undefined, prefillGenderPref: undefined,
       prefillGroupSize: undefined, prefillTicketsUrl: undefined,
+      prefillExploreEventId: undefined,
       duplicatedFromEventId: undefined,
+      draftId: undefined,
     } as never);
+  };
+
+  // ── Save as draft (COMMUNITIES_ENABLED): title + when are enough; the rest
+  // waits. No host member row, no feed presence, no waitlist notify - the row
+  // sits at status 'draft', visible only in Yours until it posts. ──
+  const canSaveDraft = title.trim().length > 0 && dateSelected && timeSelected && !loading && !imageLoading;
+  const handleSaveDraft = async () => {
+    if (loading || imageLoading || confirmVisible) return;
+    const missing: string[] = [];
+    if (title.trim().length === 0) missing.push('Title');
+    if (!dateSelected) missing.push('Day');
+    if (!timeSelected) missing.push('Time');
+    if (missing.length > 0) {
+      // LIZ COPY
+      setAlertInfo({ title: 'Almost there', message: `A draft just needs:\n\n• ${missing.join('\n• ')}` });
+      return;
+    }
+    const fieldsToCheck = [title, description, creatorMessage, location].filter(Boolean).join(' ');
+    const filter = checkContent(fieldsToCheck);
+    if (!filter.ok) {
+      setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
+      return;
+    }
+    const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
+    let endTimeIso: string | null = null;
+    if (endTimeSelected) {
+      let endDt = buildDatetime(dateMonth, dateDay, dateYear, endTimeHour, endTimeMinute, endTimePeriod);
+      if (endDt.getTime() <= startTime.getTime()) {
+        endDt = new Date(endDt.getTime() + 24 * 60 * 60 * 1000);
+      }
+      endTimeIso = endDt.toISOString();
+    }
+    const ageBounds = ageRangesToMinMax(ageRanges);
+    const row = {
+      title: title.trim(),
+      start_time: startTime.toISOString(),
+      end_time: endTimeIso,
+      drop_in: dropIn,
+      allow_duplicate: allowDuplicate,
+      location_text: location.trim() || null,
+      location_lat: locationLat,
+      location_lng: locationLng,
+      tickets_url: ticketUrl.trim() || null,
+      primary_vibe: category?.toLowerCase() ?? null,
+      gender_rule: genderPref,
+      target_age_min: ageBounds.min,
+      target_age_max: ageBounds.max,
+      description: description.trim() || null,
+      host_message: creatorMessage.trim().slice(0, MSG_LIMIT) || null,
+      max_invites: groupSize,
+      min_invites: MIN_GROUP,
+      status: 'draft',
+      city: 'Los Angeles',
+      image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
+      neighborhood: neighborhood.trim() || null,
+      explore_event_id: exploreEventId,
+    };
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('auth');
+      if (params.draftId) {
+        const { error } = await supabase
+          .from('events')
+          .update(row)
+          .eq('id', String(params.draftId))
+          .eq('creator_user_id', user.id)
+          .eq('status', 'draft');
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('events')
+          .insert({ ...row, creator_user_id: user.id });
+        if (error) throw error;
+      }
+      hapticSuccess();
+      queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
+      resetForm();
+      // LIZ COPY
+      setAlertInfo({ title: 'saved', message: 'your draft lives in yours, under plans. finish it whenever.' });
+    } catch {
+      setAlertInfo({ title: 'That did not save', message: 'Try again in a moment.' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ── Submit (optimistic: the post moment shows instantly; the insert runs in
@@ -602,6 +720,7 @@ export default function PlanComposerV2() {
       city: 'Los Angeles',
       image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
       neighborhood: neighborhood.trim() || null,
+      explore_event_id: exploreEventId,
       duplicated_from_event_id: params.duplicatedFromEventId ? String(params.duplicatedFromEventId) : null,
     };
     const inviteIds = invited.map((c) => c.user_id);
@@ -651,12 +770,28 @@ export default function PlanComposerV2() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('auth');
-      const { data: insertedEvent, error } = await supabase
-        .from('events')
-        .insert({ ...row, creator_user_id: user.id })
-        .select('id')
-        .single();
-      if (error) throw error;
+      let insertedEvent: { id: string } | null = null;
+      if (params.draftId) {
+        // finishing a draft: the row exists, flip it to forming with the
+        // final fields; the host member row lands below like any new plan
+        const { data: updated, error: updateErr } = await supabase
+          .from('events')
+          .update(row)
+          .eq('id', String(params.draftId))
+          .eq('creator_user_id', user.id)
+          .select('id')
+          .single();
+        if (updateErr) throw updateErr;
+        insertedEvent = updated;
+      } else {
+        const { data: inserted, error } = await supabase
+          .from('events')
+          .insert({ ...row, creator_user_id: user.id })
+          .select('id')
+          .single();
+        if (error) throw error;
+        insertedEvent = inserted;
+      }
 
       if (insertedEvent?.id) {
         const { error: memberErr } = await supabase.from('event_members').insert({
@@ -671,8 +806,11 @@ export default function PlanComposerV2() {
             // Best-effort rollback of the orphaned event. Error-check it: a
             // failed delete leaves an event with no host member, so flag that
             // case distinctly - both paths fall through to the quiet gold
-            // recovery below so the creator can simply retry.
-            const { error: rollbackErr } = await supabase.from('events').delete().eq('id', insertedEvent.id);
+            // recovery below so the creator can simply retry. A resumed draft
+            // rolls back to 'draft' instead of being deleted.
+            const { error: rollbackErr } = params.draftId
+              ? (await supabase.from('events').update({ status: 'draft' }).eq('id', insertedEvent.id)) 
+              : (await supabase.from('events').delete().eq('id', insertedEvent.id));
             throw new Error(rollbackErr ? 'member_orphan' : 'member');
           }
         }
@@ -702,6 +840,7 @@ export default function PlanComposerV2() {
 
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
       queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       setPostedPlanId(insertedEvent?.id ?? null);
       if (isFirst) {
@@ -1031,6 +1170,17 @@ export default function PlanComposerV2() {
         >
           {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.postBtnText}>post the plan</Text>}
         </TouchableOpacity>
+        {COMMUNITIES_ENABLED && (
+          <TouchableOpacity
+            onPress={handleSaveDraft}
+            disabled={!canSaveDraft}
+            hitSlop={8}
+            style={styles.draftLinkWrap}
+          >
+            {/* LIZ COPY */}
+            <Text style={[styles.draftLink, !canSaveDraft && styles.draftLinkOff]}>save it as a draft</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Neighborhood picker modal */}
@@ -1271,6 +1421,9 @@ const styles = StyleSheet.create({
   },
   postBtnOff: { opacity: 0.45 },
   postBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white, letterSpacing: 0.2 },
+  draftLinkWrap: { alignItems: 'center', marginTop: 10 },
+  draftLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  draftLinkOff: { opacity: 0.45 },
 
   // Modals
   modalOverlay: { flex: 1, backgroundColor: Colors.overlayDark40, justifyContent: 'flex-end' },

@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, SectionList, TouchableOpacity, StyleSheet } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { ChevronDown, ChevronRight } from 'lucide-react-native';
+import { ChevronDown, ChevronRight, X } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 import { withTimeout } from '../../../lib/withTimeout';
 import { hapticLight, hapticError } from '../../../lib/haptics';
@@ -19,10 +19,16 @@ import { toPlanCardPlan } from '../../../lib/creatorMarks';
 import type { Plan } from '../../../lib/fetchPlans';
 import {
   useMyPlans,
+  useMyPlanDrafts,
   useWaitlistedPlans,
   useInterestedPlans,
   useSavedPlans,
+  type PlanDraft,
 } from '../../../hooks/useMyPlansData';
+import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
+import { buildDuplicatePostParams } from '../../../lib/duplicatePlan';
+import { formatEventDateLA } from '../../../lib/laDate';
+import { BrandedAlert, type BrandedAlertButton } from '../../BrandedAlert';
 
 const WISHLISTS_TIMEOUT_MS = 8000;
 
@@ -46,6 +52,55 @@ export default function MyPlansView({ userId }: { userId: string }) {
   const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string; slug: string | null } | null>(null);
 
   const { data: myPlans = [], isLoading: myPlansLoading } = useMyPlans(userId);
+  const { data: planDrafts = [] } = useMyPlanDrafts(userId);
+  const [draftAlert, setDraftAlert] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+
+  const openDraft = useCallback((draft: PlanDraft) => {
+    hapticLight();
+    router.push({
+      pathname: '/(tabs)/post',
+      params: { ...buildDuplicatePostParams(draft, null), draftId: draft.id },
+    } as never);
+  }, [router]);
+
+  const confirmDeleteDraft = useCallback((draft: PlanDraft) => {
+    // LIZ COPY
+    setDraftAlert({
+      title: 'toss this draft?',
+      message: 'it goes for good.',
+      buttons: [
+        { text: 'keep it', style: 'cancel' },
+        {
+          // muted confirm, never red (C13)
+          text: 'toss it',
+          onPress: async () => {
+            await supabase.from('events').delete().eq('id', draft.id).eq('status', 'draft');
+            queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
+          },
+        },
+      ],
+    });
+  }, [queryClient]);
+
+  const draftsHeader = COMMUNITIES_ENABLED && planDrafts.length > 0 ? (
+    <View>
+      <Text style={styles.sectionHeader}>Drafts</Text>
+      {planDrafts.map((d) => (
+        <TouchableOpacity key={d.id} style={styles.draftRow} onPress={() => openDraft(d)} activeOpacity={0.7}>
+          <View style={styles.draftBody}>
+            <Text style={styles.draftTitle} numberOfLines={1}>{d.title}</Text>
+            <Text style={styles.draftMeta} numberOfLines={1}>
+              {formatEventDateLA(d.start_time)}
+              {'  ·  finish it whenever'}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => confirmDeleteDraft(d)} hitSlop={10}>
+            <X size={16} color={Colors.tertiary} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      ))}
+    </View>
+  ) : null;
   const { data: waitlistedPlans = [] } = useWaitlistedPlans(userId);
   const { data: interestedPlans = [] } = useInterestedPlans(userId);
   const { data: savedBase = [] } = useSavedPlans(userId);
@@ -231,7 +286,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
     <View style={styles.fill}>
       {myPlansLoading ? (
         <SkeletonFeed />
-      ) : sections.length === 0 ? (
+      ) : sections.length === 0 && !draftsHeader ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>You haven't joined any plans yet.</Text>
           <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/plans')}>
@@ -240,6 +295,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
         </View>
       ) : (
         <SectionList
+          ListHeaderComponent={draftsHeader}
           decelerationRate="normal"
           sections={sections}
           keyExtractor={(item) => item.id}
@@ -297,12 +353,35 @@ export default function MyPlansView({ userId }: { userId: string }) {
         slug={shareSheet?.slug ?? undefined}
         onClose={() => setShareSheet(null)}
       />
+
+      <BrandedAlert
+        visible={!!draftAlert}
+        title={draftAlert?.title ?? ''}
+        message={draftAlert?.message}
+        buttons={draftAlert?.buttons}
+        onClose={() => setDraftAlert(null)}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  draftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  draftBody: { flex: 1 },
+  draftTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  draftMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 2 },
   listContent: { paddingHorizontal: 20, paddingBottom: 32 },
   cardWrap: { marginBottom: 14 },
   sectionHeader: {

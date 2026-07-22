@@ -12,6 +12,8 @@ import { FilterBottomSheet } from './FilterBottomSheet';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { getPlanPinColor } from '../lib/planColors';
+import { formatEventDateLA } from '../lib/laDate';
+import { normalizeTicketPrice } from '../lib/ticketPrice';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -33,8 +35,12 @@ interface SceneEvent {
   venue_address: string | null;
   category: string | null;
   external_url: string | null;
-  ticket_price: string | null;
+  // Postgres numeric: number or numeric string depending on the path (doc 34 2.3)
+  ticket_price: number | string | null;
   plans_count: number;
+  // proposal 35: the organizer's place-picker pin, null on legacy rows
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 interface GeocodedEvent extends SceneEvent {
@@ -52,7 +58,7 @@ function formatDateShort(dateStr: string | null, timeStr: string | null): string
   let dayLabel: string;
   if (date.toDateString() === today.toDateString()) dayLabel = 'Tonight';
   else if (date.toDateString() === tomorrow.toDateString()) dayLabel = 'Tomorrow';
-  else dayLabel = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  else dayLabel = formatEventDateLA(dateStr);
 
   if (timeStr) {
     const [h, m] = timeStr.split(':');
@@ -102,12 +108,24 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
       const results: GeocodedEvent[] = [];
       for (const event of events) {
         if (cancelled) return;
+        // proposal 35: a stored pin is the organizer's own pick, so it wins
+        // outright; geocoding stays as the legacy-row fallback
+        if (event.latitude != null && event.longitude != null) {
+          results.push({ ...event, latitude: event.latitude, longitude: event.longitude });
+          continue;
+        }
         const address = event.venue_address || event.venue;
         if (!address) continue;
         try {
-          const coords = await Location.geocodeAsync(address);
-          if (coords.length > 0) {
-            results.push({ ...event, latitude: coords[0].latitude, longitude: coords[0].longitude });
+          // LA events only: anchor the query and refuse out-of-basin hits
+          // (a bare venue name through the unbiased geocoder can land in
+          // another city entirely; C17)
+          const coords = await Location.geocodeAsync(`${address}, Los Angeles, CA`);
+          const hit = coords.find(
+            (c) => c.latitude > 33.2 && c.latitude < 34.9 && c.longitude > -119.1 && c.longitude < -117.2,
+          );
+          if (hit) {
+            results.push({ ...event, latitude: hit.latitude, longitude: hit.longitude });
           }
         } catch {
           // Skip events that can't be geocoded
@@ -151,9 +169,9 @@ export default function SceneMapView({ events, wishlistedSet, onClose, onWishlis
     setSelectedEvent(null);
   }, []);
 
-  const isFree = selectedEvent
-    ? !selectedEvent.ticket_price || selectedEvent.ticket_price.trim() === '' || selectedEvent.ticket_price.trim().toLowerCase() === 'free'
-    : true;
+  // normalizeTicketPrice handles the numeric column arriving as number or
+  // string; the old .trim() chain crashed on a number (doc 34 2.3)
+  const isFree = selectedEvent ? normalizeTicketPrice(selectedEvent.ticket_price) === null : true;
 
   return (
     <View style={styles.container}>

@@ -79,6 +79,7 @@ export const COPY = {
   tabPeople: 'People',
   tabMyPlans: 'Plans',
   tabCircles: 'Circles',
+  tabCommunities: 'Communities',
   tabAlbums: 'Albums',
 
   // SIM-EYEBALL #3: request banner phrasing

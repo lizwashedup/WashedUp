@@ -27,7 +27,9 @@ import {
   declineWaitlistException,
   waitlistAlertMessage,
 } from '../lib/waitlistExceptions';
+import { getParticipationNoticeStatus, recordParticipationAssent } from '../lib/participationTerms';
 import { BrandedAlert, BrandedAlertButton } from './BrandedAlert';
+import { ParticipationNotice } from './legal/ParticipationNotice';
 
 /**
  * Yours-system notification types that carry no event_id and resolve on
@@ -56,6 +58,14 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   // twice (the 2nd call would error not_on_waitlist / no_active_invite and
   // surface a spurious branded alert). Keyed by notification id.
   const exceptionInFlightRef = useRef<Set<string>>(new Set());
+  // proposal 49: the exception accept owed the Independent Activity Notice;
+  // the pending accept is stashed here while the sheet is up.
+  const [exceptionNotice, setExceptionNotice] = useState<{
+    notifId: string;
+    eventId: string;
+    organizerUserId: string | null;
+    organizerName: string;
+  } | null>(null);
 
   // Clear the home-screen badge whenever the inbox is opened. The act of
   // viewing the inbox is the user's "I've seen these" signal — even if they
@@ -231,11 +241,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   // exception_invite inline Accept. Mirrors the waitlist_spot Claim flow:
   // act on the RPC, mark the notification consumed, then route to the chat
   // (the accept trigger adds the user as a member).
-  const handleAcceptException = useCallback(async (notifId: string, eventId?: string) => {
-    if (!eventId) return;
+  const performAcceptException = useCallback(async (notifId: string, eventId: string) => {
     if (exceptionInFlightRef.current.has(notifId)) return;
     exceptionInFlightRef.current.add(notifId);
-    hapticLight();
     try {
       await acceptWaitlistException(eventId);
       await supabase.from('app_notifications').update({ status: 'acted' }).eq('id', notifId);
@@ -258,6 +266,53 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       exceptionInFlightRef.current.delete(notifId);
     }
   }, [refetchNotifs, queryClient, router, onClose]);
+
+  // proposal 49 (Cowork ruling): the exception accept ends in plan
+  // membership, so it owes the notice like any join; the accept proceeds
+  // only once the assent is recorded (fail CLOSED after 49 is live;
+  // dormant before it). The inbox row carries no creator, so the byline
+  // for the sheet + evidence snapshot is fetched when the notice is owed.
+  const handleAcceptException = useCallback(async (notifId: string, eventId?: string) => {
+    if (!eventId) return;
+    if (exceptionInFlightRef.current.has(notifId)) return;
+    hapticLight();
+    const { needsAssent } = await getParticipationNoticeStatus();
+    if (needsAssent) {
+      const { data: eventRow } = await supabase
+        .from('events')
+        .select('creator_user_id')
+        .eq('id', eventId)
+        .maybeSingle();
+      const creatorId = eventRow?.creator_user_id ?? null;
+      let organizerName = 'Someone';
+      if (creatorId) {
+        const { data: profileRow } = await supabase
+          .from('profiles_public')
+          .select('first_name_display')
+          .eq('id', creatorId)
+          .maybeSingle();
+        organizerName = profileRow?.first_name_display ?? 'Someone';
+      }
+      setExceptionNotice({ notifId, eventId, organizerUserId: creatorId, organizerName });
+      return;
+    }
+    await performAcceptException(notifId, eventId);
+  }, [performAcceptException]);
+
+  const handleExceptionNoticeAgree = useCallback(async () => {
+    if (!exceptionNotice) return false;
+    const ok = await recordParticipationAssent({
+      listingType: 'plan',
+      listingId: exceptionNotice.eventId,
+      organizerUserId: exceptionNotice.organizerUserId,
+      organizerName: exceptionNotice.organizerName,
+      action: 'join',
+    });
+    if (!ok) return false;
+    setExceptionNotice(null);
+    await performAcceptException(exceptionNotice.notifId, exceptionNotice.eventId);
+    return true;
+  }, [exceptionNotice, performAcceptException]);
 
   const handleDeclineException = useCallback(async (notifId: string, eventId?: string) => {
     if (!eventId) return;
@@ -489,6 +544,12 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
+      />
+      <ParticipationNotice
+        visible={exceptionNotice !== null}
+        organizerName={exceptionNotice?.organizerName ?? 'Someone'}
+        onAgree={handleExceptionNoticeAgree}
+        onClose={() => setExceptionNotice(null)}
       />
     </Modal>
   );

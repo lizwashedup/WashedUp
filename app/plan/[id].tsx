@@ -37,10 +37,11 @@ import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-nat
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
+import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
 import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
-import { YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
 import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
 // Lazy so a circle component's module-scope code (its StyleSheet) is never
 // evaluated for non-circle users on this universally-reachable shipped screen.
@@ -55,6 +56,7 @@ import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
+import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import LinkifiedText from '../../components/LinkifiedText';
@@ -193,6 +195,7 @@ interface PlanDetail {
   tickets_url: string | null;
   is_featured: boolean;
   featured_type: 'washedup_event' | 'birthday_party' | null;
+  explore_event_id: string | null;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -293,7 +296,8 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
-      status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured, featured_type
+      status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured, featured_type,
+      explore_event_id
     `)
     .eq('id', id)
     .single();
@@ -347,6 +351,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     tickets_url: row.tickets_url ?? null,
     is_featured: row.is_featured ?? false,
     featured_type: (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
+    explore_event_id: row.explore_event_id ?? null,
     member_count: row.member_count ?? 0,
     creator,
   };
@@ -437,6 +442,9 @@ export default function PlanDetailScreen() {
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
+  const [noticePending, setNoticePending] = useState<
+    { action: 'join'; message?: string } | { action: 'exception' } | null
+  >(null);
   const [showDuplicateSheet, setShowDuplicateSheet] = useState(false);
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
   const [manageModalVisible, setManageModalVisible] = useState(false);
@@ -589,10 +597,17 @@ export default function PlanDetailScreen() {
 
     if (!plan.location_text) return;
 
-    Location.geocodeAsync(plan.location_text)
+    // Plans live in LA (the city column is hardcoded), but a bare venue name
+    // through the unbiased geocoder can land anywhere (the tour's Barnsdall
+    // Art Park pin in San Jose). Anchor the query to LA and refuse results
+    // outside the LA basin: no map beats a wrong-city map.
+    Location.geocodeAsync(`${plan.location_text}, Los Angeles, CA`)
       .then((results) => {
-        if (results.length > 0) {
-          setMapCoords({ latitude: results[0].latitude, longitude: results[0].longitude });
+        const hit = results.find(
+          (r) => r.latitude > 33.2 && r.latitude < 34.9 && r.longitude > -119.1 && r.longitude < -117.2,
+        );
+        if (hit) {
+          setMapCoords({ latitude: hit.latitude, longitude: hit.longitude });
         }
       })
       .catch(() => {
@@ -816,6 +831,32 @@ export default function PlanDetailScreen() {
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
   const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
+
+  // Communities: if this plan spawned from a Scene event and that event was
+  // cancelled, say so plainly. Two read shapes cover everyone: a normal
+  // user's Live-only RLS read comes back EMPTY, while the event's owner or
+  // community leader can still read the row and must check its status (the
+  // tour walked as the leader, so the empty-read-only version could never
+  // show her the banner). The plan itself is untouched: formed groups keep
+  // their plans and decide for themselves (batch 15 call b).
+  const { data: sourceEventCancelled = false } = useQuery({
+    queryKey: ['plan-source-event-gone', id],
+    enabled: COMMUNITIES_ENABLED && !!id && !!plan && !isPastPlan,
+    queryFn: async () => {
+      const { data: row } = await supabase
+        .from('events')
+        .select('explore_event_id')
+        .eq('id', id!)
+        .maybeSingle();
+      if (!row?.explore_event_id) return false;
+      const { data: ev } = await supabase
+        .from('explore_events')
+        .select('id, status')
+        .eq('id', row.explore_event_id)
+        .maybeSingle();
+      return !ev || ev.status === 'Cancelled';
+    },
+  });
   // Next Time! uses the end_time-aware "past" check so users can still
   // signal interest on a plan that's already started but not yet ended.
   const interestPlanEnded = plan ? isPlanPast(plan.start_time, plan.end_time) : true;
@@ -998,6 +1039,55 @@ export default function PlanDetailScreen() {
       setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
     },
   });
+
+  // the creator name exactly as the byline renders it, for the notice and
+  // its evidence snapshot (doc 13: show the organizer's display name)
+  const noticeOrganizerName = plan?.creator?.first_name_display ?? 'Someone';
+
+  // proposal 49: every path that ends in plan membership shows the
+  // Independent Activity Notice first (Cowork ruling: entry route is
+  // irrelevant to the evidence purpose) and proceeds only once the assent
+  // is recorded (fail CLOSED after 49 is live; dormant before it). The
+  // pending action is stashed while the sheet is up; the join modal
+  // closes first because two sibling Modals cannot be visible at once on
+  // iOS, and joinMessage survives in state.
+  const requestJoin = useCallback(async (message?: string) => {
+    const { needsAssent } = await getParticipationNoticeStatus();
+    if (needsAssent) {
+      setJoinModalVisible(false);
+      setNoticePending({ action: 'join', message });
+      return;
+    }
+    joinMutation.mutate(message);
+  }, [joinMutation]);
+
+  const requestAcceptException = useCallback(async () => {
+    const { needsAssent } = await getParticipationNoticeStatus();
+    if (needsAssent) {
+      setNoticePending({ action: 'exception' });
+      return;
+    }
+    acceptExceptionMutation.mutate();
+  }, [acceptExceptionMutation]);
+
+  const handleNoticeAgree = useCallback(async () => {
+    if (!id || !noticePending) return false;
+    const ok = await recordParticipationAssent({
+      listingType: 'plan',
+      listingId: id,
+      organizerUserId: plan?.creator_user_id ?? null,
+      organizerName: noticeOrganizerName,
+      action: 'join',
+    });
+    if (!ok) return false;
+    setNoticePending(null);
+    if (noticePending.action === 'join') {
+      joinMutation.mutate(noticePending.message);
+    } else {
+      acceptExceptionMutation.mutate();
+    }
+    return true;
+  }, [id, plan?.creator_user_id, noticeOrganizerName, noticePending, joinMutation, acceptExceptionMutation]);
 
   // ─── Leave ───────────────────────────────────────────────────────────────────
 
@@ -1240,8 +1330,8 @@ export default function PlanDetailScreen() {
       buttons: [
         { text: 'Keep Plan', style: 'cancel' },
         {
+          // muted confirm, never red (C13)
           text: 'Cancel Plan',
-          style: 'destructive',
           onPress: async () => {
             if (!plan || !currentUserId) return;
             try {
@@ -1502,6 +1592,15 @@ export default function PlanDetailScreen() {
 
         {/* B. Plan Title */}
         <Text style={styles.planTitle}>{plan.title}</Text>
+
+        {COMMUNITIES_ENABLED && sourceEventCancelled && (
+          /* LIZ COPY (taste call 7) */
+          <View style={styles.cancelledEventBanner}>
+            <Text style={styles.cancelledEventText}>
+              the event this plan came from was cancelled. your plans are your own.
+            </Text>
+          </View>
+        )}
 
         {/* C. Category Tags — featured pill ("washedup event" gold or "birthday party" pink) for featured plans, otherwise regular category */}
         {isFeatured ? (
@@ -1845,7 +1944,7 @@ export default function PlanDetailScreen() {
                 style={styles.exceptionAcceptBtn}
                 activeOpacity={0.85}
                 disabled={acceptExceptionMutation.isPending || declineExceptionMutation.isPending}
-                onPress={() => acceptExceptionMutation.mutate()}
+                onPress={() => requestAcceptException()}
               >
                 <Text style={styles.exceptionAcceptText}>Join the plan</Text>
               </TouchableOpacity>
@@ -1980,7 +2079,7 @@ export default function PlanDetailScreen() {
               // the group): join directly, no greeting modal. Strangers on an
               // open circle plan keep the modal, exactly like a normal plan.
               if (isCirclePlan && circleViewerIsMember) {
-                joinMutation.mutate(undefined);
+                requestJoin(undefined);
               } else {
                 setJoinModalVisible(true);
               }
@@ -2041,7 +2140,7 @@ export default function PlanDetailScreen() {
 
             <TouchableOpacity
               style={[joinStyles.joinBtn, (!joinConfirmed || !joinMessage.trim()) && joinStyles.joinBtnDisabled]}
-              onPress={() => joinMutation.mutate(joinMessage)}
+              onPress={() => requestJoin(joinMessage)}
               disabled={!joinConfirmed || !joinMessage.trim() || joinMutation.isPending}
               activeOpacity={0.85}
             >
@@ -2540,6 +2639,24 @@ export default function PlanDetailScreen() {
                 )}
               </TouchableOpacity>
 
+              {/* Duplicate: reuse the exact prefill pipeline the waitlist
+                  "Post your own" path uses, from the creator's own plan */}
+              {COMMUNITIES_ENABLED && (
+                <TouchableOpacity
+                  style={manageStyles.duplicateBtn}
+                  onPress={() => {
+                    setManageModalVisible(false);
+                    router.push({
+                      pathname: '/(tabs)/post',
+                      params: buildDuplicatePostParams(plan, id),
+                    });
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={manageStyles.duplicateBtnText}>Post This Again</Text>
+                </TouchableOpacity>
+              )}
+
               {/* Cancel plan */}
               <TouchableOpacity
                 style={manageStyles.cancelBtn}
@@ -2702,6 +2819,13 @@ export default function PlanDetailScreen() {
         }}
         onBlock={(uid, uname) => blockUser(uid, uname, () => router.back())}
       />
+
+      <ParticipationNotice
+        visible={noticePending !== null}
+        organizerName={noticeOrganizerName}
+        onAgree={handleNoticeAgree}
+        onClose={() => setNoticePending(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -2802,6 +2926,19 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
     lineHeight: 34,
     marginBottom: 12,
+  },
+  cancelledEventBanner: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.gold,
+    padding: 12,
+    marginBottom: 12,
+  },
+  cancelledEventText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
   },
   categoryTagsRow: {
     flexDirection: 'row',
@@ -3212,7 +3349,8 @@ const styles = StyleSheet.create({
   creatorCancelLinkText: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
-    color: Colors.cancelRed,
+    // muted, never red (C13); the confirm carries the weight
+    color: Colors.textMedium,
     textDecorationLine: 'underline',
   },
   waitlistManageButton: {
@@ -3641,7 +3779,10 @@ const manageStyles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 8,
   },
-  cancelBtnText: { color: Colors.cancelRed, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
+  // muted, never red (C13)
+  cancelBtnText: { color: Colors.textMedium, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
+  duplicateBtn: { alignItems: 'center', paddingVertical: 12 },
+  duplicateBtnText: { color: Colors.terracotta, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
   featuredSection: {
     marginTop: 16,
     paddingTop: 16,

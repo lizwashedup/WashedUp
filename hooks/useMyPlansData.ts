@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { COMMUNITIES_ENABLED } from '../constants/FeatureFlags';
 import { fetchInterestedPlans, fetchRealMemberCounts, type Plan } from '../lib/fetchPlans';
 import { populateCreatorMarks } from '../lib/creatorMarks';
 import { withTimeout } from '../lib/withTimeout';
@@ -11,6 +12,47 @@ import { withTimeout } from '../lib/withTimeout';
 
 const MY_PLANS_TIMEOUT_MS = 12000;
 const SAVED_TIMEOUT_MS = 8000;
+
+/** The creator's saved plan drafts (status 'draft': composer-only, never on the feed). */
+export interface PlanDraft {
+  id: string;
+  title: string;
+  start_time: string;
+  end_time: string | null;
+  description: string | null;
+  host_message: string | null;
+  location_text: string | null;
+  location_lat: number | null;
+  location_lng: number | null;
+  neighborhood: string | null;
+  primary_vibe: string | null;
+  image_url: string | null;
+  gender_rule: string | null;
+  target_age_min: number | null;
+  target_age_max: number | null;
+  max_invites: number | null;
+  tickets_url: string | null;
+  drop_in: boolean | null;
+  allow_duplicate: boolean | null;
+  explore_event_id: string | null;
+}
+
+export function useMyPlanDrafts(userId: string | null | undefined) {
+  return useQuery<PlanDraft[]>({
+    queryKey: ['my-plan-drafts', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      const { data } = await supabase
+        .from('events')
+        .select('id, title, start_time, end_time, description, host_message, location_text, location_lat, location_lng, neighborhood, primary_vibe, image_url, gender_rule, target_age_min, target_age_max, max_invites, tickets_url, drop_in, allow_duplicate, explore_event_id')
+        .eq('creator_user_id', userId)
+        .eq('status', 'draft')
+        .order('start_time', { ascending: true });
+      return (data ?? []) as PlanDraft[];
+    },
+    enabled: !!userId && COMMUNITIES_ENABLED,
+  });
+}
 
 /** Plans the user joined or created (excluding ones they left), upcoming + past. */
 export function useMyPlans(userId: string | null | undefined) {

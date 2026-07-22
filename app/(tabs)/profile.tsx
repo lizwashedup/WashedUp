@@ -35,6 +35,9 @@ import Colors from '../../constants/Colors';
 import { SkeletonProfile } from '../../components/SkeletonCard';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
+import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import { getCreatorAccess, hasCreatorAccess, creatorLandingRoute, isLeaderAccess, type CreatorAccess } from '../../lib/creatorMode';
+import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
 import { lastUnauthRedirectAt } from '../../lib/navState';
@@ -65,6 +68,33 @@ export default function ProfileScreen() {
   const queryClient = useQueryClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  // creator mode entry: set when the user leads a community or holds an
+  // approved operator grant (checked server-side too; this only shows the
+  // row). The full access object decides where the switch lands: leaders on
+  // today, event-host-only grants on events (doc 34 §1.1)
+  const [creatorAccess, setCreatorAccess] = useState<CreatorAccess | null>(null);
+  // slice 0 (doc 43 track B): the switch label is context-aware — the
+  // community's name for leaders, the organizer name for event hosts,
+  // the generic line only when neither resolves
+  const [switchName, setSwitchName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!COMMUNITIES_ENABLED) return;
+    getCreatorAccess()
+      .then(async (a) => {
+        if (!hasCreatorAccess(a)) {
+          setCreatorAccess(null);
+          return;
+        }
+        setCreatorAccess(a);
+        if (isLeaderAccess(a) && a.ledCommunities[0]) {
+          setSwitchName(a.ledCommunities[0].name);
+        } else {
+          const organizer = await getMyOrganizerProfile().catch(() => null);
+          setSwitchName(organizer?.display_name ?? null);
+        }
+      })
+      .catch(() => setCreatorAccess(null));
+  }, []);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [showDeleteFlow, setShowDeleteFlow] = useState(false);
   const [deleteStep, setDeleteStep] = useState(1);
@@ -516,7 +546,12 @@ export default function ProfileScreen() {
               <Text style={styles.deleteTitle}>Are you sure?</Text>
               <Text style={styles.deleteBody}>
                 Deleting your account is permanent and cannot be undone.{'\n\n'}
-                All your plans, chats, and profile data will be permanently removed.
+                All your plans, chats, and profile data will be permanently removed.{'\n\n'}
+                {/* doc 45: the exact records-may-remain sentence — LIZ COPY
+                    may warm the words AROUND it, never this substance */}
+                some limited records — transactions, consent, fraud-prevention,
+                security, tax, and legal compliance — may remain after deletion
+                for the retention periods described in our privacy policy.
               </Text>
               <TouchableOpacity
                 style={styles.deleteNextBtn}
@@ -945,6 +980,41 @@ export default function ProfileScreen() {
           {supportRows.map((row, i) => renderSettingsRow(row, i === supportRows.length - 1))}
         </View>
 
+        {/* Creators (Communities & Events, flag-gated) */}
+        {COMMUNITIES_ENABLED && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Creators</Text>
+            </View>
+            <View style={styles.settingsGroup}>
+              {creatorAccess && (
+                <TouchableOpacity
+                  style={styles.settingsRow}
+                  onPress={() => router.replace(creatorLandingRoute(creatorAccess))}
+                  activeOpacity={0.7}
+                >
+                  {/* LIZ COPY (slice 0): context-aware switch, named when a
+                      name exists */}
+                  <Text style={[styles.settingsLabel, { color: Colors.terracotta, fontFamily: Fonts.sansBold }]}>
+                    {switchName
+                      ? `switch to ${switchName.toLowerCase()} & your events`
+                      : 'switch to your community & events'}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.terracotta} />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.settingsRow}
+                onPress={() => router.push('/creator/apply')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.settingsLabel}>Run things on washedup</Text>
+                <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
         {/* Admin */}
         {isAdmin(profile?.id ?? null) && (
           <>
@@ -958,6 +1028,14 @@ export default function ProfileScreen() {
                 activeOpacity={0.7}
               >
                 <Text style={styles.settingsLabel}>Manage Scene Events</Text>
+                <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.settingsRow}
+                onPress={() => router.push('/admin/applications')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.settingsLabel}>Creator Applications</Text>
                 <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
               </TouchableOpacity>
             </View>

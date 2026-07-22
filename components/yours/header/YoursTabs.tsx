@@ -2,10 +2,10 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
-import { GROUPS_ENABLED } from '../../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, GROUPS_ENABLED } from '../../../constants/FeatureFlags';
 import { COPY } from '../state/constants';
 
-export type YoursTab = 'people' | 'myPlans' | 'circles' | 'albums';
+export type YoursTab = 'people' | 'myPlans' | 'circles' | 'communities' | 'albums';
 
 /** Full-width underline tabs (active: asphalt + terracotta underline). */
 export default function YoursTabs({
@@ -22,6 +22,11 @@ export default function YoursTabs({
     ['people', COPY.tabPeople],
     ...(GROUPS_ENABLED
       ? ([['circles', COPY.tabCircles]] as const)
+      : []),
+    // Communities sits between Circles and Albums (Liz's walkthrough order);
+    // compile-time flag, so the shipped row is unchanged when off.
+    ...(COMMUNITIES_ENABLED
+      ? ([['communities', COPY.tabCommunities]] as const)
       : []),
     ['albums', COPY.tabAlbums],
   ];

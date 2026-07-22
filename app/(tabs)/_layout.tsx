@@ -17,6 +17,7 @@ import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
 import SunriseIcon from '../../components/yours/icons/SunriseIcon';
 import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
 import { SCENE_STAGE, getSeenSceneStage, SCENE_BADGE_KEY } from '../../lib/sceneStage';
+import { TermsReacceptance } from '../../components/legal/TermsReacceptance';
 
 function PostTabIcon() {
   return (
@@ -188,6 +189,11 @@ export default function TabLayout() {
   });
 
   return (
+    <>
+    {/* ToS reacceptance interstitial (proposal 49, legal v4.0): dormant
+        until the status RPC exists; shows only on a confirmed server
+        answer, so an offline open is never blocked. */}
+    <TermsReacceptance enabled={!!userId} />
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -304,6 +310,7 @@ export default function TabLayout() {
         options={{ href: null, tabBarStyle: { display: 'none' } }}
       />
     </Tabs>
+    </>
   );
 }
 

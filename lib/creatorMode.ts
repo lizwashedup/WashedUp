@@ -1,0 +1,383 @@
+/**
+ * Creator mode data layer (phase 4 logic).
+ *
+ * Everything here runs against the live phase 1 schema through RLS:
+ * leadership comes from community_members (role leader/co_leader, active),
+ * join approvals are leader UPDATEs on pending member rows, broadcasts are
+ * leader INSERTs into community_broadcasts. No new migrations required for
+ * this slice. Screens are functionally minimal per decision 15a (logic
+ * before design).
+ */
+
+import { supabase } from './supabase';
+import { isAdmin } from '../constants/Admin';
+import { areaFromZip } from './zipAreas';
+import { isViewingAsEventHost } from './viewAs';
+import type { OperatorGrantStatus, OperatorTrack } from './operatorApplications';
+
+export interface LedCommunity {
+  id: string;
+  handle: string;
+  name: string;
+  status: 'draft' | 'active' | 'archived';
+  role: 'leader' | 'co_leader';
+}
+
+export interface CreatorAccess {
+  /** Communities this user actively leads or co-leads. */
+  ledCommunities: LedCommunity[];
+  hasLeaderGrant: boolean;
+  hasEventHostGrant: boolean;
+}
+
+export function hasCreatorAccess(a: CreatorAccess | undefined | null): boolean {
+  if (!a) return false;
+  return a.ledCommunities.length > 0 || a.hasLeaderGrant || a.hasEventHostGrant;
+}
+
+/**
+ * The one definition of "leader" for the whole creator shell (doc 34 §1).
+ * Leaders get all five tabs and land on today; an event-host-only grant gets
+ * the two-tab shell (events + menu), lands on events, and must never reach
+ * today/members/community.
+ */
+export function isLeaderAccess(a: CreatorAccess | undefined | null): boolean {
+  if (!a) return false;
+  return a.ledCommunities.length > 0 || a.hasLeaderGrant;
+}
+
+/** Where the creator switch (and any guard bounce) lands this user. */
+export function creatorLandingRoute(a: CreatorAccess | undefined | null): '/(creator)/today' | '/(creator)/events' {
+  return isLeaderAccess(a) ? '/(creator)/today' : '/(creator)/events';
+}
+
+export async function getCreatorAccess(): Promise<CreatorAccess> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: false };
+
+  // admin view-as (doc 00 7-13): force the event-host-only shape at the one
+  // place every creator surface reads from. Admin-gated here too, so the
+  // override is inert even if the flag were somehow flipped for anyone else.
+  if (isViewingAsEventHost() && isAdmin(user.id)) {
+    return { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: true };
+  }
+
+  const [{ data: memberships }, { data: grants }] = await Promise.all([
+    supabase
+      .from('community_members')
+      .select('role, joined_at, communities ( id, handle, name, status )')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .in('role', ['leader', 'co_leader'])
+      // deterministic order: the oldest-led community is the default the
+      // switcher (lib/selectedCommunity) falls back to
+      .order('joined_at', { ascending: true }),
+    supabase
+      .from('operator_grants')
+      .select('track, status')
+      .eq('user_id', user.id)
+      .eq('status', 'approved'),
+  ]);
+
+  const ledCommunities: LedCommunity[] = (memberships ?? [])
+    .map((m: any) => {
+      const c = m.communities;
+      if (!c) return null;
+      return { id: c.id, handle: c.handle, name: c.name, status: c.status, role: m.role };
+    })
+    .filter(Boolean) as LedCommunity[];
+
+  const approved = (grants ?? []) as { track: OperatorTrack; status: OperatorGrantStatus }[];
+  return {
+    ledCommunities,
+    hasLeaderGrant: approved.some((g) => g.track === 'community_leader'),
+    hasEventHostGrant: approved.some((g) => g.track === 'event_host'),
+  };
+}
+
+// -- members ------------------------------------------------------------------
+
+/**
+ * Publish a draft community: status draft -> active through the leader-scoped
+ * communities_update RLS policy. Only active communities are world-readable
+ * (lock view, discovery, member pages); this is the one-way door that opens
+ * the page. Archiving stays an admin conversation for now.
+ */
+export async function publishCommunity(communityId: string): Promise<void> {
+  const { error } = await supabase
+    .from('communities')
+    .update({ status: 'active' })
+    .eq('id', communityId)
+    .eq('status', 'draft');
+  if (error) throw error;
+}
+
+export interface CommunityMemberRow {
+  id: string;
+  user_id: string;
+  role: 'leader' | 'co_leader' | 'member';
+  status: 'pending' | 'active' | 'left' | 'removed' | 'banned';
+  join_answers: Record<string, unknown> | null;
+  joined_at: string | null;
+  created_at: string;
+  name: string | null;
+  photo_url: string | null;
+}
+
+export async function getCommunityMembers(communityId: string): Promise<CommunityMemberRow[]> {
+  const { data, error } = await supabase
+    .from('community_members')
+    .select('id, user_id, role, status, join_answers, joined_at, created_at')
+    .eq('community_id', communityId)
+    .in('status', ['pending', 'active'])
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  const ids = Array.from(new Set(rows.map((r) => r.user_id)));
+  const { data: profiles } = await supabase
+    .from('profiles_public')
+    .select('id, first_name_display, profile_photo_url')
+    .in('id', ids);
+  const byId = new Map((profiles ?? []).map((p: any) => [p.id, p]));
+
+  return rows.map((r) => ({
+    ...r,
+    name: byId.get(r.user_id)?.first_name_display ?? null,
+    photo_url: byId.get(r.user_id)?.profile_photo_url ?? null,
+  })) as CommunityMemberRow[];
+}
+
+/**
+ * Approve or decline a pending join request via the review_community_join
+ * RPC (leader-gated server-side). Approval activates the member, drops the
+ * system-composed intro card into the main community chat, and sends the
+ * warm note. Decline sets the distinct 'declined' status and sends
+ * a kind note; whether a declined person can re-request later is a logged
+ * open question (currently blocked).
+ */
+export async function reviewJoinRequest(memberRowId: string, approve: boolean): Promise<void> {
+  const { error } = await supabase.rpc('review_community_join', {
+    p_member_id: memberRowId,
+    p_approve: approve,
+  });
+  if (error) throw error;
+}
+
+/**
+ * The join-answer CARD a leader sees on pending requests: name, AREA
+ * (never the raw zip), the intro answer, and the guidelines timestamp.
+ * Email and raw zip stay stored, washedup-only (Liz's call, doc 13; the
+ * 30a v1.3 disclosure promise).
+ *
+ * This is the proposal-42 self-flipping bridge: it reads the
+ * get_join_answer_cards projection first (which is the ONLY leader read
+ * once 42 lands and the raw table read goes dark), and until 42 applies
+ * it falls back to the current leader RLS table read, shaping the same
+ * card client-side (area via the zipAreas mirror). Keyed by the
+ * membership row id.
+ */
+export interface JoinAnswerCard {
+  first_name: string | null;
+  last_name: string | null;
+  area: string | null;
+  intro_answer: string | null;
+  guidelines_accepted_at: string | null;
+}
+
+export async function getJoinAnswerCards(
+  communityId: string,
+): Promise<Map<string, JoinAnswerCard>> {
+  const { data, error } = await supabase.rpc('get_join_answer_cards', {
+    p_community_id: communityId,
+  });
+  if (!error) {
+    return new Map(
+      ((data ?? []) as (JoinAnswerCard & { member_id: string })[]).map((c) => [
+        c.member_id,
+        {
+          first_name: c.first_name ?? null,
+          last_name: c.last_name ?? null,
+          area: c.area ?? null,
+          intro_answer: c.intro_answer ?? null,
+          guidelines_accepted_at: c.guidelines_accepted_at ?? null,
+        },
+      ]),
+    );
+  }
+  // pre-42 fallback: the leader RLS table read still works; same card shape
+  const { data: rows, error: tableError } = await supabase
+    .from('community_member_answers')
+    .select('member_id, answers')
+    .eq('community_id', communityId);
+  if (tableError) throw tableError;
+  return new Map(
+    (rows ?? []).map((r: any) => {
+      const a = (r.answers ?? {}) as Record<string, string>;
+      return [
+        r.member_id,
+        {
+          first_name: a.first_name ?? null,
+          last_name: a.last_name ?? null,
+          area: areaFromZip(a.zip),
+          intro_answer: a.intro_answer ?? null,
+          guidelines_accepted_at: a.guidelines_accepted_at ?? null,
+        },
+      ];
+    }),
+  );
+}
+
+// -- join gate settings (doc 09: welcome message, intro question, guidelines) --
+
+export interface JoinGateSettings {
+  join_welcome_message: string | null;
+  join_intro_question: string | null;
+  guidelines_url: string | null;
+}
+
+export async function getJoinGateSettings(communityId: string): Promise<JoinGateSettings> {
+  const { data, error } = await supabase
+    .from('communities')
+    .select('join_welcome_message, join_intro_question, guidelines_url')
+    .eq('id', communityId)
+    .single();
+  if (error) throw error;
+  return data as JoinGateSettings;
+}
+
+/** Leader-only by the communities_update RLS policy. Empty strings clear a field. */
+export async function updateJoinGateSettings(
+  communityId: string,
+  settings: JoinGateSettings,
+): Promise<void> {
+  const { error, count } = await supabase
+    .from('communities')
+    .update(
+      {
+        join_welcome_message: settings.join_welcome_message?.trim() || null,
+        join_intro_question: settings.join_intro_question?.trim() || null,
+        guidelines_url: settings.guidelines_url?.trim() || null,
+      },
+      { count: 'exact' },
+    )
+    .eq('id', communityId);
+  if (error) throw error;
+  if (!count) throw new Error('That did not save.');
+}
+
+/** Remove an active member (leader-only by RLS). */
+export async function removeMember(memberRowId: string): Promise<void> {
+  const { error, count } = await supabase
+    .from('community_members')
+    .update({ status: 'removed', role: 'member' }, { count: 'exact' })
+    .eq('id', memberRowId)
+    .eq('status', 'active')
+    .eq('role', 'member'); // guard: never remove a leader row this way
+  if (error) throw error;
+  if (!count) throw new Error('Could not remove that member.');
+}
+
+// -- broadcasts ---------------------------------------------------------------
+
+export interface BroadcastRow {
+  id: string;
+  body: string;
+  pinned: boolean;
+  created_at: string;
+}
+
+export async function getBroadcasts(communityId: string): Promise<BroadcastRow[]> {
+  // creator surfaces count and list real announcements only: member messages
+  // and intro cards share this table (kind 'message' / 'intro') but are not
+  // broadcasts (tour part 1 finding 2 + part 2 reaction 4)
+  const { data, error } = await supabase
+    .from('community_broadcasts')
+    .select('id, body, pinned, created_at')
+    .eq('community_id', communityId)
+    .eq('kind', 'broadcast')
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  return (data ?? []) as BroadcastRow[];
+}
+
+export async function sendBroadcast(communityId: string, body: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { error } = await supabase.from('community_broadcasts').insert({
+    community_id: communityId,
+    sender_id: user.id,
+    body: body.trim(),
+  });
+  if (error) throw error;
+}
+
+// -- events (read-only this slice) --------------------------------------------
+
+export interface CommunityEventRow {
+  id: string;
+  title: string;
+  event_date: string | null;
+  venue: string | null;
+  status: string;
+  public_name: string | null;
+  image_url: string | null;
+}
+
+/**
+ * Live events attributed to the community or to the creator personally.
+ * NOTE (phase 5 gap, logged): explore_events RLS only exposes status='Live'
+ * to non-admins, so an operator cannot yet see their own drafts or past
+ * events. Owner-read policy + operator create/edit RPCs ride phase 5.
+ */
+export async function getCreatorEvents(
+  communityIds: string[],
+  userId: string,
+): Promise<CommunityEventRow[]> {
+  const ors: string[] = [`host_user_id.eq.${userId}`];
+  if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
+  const { data, error } = await supabase
+    .from('explore_events')
+    .select('id, title, event_date, venue, status, public_name, image_url')
+    .or(ors.join(','))
+    .order('event_date', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as CommunityEventRow[];
+}
+
+// -- stage 2: name your community (the creation wiring) -------------------------
+
+/**
+ * The one client door to community creation (create_community RPC, live on
+ * prod: grant-gated definer, born DRAFT, seats the leader membership, seeds
+ * the five starter blocks). The publish control stays the existing
+ * publish-your-page flow; nothing here opens a page.
+ */
+export async function createCommunity(handle: string, name: string): Promise<string> {
+  const { data, error } = await supabase.rpc('create_community', {
+    p_handle: handle,
+    p_name: name,
+    p_description: null,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/**
+ * A starting handle from the community name, matching the DB shape
+ * (^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$): lowercase, hyphens between words,
+ * 3-40 chars. The user edits it freely; validation is the regex below.
+ */
+export function suggestHandle(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/g, '');
+}
+
+export const HANDLE_SHAPE = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
