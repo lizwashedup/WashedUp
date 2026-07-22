@@ -19,6 +19,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
@@ -52,7 +53,12 @@ import {
   type OperatorEventFields,
 } from '../../lib/creatorEvents';
 
-const POSTER_HEIGHT = 160;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// doc 76 §3: the poster is the 16:9 cover, a real drop-zone, not a
+// pill floating over emptiness
+const FORM_HORIZONTAL_PADDING = 40;
+const POSTER_ASPECT = 16 / 9;
+const POSTER_HEIGHT = Math.round((SCREEN_WIDTH - FORM_HORIZONTAL_PADDING) / POSTER_ASPECT);
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -466,6 +472,10 @@ export default function EventFormScreen() {
               </Text>
             )}
 
+            {/* doc 76 §3: identity → media → when → where → tickets →
+                who, in grouped cards; not one long grey ladder */}
+            <Text style={styles.sectionHeader}>the event</Text>
+            <View style={styles.sectionCard}>
             <Text style={styles.fieldLabel}>title</Text>
             <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
 
@@ -479,7 +489,12 @@ export default function EventFormScreen() {
                 {uploading ? (
                   <ActivityIndicator size="small" color={Colors.terracotta} />
                 ) : (
-                  <Plus size={22} color={Colors.terracotta} strokeWidth={2.5} />
+                  <>
+                    <Plus size={26} color={Colors.terracotta} strokeWidth={2.5} />
+                    {/* copy to the taste gate (doc 76 §3) */}
+                    <Text style={styles.posterAddLabel}>add the poster</Text>
+                    <Text style={styles.posterAddHint}>wide shot, 16:9. it fronts the card and the page.</Text>
+                  </>
                 )}
               </TouchableOpacity>
             )}
@@ -498,15 +513,21 @@ export default function EventFormScreen() {
                 has the id the image folder pin needs, so the editor shows
                 in edit mode incl. Drafts; blocks save independently of
                 this form's full-overwrite RPC */}
+            </View>
+
             {editing && !!id && (
               <>
-                <Text style={styles.fieldLabel}>the page body</Text>
-                {/* copy to the taste gate */}
-                <Text style={styles.fieldHint}>text, photos, and where your faq cards sit. this is the page people see.</Text>
-                <DescriptionBlocksEditor eventId={id} />
+                <Text style={styles.sectionHeader}>photos & story</Text>
+                <View style={styles.sectionCard}>
+                  {/* copy to the taste gate (doc 76 §2) */}
+                  <Text style={styles.fieldHint}>the mood board. photos, text between them, and where your good-to-know cards sit.</Text>
+                  <DescriptionBlocksEditor eventId={id} />
+                </View>
               </>
             )}
 
+            <Text style={styles.sectionHeader}>when</Text>
+            <View style={styles.sectionCard}>
             <Text style={styles.fieldLabel}>date</Text>
             {/* the calendar refuses past days; a stored past date shows in
                 the placeholder instead of pinning the calendar to a month it
@@ -539,7 +560,11 @@ export default function EventFormScreen() {
               )}
             </View>
 
-            <Text style={styles.fieldLabel}>where</Text>
+            </View>
+
+            <Text style={styles.sectionHeader}>where</Text>
+            <View style={styles.sectionCard}>
+            <Text style={styles.fieldLabel}>search for it</Text>
             {/* the search fills venue and address and pins the coordinates
                 (proposal 35); the fields below stay editable, and typing in
                 them by hand drops the pin so it never lies */}
@@ -567,6 +592,10 @@ export default function EventFormScreen() {
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
+            </View>
+
+            <Text style={styles.sectionHeader}>the details</Text>
+            <View style={styles.sectionCard}>
             <Text style={styles.fieldLabel}>category</Text>
             <View style={styles.chipWrap}>
               {EVENT_CATEGORIES.map((c) => (
@@ -592,7 +621,10 @@ export default function EventFormScreen() {
             <Text style={styles.fieldLabel}>public listing name</Text>
             <Text style={styles.fieldHint}>a brand or venue name to front the listing. leave empty to show yours.</Text>
             <TextInput style={styles.input} value={publicName} onChangeText={setPublicName} maxLength={80} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            </View>
 
+            <Text style={styles.sectionHeader}>who puts it on</Text>
+            <View style={styles.sectionCard}>
             {!editing && community && (
               <>
                 <Text style={styles.fieldLabel}>whose event is this</Text>
@@ -640,6 +672,7 @@ export default function EventFormScreen() {
                 </View>
               </>
             )}
+            </View>
 
             <TouchableOpacity
               style={[styles.saveBtn, saving && styles.saveBtnBusy]}
@@ -703,27 +736,45 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   statusLine: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary, marginBottom: 12 },
-  fieldLabel: {
+  // doc 76 §3: sections carry the rhythm; labels stop shouting
+  // terracotta on every field and go quiet and tracked
+  sectionHeader: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
-    marginBottom: 4,
+    textTransform: 'uppercase',
+    marginTop: 24,
+    marginBottom: 10,
+  },
+  sectionCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 16,
+    paddingBottom: 4,
+  },
+  fieldLabel: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    marginBottom: 6,
   },
   fieldHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginBottom: 6 },
   input: {
-    backgroundColor: Colors.inputBg,
+    backgroundColor: Colors.parchment,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
-    marginBottom: 14,
+    marginBottom: 18,
   },
-  inputMultiline: { minHeight: 90, textAlignVertical: 'top' },
+  inputMultiline: { minHeight: 110, textAlignVertical: 'top', lineHeight: 21 },
   pickerBlock: { marginBottom: 14 },
   clearTimeLink: {
     fontFamily: Fonts.sansMedium,
@@ -732,17 +783,21 @@ const styles = StyleSheet.create({
     marginTop: 8,
     alignSelf: 'flex-end',
   },
-  poster: { width: '100%', height: POSTER_HEIGHT, borderRadius: 16, marginBottom: 14 },
+  poster: { width: '100%', height: POSTER_HEIGHT, borderRadius: 14, marginBottom: 18 },
   posterAdd: {
     height: POSTER_HEIGHT,
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: Colors.terracotta,
+    backgroundColor: Colors.parchment,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
+    marginBottom: 18,
+    gap: 6,
   },
+  posterAddLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  posterAddHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.tertiary },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   chip: {
     borderRadius: 999,

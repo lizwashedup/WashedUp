@@ -24,7 +24,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { useBlock } from '../../hooks/useBlock';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
@@ -43,6 +43,9 @@ import { getLeaderCards } from '../../lib/communityLeader';
 import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
 import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
+import { type DescriptionBlock } from '../../lib/eventContent';
+import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
+import { EventFaqCards } from '../../components/events/EventFaqCards';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 280;
@@ -62,6 +65,7 @@ interface ExploreEvent {
   id: string;
   title: string;
   description: string | null;
+  description_blocks: DescriptionBlock[] | null;
   image_url: string | null;
   event_date: string | null;
   start_time: string | null;
@@ -196,7 +200,7 @@ export default function EventDetailScreen() {
     queryFn: async (): Promise<ExploreEvent | null> => {
       const { data, error } = await supabase
         .from('explore_events')
-        .select('id, title, description, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id')
+        .select('id, title, description, description_blocks, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -795,9 +799,19 @@ export default function EventDetailScreen() {
             </TouchableOpacity>
           )}
 
-          {event.description && (
+          {/* the body (doc 76 §3): the mood board when an organizer has
+              built one, the legacy plain description otherwise; the
+              good-to-know cards close it either way */}
+          {Array.isArray(event.description_blocks) && event.description_blocks.length > 0 ? (
             <View style={styles.descriptionSection}>
-              <LinkifiedText text={event.description} style={styles.descriptionText} />
+              <EventBodyBlocks eventId={event.id} blocks={event.description_blocks} />
+            </View>
+          ) : (
+            <View style={styles.descriptionSection}>
+              {!!event.description && (
+                <LinkifiedText text={event.description} style={styles.descriptionText} />
+              )}
+              <EventFaqCards eventId={event.id} />
             </View>
           )}
 
@@ -1051,15 +1065,18 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  content: { padding: 20, gap: 12 },
+  content: { padding: 20, gap: 14 },
   detailCategoryPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   // sentence-lowercase, no transforms (C16 + the lowercase law)
   detailCategoryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.white },
+  // doc 76 §3: the title carries the page in the display face, with the
+  // Luma/Posh air around it
   title: {
     fontFamily: Fonts.displayBold,
-    fontSize: FontSizes.displayLG,
+    fontSize: FontSizes.displayXL,
     color: Colors.asphalt,
-    lineHeight: 34,
+    lineHeight: LineHeights.displayXL,
+    marginBottom: 2,
   },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   infoCards: { gap: 8 },
@@ -1112,7 +1129,7 @@ const styles = StyleSheet.create({
   moreCardTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   moreCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
   metaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, flex: 1, lineHeight: 20 },
-  descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg },
+  descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 14 },
   descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, lineHeight: 22 },
   // the secondary-button pattern: outline terracotta, never competing with
   // the sticky bar's primary CTA
