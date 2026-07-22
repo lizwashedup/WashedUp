@@ -1,8 +1,8 @@
 /**
  * The tier editor (doc 61 §4b/§5): name, description, price with the
- * four-number fee preview (§3 — face, buyer pays, our cut, organizer
+ * four-number fee preview (§3 - face, buyer pays, our cut, organizer
  * gets, honest incl. cheap-ticket physics), caps, visibility. Windows
- * and chaining are 65 columns the sheet does not edit yet — they ride
+ * and chaining are 65 columns the sheet does not edit yet - they ride
  * the next slice with the house date pickers.
  */
 
@@ -82,7 +82,7 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
     priceCents === null
       ? /* copy to the taste gate */ 'that price does not read as a number.'
       : priceCents !== 0 && priceCents < TIER_MIN_PAID_CENTS
-        ? /* copy to the taste gate: the cheap-ticket physics floor */ 'paid tickets start at $5 — under that, fees eat the ticket.'
+        ? /* copy to the taste gate: the cheap-ticket physics floor */ 'paid tickets start at $5. under that, fees eat the ticket.'
         : priceCents !== null && priceCents > TIER_MAX_CENTS
           ? 'that is past the $10,000 ceiling.'
           : null;
@@ -175,7 +175,7 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
               )}
               {priceCents === 0 && (
                 /* copy to the taste gate: free is free at the code level */
-                <Text style={styles.freeNote}>free means free — no fees, no card, rsvp as usual.</Text>
+                <Text style={styles.freeNote}>free means free. no fees, no card, rsvp as usual.</Text>
               )}
 
               <Text style={styles.label}>how many exist (blank = no cap)</Text>
@@ -203,7 +203,7 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
                   {hidden && <Text style={styles.checkmark}>✓</Text>}
                 </View>
                 {/* copy to the taste gate */}
-                <Text style={styles.checkLabel}>hidden — only people with the direct link see it</Text>
+                <Text style={styles.checkLabel}>hidden. only people with the direct link see it</Text>
               </TouchableOpacity>
 
               <TouchableOpacity

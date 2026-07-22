@@ -253,7 +253,7 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
-  // Fetch actual member counts from event_members — member_count on events can be out of sync
+  // Fetch actual member counts from event_members - member_count on events can be out of sync
   const planIdsKey = linkedPlans.map((p) => p.id).sort().join(',');
   const { data: memberCountsMap = {} } = useQuery({
     queryKey: ['event-plans-member-counts', planIdsKey],
@@ -339,7 +339,7 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
-  // slice 2 (doc 37): a COMMUNITY event fronts with the community — its
+  // slice 2 (doc 37): a COMMUNITY event fronts with the community - its
   // name in the byline, the leader's face as the chip (the 41 read). A
   // public_name override still wins and wears neither image.
   const { data: eventCommunity = null } = useQuery({
@@ -362,7 +362,7 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
-  // §4c: the follow/rail entity is the FRONTING entity — the community,
+  // §4c: the follow/rail entity is the FRONTING entity - the community,
   // or the standalone organizer profile; a public_name override fronts
   // as itself and carries neither follow nor rail (the proposal-36 grammar)
   const frontingTarget: FollowTarget | null =
@@ -374,7 +374,7 @@ export default function EventDetailScreen() {
           ? { kind: 'organizer', id: event.host_user_id }
           : null;
 
-  // §4c (doc 69 A6): more from the same fronting entity — upcoming Live
+  // §4c (doc 69 A6): more from the same fronting entity - upcoming Live
   // listings, soonest first, this one excluded
   const { data: moreEvents = [] } = useQuery({
     queryKey: ['more-from', frontingTarget?.kind, frontingTarget?.id, id],
@@ -395,7 +395,7 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
-  // §4c (doc 69 B1/B2): dormant until proposal 68 applies — a missing
+  // §4c (doc 69 B1/B2): dormant until proposal 68 applies - a missing
   // table reads as available:false and the affordance never renders
   const { data: followState } = useQuery({
     queryKey: ['organizer-follow', frontingTarget?.kind, frontingTarget?.id, userId],
@@ -620,7 +620,7 @@ export default function EventDetailScreen() {
           {event.image_url ? (
             <Image source={{ uri: event.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
           ) : (
-            // slice 2: the generated branded poster is the hero fallback —
+            // slice 2: the generated branded poster is the hero fallback -
             // a designed card, not a photo, so its words are legible by
             // construction; the circle controls stay (non-load-bearing marks)
             <GeneratedPoster
@@ -691,7 +691,7 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          {/* §4c (doc 69 A1): date/time and venue become tappable cards —
+          {/* §4c (doc 69 A1): date/time and venue become tappable cards -
               calendar card adds the event, venue card opens the maps app.
               Flag off renders today's meta rows byte for byte (one reveal
               at the August moment, Cowork ruling). */}
@@ -981,7 +981,7 @@ export default function EventDetailScreen() {
             )}
           </TouchableOpacity>
         )}
-        {/* the chat law: find-people never renders on a community event —
+        {/* the chat law: find-people never renders on a community event -
             the chat affordance takes its place once the viewer is going */}
         {isCommunityEvent ? (
           myRsvp === 'going' && !!eventTopicId && (

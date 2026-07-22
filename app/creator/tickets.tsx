@@ -2,7 +2,7 @@
  * The organizer's ticket setup for one event (doc 61 §5, launch sprint
  * 7-21): payout status up top (64's row, read-only; onboarding via the
  * declared edge contract), the tier list with the editor sheet, and the
- * FAQ editor — dormant until proposal 70's re-cut applies.
+ * FAQ editor - dormant until proposal 70's re-cut applies.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -212,7 +212,7 @@ export default function TicketSetupScreen() {
                 {payout?.exists ? 'finish setting up payouts' : 'set up payouts'}
               </Text>
               <Text style={styles.payoutMeta}>
-                stripe handles your bank details and identity — washedup never sees them.
+                stripe handles your bank details and identity. washedup never sees them.
               </Text>
               <TouchableOpacity style={styles.payoutBtn} onPress={handleOnboard} activeOpacity={0.85}>
                 {onboardBusy ? (
@@ -238,7 +238,7 @@ export default function TicketSetupScreen() {
           <ActivityIndicator size="small" color={Colors.terracotta} />
         ) : tiers.length === 0 ? (
           /* copy to the taste gate (the empty-state invitation rule) */
-          <Text style={styles.emptyText}>no tickets yet — the first one takes a minute.</Text>
+          <Text style={styles.emptyText}>no tickets yet. the first one takes a minute.</Text>
         ) : (
           tiers.map((tier) => (
             <TouchableOpacity
@@ -281,14 +281,14 @@ export default function TicketSetupScreen() {
           <Text style={styles.addBtnText}>add a ticket</Text>
         </TouchableOpacity>
 
-        {/* FAQs (proposal 70 — dormant until the re-cut applies) */}
+        {/* FAQs (proposal 70 - dormant until the re-cut applies) */}
         <View style={styles.sectionHeader}>
           {/* copy to the taste gate */}
           <Text style={styles.sectionTitle}>questions people will have</Text>
         </View>
         {faqState?.available === false ? (
           /* copy to the taste gate */
-          <Text style={styles.emptyText}>faq cards are almost ready — check back soon.</Text>
+          <Text style={styles.emptyText}>faq cards are almost ready. check back soon.</Text>
         ) : (
           <>
             {(faqState?.faqs ?? []).map((faq) => (
@@ -306,7 +306,7 @@ export default function TicketSetupScreen() {
               style={styles.faqInput}
               value={faqQuestion}
               onChangeText={setFaqQuestion}
-              placeholder="the question — is there parking?"
+              placeholder="is there parking?"
               placeholderTextColor={Colors.textLight}
               maxLength={FAQ_QUESTION_MAX}
             />

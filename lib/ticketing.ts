@@ -2,7 +2,7 @@
  * Organizer-side ticketing client (doc 61; proposals 64 + 65 applied,
  * 70 pending its re-cut). Tiers are direct table ops under 65's RLS
  * (is_ticketing_organizer gates writes server-side). The Stripe account
- * row is READ-ONLY here — writes are service-role only, through the
+ * row is READ-ONLY here - writes are service-role only, through the
  * onboarding edge function and the webhook inbox drain (64's law).
  *
  * The FAQ half is SELF-FLIPPING in the house canon: proposal 70 is not
@@ -179,7 +179,7 @@ export async function requestOnboardingLink(): Promise<string | null> {
   }
 }
 
-// ─── event FAQs (proposal 70, NOT applied — dormant until the re-cut) ────
+// ─── event FAQs (proposal 70, NOT applied - dormant until the re-cut) ────
 
 export const FAQ_QUESTION_MAX = 300;
 export const FAQ_ANSWER_MAX = 2000;

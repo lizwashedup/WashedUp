@@ -1,7 +1,7 @@
 /**
  * §4c follow mechanic client (doc 69 B1, proposal 68): a follow attaches
  * to a community OR a standalone organizer profile, never both. Follow is
- * NOT membership — no chat, no member count change; joining implies
+ * NOT membership - no chat, no member count change; joining implies
  * following DB-side (68's trigger), so the client never writes a follow
  * on join.
  *
@@ -27,7 +27,7 @@ function targetColumn(target: FollowTarget): 'community_id' | 'organizer_user_id
 }
 
 export interface FollowState {
-  /** false until proposal 68 applies — hide the affordance entirely */
+  /** false until proposal 68 applies - hide the affordance entirely */
   available: boolean;
   following: boolean;
 }
