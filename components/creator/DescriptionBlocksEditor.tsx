@@ -177,13 +177,13 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
           </View>
           <View style={styles.blockControls}>
             <TouchableOpacity onPress={() => move(index, -1)} hitSlop={8} disabled={index === 0}>
-              <ArrowUp size={16} color={index === 0 ? Colors.border : Colors.textMedium} strokeWidth={2} />
+              <ArrowUp size={16} color={index === 0 ? Colors.border : Colors.warmGray} strokeWidth={2} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => move(index, 1)} hitSlop={8} disabled={index === blocks.length - 1}>
-              <ArrowDown size={16} color={index === blocks.length - 1 ? Colors.border : Colors.textMedium} strokeWidth={2} />
+              <ArrowDown size={16} color={index === blocks.length - 1 ? Colors.border : Colors.warmGray} strokeWidth={2} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => remove(index)} hitSlop={8}>
-              <X size={16} color={Colors.errorRed} strokeWidth={2} />
+              <X size={16} color={EventAction.error} strokeWidth={2} />
             </TouchableOpacity>
           </View>
         </View>
@@ -300,28 +300,30 @@ const styles = StyleSheet.create({
   },
   addPillDisabled: { opacity: 0.4 },
   addPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  limitText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
-  problemText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed },
+  limitText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2 },
+  problemText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error },
+  // doc 80 section C: the cover badge is the gold success family on
+  // brandDeep text, NOT a second terracotta accent
   coverBadge: {
     position: 'absolute',
     left: 8,
     top: 8,
-    backgroundColor: EventAction.primary,
+    backgroundColor: EventAction.successFill,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  coverBadgeText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: EventAction.onPrimary },
+  coverBadgeText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.brandDeep },
   makeCoverBtn: {
     position: 'absolute',
     left: 8,
     top: 8,
-    backgroundColor: EventSurface.mediaRaised,
+    backgroundColor: EventSurface.mediaControl,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  makeCoverText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: EventSurface.onMedia },
+  makeCoverText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.darkWarm },
   videoChip: {
     flexDirection: 'row',
     alignItems: 'center',

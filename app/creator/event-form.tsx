@@ -32,6 +32,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { DescriptionBlocksEditor } from '../../components/creator/DescriptionBlocksEditor';
 import { type DescriptionBlock } from '../../lib/eventContent';
+import { COVER_ASPECT_INTERIM } from '../../constants/EventDesign';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { formatEventDateLA, getLAWallParts, isBeforeTodayLA, laWallTimeToUTC } from '../../lib/laDate';
@@ -55,10 +56,12 @@ import {
 } from '../../lib/creatorEvents';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-// doc 76 §3: the poster is the 16:9 cover, a real drop-zone, not a
-// pill floating over emptiness
+// doc 78 law 2 / doc 80 section D: a real drop-zone, not a pill over
+// emptiness. The RATIO IS HELD - Liz is calling portrait 4:5 vs square
+// 1:1 - so the shape reads from the pending constant and the copy makes
+// no ratio promise we are about to break.
 const FORM_HORIZONTAL_PADDING = 40;
-const POSTER_ASPECT = 16 / 9;
+const POSTER_ASPECT = COVER_ASPECT_INTERIM;
 const POSTER_HEIGHT = Math.round((SCREEN_WIDTH - FORM_HORIZONTAL_PADDING) / POSTER_ASPECT);
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -504,7 +507,9 @@ export default function EventFormScreen() {
                     <Plus size={26} color={Colors.terracotta} strokeWidth={2.5} />
                     {/* copy to the taste gate (doc 76 §3) */}
                     <Text style={styles.posterAddLabel}>add the poster</Text>
-                    <Text style={styles.posterAddHint}>wide shot, 16:9. it fronts the card and the page.</Text>
+                    {/* copy to the taste gate; the exact shape lands with
+                        the ratio ruling (doc 80 section D) */}
+                    <Text style={styles.posterAddHint}>it fronts the card and the page.</Text>
                   </>
                 )}
               </TouchableOpacity>

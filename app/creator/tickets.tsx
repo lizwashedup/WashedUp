@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
   tierCardBody: { flex: 1, gap: 2 },
   tierName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   tierMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
-  tierRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorRed },
+  tierRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventAction.error },
   // law 1: the payout CTA is this screen's single primary action, so
   // add-a-ticket takes the secondary treatment rather than competing
   addBtn: {
