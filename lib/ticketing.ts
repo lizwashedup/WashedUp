@@ -230,3 +230,123 @@ export async function updateEventFaq(
   const { error } = await supabase.from('event_faqs').update(patch).eq('id', faqId);
   return !error;
 }
+
+// ─── F5: tier count law, buyer questions, refund presets ─────────────────
+
+/** doc 78 law 11 (Iyengar-Lepper): more options measurably reduce sales. */
+export const TIER_COUNT_MAX = 4;
+export const TIER_COUNT_RECOMMENDED = 3;
+/**
+ * Law 11 also wants ONE tier marked "most popular". ticket_tiers carries
+ * no recommended/badge column on prod, so rather than invent an
+ * unvalidated key the lowest-sorted ON-SALE tier is treated as the
+ * recommended one by convention. If the product wants an explicit,
+ * organizer-chosen badge, that is a column and a numbered proposal.
+ */
+export function recommendedTierId(tiers: TicketTier[]): string | null {
+  const onSale = tiers.filter((t) => t.status === 'on_sale' && t.visibility !== 'hidden');
+  const pool = onSale.length > 0 ? onSale : tiers;
+  return pool.length > 1 ? pool[0].id : null;
+}
+
+// buyer questions (proposal 66, applied)
+export const QUESTIONS_MAX = 11; // Liz's ruling
+export const QUESTION_PROMPT_MAX = 500;
+export const QUESTION_OPTIONS_MAX = 50;
+export type QuestionType =
+  | 'short_text' | 'paragraph' | 'multi_select'
+  | 'single_select' | 'dropdown' | 'terms';
+export type QuestionScope = 'per_order' | 'per_attendee';
+/** the three types that REQUIRE an options array (66's CHECK) */
+export const QUESTION_TYPES_WITH_OPTIONS: QuestionType[] = ['multi_select', 'single_select', 'dropdown'];
+
+export interface TicketQuestion {
+  id: string;
+  event_id: string;
+  prompt: string;
+  qtype: QuestionType;
+  options: string[] | null;
+  required: boolean;
+  scope: QuestionScope;
+  sort_order: number;
+}
+
+export async function getQuestions(eventId: string): Promise<TicketQuestion[]> {
+  const { data, error } = await supabase
+    .from('ticket_questions')
+    .select('id, event_id, prompt, qtype, options, required, scope, sort_order')
+    .eq('event_id', eventId)
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true });
+  if (error) return [];
+  return (data ?? []) as TicketQuestion[];
+}
+
+export async function createQuestion(
+  eventId: string,
+  q: { prompt: string; qtype: QuestionType; options: string[] | null; required: boolean; scope: QuestionScope },
+  sortOrder: number,
+): Promise<{ ok: boolean; message: string | null }> {
+  // mirror 66's CHECK client-side so the organizer gets a sentence, not a
+  // constraint name
+  const needsOptions = QUESTION_TYPES_WITH_OPTIONS.includes(q.qtype);
+  if (needsOptions && (!q.options || q.options.length < 1)) {
+    /* copy to the taste gate */
+    return { ok: false, message: 'that kind of question needs at least one choice.' };
+  }
+  const { error } = await supabase.from('ticket_questions').insert({
+    event_id: eventId,
+    prompt: q.prompt.slice(0, QUESTION_PROMPT_MAX),
+    qtype: q.qtype,
+    options: needsOptions ? q.options : null,
+    required: q.required,
+    scope: q.scope,
+    sort_order: sortOrder,
+  });
+  return { ok: !error, message: error?.message ?? null };
+}
+
+export async function retireQuestion(questionId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('ticket_questions')
+    .update({ is_active: false })
+    .eq('id', questionId);
+  return !error;
+}
+
+// refund presets (doc 61 section 10.2; explore_events.refund_policy is text)
+export interface RefundPreset {
+  key: string;
+  label: string;
+  body: string;
+}
+/* copy to the taste gate */
+export const REFUND_PRESETS: RefundPreset[] = [
+  {
+    key: 'full_7',
+    label: 'full refund up to 7 days before',
+    body: 'full refund up to 7 days before the event. after that, tickets are final.',
+  },
+  {
+    key: 'full_24h',
+    label: 'full refund up to 24 hours before',
+    body: 'full refund up to 24 hours before the event. after that, tickets are final.',
+  },
+  {
+    key: 'final',
+    label: 'all sales final',
+    body: 'all sales are final. if we cancel, you are refunded in full.',
+  },
+];
+
+/**
+ * NOT WRITABLE YET, and deliberately not faked. explore_events carries
+ * refund_policy, but the ONLY update policy on that table is
+ * admin-scoped and operator_update_explore_event has no
+ * p_refund_policy param - so a direct column write silently no-ops for
+ * every real organizer while appearing to succeed on an admin account.
+ * That is the same class of bug the rich body hit twice; it needs an RPC
+ * param as a numbered proposal, not a client workaround. The presets
+ * above are ready to wire the moment the door exists.
+ */
+export const REFUND_POLICY_WRITE_BLOCKED = true;

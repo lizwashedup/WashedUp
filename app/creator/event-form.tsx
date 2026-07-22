@@ -25,14 +25,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { ArrowLeft, Plus } from 'lucide-react-native';
+import { ArrowLeft, Check, Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { DescriptionBlocksEditor } from '../../components/creator/DescriptionBlocksEditor';
 import { type DescriptionBlock } from '../../lib/eventContent';
-import { COVER_ASPECT, COVER_ASPECT_LABEL } from '../../constants/EventDesign';
+import { COVER_ASPECT, COVER_ASPECT_LABEL, EventAction, EventSpacing } from '../../constants/EventDesign';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { formatEventDateLA, getLAWallParts, isBeforeTodayLA, laWallTimeToUTC } from '../../lib/laDate';
@@ -62,6 +62,10 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const FORM_HORIZONTAL_PADDING = 40;
 const POSTER_ASPECT = COVER_ASPECT;
 const POSTER_HEIGHT = Math.round((SCREEN_WIDTH - FORM_HORIZONTAL_PADDING) / POSTER_ASPECT);
+
+// law 19: long enough that typing does not thrash the RPC, short enough
+// that an organizer never loses gallery or body work to a refresh
+const AUTOSAVE_DEBOUNCE_MS = 1500;
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -103,6 +107,7 @@ export default function EventFormScreen() {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'problem'>('idle');
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const community = useLedCommunity(access);
@@ -196,23 +201,28 @@ export default function EventFormScreen() {
   // exactly like category (the tour published a dateless event straight to
   // Live; doc 34 3.3 adds the past-date guard). Drafts and templates stay
   // dateless-legal, and cancel/complete never blocks on it.
-  const collectFields = (opts?: { requireDate?: boolean }): OperatorEventFields | null => {
+  const collectFields = (opts?: { requireDate?: boolean; silent?: boolean }): OperatorEventFields | null => {
+    // law 20 + law 19: a background save must never red-flag a field the
+    // organizer is still filling in, so silent mode returns null quietly
+    const complain = (heading: string, body: string) => {
+      if (!opts?.silent) showError(heading, body);
+    };
     if (!title.trim()) {
-      showError('Almost', 'A title is required.');
+      complain('Almost', 'A title is required.');
       return null;
     }
     if (!category) {
       // mirrors the server guard ("Pick a category."), caught here first
-      showError('Almost', 'Pick a category.');
+      complain('Almost', 'Pick a category.');
       return null;
     }
     if (opts?.requireDate && !date.trim()) {
       // mirrors the proposed server guard ("Pick a date."), caught here first
-      showError('Almost', 'Pick a date.');
+      complain('Almost', 'Pick a date.');
       return null;
     }
     if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
-      showError('Check the date', 'Use the YYYY-MM-DD shape, like 2026-07-20.');
+      complain('Check the date', 'Use the YYYY-MM-DD shape, like 2026-07-20.');
       return null;
     }
     if (opts?.requireDate && date) {
@@ -220,12 +230,12 @@ export default function EventFormScreen() {
       if (day && isBeforeTodayLA(day.year, day.month, day.day)) {
         // LIZ COPY: the calendar refuses past days; this catches a stale
         // seeded date on its way to Live
-        showError('Check the date', 'That day already happened. Pick one coming up.');
+        complain('Check the date', 'That day already happened. Pick one coming up.');
         return null;
       }
     }
     if (time && !/^\d{2}:\d{2}$/.test(time.trim())) {
-      showError('Check the time', 'Use the HH:MM shape, like 19:30.');
+      complain('Check the time', 'Use the HH:MM shape, like 19:30.');
       return null;
     }
     let startTime: string | null = null;
@@ -235,7 +245,7 @@ export default function EventFormScreen() {
       const dm = date.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
       const tm = time.trim().match(/^(\d{2}):(\d{2})$/);
       if (!dm || !tm) {
-        showError('Check the date and time', 'That combination did not parse.');
+        complain('Check the date and time', 'That combination did not parse.');
         return null;
       }
       startTime = laWallTimeToUTC(
@@ -337,6 +347,49 @@ export default function EventFormScreen() {
   // creator event drafts (batch 20): p_publish false = status Draft, no chat;
   // the chat is born when the draft publishes
   const isDraft = editing && eventStatus === 'Draft';
+
+  // law 19: autosave drafts continuously with a visible saved state, and
+  // NEVER let autosave publish. It only ever runs on an existing DRAFT
+  // and always passes status null, so a Live event is never touched
+  // behind the organizer's back and a draft is never flipped live.
+  // law 19: the review checklist. Nudges, not blockers - a draft can
+  // always publish with items unticked.
+  const reviewItems = [
+    { label: 'a poster', done: !!imageUrl },
+    { label: 'a date', done: !!date.trim() },
+    { label: 'where it is', done: !!venue.trim() },
+    { label: 'photos or a story', done: (blocks?.length ?? 0) > 0 },
+  ];
+
+  const autosaveSignature = JSON.stringify([
+    title, description, imageUrl, date, time, venue, venueAddress,
+    category, ticketPrice, publicName, pinToChat, blocks,
+  ]);
+  const lastSavedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!isDraft || !id || saving || !seeded) return;
+    if (lastSavedRef.current === null) {
+      lastSavedRef.current = autosaveSignature;
+      return;
+    }
+    if (lastSavedRef.current === autosaveSignature) return;
+    const handle = setTimeout(async () => {
+      const fields = collectFields({ silent: true });
+      if (!fields) return;
+      try {
+        setAutosaveState('saving');
+        await updateOperatorEvent(id, fields, null);
+        lastSavedRef.current = autosaveSignature;
+        setAutosaveState('saved');
+      } catch {
+        // never a blocking alert on a background save; the explicit save
+        // button remains the honest path and will surface the real error
+        setAutosaveState('problem');
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autosaveSignature, isDraft, id, saving, seeded]);
   const handleSaveDraft = async () => {
     const fields = collectFields();
     if (!fields || saving) return;
@@ -476,6 +529,18 @@ export default function EventFormScreen() {
               /* LIZ COPY */
               <Text style={styles.statusLine}>same event, fresh date. pick the new one.</Text>
             )}
+            {isDraft && autosaveState !== 'idle' && (
+              /* law 19: the organizer can SEE that their work is safe */
+              <Text style={[styles.savedLine, autosaveState === 'problem' && styles.savedLineProblem]}>
+                {/* copy to the taste gate */}
+                {autosaveState === 'saving'
+                  ? 'saving…'
+                  : autosaveState === 'saved'
+                    ? 'saved just now'
+                    : 'not saved yet. your work is still here.'}
+              </Text>
+            )}
+
             {editing && eventStatus !== 'Live' && (
               /* LIZ COPY */
               <Text style={styles.statusLine}>
@@ -692,6 +757,26 @@ export default function EventFormScreen() {
             )}
             </View>
 
+            {isDraft && (
+              <View style={styles.reviewCard}>
+                {/* copy to the taste gate: a friendly checklist, and every
+                    missing item is a NUDGE, never a blocker (law 19) */}
+                <Text style={styles.reviewTitle}>before it goes up</Text>
+                {reviewItems.map((item) => (
+                  <View key={item.label} style={styles.reviewRow}>
+                    <Check
+                      size={14}
+                      color={item.done ? Colors.brandDeep : Colors.border}
+                      strokeWidth={2.5}
+                    />
+                    <Text style={[styles.reviewItem, item.done && styles.reviewItemDone]}>
+                      {item.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
             <TouchableOpacity
               style={[styles.saveBtn, saving && styles.saveBtnBusy]}
               onPress={isDraft ? handlePublishDraft : handleSave}
@@ -754,6 +839,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   statusLine: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary, marginBottom: 12 },
+  savedLine: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2, marginBottom: 12 },
+  savedLineProblem: { color: EventAction.error },
+  reviewCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.borderWarm,
+    padding: EventSpacing.md,
+    gap: EventSpacing.xs,
+    marginTop: EventSpacing.lg,
+    marginBottom: EventSpacing.md,
+  },
+  reviewTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.text1, marginBottom: EventSpacing.xs },
+  reviewRow: { flexDirection: 'row', alignItems: 'center', gap: EventSpacing.sm },
+  reviewItem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2 },
+  reviewItemDone: { color: Colors.brandDeep },
   // doc 76 §3: sections carry the rhythm; labels stop shouting
   // terracotta on every field and go quiet and tracked
   sectionHeader: {

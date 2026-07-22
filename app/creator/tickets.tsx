@@ -35,7 +35,9 @@ import {
   getEventFaqs,
   getMyPayoutState,
   getTiers,
+  recommendedTierId,
   requestOnboardingLink,
+  TIER_COUNT_MAX,
   updateEventFaq,
   updateTier,
   type TicketTier,
@@ -181,6 +183,9 @@ export default function TicketSetupScreen() {
   }, [queryClient, id]);
 
   const payoutReady = !!payout?.payoutsEnabled && !!payout?.chargesEnabled;
+  // law 11: three or four, one of them recommended
+  const recommendedId = recommendedTierId(tiers);
+  const tiersFull = tiers.length >= TIER_COUNT_MAX;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -253,7 +258,15 @@ export default function TicketSetupScreen() {
               activeOpacity={0.85}
             >
               <View style={styles.tierCardBody}>
-                <Text style={styles.tierName}>{tier.name}</Text>
+                <View style={styles.tierNameRow}>
+                  <Text style={styles.tierName}>{tier.name}</Text>
+                  {tier.id === recommendedId && (
+                    <View style={styles.popularBadge}>
+                      {/* copy to the taste gate (law 11) */}
+                      <Text style={styles.popularBadgeText}>most popular</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.tierMeta}>
                   {tier.price_cents === 0 ? 'free' : formatCents(tier.price_cents)}
                   {tier.quantity_cap ? ` · ${tier.quantity_cap} exist` : ''}
@@ -269,18 +282,26 @@ export default function TicketSetupScreen() {
         )}
 
         <TouchableOpacity
-          style={styles.addBtn}
+          style={[styles.addBtn, tiersFull && styles.addBtnDisabled]}
           onPress={() => {
+            if (tiersFull) return;
             hapticLight();
             setEditingTier(null);
             setEditorVisible(true);
           }}
+          disabled={tiersFull}
           activeOpacity={0.85}
         >
           <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
           {/* copy to the taste gate */}
           <Text style={styles.addBtnText}>add a ticket</Text>
         </TouchableOpacity>
+
+        {tiersFull && (
+          /* copy to the taste gate: law 11's cap, framed as taste not a
+             limit - more options measurably reduce sales */
+          <Text style={styles.emptyText}>four is the most. fewer choices sell better.</Text>
+        )}
 
         {/* FAQs (proposal 70; doc 76 names the section) */}
         <View style={styles.sectionHeader}>
@@ -396,7 +417,17 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   tierCardBody: { flex: 1, gap: 2 },
+  tierNameRow: { flexDirection: 'row', alignItems: 'center', gap: EventSpacing.sm },
   tierName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  // the recommended marker is the GOLD family, never a second accent
+  popularBadge: {
+    backgroundColor: EventAction.successFill,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  popularBadgeText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.brandDeep },
+  addBtnDisabled: { opacity: 0.4 },
   tierMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventAction.error },
   // law 1: the payout CTA is this screen's single primary action, so
