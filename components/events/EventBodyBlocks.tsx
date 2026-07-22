@@ -25,9 +25,12 @@ const BODY_VIDEO_ASPECT = 16 / 9;
 
 /** law 1: the media zones are the ONE place the base goes warm-dark, so
  *  real footage reads cinematic against the cream page. */
-function BodyVideo({ path }: { path: string }) {
+function BodyVideo({ path, posterTime }: { path: string; posterTime?: number }) {
   const player = useVideoPlayer(eventContentPublicUrl(path), (p) => {
     p.loop = false;
+    // law 16: never open on a black frame - seek to the second the
+    // organizer chose in the poster-frame chooser
+    if (posterTime && posterTime > 0) p.currentTime = posterTime;
   });
   return (
     <View style={styles.videoFrame}>
@@ -69,7 +72,7 @@ export function EventBodyBlocks({ eventId, blocks }: EventBodyBlocksProps) {
           );
         }
         if (block.type === 'video') {
-          return <BodyVideo key={`v-${index}`} path={block.path} />;
+          return <BodyVideo key={`v-${index}`} path={block.path} posterTime={block.posterTime} />;
         }
         return <EventFaqCards key={`f-${index}`} eventId={eventId} />;
       })}

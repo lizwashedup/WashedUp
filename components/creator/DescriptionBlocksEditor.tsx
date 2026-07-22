@@ -24,13 +24,13 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight, hapticError } from '../../lib/haptics';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 import { EventAction, EventSurface } from '../../constants/EventDesign';
+import { VideoBlockUploader, VIDEO_LIMITS_LINE } from './VideoBlockUploader';
 import {
   BLOCKS_MAX,
   GALLERY_SOFT_CAP,
   TEXT_BLOCK_MAX,
   eventContentPublicUrl,
   pickAndUploadEventContentImages,
-  pickAndUploadEventContentVideo,
   type DescriptionBlock,
 } from '../../lib/eventContent';
 
@@ -80,19 +80,6 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
     const [item] = next.splice(index, 1);
     next.splice(target, 0, item);
     mutate(next);
-  };
-
-  const handleAddVideo = async () => {
-    if (full || uploading) return;
-    hapticLight();
-    setUploading(true);
-    try {
-      const { path, problem } = await pickAndUploadEventContentVideo(eventId);
-      setUploadProblems(problem ? [problem] : []);
-      if (path) mutate([...blocks, { type: 'video', path }]);
-    } finally {
-      setUploading(false);
-    }
   };
 
   // law 15: order = importance, so tile #1 is the cover; "make cover"
@@ -217,15 +204,11 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
           {/* copy to the taste gate (doc 76: many at once) */}
           <Text style={styles.addPillText}>photos</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.addPill, (full || uploading) && styles.addPillDisabled]}
-          onPress={handleAddVideo}
+        <VideoBlockUploader
+          eventId={eventId}
           disabled={full || uploading}
-          activeOpacity={0.85}
-        >
-          <Video size={14} color={Colors.terracotta} strokeWidth={2.5} />
-          <Text style={styles.addPillText}>video</Text>
-        </TouchableOpacity>
+          onReady={(path, posterTime) => mutate([...blocks, { type: 'video', path, posterTime }])}
+        />
         {!faqMarkerPlaced && (
           <TouchableOpacity
             style={[styles.addPill, full && styles.addPillDisabled]}
@@ -244,7 +227,7 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
       </View>
 
       {/* law 16: the limits are stated BEFORE a file is chosen */}
-      <Text style={styles.limitText}>video: mp4, up to 100 mb, landscape 16:9 looks best.</Text>
+      <Text style={styles.limitText}>video: {VIDEO_LIMITS_LINE}</Text>
 
       {imageCount > 0 && (
         /* law 15: the live count counts BLOCKS, under 70's hard ceiling */

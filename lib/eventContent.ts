@@ -18,7 +18,13 @@ export type DescriptionBlock =
   | { type: 'image'; path: string; alt?: string }
   // 77's validator: video is hosted mp4 in v1 and shares the image
   // branch's folder-pin law. mp4 ONLY - never promise .mov (doc 78 law 16)
-  | { type: 'video'; path: string; alt?: string }
+  // posterTime = the second the player seeks to on load, so the video
+  // never opens on a black frame (law 16's stated purpose). DELIBERATELY
+  // a NUMBER, not an image path: 77's validator pins `path` to the
+  // event's own folder but does not police extra keys, so persisting an
+  // unpinned poster PATH would smuggle an unvalidated storage reference
+  // into the body. A seek offset carries no such surface.
+  | { type: 'video'; path: string; alt?: string; posterTime?: number }
   | { type: 'faq' };
 
 // 70's validator limits, mirrored so the editor can explain them
@@ -115,13 +121,18 @@ export function eventContentPublicUrl(path: string): string {
 /** Video pick (doc 78 law 16, proposal 77's allow-list): mp4 only, 100 MB
  *  ceiling, both checked CLIENT-SIDE before a byte uploads so a bad file
  *  never costs the organizer an upload. Returns the stored path. */
-export async function pickAndUploadEventContentVideo(
-  eventId: string,
-): Promise<{ path: string | null; problem: string | null }> {
+export interface VideoPick {
+  /** the local uri, so the poster chooser can grab frames before upload */
+  uri: string;
+  sizeBytes: number | null;
+}
+
+/** Step 1: choose and VALIDATE, before a byte moves. */
+export async function pickEventContentVideo(): Promise<{ pick: VideoPick | null; problem: string | null }> {
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) return { path: null, problem: null };
+  if (!perm.granted) return { pick: null, problem: null };
   const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], quality: 1 });
-  if (res.canceled || !res.assets?.[0]) return { path: null, problem: null };
+  if (res.canceled || !res.assets?.[0]) return { pick: null, problem: null };
   const asset = res.assets[0];
 
   // instant reject 1: format. The bucket allow-list is {jpeg,png,webp,mp4},
@@ -129,23 +140,37 @@ export async function pickAndUploadEventContentVideo(
   const name = (asset.fileName ?? asset.uri).toLowerCase();
   if (!name.endsWith('.mp4')) {
     /* copy to the taste gate */
-    return { path: null, problem: 'that one is not an mp4. mp4 is the format we take right now.' };
+    return { pick: null, problem: 'that one is not an mp4. mp4 is the format we take right now.' };
   }
   // instant reject 2: size, with the real number
   if (asset.fileSize && asset.fileSize > MEDIA_MAX_BYTES) {
     return {
-      path: null,
+      pick: null,
       /* copy to the taste gate */
       problem: `that video is ${describeSize(asset.fileSize)}, the most is ${describeSize(MEDIA_MAX_BYTES)}.`,
     };
   }
-
-  try {
-    const path = `${eventId}/${Crypto.randomUUID()}.mp4`;
-    await uploadUriToStorage(EVENT_CONTENT_BUCKET, path, asset.uri, VIDEO_MIME);
-    return { path, problem: null };
-  } catch {
-    /* copy to the taste gate */
-    return { path: null, problem: 'that video did not upload. give it another try.' };
-  }
+  return { pick: { uri: asset.uri, sizeBytes: asset.fileSize ?? null }, problem: null };
 }
+
+/** Step 2: upload with REAL progress and a working cancel (law 16). No
+ *  processing stage: mp4-only under the 100 MB cap plays directly, so
+ *  the states are uploading -> ready. */
+export function uploadEventContentVideo(
+  eventId: string,
+  pick: VideoPick,
+  onProgress: (fraction: number) => void,
+): { done: Promise<string | null>; cancel: () => void } {
+  const path = `${eventId}/${Crypto.randomUUID()}.mp4`;
+  const upload = uploadUriToStorage(EVENT_CONTENT_BUCKET, path, pick.uri, VIDEO_MIME, onProgress);
+  return {
+    done: upload.done.then((url) => (url ? path : null)),
+    cancel: upload.cancel,
+  };
+}
+
+/** Step 3: the poster frame, chosen client-side from the LOCAL file via
+ *  expo-video's generateThumbnailsAsync - already in the 1.0.5 binary, so
+ *  no new native module and no transcode service (law 16, v1 scope). */
+export const POSTER_FRAME_OFFSETS_SEC = [0, 1, 3, 5, 8];
+

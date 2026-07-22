@@ -101,15 +101,13 @@ export const EventSpacing = {
 // ─── the cover ratio (doc 80 section D, item 1) ──────────────────────────
 
 /**
- * HELD, pending Liz: the ratio is being revised off 2:1 to portrait 4:5
- * or square 1:1. Every cover surface reads THIS constant, so calling it
- * is a one-line change, and nothing downstream hardcodes a shape. Until
- * it is called, the form must not promise a ratio in copy - a promise we
- * are about to break is worse than no promise.
+ * LOCKED 2026-07-22: portrait 4:5 (doc 80 section D, item 1). Every cover
+ * surface reads this one constant, system-cropped with a focal-point
+ * control so no organizer can stretch or letterbox the hero. Video keeps
+ * its own 16:9 - that is law 16 and unrelated to the cover.
  */
-export const COVER_ASPECT_PENDING = true;
-/** the interim preview shape only; NOT a ruling and NOT shown as copy */
-export const COVER_ASPECT_INTERIM = 4 / 5;
+export const COVER_ASPECT = 4 / 5;
+export const COVER_ASPECT_LABEL = '4:5';
 
 // ─── motion (law 5: three motions, nothing else animates) ────────────────
 
