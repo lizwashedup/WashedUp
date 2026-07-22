@@ -237,13 +237,16 @@ export async function updateEventFaq(
 export const TIER_COUNT_MAX = 4;
 export const TIER_COUNT_RECOMMENDED = 3;
 /**
- * Law 11 also wants ONE tier marked "most popular". ticket_tiers carries
- * no recommended/badge column on prod, so rather than invent an
- * unvalidated key the lowest-sorted ON-SALE tier is treated as the
- * recommended one by convention. If the product wants an explicit,
- * organizer-chosen badge, that is a column and a numbered proposal.
+ * Law 11 also wants ONE tier marked "most popular". The real marker is
+ * an is_recommended column (proposal 85, ruled 2026-07-22: a MISLABELED
+ * "most popular" is worse than none, so sort-order convention is INTERIM
+ * only). Until 85 applies, the lowest-sorted on-sale tier stands in; the
+ * moment the column lands, prefer a tier flagged is_recommended and fall
+ * back to this convention only when none is flagged.
  */
 export function recommendedTierId(tiers: TicketTier[]): string | null {
+  const flagged = tiers.find((t) => (t as { is_recommended?: boolean }).is_recommended);
+  if (flagged) return flagged.id;
   const onSale = tiers.filter((t) => t.status === 'on_sale' && t.visibility !== 'hidden');
   const pool = onSale.length > 0 ? onSale : tiers;
   return pool.length > 1 ? pool[0].id : null;
@@ -350,3 +353,10 @@ export const REFUND_PRESETS: RefundPreset[] = [
  * above are ready to wire the moment the door exists.
  */
 export const REFUND_POLICY_WRITE_BLOCKED = true;
+// The writer wires the moment proposal 84 (p_refund_policy on the
+// operator RPC, launch priority) lands - built against its APPLIED bytes,
+// not pre-guessed. Deliberately NOT pre-written: refund_policy rides the
+// full-overwrite RPC, so a two-arg convenience caller would null
+// title/date/venue - the exact trap this whole class keeps setting. The
+// real wiring adds refund_policy to the form's complete field set (the
+// way description_blocks already rides it), once the param exists.
