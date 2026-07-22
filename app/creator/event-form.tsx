@@ -566,9 +566,11 @@ export default function EventFormScreen() {
               ))}
             </View>
 
-            <Text style={styles.fieldLabel}>tickets link</Text>
-            <Text style={styles.fieldHint}>eventbrite, your site, wherever people pay or reserve. free events skip it.</Text>
-            <TextInput style={styles.input} value={externalUrl} onChangeText={setExternalUrl} placeholder="https://" placeholderTextColor={Colors.inkSoft} autoCapitalize="none" keyboardType="url" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            {/* the tickets-link field is GONE per the 7-20 ruling: no
+                external ticket links at launch, ticketing runs through
+                washedup (doc 61 §1.2). The externalUrl state stays as a
+                silent pass-through so existing events' stored links
+                survive an edit-save untouched. */}
 
             <Text style={styles.fieldLabel}>ticket price</Text>
             <TextInput style={styles.input} value={ticketPrice} onChangeText={setTicketPrice} placeholder="leave empty if free" placeholderTextColor={Colors.inkSoft} keyboardType="decimal-pad" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
