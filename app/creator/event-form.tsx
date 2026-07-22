@@ -31,6 +31,7 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { DescriptionBlocksEditor } from '../../components/creator/DescriptionBlocksEditor';
+import { type DescriptionBlock } from '../../lib/eventContent';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { formatEventDateLA, getLAWallParts, isBeforeTodayLA, laWallTimeToUTC } from '../../lib/laDate';
@@ -76,6 +77,9 @@ export default function EventFormScreen() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  // proposal 77: the form owns the rich body so it saves inside the
+  // complete field set; undefined until an edit seeds it
+  const [blocks, setBlocks] = useState<DescriptionBlock[] | undefined>(undefined);
   const [imageUrl, setImageUrl] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
@@ -175,6 +179,9 @@ export default function EventFormScreen() {
       setTicketPrice(existing.ticket_price);
       setPublicName(existing.public_name);
       setPinToChat(existing.pin_to_chat);
+      // proposal 77: seed the stored body so an untouched save round-trips
+      // it unchanged rather than clearing it
+      setBlocks(existing.description_blocks ?? []);
       setEventStatus(existing.status);
       setEventCommunityId(existing.community_id);
       setSeeded(true);
@@ -247,6 +254,10 @@ export default function EventFormScreen() {
       ticket_price: ticketPrice,
       public_name: publicName,
       pin_to_chat: pinToChat,
+      // proposal 77: the rich body rides the same full-overwrite payload.
+      // undefined (create, or an edit that never opened the editor) leaves
+      // the stored body untouched; [] clears it.
+      description_blocks: blocks,
     };
   };
 
@@ -521,7 +532,11 @@ export default function EventFormScreen() {
                 <View style={styles.sectionCard}>
                   {/* copy to the taste gate (doc 76 §2) */}
                   <Text style={styles.fieldHint}>the mood board. photos, text between them, and where your good-to-know cards sit.</Text>
-                  <DescriptionBlocksEditor eventId={id} />
+                  <DescriptionBlocksEditor
+                  eventId={id}
+                  blocks={blocks ?? []}
+                  onChange={setBlocks}
+                />
                 </View>
               </>
             )}

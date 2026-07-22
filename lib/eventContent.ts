@@ -38,26 +38,11 @@ export async function getDescriptionBlocks(eventId: string): Promise<Description
     : [];
 }
 
-export async function saveDescriptionBlocks(
-  eventId: string,
-  blocks: DescriptionBlock[],
-): Promise<{ ok: boolean; message: string | null }> {
-  // doc 76 stage-0 fix: a direct column update silently no-ops for
-  // non-admin organizers (the only explore_events update policy is
-  // admin-scoped), so the ONLY honest write path is the operator door
-  // (web's proposal, at the gate). Self-flipping: until it applies the
-  // save fails plainly instead of pretending.
-  const { error } = await supabase.rpc('operator_set_description_blocks', {
-    p_event_id: eventId,
-    p_blocks: blocks.length > 0 ? blocks : null,
-  });
-  if (!error) return { ok: true, message: null };
-  if (error.code === 'PGRST202' || error.code === '42883') {
-    /* copy to the taste gate */
-    return { ok: false, message: 'the page body cannot save just yet. your blocks stay right here; try again soon.' };
-  }
-  return { ok: false, message: error.message };
-}
+// NO standalone save: proposal 77 (applied) puts p_description_blocks on
+// operator_create/update_explore_event, and every OTHER omitted param on
+// that RPC still NULLS its column - so a blocks-only call would wipe the
+// title, date, and venue. The body rides the form's complete field set
+// instead (lib/creatorEvents), which is why this module has no writer.
 
 /** Multi-select gallery pick (doc 76 §2: the Curtain Call mood board is
  *  many photos at once): resizes and uploads each into the event's own

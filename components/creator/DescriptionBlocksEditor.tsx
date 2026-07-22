@@ -1,12 +1,14 @@
 /**
- * The mood-board body editor (proposal 70, section 4c anatomy): ordered
- * text, image, and one-faq-marker blocks on a saved event. Draft-safe:
- * a Draft row already has the id the image folder pin needs, and saving
- * blocks never touches status or the rest of the form. The 70 trigger
- * is the validator of record; this editor mirrors its limits in copy.
+ * The mood-board body editor (proposal 70 shape, proposal 77 door):
+ * ordered text, image, and one-faq-marker blocks. CONTROLLED - the form
+ * owns the blocks and saves them inside its complete field set, because
+ * 77's RPC nulls every other omitted column (a blocks-only write would
+ * wipe the title, date, and venue). Draft-safe: a Draft row already has
+ * the id the image folder pin needs. The 70/77 trigger is the validator
+ * of record; this editor mirrors its limits in copy.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -16,19 +18,16 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ImagePlus, MessageCircleQuestion, Plus, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
+import { hapticLight, hapticError } from '../../lib/haptics';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 import {
   BLOCKS_MAX,
   TEXT_BLOCK_MAX,
   eventContentPublicUrl,
-  getDescriptionBlocks,
   pickAndUploadEventContentImages,
-  saveDescriptionBlocks,
   type DescriptionBlock,
 } from '../../lib/eventContent';
 
@@ -36,46 +35,13 @@ const IMAGE_PREVIEW_HEIGHT = 140;
 
 interface DescriptionBlocksEditorProps {
   eventId: string;
+  blocks: DescriptionBlock[];
+  onChange: (next: DescriptionBlock[]) => void;
 }
 
-export function DescriptionBlocksEditor({ eventId }: DescriptionBlocksEditorProps) {
-  const queryClient = useQueryClient();
-  const [blocks, setBlocks] = useState<DescriptionBlock[] | null>(null);
-  const [dirty, setDirty] = useState(false);
+export function DescriptionBlocksEditor({ eventId, blocks, onChange }: DescriptionBlocksEditorProps) {
   const [uploading, setUploading] = useState(false);
-
-  const { data: loaded, isLoading } = useQuery({
-    queryKey: ['description-blocks', eventId],
-    queryFn: () => getDescriptionBlocks(eventId),
-    staleTime: 30_000,
-  });
-
-  useEffect(() => {
-    if (loaded && blocks === null) setBlocks(loaded);
-  }, [loaded, blocks]);
-
-  const mutate = useCallback((next: DescriptionBlock[]) => {
-    setBlocks(next);
-    setDirty(true);
-  }, []);
-
-  const [saveProblem, setSaveProblem] = useState<string | null>(null);
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const result = await saveDescriptionBlocks(eventId, blocks ?? []);
-      if (!result.ok) throw new Error(result.message ?? 'save failed');
-    },
-    onSuccess: () => {
-      hapticSuccess();
-      setDirty(false);
-      setSaveProblem(null);
-      queryClient.invalidateQueries({ queryKey: ['description-blocks', eventId] });
-    },
-    onError: (e: any) => {
-      hapticError();
-      setSaveProblem(e?.message ?? 'that did not save. give it another try.');
-    },
-  });
+  const mutate = onChange;
 
   const handleAddImages = useCallback(async () => {
     if (!blocks || blocks.length >= BLOCKS_MAX || uploading) return;
@@ -92,10 +58,6 @@ export function DescriptionBlocksEditor({ eventId }: DescriptionBlocksEditorProp
       setUploading(false);
     }
   }, [blocks, uploading, eventId, mutate]);
-
-  if (isLoading || blocks === null) {
-    return <ActivityIndicator size="small" color={Colors.terracotta} />;
-  }
 
   const faqMarkerPlaced = blocks.some((b) => b.type === 'faq');
   const full = blocks.length >= BLOCKS_MAX;
@@ -217,23 +179,6 @@ export function DescriptionBlocksEditor({ eventId }: DescriptionBlocksEditorProp
         <Text style={styles.limitText}>that is the whole page. thirty blocks is the ceiling.</Text>
       )}
 
-      {!!saveProblem && <Text style={styles.problemText}>{saveProblem}</Text>}
-
-      {dirty && (
-        <TouchableOpacity
-          style={styles.saveBtn}
-          onPress={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
-          activeOpacity={0.85}
-        >
-          {saveMutation.isPending ? (
-            <ActivityIndicator size="small" color={Colors.white} />
-          ) : (
-            /* copy to the taste gate */
-            <Text style={styles.saveBtnText}>save the page body</Text>
-          )}
-        </TouchableOpacity>
-      )}
     </View>
   );
 }
@@ -275,12 +220,4 @@ const styles = StyleSheet.create({
   addPillDisabled: { opacity: 0.4 },
   addPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   limitText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
-  problemText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed },
-  saveBtn: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  saveBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
 });
