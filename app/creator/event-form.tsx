@@ -29,6 +29,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
+import { DescriptionBlocksEditor } from '../../components/creator/DescriptionBlocksEditor';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { formatEventDateLA, getLAWallParts, isBeforeTodayLA, laWallTimeToUTC } from '../../lib/laDate';
@@ -492,6 +493,19 @@ export default function EventFormScreen() {
               maxLength={4000}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
+
+            {/* the page body (proposal 70, section 4c): only a saved row
+                has the id the image folder pin needs, so the editor shows
+                in edit mode incl. Drafts; blocks save independently of
+                this form's full-overwrite RPC */}
+            {editing && !!id && (
+              <>
+                <Text style={styles.fieldLabel}>the page body</Text>
+                {/* copy to the taste gate */}
+                <Text style={styles.fieldHint}>text, photos, and where your faq cards sit. this is the page people see.</Text>
+                <DescriptionBlocksEditor eventId={id} />
+              </>
+            )}
 
             <Text style={styles.fieldLabel}>date</Text>
             {/* the calendar refuses past days; a stored past date shows in
