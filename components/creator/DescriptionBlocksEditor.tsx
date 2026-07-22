@@ -207,7 +207,7 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
         <VideoBlockUploader
           eventId={eventId}
           disabled={full || uploading}
-          onReady={(path, posterTime) => mutate([...blocks, { type: 'video', path, posterTime }])}
+          onReady={(path, poster) => mutate([...blocks, { type: 'video', path, poster }])}
         />
         {!faqMarkerPlaced && (
           <TouchableOpacity

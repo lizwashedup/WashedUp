@@ -25,15 +25,21 @@ const BODY_VIDEO_ASPECT = 16 / 9;
 
 /** law 1: the media zones are the ONE place the base goes warm-dark, so
  *  real footage reads cinematic against the cream page. */
-function BodyVideo({ path, posterTime }: { path: string; posterTime?: number }) {
+function BodyVideo({ path, poster }: { path: string; poster?: string }) {
   const player = useVideoPlayer(eventContentPublicUrl(path), (p) => {
     p.loop = false;
-    // law 16: never open on a black frame - seek to the second the
-    // organizer chose in the poster-frame chooser
-    if (posterTime && posterTime > 0) p.currentTime = posterTime;
   });
   return (
     <View style={styles.videoFrame}>
+      {/* law 16: the persisted poster paints INSTANTLY under the player,
+          so the frame is never black while the video buffers */}
+      {!!poster && (
+        <Image
+          source={{ uri: eventContentPublicUrl(poster) }}
+          style={styles.videoPoster}
+          contentFit="cover"
+        />
+      )}
       <VideoView
         player={player}
         style={styles.video}
@@ -72,7 +78,7 @@ export function EventBodyBlocks({ eventId, blocks }: EventBodyBlocksProps) {
           );
         }
         if (block.type === 'video') {
-          return <BodyVideo key={`v-${index}`} path={block.path} posterTime={block.posterTime} />;
+          return <BodyVideo key={`v-${index}`} path={block.path} poster={block.poster} />;
         }
         return <EventFaqCards key={`f-${index}`} eventId={eventId} />;
       })}
@@ -93,4 +99,5 @@ const styles = StyleSheet.create({
     backgroundColor: EventSurface.media,
   },
   video: { width: '100%', height: '100%' },
+  videoPoster: { ...StyleSheet.absoluteFillObject },
 });

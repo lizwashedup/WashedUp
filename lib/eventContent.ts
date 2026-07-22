@@ -9,6 +9,8 @@
 
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { ImageManipulator as ImageManipulatorModule, SaveFormat } from 'expo-image-manipulator';
+import type { SharedRef } from 'expo-modules-core/types';
 import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
 import { uploadBase64ToStorage, uploadUriToStorage } from './uploadPhoto';
@@ -18,13 +20,12 @@ export type DescriptionBlock =
   | { type: 'image'; path: string; alt?: string }
   // 77's validator: video is hosted mp4 in v1 and shares the image
   // branch's folder-pin law. mp4 ONLY - never promise .mov (doc 78 law 16)
-  // posterTime = the second the player seeks to on load, so the video
-  // never opens on a black frame (law 16's stated purpose). DELIBERATELY
-  // a NUMBER, not an image path: 77's validator pins `path` to the
-  // event's own folder but does not police extra keys, so persisting an
-  // unpinned poster PATH would smuggle an unvalidated storage reference
-  // into the body. A seek offset carries no such surface.
-  | { type: 'video'; path: string; alt?: string; posterTime?: number }
+  // poster = a REAL image pinned to the event's own folder, so the page
+  // paints instantly instead of risking the black flash a seek offset
+  // allows (ruled 2026-07-22, superseding the interim posterTime).
+  // Proposal 83 amends the validator to allow-list and PIN this key the
+  // way image paths are pinned; until 83 applies nothing ships to prod.
+  | { type: 'video'; path: string; alt?: string; poster?: string }
   | { type: 'faq' };
 
 // 70's validator limits, mirrored so the editor can explain them
@@ -173,4 +174,38 @@ export function uploadEventContentVideo(
  *  expo-video's generateThumbnailsAsync - already in the 1.0.5 binary, so
  *  no new native module and no transcode service (law 16, v1 scope). */
 export const POSTER_FRAME_OFFSETS_SEC = [0, 1, 3, 5, 8];
+const POSTER_WIDTH = 1080;
+const POSTER_QUALITY = 0.85;
+
+/**
+ * Persist a chosen frame as a REAL poster image inside the event's own
+ * folder (ruled 2026-07-22; proposal 83 pins this key server-side).
+ *
+ * generateThumbnailsAsync hands back a native SharedRef with no uri and
+ * no save method, so the frame is rendered through the image manipulator
+ * to get bytes. The path uses the SAME <event-id>/<uuid>.jpg shape as
+ * every image block, so it satisfies 83's pin by construction rather
+ * than by hope.
+ */
+export async function uploadPosterFrame(
+  eventId: string,
+  frame: SharedRef<'image'>,
+): Promise<string | null> {
+  try {
+    const rendered = await ImageManipulatorModule.manipulate(frame)
+      .resize({ width: POSTER_WIDTH })
+      .renderAsync();
+    const saved = await rendered.saveAsync({
+      compress: POSTER_QUALITY,
+      format: SaveFormat.JPEG,
+      base64: true,
+    });
+    if (!saved.base64) return null;
+    const path = `${eventId}/${Crypto.randomUUID()}.jpg`;
+    await uploadBase64ToStorage(EVENT_CONTENT_BUCKET, path, saved.base64);
+    return path;
+  } catch {
+    return null;
+  }
+}
 

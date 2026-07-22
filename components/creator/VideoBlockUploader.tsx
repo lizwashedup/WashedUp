@@ -13,6 +13,7 @@ import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { VideoSource, useVideoPlayer } from 'expo-video';
+import type { SharedRef } from 'expo-modules-core/types';
 import { Video as VideoIcon } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -23,6 +24,7 @@ import {
   POSTER_FRAME_OFFSETS_SEC,
   pickEventContentVideo,
   uploadEventContentVideo,
+  uploadPosterFrame,
   type VideoPick,
 } from '../../lib/eventContent';
 
@@ -33,8 +35,8 @@ const PERCENT = 100;
 interface VideoBlockUploaderProps {
   eventId: string;
   disabled?: boolean;
-  /** the stored path plus the chosen poster SECOND, once ready */
-  onReady: (path: string, posterTime?: number) => void;
+  /** the stored video path plus the pinned POSTER IMAGE path, once ready */
+  onReady: (path: string, poster?: string) => void;
 }
 
 type Stage =
@@ -45,7 +47,8 @@ type Stage =
 export function VideoBlockUploader({ eventId, disabled, onReady }: VideoBlockUploaderProps) {
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   const [problem, setProblem] = useState<string | null>(null);
-  const [frames, setFrames] = useState<{ thumb: unknown; atSec: number }[]>([]);
+  const [frames, setFrames] = useState<{ thumb: SharedRef<'image'>; atSec: number }[]>([]);
+  const [savingPoster, setSavingPoster] = useState(false);
 
   // the player exists only to grab frames from the LOCAL file
   const posterSource: VideoSource = stage.kind === 'poster' ? stage.localUri : null;
@@ -130,6 +133,7 @@ export function VideoBlockUploader({ eventId, disabled, onReady }: VideoBlockUpl
       <View style={styles.panel}>
         {/* copy to the taste gate */}
         <Text style={styles.panelTitle}>pick the frame people see first</Text>
+        {savingPoster && <ActivityIndicator size="small" color={EventAction.primary} />}
         {frames.length === 0 ? (
           <ActivityIndicator size="small" color={EventAction.primary} />
         ) : (
@@ -137,16 +141,31 @@ export function VideoBlockUploader({ eventId, disabled, onReady }: VideoBlockUpl
             {frames.map((frame) => (
               <TouchableOpacity
                 key={frame.atSec}
-                onPress={() => {
+                onPress={async () => {
+                  if (savingPoster) return;
+                  hapticLight();
+                  setSavingPoster(true);
+                  // the frame persists as a real image in the event's own
+                  // folder, so the page paints it instantly (ruled
+                  // 2026-07-22; proposal 83 pins the key server-side)
+                  const poster = await uploadPosterFrame(eventId, frame.thumb);
+                  setSavingPoster(false);
+                  if (!poster) {
+                    hapticError();
+                    /* copy to the taste gate */
+                    setProblem('that frame did not save. pick another, or use the first frame.');
+                    return;
+                  }
                   hapticSuccess();
-                  onReady(stage.path, frame.atSec);
+                  onReady(stage.path, poster);
                   setStage({ kind: 'idle' });
                   setFrames([]);
                 }}
+                disabled={savingPoster}
                 activeOpacity={0.85}
               >
                 {/* expo-image renders the thumbnail SharedRef directly */}
-                <Image source={frame.thumb as never} style={styles.frame} contentFit="cover" />
+                <Image source={frame.thumb} style={styles.frame} contentFit="cover" />
               </TouchableOpacity>
             ))}
           </View>
