@@ -18,16 +18,19 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { ArrowDown, ArrowUp, ImagePlus, MessageCircleQuestion, Plus, X } from 'lucide-react-native';
+import { ArrowDown, ArrowUp, ImagePlus, MessageCircleQuestion, Plus, Video, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight, hapticError } from '../../lib/haptics';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
+import { EventAction, EventSurface } from '../../constants/EventDesign';
 import {
   BLOCKS_MAX,
+  GALLERY_SOFT_CAP,
   TEXT_BLOCK_MAX,
   eventContentPublicUrl,
   pickAndUploadEventContentImages,
+  pickAndUploadEventContentVideo,
   type DescriptionBlock,
 } from '../../lib/eventContent';
 
@@ -41,6 +44,7 @@ interface DescriptionBlocksEditorProps {
 
 export function DescriptionBlocksEditor({ eventId, blocks, onChange }: DescriptionBlocksEditorProps) {
   const [uploading, setUploading] = useState(false);
+  const [uploadProblems, setUploadProblems] = useState<string[]>([]);
   const mutate = onChange;
 
   const handleAddImages = useCallback(async () => {
@@ -48,7 +52,11 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
     hapticLight();
     setUploading(true);
     try {
-      const paths = await pickAndUploadEventContentImages(eventId, BLOCKS_MAX - blocks.length);
+      const { paths, problems } = await pickAndUploadEventContentImages(
+        eventId,
+        Math.min(BLOCKS_MAX, GALLERY_SOFT_CAP) - blocks.length,
+      );
+      setUploadProblems(problems);
       if (paths.length > 0) {
         mutate([...blocks, ...paths.map((path) => ({ type: 'image' as const, path }))]);
       }
@@ -60,7 +68,9 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
   }, [blocks, uploading, eventId, mutate]);
 
   const faqMarkerPlaced = blocks.some((b) => b.type === 'faq');
-  const full = blocks.length >= BLOCKS_MAX;
+  const imageCount = blocks.filter((b) => b.type === 'image').length;
+  // the soft cap sits UNDER 70's hard ceiling so the counters agree
+  const full = blocks.length >= Math.min(BLOCKS_MAX, GALLERY_SOFT_CAP);
 
   const move = (index: number, delta: number) => {
     const target = index + delta;
@@ -69,6 +79,32 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
     const next = [...blocks];
     const [item] = next.splice(index, 1);
     next.splice(target, 0, item);
+    mutate(next);
+  };
+
+  const handleAddVideo = async () => {
+    if (full || uploading) return;
+    hapticLight();
+    setUploading(true);
+    try {
+      const { path, problem } = await pickAndUploadEventContentVideo(eventId);
+      setUploadProblems(problem ? [problem] : []);
+      if (path) mutate([...blocks, { type: 'video', path }]);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // law 15: order = importance, so tile #1 is the cover; "make cover"
+  // moves a tile ahead of every other image without disturbing the text
+  // and faq blocks around it
+  const firstImageIndex = blocks.findIndex((b) => b.type === 'image');
+  const makeCover = (index: number) => {
+    if (firstImageIndex < 0 || index === firstImageIndex) return;
+    hapticLight();
+    const next = [...blocks];
+    const [item] = next.splice(index, 1);
+    next.splice(firstImageIndex, 0, item);
     mutate(next);
   };
 
@@ -104,11 +140,35 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
               />
             )}
             {block.type === 'image' && (
-              <Image
-                source={{ uri: eventContentPublicUrl(block.path) }}
-                style={styles.imagePreview}
-                contentFit="cover"
-              />
+              <View>
+                <Image
+                  source={{ uri: eventContentPublicUrl(block.path) }}
+                  style={styles.imagePreview}
+                  contentFit="cover"
+                />
+                {index === firstImageIndex ? (
+                  <View style={styles.coverBadge}>
+                    {/* copy to the taste gate (law 15) */}
+                    <Text style={styles.coverBadgeText}>cover</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.makeCoverBtn}
+                    onPress={() => makeCover(index)}
+                    activeOpacity={0.85}
+                  >
+                    {/* copy to the taste gate (law 15) */}
+                    <Text style={styles.makeCoverText}>make cover</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+            {block.type === 'video' && (
+              <View style={styles.videoChip}>
+                <Video size={16} color={EventSurface.onMedia} strokeWidth={2} />
+                {/* copy to the taste gate */}
+                <Text style={styles.videoChipText}>video ready</Text>
+              </View>
             )}
             {block.type === 'faq' && (
               /* copy to the taste gate */
@@ -157,6 +217,15 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
           {/* copy to the taste gate (doc 76: many at once) */}
           <Text style={styles.addPillText}>photos</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.addPill, (full || uploading) && styles.addPillDisabled]}
+          onPress={handleAddVideo}
+          disabled={full || uploading}
+          activeOpacity={0.85}
+        >
+          <Video size={14} color={Colors.terracotta} strokeWidth={2.5} />
+          <Text style={styles.addPillText}>video</Text>
+        </TouchableOpacity>
         {!faqMarkerPlaced && (
           <TouchableOpacity
             style={[styles.addPill, full && styles.addPillDisabled]}
@@ -173,6 +242,18 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
           </TouchableOpacity>
         )}
       </View>
+
+      {/* law 16: the limits are stated BEFORE a file is chosen */}
+      <Text style={styles.limitText}>video: mp4, up to 100 mb, landscape 16:9 looks best.</Text>
+
+      {imageCount > 0 && (
+        /* law 15: the live count counts BLOCKS, under 70's hard ceiling */
+        <Text style={styles.limitText}>{blocks.length} of {GALLERY_SOFT_CAP} blocks</Text>
+      )}
+
+      {uploadProblems.map((problem, i) => (
+        <Text key={`p-${i}`} style={styles.problemText}>{problem}</Text>
+      ))}
 
       {full && (
         /* copy to the taste gate: 70's 30-block ceiling */
@@ -220,4 +301,35 @@ const styles = StyleSheet.create({
   addPillDisabled: { opacity: 0.4 },
   addPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   limitText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  problemText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed },
+  coverBadge: {
+    position: 'absolute',
+    left: 8,
+    top: 8,
+    backgroundColor: EventAction.primary,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  coverBadgeText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: EventAction.onPrimary },
+  makeCoverBtn: {
+    position: 'absolute',
+    left: 8,
+    top: 8,
+    backgroundColor: EventSurface.mediaRaised,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  makeCoverText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: EventSurface.onMedia },
+  videoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: EventSurface.media,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+  },
+  videoChipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventSurface.onMedia },
 });

@@ -21,6 +21,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Plus, Ticket } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
@@ -276,7 +277,7 @@ export default function TicketSetupScreen() {
           }}
           activeOpacity={0.85}
         >
-          <Plus size={18} color={Colors.white} strokeWidth={2.5} />
+          <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
           {/* copy to the taste gate */}
           <Text style={styles.addBtnText}>add a ticket</Text>
         </TouchableOpacity>
@@ -398,17 +399,20 @@ const styles = StyleSheet.create({
   tierName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   tierMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorRed },
+  // law 1: the payout CTA is this screen's single primary action, so
+  // add-a-ticket takes the secondary treatment rather than competing
   addBtn: {
-    backgroundColor: Colors.terracotta,
+    borderWidth: 1.5,
+    borderColor: EventAction.secondaryBorder,
     borderRadius: 999,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    marginTop: 4,
+    marginTop: EventSpacing.xs,
   },
-  addBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
+  addBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: EventAction.secondaryLabel },
   faqCard: {
     backgroundColor: Colors.white,
     borderRadius: 12,
