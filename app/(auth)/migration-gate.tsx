@@ -180,10 +180,10 @@ export default function MigrationGateScreen() {
               </View>
               <View style={styles.timelineColRight}>
                 <Text style={[styles.timelineLabel, styles.timelineLabelMuted]}>
-                  starting june 1
+                  since june 1
                 </Text>
                 <Text style={[styles.timelineBody, styles.timelineBodyMuted]}>
-                  you’ll sign in with your phone instead of a password.
+                  you sign in with your phone instead of a password.
                 </Text>
               </View>
             </View>

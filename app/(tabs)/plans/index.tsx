@@ -26,6 +26,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
+import { CreatorSpaceBanner } from '../../../components/creator/CreatorSpaceBanner';
 import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
 import { SkeletonFeed } from '../../../components/SkeletonCard';
 import MiniProfileCard from '../../../components/MiniProfileCard';
@@ -1110,6 +1111,9 @@ export default function PlansScreen() {
 
   const listHeader = (
     <>
+      {/* the approved organizer's front door (7-21): grant-gated, renders
+          nothing for everyone else */}
+      <CreatorSpaceBanner />
       {welcomeBanner}
       {featuredSection}
     </>

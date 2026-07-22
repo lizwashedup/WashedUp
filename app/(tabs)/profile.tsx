@@ -78,7 +78,8 @@ export default function ProfileScreen() {
   // the generic line only when neither resolves
   const [switchName, setSwitchName] = useState<string | null>(null);
   useEffect(() => {
-    if (!COMMUNITIES_ENABLED) return;
+    // the switch row is GRANT-gated, not flag-gated (7-21: approved
+    // organizers must reach their space while the fleet is public-dark)
     getCreatorAccess()
       .then(async (a) => {
         if (!hasCreatorAccess(a)) {
@@ -980,8 +981,9 @@ export default function ProfileScreen() {
           {supportRows.map((row, i) => renderSettingsRow(row, i === supportRows.length - 1))}
         </View>
 
-        {/* Creators (Communities & Events, flag-gated) */}
-        {COMMUNITIES_ENABLED && (
+        {/* Creators: the switch row is grant-gated and shows public-dark
+            (7-21); only the apply row stays behind the flag */}
+        {(COMMUNITIES_ENABLED || !!creatorAccess) && (
           <>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Creators</Text>
@@ -1003,14 +1005,16 @@ export default function ProfileScreen() {
                   <Ionicons name="chevron-forward" size={16} color={Colors.terracotta} />
                 </TouchableOpacity>
               )}
-              <TouchableOpacity
-                style={styles.settingsRow}
-                onPress={() => router.push('/creator/apply')}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.settingsLabel}>Run things on washedup</Text>
-                <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
-              </TouchableOpacity>
+              {COMMUNITIES_ENABLED && (
+                <TouchableOpacity
+                  style={styles.settingsRow}
+                  onPress={() => router.push('/creator/apply')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.settingsLabel}>Run things on washedup</Text>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
+                </TouchableOpacity>
+              )}
             </View>
           </>
         )}
