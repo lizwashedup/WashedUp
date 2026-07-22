@@ -281,10 +281,10 @@ export default function TicketSetupScreen() {
           <Text style={styles.addBtnText}>add a ticket</Text>
         </TouchableOpacity>
 
-        {/* FAQs (proposal 70 - dormant until the re-cut applies) */}
+        {/* FAQs (proposal 70; doc 76 names the section) */}
         <View style={styles.sectionHeader}>
-          {/* copy to the taste gate */}
-          <Text style={styles.sectionTitle}>questions people will have</Text>
+          {/* copy to the taste gate (doc 76 §2) */}
+          <Text style={styles.sectionTitle}>good to know</Text>
         </View>
         {faqState?.available === false ? (
           /* copy to the taste gate */

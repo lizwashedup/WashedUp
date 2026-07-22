@@ -42,29 +42,57 @@ export async function saveDescriptionBlocks(
   eventId: string,
   blocks: DescriptionBlock[],
 ): Promise<{ ok: boolean; message: string | null }> {
-  const { error } = await supabase
-    .from('explore_events')
-    .update({ description_blocks: blocks.length > 0 ? blocks : null })
-    .eq('id', eventId);
-  return { ok: !error, message: error?.message ?? null };
+  // doc 76 stage-0 fix: a direct column update silently no-ops for
+  // non-admin organizers (the only explore_events update policy is
+  // admin-scoped), so the ONLY honest write path is the operator door
+  // (web's proposal, at the gate). Self-flipping: until it applies the
+  // save fails plainly instead of pretending.
+  const { error } = await supabase.rpc('operator_set_description_blocks', {
+    p_event_id: eventId,
+    p_blocks: blocks.length > 0 ? blocks : null,
+  });
+  if (!error) return { ok: true, message: null };
+  if (error.code === 'PGRST202' || error.code === '42883') {
+    /* copy to the taste gate */
+    return { ok: false, message: 'the page body cannot save just yet. your blocks stay right here; try again soon.' };
+  }
+  return { ok: false, message: error.message };
 }
 
-/** Picks, resizes, and uploads a body image into the event's own folder;
- *  returns the STORED PATH (what the block carries), not a URL. */
-export async function pickAndUploadEventContentImage(eventId: string): Promise<string | null> {
+/** Multi-select gallery pick (doc 76 §2: the Curtain Call mood board is
+ *  many photos at once): resizes and uploads each into the event's own
+ *  folder; returns the STORED PATHS in pick order, skipping any that
+ *  fail rather than losing the batch. */
+export async function pickAndUploadEventContentImages(
+  eventId: string,
+  maxCount: number,
+): Promise<string[]> {
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) return null;
-  const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-  if (res.canceled || !res.assets?.[0]) return null;
-  const manipulated = await ImageManipulator.manipulateAsync(
-    res.assets[0].uri,
-    [{ resize: { width: BLOCK_IMAGE_WIDTH } }],
-    { compress: BLOCK_IMAGE_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-  );
-  if (!manipulated.base64) return null;
-  const path = `${eventId}/${Crypto.randomUUID()}.jpg`;
-  await uploadBase64ToStorage(EVENT_CONTENT_BUCKET, path, manipulated.base64);
-  return path;
+  if (!perm.granted) return [];
+  const res = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    quality: 1,
+    allowsMultipleSelection: true,
+    selectionLimit: maxCount,
+  });
+  if (res.canceled || !res.assets?.length) return [];
+  const paths: string[] = [];
+  for (const asset of res.assets.slice(0, maxCount)) {
+    try {
+      const manipulated = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: BLOCK_IMAGE_WIDTH } }],
+        { compress: BLOCK_IMAGE_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+      if (!manipulated.base64) continue;
+      const path = `${eventId}/${Crypto.randomUUID()}.jpg`;
+      await uploadBase64ToStorage(EVENT_CONTENT_BUCKET, path, manipulated.base64);
+      paths.push(path);
+    } catch {
+      continue;
+    }
+  }
+  return paths;
 }
 
 export function eventContentPublicUrl(path: string): string {

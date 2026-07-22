@@ -27,7 +27,7 @@ import {
   TEXT_BLOCK_MAX,
   eventContentPublicUrl,
   getDescriptionBlocks,
-  pickAndUploadEventContentImage,
+  pickAndUploadEventContentImages,
   saveDescriptionBlocks,
   type DescriptionBlock,
 } from '../../lib/eventContent';
@@ -59,6 +59,7 @@ export function DescriptionBlocksEditor({ eventId }: DescriptionBlocksEditorProp
     setDirty(true);
   }, []);
 
+  const [saveProblem, setSaveProblem] = useState<string | null>(null);
   const saveMutation = useMutation({
     mutationFn: async () => {
       const result = await saveDescriptionBlocks(eventId, blocks ?? []);
@@ -67,18 +68,24 @@ export function DescriptionBlocksEditor({ eventId }: DescriptionBlocksEditorProp
     onSuccess: () => {
       hapticSuccess();
       setDirty(false);
+      setSaveProblem(null);
       queryClient.invalidateQueries({ queryKey: ['description-blocks', eventId] });
     },
-    onError: () => hapticError(),
+    onError: (e: any) => {
+      hapticError();
+      setSaveProblem(e?.message ?? 'that did not save. give it another try.');
+    },
   });
 
-  const handleAddImage = useCallback(async () => {
+  const handleAddImages = useCallback(async () => {
     if (!blocks || blocks.length >= BLOCKS_MAX || uploading) return;
     hapticLight();
     setUploading(true);
     try {
-      const path = await pickAndUploadEventContentImage(eventId);
-      if (path) mutate([...blocks, { type: 'image', path }]);
+      const paths = await pickAndUploadEventContentImages(eventId, BLOCKS_MAX - blocks.length);
+      if (paths.length > 0) {
+        mutate([...blocks, ...paths.map((path) => ({ type: 'image' as const, path }))]);
+      }
     } catch {
       hapticError();
     } finally {
@@ -176,7 +183,7 @@ export function DescriptionBlocksEditor({ eventId }: DescriptionBlocksEditorProp
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.addPill, (full || uploading) && styles.addPillDisabled]}
-          onPress={handleAddImage}
+          onPress={handleAddImages}
           disabled={full || uploading}
           activeOpacity={0.85}
         >
@@ -185,7 +192,8 @@ export function DescriptionBlocksEditor({ eventId }: DescriptionBlocksEditorProp
           ) : (
             <ImagePlus size={14} color={Colors.terracotta} strokeWidth={2.5} />
           )}
-          <Text style={styles.addPillText}>photo</Text>
+          {/* copy to the taste gate (doc 76: many at once) */}
+          <Text style={styles.addPillText}>photos</Text>
         </TouchableOpacity>
         {!faqMarkerPlaced && (
           <TouchableOpacity
@@ -208,6 +216,8 @@ export function DescriptionBlocksEditor({ eventId }: DescriptionBlocksEditorProp
         /* copy to the taste gate: 70's 30-block ceiling */
         <Text style={styles.limitText}>that is the whole page. thirty blocks is the ceiling.</Text>
       )}
+
+      {!!saveProblem && <Text style={styles.problemText}>{saveProblem}</Text>}
 
       {dirty && (
         <TouchableOpacity
@@ -265,6 +275,7 @@ const styles = StyleSheet.create({
   addPillDisabled: { opacity: 0.4 },
   addPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   limitText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  problemText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed },
   saveBtn: {
     backgroundColor: Colors.terracotta,
     borderRadius: 999,
