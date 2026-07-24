@@ -17,7 +17,7 @@ export const CATEGORY_PIN_COLORS: Record<string, string> = {
 
 export interface PlanColorInput {
   is_featured?: boolean | null;
-  featured_type?: 'washedup_event' | 'birthday_party' | string | null;
+  featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | string | null;
   category?: string | null;
 }
 

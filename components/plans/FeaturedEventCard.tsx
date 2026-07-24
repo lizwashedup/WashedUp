@@ -29,7 +29,7 @@ interface FeaturedEventCardProps {
     member_count: number;
     slug?: string | null;
     is_featured?: boolean;
-    featured_type?: 'washedup_event' | 'birthday_party' | null;
+    featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | null;
     creator: {
       first_name_display: string;
       profile_photo_url: string | null;
@@ -129,6 +129,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
   const creatorNote = plan.host_message ? `\u201C${plan.host_message}\u201D` : null;
   const attendees = plan.attendees ?? [];
   const isBirthdayParty = plan.featured_type === 'birthday_party';
+  const isSpecialEvent = plan.featured_type === 'special_event';
   const isPrideFlagCard = plan.slug === 'washedup-weho-pride-2026';
 
   return (
@@ -141,9 +142,10 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
         styles.card,
         solo && styles.cardSolo,
         isBirthdayParty && { borderColor: Colors.birthdayPink },
+        isSpecialEvent && { borderColor: Colors.specialEventMaroon },
         isPrideFlagCard && { backgroundColor: 'transparent' },
       ]}
-      accessibilityLabel={`${plan.title} ${isBirthdayParty ? 'Birthday Party' : 'WashedUp Event'}`}
+      accessibilityLabel={`${plan.title} ${isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event'}`}
       accessibilityRole="button"
     >
       {isPrideFlagCard && (
@@ -160,15 +162,17 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
           style={[
             styles.featuredPill,
             isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
+            isSpecialEvent && { backgroundColor: Colors.specialEventMaroon },
           ]}
         >
           <Text
             style={[
               styles.featuredPillText,
               isBirthdayParty && { color: Colors.birthdayPink },
+              isSpecialEvent && { color: Colors.specialEventCream },
             ]}
           >
-            {isBirthdayParty ? 'birthday party' : 'washedup event'}
+            {isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
           </Text>
         </View>
         <View style={styles.topRowIcons}>

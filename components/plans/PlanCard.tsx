@@ -58,7 +58,7 @@ interface PlanCardProps {
     max_invites: number;
     member_count: number;
     is_featured?: boolean;
-    featured_type?: 'washedup_event' | 'birthday_party' | null;
+    featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | null;
     allow_duplicate?: boolean;
     // Circle-aware plans (optional; absent on normal plans). When circle_id is
     // set the card carries the "from a circle" badge / "private to circle" tag,
@@ -216,6 +216,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   // Creator always counts as 1 — member_count should never display as 0
   const isFeatured = plan.is_featured ?? false;
   const isBirthdayParty = isFeatured && plan.featured_type === 'birthday_party';
+  const isSpecialEvent = isFeatured && plan.featured_type === 'special_event';
   const going = Math.max(1, capDisplayCount(plan.member_count, isFeatured));
   const totalCapacity = isFeatured
     ? (plan.max_invites ?? 99) + 1
@@ -422,15 +423,17 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               style={[
                 styles.featuredPill,
                 isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
+                isSpecialEvent && { backgroundColor: Colors.specialEventMaroon },
               ]}
             >
               <Text
                 style={[
                   styles.featuredPillText,
                   isBirthdayParty && { color: Colors.birthdayPink },
+                  isSpecialEvent && { color: Colors.specialEventCream },
                 ]}
               >
-                {isBirthdayParty ? 'birthday party' : 'washedup event'}
+                {isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
               </Text>
             </View>
           ) : (

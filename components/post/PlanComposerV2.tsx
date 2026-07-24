@@ -90,7 +90,9 @@ const MIN_GROUP = 3;
 const MAX_GROUP = 8;
 const MSG_MIN = 10;
 const MSG_LIMIT = 150;
-const DESC_LIMIT = 1000;
+const DESC_LIMIT = 2000;
+// Counter turns to the warm warn color once you're within this many chars of the cap.
+const DESC_WARN_MARGIN = 200;
 
 type QuickKind = 'tonight' | 'tomorrow';
 
@@ -936,7 +938,17 @@ export default function PlanComposerV2() {
 
         {/* DESCRIPTION (required; surfaced out of "more options") */}
         <View style={styles.section}>
-          <Text style={styles.label}>description</Text>
+          <View style={styles.descLabelRow}>
+            <Text style={[styles.label, { marginBottom: 0 }]}>description</Text>
+            <Text
+              style={[
+                styles.charCounter,
+                description.length >= DESC_LIMIT - DESC_WARN_MARGIN && styles.charCounterWarn,
+              ]}
+            >
+              {description.length}/{DESC_LIMIT}
+            </Text>
+          </View>
           <TextInput
             style={[styles.textField, styles.textArea]}
             value={description}
@@ -1381,6 +1393,13 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.darkWarm,
   },
   textArea: { minHeight: 72, textAlignVertical: 'top' },
+  descLabelRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10,
+  },
+  charCounter: {
+    fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary,
+  },
+  charCounterWarn: { color: Colors.errorBrand, fontFamily: Fonts.sansSemibold },
   selectField: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 12,

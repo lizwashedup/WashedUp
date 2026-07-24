@@ -796,7 +796,7 @@ export default function PlansScreen() {
           member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
           slug: e.slug ?? null,
           is_featured: true,
-          featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
+          featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null,
           creator: {
             first_name_display: hp?.first_name_display ?? 'Creator',
             profile_photo_url: hp?.profile_photo_url ?? null,

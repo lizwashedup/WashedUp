@@ -353,7 +353,7 @@ export default function CirclePlanComposer({
               placeholder={COPY.circlePlanDescriptionPlaceholder}
               placeholderTextColor={Colors.tertiary}
               multiline
-              maxLength={1000}
+              maxLength={2000}
             />
             {!description.trim() ? (
               <InlineNudge text={COPY.circlePlanDescriptionRequired} />

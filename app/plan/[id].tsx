@@ -89,6 +89,11 @@ const MANAGE_CATEGORIES = [
   'Sports', 'Tech', 'Wellness', 'Other',
 ] as const;
 
+// Manage-Plan description limit. Matches the composer's DESC_LIMIT (2000) so
+// editing never silently truncates a description created at the higher cap.
+const EDIT_DESC_LIMIT = 2000;
+const EDIT_DESC_WARN_MARGIN = 200; // counter turns warn-colored within this many chars of the cap
+
 const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
 type AgeRange = typeof AGE_RANGES[number];
 
@@ -194,7 +199,7 @@ interface PlanDetail {
   creator_user_id: string;
   tickets_url: string | null;
   is_featured: boolean;
-  featured_type: 'washedup_event' | 'birthday_party' | null;
+  featured_type: 'washedup_event' | 'birthday_party' | 'special_event' | null;
   explore_event_id: string | null;
   creator: {
     id: string;
@@ -494,7 +499,7 @@ export default function PlanDetailScreen() {
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
   const [isOfficialCreator, setIsOfficialCreator] = useState(false);
   const [featuredToggle, setFeaturedToggle] = useState(false);
-  const [featuredType, setFeaturedType] = useState<'washedup_event' | 'birthday_party'>('washedup_event');
+  const [featuredType, setFeaturedType] = useState<'washedup_event' | 'birthday_party' | 'special_event'>('washedup_event');
   const [featuredCapacity, setFeaturedCapacity] = useState(FEATURED_DEFAULT_CAPACITY);
   const [featuredSaving, setFeaturedSaving] = useState(false);
   // Hide the hero image slot when the URL fails to load. Some legacy plans
@@ -580,7 +585,13 @@ export default function PlanDetailScreen() {
   useEffect(() => {
     if (!plan) return;
     setFeaturedToggle(plan.is_featured);
-    setFeaturedType(plan.featured_type === 'birthday_party' ? 'birthday_party' : 'washedup_event');
+    setFeaturedType(
+      plan.featured_type === 'birthday_party'
+        ? 'birthday_party'
+        : plan.featured_type === 'special_event'
+        ? 'special_event'
+        : 'washedup_event',
+    );
     if (plan.is_featured) {
       setFeaturedCapacity((plan.max_invites ?? 99) + 1);
     }
@@ -823,6 +834,7 @@ export default function PlanDetailScreen() {
 
   const isFeatured = plan?.is_featured ?? false;
   const isBirthdayParty = isFeatured && plan?.featured_type === 'birthday_party';
+  const isSpecialEvent = isFeatured && plan?.featured_type === 'special_event';
   // Use actual member count when available — member_count can be out of sync
   const displayMemberCount = members.length > 0 ? capDisplayCount(members.length, isFeatured) : capDisplayCount(plan?.member_count ?? 0, isFeatured);
   const totalCapacity = isFeatured
@@ -1495,7 +1507,7 @@ export default function PlanDetailScreen() {
     ].filter(Boolean);
   const isWomenOnly = plan.gender_rule === 'women_only';
 
-  const groupSizeLabel = isFeatured ? (isBirthdayParty ? 'Birthday Party' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small • intimate' : totalCapacity <= 6 ? 'Cozy' : 'Larger';
+  const groupSizeLabel = isFeatured ? (isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small • intimate' : totalCapacity <= 6 ? 'Cozy' : 'Larger';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -1609,15 +1621,17 @@ export default function PlanDetailScreen() {
               style={[
                 styles.featuredPill,
                 isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
+                isSpecialEvent && { backgroundColor: Colors.specialEventMaroon },
               ]}
             >
               <Text
                 style={[
                   styles.featuredPillText,
                   isBirthdayParty && { color: Colors.birthdayPink },
+                  isSpecialEvent && { color: Colors.specialEventCream },
                 ]}
               >
-                {isBirthdayParty ? 'birthday party' : 'washedup event'}
+                {isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
               </Text>
             </View>
           </View>
@@ -2357,13 +2371,23 @@ export default function PlanDetailScreen() {
               </View>
 
               {/* Description */}
-              <Text style={manageStyles.label}>Plan description</Text>
+              <View style={manageStyles.descLabelRow}>
+                <Text style={[manageStyles.label, { marginTop: 0, marginBottom: 0 }]}>Plan description</Text>
+                <Text
+                  style={[
+                    manageStyles.charCounter,
+                    editDescription.length >= EDIT_DESC_LIMIT - EDIT_DESC_WARN_MARGIN && manageStyles.charCounterWarn,
+                  ]}
+                >
+                  {editDescription.length}/{EDIT_DESC_LIMIT}
+                </Text>
+              </View>
               <TextInput
                 style={[manageStyles.input, manageStyles.textArea]}
                 value={editDescription}
                 onChangeText={setEditDescription}
                 multiline
-                maxLength={500}
+                maxLength={EDIT_DESC_LIMIT}
                 placeholder="What's the plan? Dress code, what to expect..."
                 placeholderTextColor={Colors.textLight}
                 inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
@@ -2545,7 +2569,7 @@ export default function PlanDetailScreen() {
                           setFeaturedCapacity(plan?.is_featured ? (plan.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
                         }
                       }}
-                      trackColor={{ false: Colors.border, true: featuredType === 'birthday_party' ? Colors.birthdayPink : Colors.goldenAmber }}
+                      trackColor={{ false: Colors.border, true: featuredType === 'birthday_party' ? Colors.birthdayPink : featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.goldenAmber }}
                       thumbColor={Colors.white}
                     />
                   </View>
@@ -2583,6 +2607,23 @@ export default function PlanDetailScreen() {
                           ]}
                         >
                           birthday party
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          manageStyles.featuredTypePill,
+                          { backgroundColor: featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.inputBg },
+                        ]}
+                        onPress={() => { hapticLight(); setFeaturedType('special_event'); }}
+                        activeOpacity={0.85}
+                      >
+                        <Text
+                          style={[
+                            manageStyles.featuredTypePillText,
+                            { color: featuredType === 'special_event' ? Colors.specialEventCream : Colors.tertiary },
+                          ]}
+                        >
+                          special event
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -3704,6 +3745,22 @@ const manageStyles = StyleSheet.create({
     color: Colors.textLight,
     marginTop: 4,
   },
+  descLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginTop: 16,
+    marginBottom: 6,
+  },
+  charCounter: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
+  },
+  charCounterWarn: {
+    color: Colors.errorBrand,
+    fontFamily: Fonts.sansSemibold,
+  },
   pillWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -3796,6 +3853,7 @@ const manageStyles = StyleSheet.create({
   },
   featuredTypeRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 12,
     justifyContent: 'center',

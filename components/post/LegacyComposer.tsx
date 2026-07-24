@@ -87,7 +87,7 @@ const MIN_GROUP = 3;
 const MAX_GROUP = 8;
 const MSG_MIN = 10;
 const MSG_LIMIT = 150;
-const DESC_LIMIT = 500;
+const DESC_LIMIT = 2000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 // LA-date helpers + the month grid now live in lib/laDate.ts (shared with

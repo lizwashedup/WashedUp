@@ -44,7 +44,7 @@ export interface PlanCardPlan {
   max_invites: number;
   member_count: number;
   is_featured?: boolean;
-  featured_type?: 'washedup_event' | 'birthday_party' | null;
+  featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | null;
   allow_duplicate?: boolean;
   creator: {
     id: string;

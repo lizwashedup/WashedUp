@@ -47,7 +47,7 @@ export interface Plan {
   status: string;
   host_message: string | null;
   is_featured: boolean;
-  featured_type: 'washedup_event' | 'birthday_party' | null;
+  featured_type: 'washedup_event' | 'birthday_party' | 'special_event' | null;
   cluster_root_id: string | null;
   allow_duplicate: boolean;
   circle_id?: string | null;
@@ -85,7 +85,7 @@ function mapRowToPlan(item: any): Plan {
     status: item.status ?? 'forming',
     host_message: item.host_message ?? null,
     is_featured: item.is_featured ?? false,
-    featured_type: (item.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
+    featured_type: (item.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null,
     cluster_root_id: item.cluster_root_id ?? null,
     allow_duplicate: item.allow_duplicate ?? true,
     circle_size: item.circle_size ?? null,
@@ -149,12 +149,12 @@ export async function fetchPlans(
   // Apply featured_type (only meaningful when is_featured is true) and
   // allow_duplicate to plans.
   if (!featuredTypeResult.error) {
-    const featuredTypeById: Record<string, 'washedup_event' | 'birthday_party' | null> = {};
+    const featuredTypeById: Record<string, 'washedup_event' | 'birthday_party' | 'special_event' | null> = {};
     const allowDuplicateById: Record<string, boolean> = {};
     const circleById: Record<string, { circle_id: string | null; circle_visibility: 'circle_only' | 'open' | null; stranger_cap: number | null }> = {};
     ((featuredTypeResult.data ?? []) as unknown as Array<{ id: string; featured_type: string | null; allow_duplicate: boolean | null; circle_id?: string | null; circle_visibility?: 'circle_only' | 'open' | null; stranger_cap?: number | null }>).forEach(
       (row) => {
-        featuredTypeById[row.id] = (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null;
+        featuredTypeById[row.id] = (row.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null;
         allowDuplicateById[row.id] = row.allow_duplicate ?? true;
         circleById[row.id] = {
           circle_id: row.circle_id ?? null,
