@@ -770,19 +770,6 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          {/* social proof, threshold logic (doc 37): a real count only from
-              five up — never "1 person going"; below that, the invitation */}
-          {COMMUNITIES_ENABLED && rsvpCount !== null && (
-            <View style={styles.metaRow}>
-              <Users size={16} color={Colors.warmGray} strokeWidth={2} />
-              <Text style={styles.metaText}>
-                {rsvpCount >= GOING_COUNT_THRESHOLD
-                  ? `${rsvpCount} going`
-                  : /* LIZ COPY */ 'new event · be one of the first'}
-              </Text>
-            </View>
-          )}
-
           {/* the link-out is the one thing the link-first launch depends on
               (doc 37: prominence): a full-width button above the fold,
               shown whenever a link exists, labeled by context */}
@@ -857,6 +844,21 @@ export default function EventDetailScreen() {
                   </Text>
                 </TouchableOpacity>
               )}
+            </View>
+          )}
+
+          {/* social proof (doc 78 law 7: AFTER the organizer identity, not
+              before the body). Threshold logic (doc 37): a real count only
+              from five up, never "1 person going"; below that, the
+              invitation, and only when flattering (never "0 going"). */}
+          {COMMUNITIES_ENABLED && rsvpCount !== null && (
+            <View style={styles.metaRow}>
+              <Users size={16} color={Colors.warmGray} strokeWidth={2} />
+              <Text style={styles.metaText}>
+                {rsvpCount >= GOING_COUNT_THRESHOLD
+                  ? `${rsvpCount} going`
+                  : /* LIZ COPY */ 'new event · be one of the first'}
+              </Text>
             </View>
           )}
 
@@ -987,7 +989,7 @@ export default function EventDetailScreen() {
             disabled={rsvpBusy}
           >
             {rsvpBusy ? (
-              <ActivityIndicator size="small" color={Colors.terracotta} />
+              <ActivityIndicator size="small" color={myRsvp === 'going' ? Colors.brandDeep : Colors.white} />
             ) : (
               <Text style={[styles.rsvpButtonText, myRsvp === 'going' && styles.rsvpButtonTextGoing]}>
                 {myRsvp === 'going' ? "you're going" : 'count me in'}
@@ -1111,9 +1113,11 @@ const styles = StyleSheet.create({
   entityCardKicker: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
   entityCardName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   entityCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
-  followPill: { borderWidth: 1.5, borderColor: Colors.terracotta, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
-  followPillOn: { borderColor: Colors.border },
-  followPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  // law 1: the sticky CTA is the screen's one terracotta fill, so follow
+  // is a NEUTRAL secondary (border + darkWarm), not a second accent
+  followPill: { borderWidth: 1.5, borderColor: Colors.border, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
+  followPillOn: { borderColor: Colors.border, backgroundColor: Colors.inputBg },
+  followPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   followPillTextOn: { color: Colors.textMedium },
   moreSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
   moreSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
@@ -1182,19 +1186,25 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
   },
+  // doc 78 law 8: the SINGLE accent belongs to the primary action (rsvp),
+  // so find-people/chat drops to the secondary outline treatment - it was
+  // wearing the loud terracotta while the real CTA sat quiet, backwards.
   postPlanButton: {
     flex: 1,
-    backgroundColor: Colors.terracotta,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
     borderRadius: 14,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
-  // RSVP: outline until going; going = the documented gold confirmed-state
-  // (fill + hairline gold border + brandDeep label), never a terracotta CTA
+  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
+  // RSVP is the primary CTA: the one terracotta fill. going = the
+  // documented gold confirmed-state (fill + hairline gold border +
+  // brandDeep label), the house success family, never green.
   rsvpButton: {
     flex: 1,
+    backgroundColor: Colors.terracotta,
     borderRadius: 14,
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
@@ -1206,7 +1216,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.goingConfirmedFill,
     borderColor: Colors.gold,
   },
-  rsvpButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta },
+  rsvpButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
   rsvpButtonTextGoing: { color: Colors.brandDeep },
   putOnByRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   putOnByFace: { width: 20, height: 20, borderRadius: 10 },
