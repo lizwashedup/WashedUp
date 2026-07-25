@@ -360,3 +360,65 @@ export const REFUND_POLICY_WRITE_BLOCKED = true;
 // title/date/venue - the exact trap this whole class keeps setting. The
 // real wiring adds refund_policy to the form's complete field set (the
 // way description_blocks already rides it), once the param exists.
+
+// ─── P3: the public price-from + honest scarcity (laws 9, 10) ────────────
+
+export interface PublicTicketSummary {
+  /** any on-sale, visible, still-available tier exists */
+  onSale: boolean;
+  /** the LOWEST all-in price among AVAILABLE tiers, in cents. Law 9: a
+   *  sold-out tier never sets the headline number, so sold-out tiers are
+   *  excluded from this min. Null when nothing is buyable. */
+  fromCents: number | null;
+  /** every buyable tier is sold out (show "sold out", never a price) */
+  allSoldOut: boolean;
+  /** real remaining inventory on the cheapest available tier, when that
+   *  tier is capped. Law 10: this comes from get_ticket_tier_availability
+   *  (real orders + holds), NEVER a countdown. Null = uncapped or unknown. */
+  scarcity: { left: number; cap: number } | null;
+}
+
+export async function getPublicTicketSummary(eventId: string): Promise<PublicTicketSummary> {
+  const empty: PublicTicketSummary = { onSale: false, fromCents: null, allSoldOut: false, scarcity: null };
+  const { data, error } = await supabase
+    .from('ticket_tiers')
+    .select('id, price_cents, quantity_cap, status, visibility')
+    .eq('event_id', eventId)
+    .eq('status', 'on_sale')
+    .neq('visibility', 'hidden')
+    .order('price_cents', { ascending: true });
+  if (error || !data || data.length === 0) return empty;
+
+  // real availability per tier (definer RPC; fail-closed to "unknown", not
+  // to a made-up number)
+  const withAvail = await Promise.all(
+    data.map(async (tier) => {
+      const { data: left } = await supabase.rpc('get_ticket_tier_availability', { p_tier_id: tier.id });
+      const remaining = typeof left === 'number' ? left : null;
+      const soldOut = tier.quantity_cap !== null && remaining !== null && remaining <= 0;
+      return { tier, remaining, soldOut };
+    }),
+  );
+
+  const available = withAvail.filter((r) => !r.soldOut);
+  if (available.length === 0) {
+    return { onSale: false, fromCents: null, allSoldOut: true, scarcity: null };
+  }
+
+  // cheapest AVAILABLE tier sets the headline (law 9), by all-in buyer
+  // total - the buyer total is independent of commission (processing only)
+  const cheapest = available.reduce((lo, r) =>
+    computeFeePreview(r.tier.price_cents, 0).buyerTotalCents <
+    computeFeePreview(lo.tier.price_cents, 0).buyerTotalCents ? r : lo,
+  );
+  const fromCents = computeFeePreview(cheapest.tier.price_cents, 0).buyerTotalCents;
+
+  // real scarcity, only when the cheapest tier is capped and the count is
+  // known (law 10)
+  const scarcity =
+    cheapest.tier.quantity_cap !== null && cheapest.remaining !== null
+      ? { left: cheapest.remaining, cap: cheapest.tier.quantity_cap }
+      : null;
+
+  return { onSale: true, fromCents, allSoldOut: false, scarcity };
+}

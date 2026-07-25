@@ -45,7 +45,8 @@ import { ParticipationNotice } from '../../components/legal/ParticipationNotice'
 import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
 import { type DescriptionBlock } from '../../lib/eventContent';
 import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
-import { EventSurface } from '../../constants/EventDesign';
+import { EventAction, EventSurface } from '../../constants/EventDesign';
+import { formatCents, getPublicTicketSummary } from '../../lib/ticketing';
 import { EventFaqCards } from '../../components/events/EventFaqCards';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -381,6 +382,16 @@ export default function EventDetailScreen() {
 
   // §4c (doc 69 A6): more from the same fronting entity - upcoming Live
   // listings, soonest first, this one excluded
+  // P3 (laws 9/10): the all-in price-from and real inventory scarcity,
+  // shown beside the CTA before any checkout. Fees never surprise; a
+  // sold-out tier never headlines; scarcity is real remaining only.
+  const { data: ticketSummary } = useQuery({
+    queryKey: ['public-ticket-summary', id],
+    queryFn: () => getPublicTicketSummary(id!),
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+
   const { data: moreEvents = [] } = useQuery({
     queryKey: ['more-from', frontingTarget?.kind, frontingTarget?.id, id],
     queryFn: async () => {
@@ -982,7 +993,31 @@ export default function EventDetailScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.stickyBar, { paddingBottom: insets.bottom + 8 }]}>
+      <View style={[styles.stickyBarWrap, { paddingBottom: insets.bottom + 8 }]}>
+        {/* P3: honest all-in price + real scarcity, before any checkout */}
+        {!!ticketSummary && (ticketSummary.onSale || ticketSummary.allSoldOut) && (
+          <View style={styles.priceRow}>
+            {ticketSummary.allSoldOut ? (
+              /* copy to the taste gate: never a sold-out tier's price */
+              <Text style={styles.priceSoldOut}>sold out</Text>
+            ) : (
+              <>
+                {/* law 9: "fees included" stated so nothing surprises */}
+                <Text style={styles.priceFrom}>
+                  from {formatCents(ticketSummary.fromCents ?? 0)}
+                  <Text style={styles.priceFees}>  fees included</Text>
+                </Text>
+                {!!ticketSummary.scarcity && ticketSummary.scarcity.left > 0 && (
+                  /* law 10: REAL remaining only, from the availability RPC */
+                  <Text style={styles.priceScarcity}>
+                    {ticketSummary.scarcity.left} of {ticketSummary.scarcity.cap} left
+                  </Text>
+                )}
+              </>
+            )}
+          </View>
+        )}
+        <View style={styles.stickyBar}>
         {COMMUNITIES_ENABLED && (
           <TouchableOpacity
             style={[styles.rsvpButton, myRsvp === 'going' && styles.rsvpButtonGoing]}
@@ -1018,6 +1053,7 @@ export default function EventDetailScreen() {
             <Text style={styles.postPlanButtonText}>find people to go with</Text>
           </TouchableOpacity>
         )}
+        </View>
       </View>
 
       {reportTarget && (
@@ -1180,15 +1216,20 @@ const styles = StyleSheet.create({
   planJoinBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
   planTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   planMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
-  stickyBar: {
-    flexDirection: 'row',
-    gap: 10,
+  stickyBarWrap: {
     paddingHorizontal: 20,
     paddingTop: 12,
     backgroundColor: Colors.parchment,
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
   },
+  stickyBar: { flexDirection: 'row', gap: 10 },
+  priceRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 },
+  priceFrom: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  priceFees: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  // real scarcity wears the terracotta scarcity token (doc 78 law 1)
+  priceScarcity: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: EventAction.scarcity },
+  priceSoldOut: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.textMedium },
   // doc 78 law 8: the SINGLE accent belongs to the primary action (rsvp),
   // so find-people/chat drops to the secondary outline treatment - it was
   // wearing the loud terracotta while the real CTA sat quiet, backwards.
