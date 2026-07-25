@@ -7,9 +7,12 @@
  * legacy plain description for null bodies.
  */
 
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import { Modal, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { X } from 'lucide-react-native';
+import { hapticLight } from '../../lib/haptics';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import Colors from '../../constants/Colors';
 import { EventSurface } from '../../constants/EventDesign';
@@ -57,6 +60,9 @@ interface EventBodyBlocksProps {
 
 export function EventBodyBlocks({ eventId, blocks }: EventBodyBlocksProps) {
   const markerPlaced = blocks.some((b) => b.type === 'faq');
+  // P2 (law 3): tapping a body image opens the lightbox on the warm-dark
+  // media ground - the proof-of-good reads cinematic full-screen
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   return (
     <View style={styles.container}>
@@ -67,14 +73,23 @@ export function EventBodyBlocks({ eventId, blocks }: EventBodyBlocksProps) {
           );
         }
         if (block.type === 'image') {
+          const uri = eventContentPublicUrl(block.path);
           return (
-            <Image
+            <TouchableOpacity
               key={`i-${index}`}
-              source={{ uri: eventContentPublicUrl(block.path) }}
-              style={styles.bodyImage}
-              contentFit="cover"
-              accessibilityLabel={block.alt}
-            />
+              activeOpacity={0.9}
+              onPress={() => {
+                hapticLight();
+                setLightbox(uri);
+              }}
+            >
+              <Image
+                source={{ uri }}
+                style={styles.bodyImage}
+                contentFit="cover"
+                accessibilityLabel={block.alt}
+              />
+            </TouchableOpacity>
           );
         }
         if (block.type === 'video') {
@@ -83,6 +98,19 @@ export function EventBodyBlocks({ eventId, blocks }: EventBodyBlocksProps) {
         return <EventFaqCards key={`f-${index}`} eventId={eventId} />;
       })}
       {!markerPlaced && <EventFaqCards eventId={eventId} />}
+
+      <Modal visible={!!lightbox} transparent animationType="fade" onRequestClose={() => setLightbox(null)}>
+        <Pressable style={styles.lightbox} onPress={() => setLightbox(null)}>
+          {!!lightbox && (
+            <Image source={{ uri: lightbox }} style={styles.lightboxImage} contentFit="contain" />
+          )}
+          <SafeAreaView style={styles.lightboxClose} pointerEvents="box-none">
+            <TouchableOpacity onPress={() => setLightbox(null)} hitSlop={12} style={styles.lightboxCloseBtn}>
+              <X size={22} color={EventSurface.onMedia} strokeWidth={2} />
+            </TouchableOpacity>
+          </SafeAreaView>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -100,4 +128,8 @@ const styles = StyleSheet.create({
   },
   video: { width: '100%', height: '100%' },
   videoPoster: { ...StyleSheet.absoluteFillObject },
+  lightbox: { flex: 1, backgroundColor: EventSurface.media, alignItems: 'center', justifyContent: 'center' },
+  lightboxImage: { width: '100%', height: '100%' },
+  lightboxClose: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'flex-end', paddingHorizontal: 16 },
+  lightboxCloseBtn: { padding: 8 },
 });

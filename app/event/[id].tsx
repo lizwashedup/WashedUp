@@ -45,6 +45,7 @@ import { ParticipationNotice } from '../../components/legal/ParticipationNotice'
 import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
 import { type DescriptionBlock } from '../../lib/eventContent';
 import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
+import { EventSurface } from '../../constants/EventDesign';
 import { EventFaqCards } from '../../components/events/EventFaqCards';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -1052,7 +1053,9 @@ const styles = StyleSheet.create({
   emptyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.textMedium, textAlign: 'center' },
   goBackBtn: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 },
   goBackText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  heroContainer: { width: SCREEN_WIDTH, height: HERO_HEIGHT, position: 'relative' },
+  // P2 (law 2/3): the cover sits on the warm-dark media ground so the
+  // photo reads cinematic and never flashes cream while it loads
+  heroContainer: { width: SCREEN_WIDTH, height: HERO_HEIGHT, position: 'relative', backgroundColor: EventSurface.media },
   circleButton: {
     position: 'absolute',
     width: 40,
