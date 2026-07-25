@@ -15,7 +15,7 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
-import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight, MoreHorizontal } from 'lucide-react-native';
+import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight, MoreHorizontal, BadgeCheck } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import LinkifiedText from '../../components/LinkifiedText';
@@ -390,6 +390,23 @@ export default function EventDetailScreen() {
     queryFn: () => getPublicTicketSummary(id!),
     enabled: !!id,
     staleTime: 30_000,
+  });
+
+  // P4 (doc 78 §2.8): the organizer's track record - how many events
+  // they have put on (Live or Completed), the proof they are real
+  const { data: trackRecordCount = null } = useQuery({
+    queryKey: ['track-record', frontingTarget?.kind, frontingTarget?.id],
+    queryFn: async () => {
+      const col = frontingTarget!.kind === 'community' ? 'community_id' : 'host_user_id';
+      const { count } = await supabase
+        .from('explore_events')
+        .select('id', { count: 'exact', head: true })
+        .eq(col, frontingTarget!.id)
+        .in('status', ['Live', 'Completed']);
+      return count ?? 0;
+    },
+    enabled: COMMUNITIES_ENABLED && !!frontingTarget,
+    staleTime: 60_000,
   });
 
   const { data: moreEvents = [] } = useQuery({
@@ -835,10 +852,27 @@ export default function EventDetailScreen() {
                 {/* LIZ COPY (decision 16): put on by, never hosted by */}
                 <Text style={styles.entityCardKicker}>put on by</Text>
                 <Text style={styles.entityCardName}>{bylineName}</Text>
-                {followerCount !== null && followerCount >= GOING_COUNT_THRESHOLD && (
-                  /* copy to the taste gate (doc 69 Q5) */
-                  <Text style={styles.entityCardMeta}>{followerCount} following</Text>
-                )}
+                {/* P4 (doc 78 §2.8): the trust bridge. A fronting entity
+                    exists only through the approved-operator flow, so this
+                    is application-reviewed by construction. Substance is
+                    locked by vocabulary law; the exact string goes to the
+                    taste gate. NOT terracotta - the CTA owns the accent. */}
+                <View style={styles.badgeRow}>
+                  <BadgeCheck size={13} color={Colors.gold} strokeWidth={2.5} />
+                  <Text style={styles.badgeText}>application-reviewed founding partner</Text>
+                </View>
+                <View style={styles.entityCardMetaRow}>
+                  {trackRecordCount !== null && trackRecordCount > 0 && (
+                    /* copy to the taste gate: track record (doc 78 §2.8) */
+                    <Text style={styles.entityCardMeta}>
+                      {trackRecordCount} {trackRecordCount === 1 ? 'event' : 'events'}
+                    </Text>
+                  )}
+                  {followerCount !== null && followerCount >= GOING_COUNT_THRESHOLD && (
+                    /* copy to the taste gate (doc 69 Q5) */
+                    <Text style={styles.entityCardMeta}>{followerCount} following</Text>
+                  )}
+                </View>
               </View>
               {!!userId && !!followState?.available && (
                 <TouchableOpacity
@@ -1152,6 +1186,10 @@ const styles = StyleSheet.create({
   entityCardKicker: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
   entityCardName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   entityCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  entityCardMetaRow: { flexDirection: 'row', gap: 12, marginTop: 2 },
+  // the founding-partner badge: gold trust marker, never the terracotta accent
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  badgeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.brandDeep },
   // law 1: the sticky CTA is the screen's one terracotta fill, so follow
   // is a NEUTRAL secondary (border + darkWarm), not a second accent
   followPill: { borderWidth: 1.5, borderColor: Colors.border, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
