@@ -115,3 +115,24 @@ export const PHONE_CANONICAL_ENABLED =
  * by isAdmin like the rest of the admin surfaces.
  */
 export const COMMUNITIES_ENABLED = process.env.EXPO_PUBLIC_COMMUNITIES_ENABLED === 'true';
+
+/**
+ * Community join-policy gate (proposal 91): the "who gets in" toggle on the
+ * join-gate screen (approval-required vs open).
+ *
+ * When false (default): the toggle never renders, even after 91's join_policy
+ * column lands on prod. The screen behaves exactly as shipped.
+ *
+ * When true: the toggle renders, but ONLY where the column read also succeeds
+ * (getJoinPolicy returns non-null). Both conditions are required, so the flag
+ * cannot expose a dead control before the migration, and the migration cannot
+ * expose the control before the flag. This mirrors web, which gates its half
+ * on the same flag AND read so the two platforms flip in lockstep, not on
+ * whichever one happens to see the column first.
+ *
+ * Local dev: set EXPO_PUBLIC_JOIN_GATE_ENABLED=true in .env.local (gitignored).
+ * Env-driven and ships OFF wherever the var is unset (CI / prod / EAS), so it
+ * cannot ship on by accident. Do not flip on for a real build until 91 is
+ * applied to prod and Liz gives the word.
+ */
+export const JOIN_GATE_ENABLED = process.env.EXPO_PUBLIC_JOIN_GATE_ENABLED === 'true';

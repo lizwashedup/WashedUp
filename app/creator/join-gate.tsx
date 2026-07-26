@@ -31,6 +31,7 @@ import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import { getCreatorAccess, getJoinGateSettings, updateJoinGateSettings, getJoinPolicy, setJoinPolicy, type JoinPolicy } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
+import { JOIN_GATE_ENABLED } from '../../constants/FeatureFlags';
 
 export default function JoinGateScreen() {
   const router = useRouter();
@@ -149,10 +150,12 @@ export default function JoinGateScreen() {
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
-            {/* proposal 91 (self-flipping): the join policy toggle wakes
-                only once join_policy exists on prod; until then it stays
-                hidden, no dead control. Default is approval-required. */}
-            {joinPolicy !== null && (
+            {/* proposal 91: the join policy toggle renders only when the
+                JOIN_GATE_ENABLED flag is on AND the join_policy column read
+                succeeds (getJoinPolicy non-null). Flag off, or column absent,
+                keeps it hidden with no dead control. Both platforms flip in
+                lockstep on the same flag. Default is approval-required. */}
+            {JOIN_GATE_ENABLED && joinPolicy !== null && (
               <>
                 <Text style={styles.fieldLabel}>who gets in</Text>
                 <Text style={styles.fieldHint}>
