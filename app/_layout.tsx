@@ -975,6 +975,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="creator/join-gate" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/event-form" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/tickets" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="tickets/index" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="tickets/order/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community-thread/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community-topic/[id]" options={{ headerShown: false, gestureEnabled: true }} />

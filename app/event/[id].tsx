@@ -48,6 +48,7 @@ import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
 import { EventAction, EventSurface } from '../../constants/EventDesign';
 import { formatCents, getPublicTicketSummary } from '../../lib/ticketing';
 import { EventFaqCards } from '../../components/events/EventFaqCards';
+import { TicketCheckoutSheet } from '../../components/events/TicketCheckoutSheet';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 280;
@@ -163,6 +164,7 @@ export default function EventDetailScreen() {
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [checkoutVisible, setCheckoutVisible] = useState(false);
   const { blockUser } = useBlock();
 
   React.useEffect(() => {
@@ -1052,7 +1054,18 @@ export default function EventDetailScreen() {
           </View>
         )}
         <View style={styles.stickyBar}>
-        {COMMUNITIES_ENABLED && (
+        {/* C1: a ticketed event's primary CTA is "get tickets" (the single
+            terracotta fill), opening the tier selector -> checkout. rsvp is
+            the going-signal for FREE/tierless events, so it steps aside when
+            tickets are on sale (buying is the going action). */}
+        {ticketSummary?.onSale ? (
+          <TouchableOpacity
+            style={styles.rsvpButton}
+            onPress={() => { hapticMedium(); setCheckoutVisible(true); }}
+          >
+            <Text style={styles.rsvpButtonText}>get tickets</Text>
+          </TouchableOpacity>
+        ) : COMMUNITIES_ENABLED && (
           <TouchableOpacity
             style={[styles.rsvpButton, myRsvp === 'going' && styles.rsvpButtonGoing]}
             onPress={handleCountMeIn}
@@ -1112,6 +1125,17 @@ export default function EventDetailScreen() {
         organizerName={noticeOrganizerName}
         onAgree={handleNoticeAgree}
         onClose={() => setNoticeVisible(false)}
+      />
+
+      <TicketCheckoutSheet
+        visible={checkoutVisible}
+        eventId={event.id}
+        onClose={() => setCheckoutVisible(false)}
+        onFreeConfirmed={(orderId) => {
+          setCheckoutVisible(false);
+          // C2/C3: the order-complete + your-tickets surfaces
+          router.push(`/tickets/order/${orderId}` as never);
+        }}
       />
     </View>
   );

@@ -422,3 +422,111 @@ export async function getPublicTicketSummary(eventId: string): Promise<PublicTic
 
   return { onSale: true, fromCents, allSoldOut: false, scarcity };
 }
+
+// ─── C1: the buyer's checkout handoff (mirror of web; contract = the ────
+//        create-ticket-checkout edge function, the source of truth) ──────
+
+export type CheckoutResult =
+  | { kind: 'paid'; url: string; orderId: string }
+  | { kind: 'free'; orderId: string }
+  | { kind: 'error'; message: string };
+
+/**
+ * Calls create-ticket-checkout (verify_jwt: the signed-in buyer). The edge
+ * fn runs begin_ticket_checkout (proposal 87: §3 math + hold claim + pending
+ * order under the event lock) and returns either a hosted Stripe Checkout
+ * url (paid) or an immediate free confirmation. TEST MODE until Liz's live
+ * word - the fn hard-refuses a non-test key, surfaced here as a plain note.
+ */
+export async function startTicketCheckout(tierId: string, qty: number): Promise<CheckoutResult> {
+  const { data, error } = await supabase.functions.invoke('create-ticket-checkout', {
+    // origin drives the Stripe success/cancel return; the fn allow-lists it
+    body: { tier_id: tierId, qty, origin: 'https://washedup.app' },
+  });
+  if (error) {
+    // functions.invoke surfaces non-2xx as an error with the JSON body; the
+    // fn's 409s carry buyer-facing reasons (sold out, per-order limit, ...)
+    const ctx = (error as { context?: { body?: unknown } }).context;
+    let message = 'checkout could not start. try again.';
+    try {
+      const parsed = typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
+      if (parsed && typeof (parsed as { error?: string }).error === 'string') {
+        message = (parsed as { error: string }).error;
+      }
+    } catch { /* keep the default */ }
+    return { kind: 'error', message };
+  }
+  if (data?.free && data?.order_id) return { kind: 'free', orderId: data.order_id };
+  if (data?.url && data?.order_id) return { kind: 'paid', url: data.url, orderId: data.order_id };
+  return { kind: 'error', message: 'checkout could not start. try again.' };
+}
+
+// ─── C2/C3: the buyer's orders + answers (own-rows RLS) ──────────────────
+
+export interface MyOrder {
+  id: string;
+  event_id: string;
+  qty: number;
+  total_cents: number;
+  status: string;
+  created_at: string;
+  event_title: string | null;
+  event_date: string | null;
+}
+
+export async function getMyOrders(): Promise<MyOrder[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data, error } = await supabase
+    .from('ticket_orders')
+    .select('id, event_id, qty, total_cents, status, created_at, explore_events(title, event_date)')
+    .eq('buyer_user_id', user.id)
+    .in('status', ['paid', 'confirmed', 'free'])
+    .order('created_at', { ascending: false });
+  if (error) return [];
+  return (data ?? []).map((o: Record<string, unknown>) => {
+    const ev = o.explore_events as { title?: string; event_date?: string } | null;
+    return {
+      id: o.id as string,
+      event_id: o.event_id as string,
+      qty: o.qty as number,
+      total_cents: o.total_cents as number,
+      status: o.status as string,
+      created_at: o.created_at as string,
+      event_title: ev?.title ?? null,
+      event_date: ev?.event_date ?? null,
+    };
+  });
+}
+
+export async function getOrder(orderId: string): Promise<MyOrder | null> {
+  const { data, error } = await supabase
+    .from('ticket_orders')
+    .select('id, event_id, qty, total_cents, status, created_at, explore_events(title, event_date)')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const ev = (data as Record<string, unknown>).explore_events as { title?: string; event_date?: string } | null;
+  return {
+    id: data.id, event_id: data.event_id, qty: data.qty, total_cents: data.total_cents,
+    status: data.status, created_at: data.created_at,
+    event_title: ev?.title ?? null, event_date: ev?.event_date ?? null,
+  };
+}
+
+/** Records one buyer answer (C2, in-session; own-order RLS). attendee_index
+ *  0 = the order/first attendee; per-attendee questions repeat by index. */
+export async function recordAnswer(
+  orderId: string,
+  questionId: string,
+  value: string,
+  attendeeIndex = 0,
+): Promise<boolean> {
+  const { error } = await supabase.from('ticket_answers').insert({
+    order_id: orderId,
+    question_id: questionId,
+    attendee_index: attendeeIndex,
+    value,
+  });
+  return !error;
+}
