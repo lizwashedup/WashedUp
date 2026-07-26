@@ -555,7 +555,7 @@ export default function EventFormScreen() {
             <Text style={styles.sectionHeader}>the event</Text>
             <View style={styles.sectionCard}>
             <Text style={styles.fieldLabel}>title</Text>
-            <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} placeholder="name the event" placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
 
             <Text style={styles.fieldLabel}>the poster</Text>
             {imageUrl ? (
@@ -664,6 +664,9 @@ export default function EventFormScreen() {
               value={venue}
               onChangeText={(v) => { setVenue(v); setCoords(null); }}
               maxLength={120}
+              /* copy to the taste gate */
+              placeholder="the spot's name"
+              placeholderTextColor={Colors.inkSoft}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <Text style={styles.fieldLabel}>address</Text>
@@ -672,6 +675,9 @@ export default function EventFormScreen() {
               value={venueAddress}
               onChangeText={(v) => { setVenueAddress(v); setCoords(null); }}
               maxLength={200}
+              /* copy to the taste gate */
+              placeholder="street, city"
+              placeholderTextColor={Colors.inkSoft}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
@@ -703,7 +709,7 @@ export default function EventFormScreen() {
 
             <Text style={styles.fieldLabel}>public listing name</Text>
             <Text style={styles.fieldHint}>a brand or venue name to front the listing. leave empty to show yours.</Text>
-            <TextInput style={styles.input} value={publicName} onChangeText={setPublicName} maxLength={80} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            <TextInput style={styles.input} value={publicName} onChangeText={setPublicName} maxLength={80} placeholder="a brand or venue name" placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
             </View>
 
             <Text style={styles.sectionHeader}>who puts it on</Text>

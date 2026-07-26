@@ -7,8 +7,9 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router } from 'expo-router';
+import { Image } from 'expo-image';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronRight, Calendar } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import {
@@ -116,9 +117,19 @@ export default function CreatorTodayScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.card} onPress={() => router.push('/(creator)/events')} activeOpacity={0.8}>
+          {/* the next event's cover, so the home reads finished not skeletal */}
+          {nextEvent?.image_url ? (
+            <Image source={{ uri: nextEvent.image_url }} style={styles.cardThumb} contentFit="cover" />
+          ) : (
+            <View style={[styles.cardThumb, styles.cardThumbFallback]}>
+              <Calendar size={18} color={Colors.warmGray} strokeWidth={2} />
+            </View>
+          )}
           <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>{nextEvent ? nextEvent.title : 'no events on the calendar'}</Text>
-            <Text style={styles.cardMeta}>
+            {/* copy to the taste gate: the card's own eyebrow gives hierarchy */}
+            <Text style={styles.cardEyebrow}>{nextEvent ? 'your next event' : 'events'}</Text>
+            <Text style={styles.cardTitle} numberOfLines={1}>{nextEvent ? nextEvent.title : 'no events on the calendar'}</Text>
+            <Text style={styles.cardMeta} numberOfLines={1}>
               {nextEvent
                 ? [nextEvent.event_date ? formatEventDateLA(nextEvent.event_date) : null, nextEvent.venue]
                     .filter(Boolean)
@@ -187,6 +198,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   entryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  cardEyebrow: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.terracotta, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
   cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
   cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  cardThumb: { width: 48, height: 48, borderRadius: 10, backgroundColor: Colors.inputBg },
+  cardThumbFallback: { alignItems: 'center', justifyContent: 'center' },
 });

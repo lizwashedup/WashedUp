@@ -30,6 +30,7 @@ export const EVENT_CATEGORIES = [
   'community',
   'film',
   'markets',
+  'gaming',
 ];
 
 export interface OperatorEventFields {
