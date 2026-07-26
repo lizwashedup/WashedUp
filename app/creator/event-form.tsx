@@ -40,6 +40,7 @@ import CollapsibleCalendar from '../../components/composer/CollapsibleCalendar';
 import TimePicker from '../../components/composer/TimePicker';
 import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
 import EventPlaceSearch from '../../components/creator/EventPlaceSearch';
+import { EventLocationMap } from '../../components/creator/EventLocationMap';
 import { getCreatorAccess } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import {
@@ -95,6 +96,8 @@ export default function EventFormScreen() {
   // hand clears them (a hand-typed place makes the old pin a lie); they ride
   // their own RPC after create/save, never the full-overwrite payload.
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  // §3.4 (d): a place was chosen but geocoding returned no lat/lng
+  const [geocodeMissed, setGeocodeMissed] = useState(false);
   const [category, setCategory] = useState('');
   const [externalUrl, setExternalUrl] = useState('');
   const [ticketPrice, setTicketPrice] = useState('');
@@ -155,6 +158,7 @@ export default function EventFormScreen() {
       if (existing.latitude != null && existing.longitude != null) {
         setCoords({ lat: existing.latitude, lng: existing.longitude });
       }
+      setGeocodeMissed(false);
       setCategory(existing.category);
       setExternalUrl(existing.external_url);
       setTicketPrice(existing.ticket_price);
@@ -655,14 +659,22 @@ export default function EventFormScreen() {
               onPick={(p) => {
                 setVenue(p.venue);
                 setVenueAddress(p.address);
-                setCoords(p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
+                const hit = p.lat != null && p.lng != null;
+                setCoords(hit ? { lat: p.lat!, lng: p.lng! } : null);
+                // §3.4 (d): a chosen place with no coordinates is a miss,
+                // not an empty field
+                setGeocodeMissed(!hit);
               }}
             />
+
+            {/* §3.4 (b/c/d): the tile+pin the canvas was missing */}
+            <EventLocationMap coords={coords} geocodeMissed={geocodeMissed} />
+
             <Text style={styles.fieldLabel}>venue</Text>
             <TextInput
               style={styles.input}
               value={venue}
-              onChangeText={(v) => { setVenue(v); setCoords(null); }}
+              onChangeText={(v) => { setVenue(v); setCoords(null); setGeocodeMissed(false); }}
               maxLength={120}
               /* copy to the taste gate */
               placeholder="the spot's name"
@@ -673,7 +685,7 @@ export default function EventFormScreen() {
             <TextInput
               style={styles.input}
               value={venueAddress}
-              onChangeText={(v) => { setVenueAddress(v); setCoords(null); }}
+              onChangeText={(v) => { setVenueAddress(v); setCoords(null); setGeocodeMissed(false); }}
               maxLength={200}
               /* copy to the taste gate */
               placeholder="street, city"
