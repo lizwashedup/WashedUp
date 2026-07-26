@@ -28,8 +28,8 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
-import { hapticSuccess } from '../../lib/haptics';
-import { getCreatorAccess, getJoinGateSettings, updateJoinGateSettings } from '../../lib/creatorMode';
+import { hapticSuccess, hapticLight } from '../../lib/haptics';
+import { getCreatorAccess, getJoinGateSettings, updateJoinGateSettings, getJoinPolicy, setJoinPolicy, type JoinPolicy } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 
 export default function JoinGateScreen() {
@@ -54,6 +54,28 @@ export default function JoinGateScreen() {
     queryFn: () => getJoinGateSettings(community!.id),
     enabled: !!community,
   });
+
+  // proposal 91: self-flipping join-policy toggle. null until the column
+  // lands, then the toggle persists each tap immediately (its own write,
+  // separate from the text-field save).
+  const { data: fetchedPolicy = null } = useQuery({
+    queryKey: ['join-policy', community?.id],
+    queryFn: () => getJoinPolicy(community!.id),
+    enabled: !!community,
+  });
+  const [joinPolicy, setJoinPolicyState] = useState<JoinPolicy | null>(null);
+  useEffect(() => { setJoinPolicyState(fetchedPolicy); }, [fetchedPolicy]);
+
+  const setJoinPolicyLocal = async (policy: JoinPolicy) => {
+    if (!community || policy === joinPolicy) return;
+    const prev = joinPolicy;
+    setJoinPolicyState(policy); // optimistic
+    const ok = await setJoinPolicy(community.id, policy);
+    if (!ok) {
+      setJoinPolicyState(prev); // revert on a no-op/denied write
+      setAlertInfo({ title: 'That did not save', message: 'give it another try.' });
+    }
+  };
 
   useEffect(() => {
     if (settings && !seeded) {
@@ -126,6 +148,40 @@ export default function JoinGateScreen() {
               placeholderTextColor={Colors.inkSoft}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
+
+            {/* proposal 91 (self-flipping): the join policy toggle wakes
+                only once join_policy exists on prod; until then it stays
+                hidden, no dead control. Default is approval-required. */}
+            {joinPolicy !== null && (
+              <>
+                <Text style={styles.fieldLabel}>who gets in</Text>
+                <Text style={styles.fieldHint}>
+                  approval means you review each request. open lets anyone join instantly.
+                </Text>
+                <View style={styles.policyRow}>
+                  <TouchableOpacity
+                    style={[styles.policyPill, joinPolicy === 'approval_required' && styles.policyPillOn]}
+                    onPress={() => { hapticLight(); setJoinPolicyLocal('approval_required'); }}
+                    activeOpacity={0.85}
+                  >
+                    {/* copy to the taste gate */}
+                    <Text style={[styles.policyText, joinPolicy === 'approval_required' && styles.policyTextOn]}>
+                      you approve them
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.policyPill, joinPolicy === 'open' && styles.policyPillOn]}
+                    onPress={() => { hapticLight(); setJoinPolicyLocal('open'); }}
+                    activeOpacity={0.85}
+                  >
+                    {/* copy to the taste gate */}
+                    <Text style={[styles.policyText, joinPolicy === 'open' && styles.policyTextOn]}>
+                      anyone can join
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
 
             <Text style={styles.fieldLabel}>your intro question</Text>
             <Text style={styles.fieldHint}>
@@ -222,6 +278,18 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   inputMultiline: { minHeight: 90, textAlignVertical: 'top' },
+  policyRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  policyPill: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  policyPillOn: { borderColor: Colors.terracotta, backgroundColor: Colors.brandSoft },
+  policyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
+  policyTextOn: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
   saveBtn: {
     backgroundColor: Colors.terracotta,
     borderRadius: 999,

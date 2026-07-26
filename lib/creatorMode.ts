@@ -237,6 +237,41 @@ export interface JoinGateSettings {
   guidelines_url: string | null;
 }
 
+export type JoinPolicy = 'approval_required' | 'open';
+
+/**
+ * The community's join gate (proposal 91, at Cowork's gate). SELF-FLIPPING:
+ * until 91 adds communities.join_policy, the select errors with 42703 and
+ * this returns null, so the leader toggle stays hidden - no dead control.
+ * The moment 91 applies, the real value flows and the toggle wakes.
+ */
+export async function getJoinPolicy(communityId: string): Promise<JoinPolicy | null> {
+  const { data, error } = await supabase
+    .from('communities')
+    .select('join_policy')
+    .eq('id', communityId)
+    .single();
+  if (error || !data) return null; // column absent (42703) or unreadable = dormant
+  const v = (data as { join_policy?: string }).join_policy;
+  return v === 'open' || v === 'approval_required' ? v : null;
+}
+
+/**
+ * Leader-only by the communities_update RLS policy (verified: is_community_
+ * leader). count:'exact' catches a silent no-op the way updateJoinGateSettings
+ * does, so a non-leader write returns ok:false rather than a false success.
+ */
+export async function setJoinPolicy(
+  communityId: string,
+  policy: JoinPolicy,
+): Promise<boolean> {
+  const { error, count } = await supabase
+    .from('communities')
+    .update({ join_policy: policy }, { count: 'exact' })
+    .eq('id', communityId);
+  return !error && (count ?? 0) > 0;
+}
+
 export async function getJoinGateSettings(communityId: string): Promise<JoinGateSettings> {
   const { data, error } = await supabase
     .from('communities')
