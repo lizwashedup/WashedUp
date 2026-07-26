@@ -39,6 +39,10 @@ export interface OperatorEventFields {
   image_url: string;
   event_date: string;      // YYYY-MM-DD or ''
   start_time: string | null; // ISO timestamptz or null
+  // §3.3 end: the payout-release wall's timing input. The column and both
+  // operator RPCs' p_end_time already exist on prod (read 2026-07-26); this
+  // is the client catching up, no schema change. ISO timestamptz or null.
+  end_time: string | null;
   venue: string;
   venue_address: string;
   category: string;
@@ -67,7 +71,7 @@ export interface OperatorEventRow extends OperatorEventFields {
 export async function getOperatorEvent(eventId: string): Promise<OperatorEventRow | null> {
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, description, description_blocks, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id, latitude, longitude')
+    .select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id, latitude, longitude')
     .eq('id', eventId)
     .maybeSingle();
   if (error) throw error;
@@ -79,6 +83,7 @@ export async function getOperatorEvent(eventId: string): Promise<OperatorEventRo
     image_url: data.image_url ?? '',
     event_date: data.event_date ?? '',
     start_time: data.start_time ?? null,
+    end_time: data.end_time ?? null,
     venue: data.venue ?? '',
     venue_address: data.venue_address ?? '',
     category: data.category ?? '',
@@ -126,6 +131,7 @@ export async function createOperatorEvent(
     p_image_url: fields.image_url || null,
     p_event_date: fields.event_date || null,
     p_start_time: fields.start_time,
+    p_end_time: fields.end_time,
     p_venue: fields.venue || null,
     p_venue_address: fields.venue_address || null,
     p_category: fields.category || null,
@@ -154,6 +160,7 @@ export async function updateOperatorEvent(
     p_image_url: fields.image_url || null,
     p_event_date: fields.event_date || null,
     p_start_time: fields.start_time,
+    p_end_time: fields.end_time,
     p_venue: fields.venue || null,
     p_venue_address: fields.venue_address || null,
     p_category: fields.category || null,
@@ -198,7 +205,9 @@ export async function saveEventTemplate(
     user_id: user.id,
     community_id: communityId,
     name: name.trim().slice(0, 80),
-    fields: { ...fields, event_date: '', start_time: null },
+    // a template is the reusable clothes, never a specific instant: date,
+    // start, and end all reset so a re-used template asks for fresh times
+    fields: { ...fields, event_date: '', start_time: null, end_time: null },
   });
   if (error) throw error;
 }

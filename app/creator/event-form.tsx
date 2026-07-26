@@ -90,6 +90,10 @@ export default function EventFormScreen() {
   const [imageUrl, setImageUrl] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
+  // §3.3 end: its own LA wall date + time, composed into end_time on save.
+  // endDate defaults to the start day for a same-day event when left blank.
+  const [endDate, setEndDate] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [venue, setVenue] = useState('');
   const [venueAddress, setVenueAddress] = useState('');
   // proposal 35: the place pick's coordinates. Typing in venue or address by
@@ -180,6 +184,15 @@ export default function EventFormScreen() {
         const wall = getLAWallParts(existing.start_time);
         if (wall) setTime(`${pad2(wall.hour24)}:${pad2(wall.minute)}`);
       }
+      if (existing.end_time) {
+        // the end instant rehydrates to the SAME LA wall day + time it was
+        // composed from, so a multi-day end survives an untouched re-save
+        const ew = getLAWallParts(existing.end_time);
+        if (ew) {
+          setEndDate(`${ew.y}-${pad2(ew.m + 1)}-${pad2(ew.d)}`);
+          setEndTime(`${pad2(ew.hour24)}:${pad2(ew.minute)}`);
+        }
+      }
       setVenue(existing.venue);
       setVenueAddress(existing.venue_address);
       if (existing.latitude != null && existing.longitude != null) {
@@ -257,12 +270,46 @@ export default function EventFormScreen() {
         Number(tm[1]), Number(tm[2]),
       ).toISOString();
     }
+    // §3.3 end: optional, but if an end time is set it composes against the
+    // end day (or the start day for a same-day event) and must sit AFTER the
+    // start. end_time feeds the payout-release wall, so a nonsense window can
+    // never reach the money path.
+    let endTimeIso: string | null = null;
+    if (endTime.trim()) {
+      const etm = endTime.trim().match(/^(\d{2}):(\d{2})$/);
+      if (!etm) {
+        complain('Check the end time', 'Use the HH:MM shape, like 22:30.');
+        return null;
+      }
+      if (!startTime) {
+        // an end with no start instant is ambiguous; anchor it to a start
+        complain('Almost', 'set the start date and time before the end.');
+        return null;
+      }
+      const endDayStr = endDate.trim() || date.trim();
+      const edm = endDayStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!edm) {
+        complain('Check the end date', 'Use the YYYY-MM-DD shape, like 2026-07-20.');
+        return null;
+      }
+      const endInstant = laWallTimeToUTC(
+        Number(edm[1]), Number(edm[2]) - 1, Number(edm[3]),
+        Number(etm[1]), Number(etm[2]),
+      );
+      if (endInstant.getTime() <= new Date(startTime).getTime()) {
+        // LIZ COPY: lowercase warm, and it names the fix
+        complain('Check the end', 'it ends before it starts. pick a later time.');
+        return null;
+      }
+      endTimeIso = endInstant.toISOString();
+    }
     return {
       title,
       description,
       image_url: imageUrl,
       event_date: date.trim(),
       start_time: startTime,
+      end_time: endTimeIso,
       venue,
       venue_address: venueAddress,
       category,
@@ -366,7 +413,7 @@ export default function EventFormScreen() {
   ];
 
   const autosaveSignature = JSON.stringify([
-    title, description, imageUrl, date, time, venue, venueAddress,
+    title, description, imageUrl, date, time, endDate, endTime, venue, venueAddress,
     category, ticketPrice, publicName, pinToChat, blocks,
   ]);
   const lastSavedRef = React.useRef<string | null>(null);
@@ -512,6 +559,16 @@ export default function EventFormScreen() {
   const timeMinute = timeMatch ? timeMatch[2] : '00';
   const timePeriod: 'AM' | 'PM' = hour24 >= 12 ? 'PM' : 'AM';
 
+  // §3.3 end pickers, mirroring the start. An empty end day falls back to the
+  // start day at compose time, so a same-day event never needs a second date.
+  const parsedEndDay = parseDateString(endDate);
+  const endDayIsPast = !!parsedEndDay && isBeforeTodayLA(parsedEndDay.year, parsedEndDay.month, parsedEndDay.day);
+  const endTimeMatch = endTime.trim().match(/^(\d{2}):(\d{2})$/);
+  const endHour24 = endTimeMatch ? Number(endTimeMatch[1]) : 21;
+  const endTimeHour = ((endHour24 + 11) % 12) + 1;
+  const endTimeMinute = endTimeMatch ? endTimeMatch[2] : '00';
+  const endTimePeriod: 'AM' | 'PM' = endHour24 >= 12 ? 'PM' : 'AM';
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -651,6 +708,38 @@ export default function EventFormScreen() {
                 <TouchableOpacity onPress={() => { hapticLight(); setTime(''); }} hitSlop={8}>
                   {/* LIZ COPY: a set time stays optional, so it must be removable */}
                   <Text style={styles.clearTimeLink}>no set time</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <Text style={styles.fieldLabel}>ends</Text>
+            {/* copy to the taste gate (§3.3): optional, but the end feeds the
+                payout-release wall on paid events, so it is worth setting. a
+                blank end day means the same day as the start. */}
+            <Text style={styles.fieldHint}>optional. sets when it wraps, and when a paid event's payout releases.</Text>
+            <View style={styles.pickerBlock}>
+              <CollapsibleCalendar
+                selected={endDayIsPast ? null : parsedEndDay}
+                onSelect={(d) => setEndDate(`${d.year}-${pad2(d.month + 1)}-${pad2(d.day)}`)}
+                /* LIZ COPY: a blank end day is the same day as the start */
+                placeholder={endDayIsPast ? `it was ${formatEventDateLA(endDate.trim())}. pick a new day` : 'same day, or pick another'}
+              />
+            </View>
+            <View style={styles.pickerBlock}>
+              <TimePicker
+                hour={endTimeHour}
+                minute={endTimeMinute}
+                period={endTimePeriod}
+                selected={!!endTimeMatch}
+                onChange={(hour, minute, period) => {
+                  const h = period === 'PM' ? (hour % 12) + 12 : hour % 12;
+                  setEndTime(`${pad2(h)}:${minute}`);
+                }}
+              />
+              {!!endTimeMatch && (
+                <TouchableOpacity onPress={() => { hapticLight(); setEndTime(''); setEndDate(''); }} hitSlop={8}>
+                  {/* LIZ COPY: an end stays optional, so it must be removable */}
+                  <Text style={styles.clearTimeLink}>no end time</Text>
                 </TouchableOpacity>
               )}
             </View>
