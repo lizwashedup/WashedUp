@@ -162,7 +162,7 @@ export default function OnboardingReferralScreen() {
         keyboardVerticalOffset={0}
       >
         <View style={styles.container}>
-          <ProgressHead step={3} totalSteps={4} onBack={() => router.replace('/onboarding/la-check')} />
+          <ProgressHead step={3} totalSteps={5} onBack={() => router.replace('/onboarding/la-check')} />
 
           <ScrollView
             decelerationRate="normal"

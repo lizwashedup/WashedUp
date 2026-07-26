@@ -95,6 +95,12 @@ Always reference Fonts.* from `constants/Typography.ts`. Do not add new font fam
 - Secondary: transparent background, 1.5px #B5522E border, #B5522E text
 - Ghost: #B5522E text only, no background or border
 
+### Button labels (permanent rule, founder 2026-07-19)
+Button labels are 1 to 3 words and must NEVER wrap, at any width or text
+size. Conversational copy belongs in body text above the button, never on
+the button itself. Text links (ghost text, no fill) may run long; filled
+buttons may not.
+
 ### Tabs pattern
 - Full-width underline tabs, not pill bubbles
 - Active: #2C1810 text, 2.5px #B5522E underline
@@ -130,6 +136,8 @@ The "gold is decorative only" rule has several intentional exceptions where gold
 - **`goldenAmber` #F2A32D — the featured/live accent** (`Colors.goldenAmber` + `goldenAmberTint15`). A deliberate second warm accent reserved EXCLUSIVELY for editorial "this is happening" markers: the FEATURED pill label, the "happening now" tag, and their tint fills (PlanCard, FeaturedEventCard, plan detail). It is NOT a CTA color and never appears on buttons or links — terracotta keeps that job. Do not reach for goldenAmber outside featured/live markers.
 
 Do not extend these exceptions to additional buttons or surfaces without writing it here first.
+
+Green is not in the palette anywhere: the first-join "past the minimum" pill (2026-07-16) and the wishlist-confirmation check badge (2026-07-19) were both cut by founder decision. Gold is the system's success color; do not reintroduce green.
 
 ## General Rules
 

@@ -316,7 +316,7 @@ export default function OnboardingBasicsScreen() {
         style={styles.kav}
       >
         <View style={styles.container}>
-          <ProgressHead step={1} totalSteps={4} />
+          <ProgressHead step={1} totalSteps={5} />
 
           <ScrollView
             showsVerticalScrollIndicator={false}
