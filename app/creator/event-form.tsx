@@ -559,7 +559,9 @@ export default function EventFormScreen() {
             <Text style={styles.sectionHeader}>the event</Text>
             <View style={styles.sectionCard}>
             <Text style={styles.fieldLabel}>title</Text>
-            <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} placeholder="name the event" placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            {/* copy to the taste gate (§3.2): an evocative example in voice,
+                matching the identity placeholders, not a bare instruction */}
+            <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} placeholder="sunset rooftop social" placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
 
             <Text style={styles.fieldLabel}>the poster</Text>
             {imageUrl ? (
@@ -583,12 +585,18 @@ export default function EventFormScreen() {
             )}
 
             <Text style={styles.fieldLabel}>what is it</Text>
+            {/* copy to the taste gate (§3.2 summary): the first thing people
+                read, high on the page and on the card. an empty rectangle here
+                is exactly what §3.0 forbids */}
+            <Text style={styles.fieldHint}>the first warm line people read on your page.</Text>
             <TextInput
               style={[styles.input, styles.inputMultiline]}
               value={description}
               onChangeText={setDescription}
               multiline
               maxLength={4000}
+              placeholder="one warm line people read first"
+              placeholderTextColor={Colors.inkSoft}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
