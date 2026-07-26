@@ -808,10 +808,10 @@ export default function EventDetailScreen() {
               onPress={() => openUrl(event.external_url!)}
               activeOpacity={0.85}
             >
-              <Ticket size={18} color={Colors.terracotta} strokeWidth={2} />
+              <Ticket size={18} color={Colors.darkWarm} strokeWidth={2} />
               {/* LIZ COPY: priced vs free-with-link labels */}
               <Text style={styles.ticketBtnText}>{isFree ? 'reserve a spot' : 'get tickets'}</Text>
-              <ChevronRight size={16} color={Colors.terracotta} strokeWidth={2} />
+              <ChevronRight size={16} color={Colors.warmGray} strokeWidth={2} />
             </TouchableOpacity>
           )}
 
@@ -1214,18 +1214,22 @@ const styles = StyleSheet.create({
   descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, lineHeight: 22 },
   // the secondary-button pattern: outline terracotta, never competing with
   // the sticky bar's primary CTA
+  // law 1: the sticky CTA owns the accent, so the legacy external link-out
+  // (interim only - the go-live gate removes it, and C1's real tier CTA
+  // replaces it) drops to the neutral secondary rather than a second
+  // terracotta element competing with the primary action
   ticketBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     borderWidth: 1.5,
-    borderColor: Colors.terracotta,
+    borderColor: Colors.border,
     borderRadius: 999,
     paddingVertical: 13,
     marginTop: 4,
   },
-  ticketBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  ticketBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   plansSection: { marginTop: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
   plansSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   plansSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
