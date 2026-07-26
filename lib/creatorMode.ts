@@ -257,19 +257,25 @@ export async function getJoinPolicy(communityId: string): Promise<JoinPolicy | n
 }
 
 /**
- * Leader-only by the communities_update RLS policy (verified: is_community_
- * leader). count:'exact' catches a silent no-op the way updateJoinGateSettings
- * does, so a non-leader write returns ok:false rather than a false success.
+ * Leader-or-admin only. Proposal 91 closes the raw client UPDATE on
+ * join_policy: the table-level UPDATE grant is dropped and re-granted on the
+ * twelve cosmetic/other columns, deliberately omitting join_policy, so the one
+ * write door is set_community_join_policy(), a SECURITY DEFINER grant-checked
+ * RPC that raises for a non-leader. A non-leader therefore comes back as
+ * { error } now (not the old silent 0-row no-op), so !error is an honest
+ * success signal and the caller's optimistic revert still fires on denial.
+ * The RPC does not exist on prod until 91 lands, so this must merge and deploy
+ * in the SAME window as the migration, never before it.
  */
 export async function setJoinPolicy(
   communityId: string,
   policy: JoinPolicy,
 ): Promise<boolean> {
-  const { error, count } = await supabase
-    .from('communities')
-    .update({ join_policy: policy }, { count: 'exact' })
-    .eq('id', communityId);
-  return !error && (count ?? 0) > 0;
+  const { error } = await supabase.rpc('set_community_join_policy', {
+    p_community_id: communityId,
+    p_join_policy: policy,
+  });
+  return !error;
 }
 
 export async function getJoinGateSettings(communityId: string): Promise<JoinGateSettings> {
