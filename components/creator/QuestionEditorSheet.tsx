@@ -24,16 +24,27 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
 import {
-  OPTION_LABEL_MAX,
-  OPTION_MAX,
-  PROMPT_MAX,
-  QUESTION_TYPES,
-  typeNeedsOptions,
-  type QuestionDraft,
+  QUESTION_OPTIONS_MAX,
+  QUESTION_PROMPT_MAX,
+  QUESTION_TYPE_OPTIONS,
+  QUESTION_TYPES_WITH_OPTIONS,
   type QuestionScope,
   type QuestionType,
   type TicketQuestion,
-} from '../../lib/ticketQuestions';
+} from '../../lib/ticketing';
+
+// a single option's label length is a UI nicety (the CHECK caps the array
+// count, not each label)
+const OPTION_LABEL_MAX = 200;
+
+/** the object shape lib/ticketing's create/updateQuestion accept. */
+export interface QuestionDraft {
+  prompt: string;
+  qtype: QuestionType;
+  options: string[] | null;
+  required: boolean;
+  scope: QuestionScope;
+}
 
 interface QuestionEditorSheetProps {
   visible: boolean;
@@ -60,7 +71,7 @@ export function QuestionEditorSheet({ visible, question, busy, onSave, onClose }
     setScope(question?.scope ?? 'per_order');
   }, [visible, question]);
 
-  const needsOptions = typeNeedsOptions(qtype);
+  const needsOptions = QUESTION_TYPES_WITH_OPTIONS.includes(qtype);
   const cleanOptions = options.map((o) => o.trim()).filter((o) => o.length > 0);
   // choice types need at least two real options to be a choice at all (the
   // CHECK allows one, but a one-option pick is not a question)
@@ -70,7 +81,7 @@ export function QuestionEditorSheet({ visible, question, busy, onSave, onClose }
     setOptions((prev) => prev.map((o, idx) => (idx === i ? v.slice(0, OPTION_LABEL_MAX) : o)));
   };
   const addOption = () => {
-    if (options.length >= OPTION_MAX) return;
+    if (options.length >= QUESTION_OPTIONS_MAX) return;
     hapticLight();
     setOptions((prev) => [...prev, '']);
   };
@@ -116,13 +127,13 @@ export function QuestionEditorSheet({ visible, question, busy, onSave, onClose }
               placeholder={qtype === 'terms' ? 'the terms they agree to' : 'what should we call you at the door?'}
               placeholderTextColor={Colors.textLight}
               multiline
-              maxLength={PROMPT_MAX}
+              maxLength={QUESTION_PROMPT_MAX}
             />
 
             {/* the type */}
             <Text style={styles.label}>the kind of answer</Text>
             <View style={styles.chipWrap}>
-              {QUESTION_TYPES.map((t) => (
+              {QUESTION_TYPE_OPTIONS.map((t) => (
                 <TouchableOpacity
                   key={t.value}
                   style={[styles.chip, qtype === t.value && styles.chipOn]}
@@ -155,7 +166,7 @@ export function QuestionEditorSheet({ visible, question, busy, onSave, onClose }
                     )}
                   </View>
                 ))}
-                {options.length < OPTION_MAX && (
+                {options.length < QUESTION_OPTIONS_MAX && (
                   <TouchableOpacity style={styles.addOption} onPress={addOption} hitSlop={8}>
                     <Plus size={14} color={Colors.terracotta} strokeWidth={2.5} />
                     {/* copy to the taste gate */}

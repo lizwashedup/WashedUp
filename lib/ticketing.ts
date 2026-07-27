@@ -309,12 +309,49 @@ export async function createQuestion(
   return { ok: !error, message: error?.message ?? null };
 }
 
+export async function updateQuestion(
+  questionId: string,
+  q: { prompt: string; qtype: QuestionType; options: string[] | null; required: boolean; scope: QuestionScope },
+): Promise<{ ok: boolean; message: string | null }> {
+  const needsOptions = QUESTION_TYPES_WITH_OPTIONS.includes(q.qtype);
+  if (needsOptions && (!q.options || q.options.length < 1)) {
+    /* copy to the taste gate */
+    return { ok: false, message: 'that kind of question needs at least one choice.' };
+  }
+  const { error } = await supabase
+    .from('ticket_questions')
+    .update({
+      prompt: q.prompt.slice(0, QUESTION_PROMPT_MAX),
+      qtype: q.qtype,
+      options: needsOptions ? q.options : null,
+      required: q.required,
+      scope: q.scope,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', questionId);
+  return { ok: !error, message: error?.message ?? null };
+}
+
 export async function retireQuestion(questionId: string): Promise<boolean> {
   const { error } = await supabase
     .from('ticket_questions')
     .update({ is_active: false })
     .eq('id', questionId);
   return !error;
+}
+
+/** the six types in §3.8 order, with warm picker labels (LIZ COPY). */
+export const QUESTION_TYPE_OPTIONS: { value: QuestionType; label: string }[] = [
+  { value: 'short_text', label: 'short answer' },
+  { value: 'paragraph', label: 'long answer' },
+  { value: 'single_select', label: 'pick one' },
+  { value: 'multi_select', label: 'pick many' },
+  { value: 'dropdown', label: 'dropdown' },
+  { value: 'terms', label: 'agree to terms' },
+];
+
+export function questionTypeLabel(t: QuestionType): string {
+  return QUESTION_TYPE_OPTIONS.find((x) => x.value === t)?.label ?? t;
 }
 
 // refund presets (doc 61 section 10.2; explore_events.refund_policy is text)

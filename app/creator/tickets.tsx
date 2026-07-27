@@ -34,27 +34,24 @@ import {
   formatCents,
   getEventFaqs,
   getMyPayoutState,
+  getQuestions,
   getTiers,
+  createQuestion,
+  updateQuestion,
+  retireQuestion,
+  questionTypeLabel,
+  QUESTIONS_MAX,
   recommendedTierId,
   requestOnboardingLink,
   TIER_COUNT_MAX,
   updateEventFaq,
   updateTier,
+  type TicketQuestion,
   type TicketTier,
   type TierDraft,
 } from '../../lib/ticketing';
 import { TierEditorSheet } from '../../components/creator/TierEditorSheet';
-import { QuestionEditorSheet } from '../../components/creator/QuestionEditorSheet';
-import {
-  QUESTION_MAX,
-  createQuestion,
-  deactivateQuestion,
-  getEventQuestions,
-  questionTypeLabel,
-  updateQuestion,
-  type QuestionDraft,
-  type TicketQuestion,
-} from '../../lib/ticketQuestions';
+import { QuestionEditorSheet, type QuestionDraft } from '../../components/creator/QuestionEditorSheet';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 export default function TicketSetupScreen() {
@@ -111,7 +108,7 @@ export default function TicketSetupScreen() {
 
   const { data: questions = [], isLoading: questionsLoading } = useQuery({
     queryKey: ['ticket-questions', id],
-    queryFn: () => getEventQuestions(id!),
+    queryFn: () => getQuestions(id!),
     enabled: !!id,
     staleTime: 15_000,
   });
@@ -153,7 +150,7 @@ export default function TicketSetupScreen() {
         {
           text: 'remove it',
           onPress: async () => {
-            const ok = await deactivateQuestion(question.id);
+            const ok = await retireQuestion(question.id);
             if (ok) {
               hapticSuccess();
               invalidateQuestions();
@@ -253,7 +250,7 @@ export default function TicketSetupScreen() {
   const recommendedId = recommendedTierId(tiers);
   const tiersFull = tiers.length >= TIER_COUNT_MAX;
   // §3.8 house rule (also trigger-enforced): at most 11 active questions
-  const questionsFull = questions.length >= QUESTION_MAX;
+  const questionsFull = questions.length >= QUESTIONS_MAX;
   const questionMeta = (q: TicketQuestion): string => {
     const parts = [questionTypeLabel(q.qtype), q.required ? 'required' : 'optional'];
     parts.push(q.scope === 'per_attendee' ? 'each ticket' : 'per order');
