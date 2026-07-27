@@ -551,19 +551,41 @@ export async function getOrder(orderId: string): Promise<MyOrder | null> {
   };
 }
 
-/** Records one buyer answer (C2, in-session; own-order RLS). attendee_index
- *  0 = the order/first attendee; per-attendee questions repeat by index. */
+/**
+ * The canonical buyer-answer value shapes (set by Cowork 2026-07-26). Web's
+ * organizer reader + CSV export read the SAME rows, so these must not drift:
+ *   short_text / paragraph    -> { text }
+ *   single_select / dropdown  -> { choice }
+ *   multi_select              -> { choices: [] }
+ *   terms                     -> { accepted: true, accepted_at: iso8601 }
+ * No bare strings, no other shapes.
+ */
+export type AnswerValue =
+  | { text: string }
+  | { choice: string }
+  | { choices: string[] }
+  | { accepted: boolean; accepted_at: string };
+
+/**
+ * Records one buyer answer (C2, own-order RLS). Answers are PER SEAT:
+ * attendee_index is NULL for a per_order question and the seat's position_index
+ * (1..qty) for a per_attendee one. tg_ticket_answers_validate enforces exactly
+ * that, so the old default of 0 made EVERY per_order answer fail silently
+ * ('a per-order question takes no attendee_index'). The caller owns the index;
+ * there is no default. Returns {ok, message} so the flow surfaces a failure
+ * instead of swallowing it.
+ */
 export async function recordAnswer(
   orderId: string,
   questionId: string,
-  value: string,
-  attendeeIndex = 0,
-): Promise<boolean> {
+  value: AnswerValue,
+  attendeeIndex: number | null,
+): Promise<{ ok: boolean; message: string | null }> {
   const { error } = await supabase.from('ticket_answers').insert({
     order_id: orderId,
     question_id: questionId,
     attendee_index: attendeeIndex,
     value,
   });
-  return !error;
+  return { ok: !error, message: error?.message ?? null };
 }
