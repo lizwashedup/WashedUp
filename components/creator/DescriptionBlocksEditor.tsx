@@ -40,9 +40,14 @@ interface DescriptionBlocksEditorProps {
   eventId: string;
   blocks: DescriptionBlock[];
   onChange: (next: DescriptionBlock[]) => void;
+  /** photos and video upload into the event's OWN folder, so they need a
+   *  saved event id. Text and faq blocks ride the create payload and work
+   *  before a draft exists; when canAddMedia is false the media pills wait. */
+  canAddMedia?: boolean;
+  mediaHint?: string;
 }
 
-export function DescriptionBlocksEditor({ eventId, blocks, onChange }: DescriptionBlocksEditorProps) {
+export function DescriptionBlocksEditor({ eventId, blocks, onChange, canAddMedia = true, mediaHint }: DescriptionBlocksEditorProps) {
   const [uploading, setUploading] = useState(false);
   const [uploadProblems, setUploadProblems] = useState<string[]>([]);
   const mutate = onChange;
@@ -191,9 +196,9 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
           <Text style={styles.addPillText}>text</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.addPill, (full || uploading) && styles.addPillDisabled]}
+          style={[styles.addPill, (full || uploading || !canAddMedia) && styles.addPillDisabled]}
           onPress={handleAddImages}
-          disabled={full || uploading}
+          disabled={full || uploading || !canAddMedia}
           activeOpacity={0.85}
         >
           {uploading ? (
@@ -206,7 +211,7 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
         </TouchableOpacity>
         <VideoBlockUploader
           eventId={eventId}
-          disabled={full || uploading}
+          disabled={full || uploading || !canAddMedia}
           onReady={(path, poster) => mutate([...blocks, { type: 'video', path, poster }])}
         />
         {!faqMarkerPlaced && (
@@ -226,8 +231,13 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange }: Descripti
         )}
       </View>
 
+      {!canAddMedia && !!mediaHint && (
+        /* photos/video wait for a draft id; text and faq work right now */
+        <Text style={styles.limitText}>{mediaHint}</Text>
+      )}
+
       {/* law 16: the limits are stated BEFORE a file is chosen */}
-      <Text style={styles.limitText}>video: {VIDEO_LIMITS_LINE}</Text>
+      {canAddMedia && <Text style={styles.limitText}>video: {VIDEO_LIMITS_LINE}</Text>}
 
       {imageCount > 0 && (
         /* law 15: the live count counts BLOCKS, under 70's hard ceiling */

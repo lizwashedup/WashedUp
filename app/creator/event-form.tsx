@@ -32,7 +32,8 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { DescriptionBlocksEditor } from '../../components/creator/DescriptionBlocksEditor';
 import { type DescriptionBlock } from '../../lib/eventContent';
-import { COVER_ASPECT, COVER_ASPECT_LABEL, EventAction, EventSpacing } from '../../constants/EventDesign';
+import { COVER_ASPECT, COVER_ASPECT_LABEL, EventAction, EventSpacing, EventSurface } from '../../constants/EventDesign';
+import EditorialTitleField from '../../components/composer/EditorialTitleField';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { formatEventDateLA, getLAWallParts, isBeforeTodayLA, laWallTimeToUTC } from '../../lib/laDate';
@@ -678,72 +679,70 @@ export default function EventFormScreen() {
               </Text>
             )}
 
-            {/* doc 76 §3: identity → media → when → where → tickets →
-                who, in grouped cards; not one long grey ladder */}
-            <Text style={styles.sectionHeader}>the event</Text>
-            <View style={styles.sectionCard}>
-            <Text style={styles.fieldLabel}>title</Text>
-            {/* copy to the taste gate (§3.2): an evocative example in voice,
-                matching the identity placeholders, not a bare instruction */}
-            <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} placeholder="sunset rooftop social" placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            {/* §3 canvas: this is not a form of grey boxes, it is a PAGE being
+                built. The top half is the page itself, media-led (doc 80: the
+                cover is the one warm-dark surface, so it reads as the face of a
+                page, not a field); the logistics follow as quieter cards. */}
 
-            <Text style={styles.fieldLabel}>the poster</Text>
+            {/* §3.1 cover: the page's face, a real 4:5 warm-dark drop-zone */}
             {imageUrl ? (
-              <TouchableOpacity onPress={handlePoster} disabled={uploading}>
-                <Image source={{ uri: imageUrl }} style={styles.poster} contentFit="cover" />
+              <TouchableOpacity onPress={handlePoster} disabled={uploading} activeOpacity={0.9}>
+                <Image source={{ uri: imageUrl }} style={styles.cover} contentFit="cover" />
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={styles.posterAdd} onPress={handlePoster} disabled={uploading}>
+              <TouchableOpacity style={styles.coverAdd} onPress={handlePoster} disabled={uploading} activeOpacity={0.9}>
                 {uploading ? (
-                  <ActivityIndicator size="small" color={Colors.terracotta} />
+                  <ActivityIndicator size="small" color={EventSurface.onMedia} />
                 ) : (
                   <>
-                    <Plus size={26} color={Colors.terracotta} strokeWidth={2.5} />
-                    {/* copy to the taste gate (doc 76 §3) */}
-                    <Text style={styles.posterAddLabel}>add the poster</Text>
+                    <Plus size={30} color={EventSurface.onMedia} strokeWidth={2.5} />
+                    {/* copy to the taste gate (§3.1 empty state) */}
+                    <Text style={styles.coverAddLabel}>add your cover</Text>
                     {/* copy to the taste gate */}
-                    <Text style={styles.posterAddHint}>portrait {COVER_ASPECT_LABEL}. it fronts the card and the page.</Text>
+                    <Text style={styles.coverAddHint}>portrait {COVER_ASPECT_LABEL}. it fronts the card and the page.</Text>
                   </>
                 )}
               </TouchableOpacity>
             )}
 
-            <Text style={styles.fieldLabel}>what is it</Text>
-            {/* copy to the taste gate (§3.2 summary): the first thing people
-                read, high on the page and on the card. an empty rectangle here
-                is exactly what §3.0 forbids */}
+            {/* §3.2 title: a name, not a form field (shared editorial field) */}
+            <EditorialTitleField
+              value={title}
+              onChangeText={setTitle}
+              placeholder="sunset rooftop social"
+              label="title"
+              maxLength={120}
+            />
+
+            {/* §3.2 summary: ONE warm line, sized to what it is */}
+            <Text style={styles.fieldLabel}>the one-liner</Text>
             <Text style={styles.fieldHint}>the first warm line people read on your page.</Text>
             <TextInput
-              style={[styles.input, styles.inputMultiline]}
+              style={styles.summaryInput}
               value={description}
               onChangeText={setDescription}
-              multiline
-              maxLength={4000}
+              maxLength={140}
               placeholder="one warm line people read first"
               placeholderTextColor={Colors.inkSoft}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
-            {/* the page body (proposal 70, section 4c): only a saved row
-                has the id the image folder pin needs, so the editor shows
-                in edit mode incl. Drafts; blocks save independently of
-                this form's full-overwrite RPC */}
-            </View>
+            {/* §3.2 mood-board body: PRESENT and obvious on create and edit, not
+                hidden behind an edit-only pill. Text and faq blocks ride the
+                create/save payload and work immediately; photos and video upload
+                into the event's own folder, so they wake once a draft exists. */}
+            <Text style={styles.fieldLabel}>the page itself</Text>
+            <Text style={styles.fieldHint}>photos, the story between them, and your good-to-know cards. this is the body of your page.</Text>
+            <DescriptionBlocksEditor
+              eventId={id ?? ''}
+              blocks={blocks ?? []}
+              onChange={setBlocks}
+              canAddMedia={!!id}
+              /* copy to the taste gate */
+              mediaHint="save a draft first to add photos and video."
+            />
 
-            {editing && !!id && (
-              <>
-                <Text style={styles.sectionHeader}>photos & story</Text>
-                <View style={styles.sectionCard}>
-                  {/* copy to the taste gate (doc 76 §2) */}
-                  <Text style={styles.fieldHint}>the mood board. photos, text between them, and where your good-to-know cards sit.</Text>
-                  <DescriptionBlocksEditor
-                  eventId={id}
-                  blocks={blocks ?? []}
-                  onChange={setBlocks}
-                />
-                </View>
-              </>
-            )}
+            <View style={styles.zoneDivider} />
 
             <Text style={styles.sectionHeader}>when</Text>
             <View style={styles.sectionCard}>
@@ -1076,7 +1075,21 @@ const styles = StyleSheet.create({
     color: Colors.darkWarm,
     marginBottom: 18,
   },
-  inputMultiline: { minHeight: 110, textAlignVertical: 'top', lineHeight: 21 },
+  // §3.2 summary lives in the open cream page-zone, so it carries a white
+  // card surface to stay legible (the logistics inputs sit on white cards
+  // already and keep the parchment fill)
+  summaryInput: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+    marginBottom: 18,
+  },
   pickerBlock: { marginBottom: 14 },
   clearTimeLink: {
     fontFamily: Fonts.sansMedium,
@@ -1085,21 +1098,24 @@ const styles = StyleSheet.create({
     marginTop: 8,
     alignSelf: 'flex-end',
   },
-  poster: { width: '100%', height: POSTER_HEIGHT, borderRadius: 14, marginBottom: 18 },
-  posterAdd: {
+  // §3.1 cover: the page's face. doc 80 makes media the ONE warm-dark
+  // surface, so the empty drop-zone is dark cream-on-warm, reading as the
+  // hero of a page rather than another grey form field.
+  cover: { width: '100%', height: POSTER_HEIGHT, borderRadius: 16, marginBottom: EventSpacing.md },
+  coverAdd: {
     height: POSTER_HEIGHT,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: Colors.terracotta,
-    backgroundColor: Colors.parchment,
+    borderRadius: 16,
+    backgroundColor: EventSurface.media,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 18,
-    gap: 6,
+    marginBottom: EventSpacing.md,
+    gap: 8,
+    paddingHorizontal: 24,
   },
-  posterAddLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
-  posterAddHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.tertiary },
+  coverAddLabel: { fontFamily: Fonts.display, fontSize: FontSizes.displaySM, color: EventSurface.onMedia },
+  coverAddHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventSurface.onMediaMuted, textAlign: 'center' },
+  // the seam between the open editorial page-zone and the logistics cards
+  zoneDivider: { height: 1, backgroundColor: Colors.border, marginTop: EventSpacing.lg, marginBottom: EventSpacing.xs },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   chip: {
     borderRadius: 999,
