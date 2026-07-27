@@ -1293,7 +1293,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
     color: Colors.asphalt,
   },

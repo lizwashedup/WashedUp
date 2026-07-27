@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   warmTitle: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
   },

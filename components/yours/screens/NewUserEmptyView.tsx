@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
   },
   content: { paddingTop: 32, paddingBottom: 32 },
   title: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     textAlign: 'center',

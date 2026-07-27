@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  modalTitle: { fontFamily: Fonts.displayItalic, fontSize: 22, color: Colors.darkWarm },
+  modalTitle: { fontFamily: Fonts.display, fontSize: 22, color: Colors.darkWarm },
   modalHeaderSpacer: { width: 24 },
   acContainer: { flex: 0, paddingHorizontal: 16, paddingTop: 14 },
   acInputContainer: { backgroundColor: 'transparent' },

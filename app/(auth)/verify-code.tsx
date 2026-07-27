@@ -499,8 +499,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.displayBold,
   },
   heroItalic: {
-    fontFamily: Fonts.displayItalic,
-    fontStyle: 'italic',
+    fontFamily: Fonts.display,
   },
   subline: {
     fontFamily: Fonts.sans,

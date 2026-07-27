@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
   },
   ampersand: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: KEEP.ampersandSize,
     color: Colors.terracotta,
     marginHorizontal: 2,
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
     textAlign: 'center',
   },
-  headlineName: { fontFamily: Fonts.displayItalic, color: Colors.terracotta },
+  headlineName: { fontFamily: Fonts.display, color: Colors.terracotta },
   subline: {
     marginTop: 4,
     fontFamily: Fonts.sans,

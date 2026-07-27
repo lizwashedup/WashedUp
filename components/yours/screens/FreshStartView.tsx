@@ -56,7 +56,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   title: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
   },
@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
   },
   cardPrimary: { paddingVertical: 22 },
   count: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
     color: Colors.terracotta,
   },

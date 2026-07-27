@@ -1317,7 +1317,7 @@ const styles = StyleSheet.create({
   plansSection: { marginTop: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
   plansSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   plansSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
-  noPlansText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, fontStyle: 'italic' },
+  noPlansText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray },
   planCard: {
     backgroundColor: Colors.white,
     borderRadius: 12,

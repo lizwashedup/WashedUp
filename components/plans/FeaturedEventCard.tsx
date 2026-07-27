@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   birthdaySubtitle: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.bodySM,
     color: Colors.warmGray,
     marginTop: -4,
@@ -397,7 +397,6 @@ const styles = StyleSheet.create({
   creatorNote: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
-    fontStyle: 'italic',
     color: Colors.warmGray,
     marginBottom: 8,
   },

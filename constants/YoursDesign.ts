@@ -292,7 +292,7 @@ export const SHIMMER = {
 // Typography.ts tokens.
 export const TYPE = {
   heroDisplay: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: 20,
     lineHeight: 26,
   },

@@ -609,7 +609,7 @@ const styles = StyleSheet.create({
   logo: { width: 44, height: 44, borderRadius: 999 },
   tagline: {
     flex: 1,
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.bodyLG,
     color: Colors.darkWarm,
     lineHeight: LineHeights.bodyLG,

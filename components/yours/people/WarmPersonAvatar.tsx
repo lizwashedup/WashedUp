@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   sub: { fontSize: FontSizes.micro, marginTop: 5, textAlign: 'center' },
-  quiet: { color: Colors.tertiary, fontStyle: 'italic', fontFamily: Fonts.sans },
+  quiet: { color: Colors.tertiary, fontFamily: Fonts.sans },
   milestone: { color: Colors.asphalt, fontFamily: Fonts.sansBold },
   count: { color: Colors.tertiary, fontFamily: Fonts.sans },
   upPill: {

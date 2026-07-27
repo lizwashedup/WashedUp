@@ -1030,7 +1030,7 @@ const styles = StyleSheet.create({
     paddingLeft: 12, paddingVertical: 4,
   },
   noteInput: {
-    fontFamily: Fonts.displayItalic, fontSize: FontSizes.bodyMD,
+    fontFamily: Fonts.display, fontSize: FontSizes.bodyMD,
     color: Colors.textMedium, lineHeight: 22, minHeight: 22,
   },
   emptyGrid: { paddingHorizontal: 24, paddingVertical: 48, alignItems: 'center', gap: 6 },

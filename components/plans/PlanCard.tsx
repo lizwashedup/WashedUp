@@ -815,7 +815,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   birthdaySubtitle: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.bodySM,
     color: Colors.warmGray,
     marginTop: -2,
@@ -828,7 +828,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   quoteText: {
-    fontStyle: 'italic',
     fontSize: 13,
     color: Colors.quoteText,
     lineHeight: 19,

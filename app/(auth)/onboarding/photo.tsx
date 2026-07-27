@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   headingSans: { fontFamily: Fonts.headline },
-  headingItalic: { fontFamily: Fonts.displayItalic, fontStyle: 'italic' },
+  headingItalic: { fontFamily: Fonts.display },
 
   subline: {
     fontFamily: Fonts.sans,

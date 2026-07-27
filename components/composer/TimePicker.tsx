@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
 
   overlay: { flex: 1, backgroundColor: Colors.overlayDark40, justifyContent: 'flex-end' },
   sheet: { backgroundColor: Colors.cream, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 18 },
-  sheetTitle: { fontFamily: Fonts.displayItalic, fontSize: 22, color: Colors.darkWarm, marginBottom: 16 },
+  sheetTitle: { fontFamily: Fonts.display, fontSize: 22, color: Colors.darkWarm, marginBottom: 16 },
   columns: { flexDirection: 'row', gap: 12, height: 180 },
   col: { flex: 1, backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
   opt: { paddingVertical: 10, alignItems: 'center' },

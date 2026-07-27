@@ -38,7 +38,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   wordmark: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
     color: Colors.asphalt,
   },

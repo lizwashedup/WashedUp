@@ -2533,12 +2533,11 @@ const chatStyles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
   },
-  readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, fontStyle: 'italic' },
+  readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
   countdownText: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
-    fontStyle: 'italic',
     textAlign: 'center',
     paddingVertical: 6,
     borderTopWidth: 1,

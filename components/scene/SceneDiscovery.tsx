@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   headerTitle: { fontFamily: Fonts.display, fontSize: FontSizes.displayLG, color: Colors.darkWarm },
-  headerTitleItalic: { fontFamily: Fonts.displayItalic },
+  headerTitleItalic: { fontFamily: Fonts.display },
   content: { padding: 20, paddingBottom: 60 },
   sectionLabel: {
     fontFamily: Fonts.sansBold,

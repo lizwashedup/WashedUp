@@ -592,7 +592,6 @@ const styles = StyleSheet.create({
   countdownText: {
     fontSize: 12,
     color: '#78695C',
-    fontStyle: 'italic',
     marginTop: 2,
   },
   separator: { height: 1, backgroundColor: '#F5EDE0', marginLeft: 84 },

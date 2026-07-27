@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   prompt: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displaySM,
     color: Colors.asphalt,
   },

@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     paddingBottom: D.laterBottomGap,
   },
   headline: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: D.headlineSize,
     lineHeight: D.headlineLineHeight,
     color: Colors.terracotta,

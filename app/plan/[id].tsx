@@ -3019,7 +3019,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   birthdaySubtitle: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.bodyMD,
     color: Colors.warmGray,
     marginTop: 6,

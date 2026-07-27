@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cream,
   },
   monogram: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     color: Colors.terracotta,
     includeFontPadding: false,
   },

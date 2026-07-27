@@ -365,7 +365,7 @@ const styles = StyleSheet.create({
   },
 
   closing: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displaySM,
     color: Colors.tertiary,
     textAlign: 'center',
@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
   },
   emptyBlock: { alignItems: 'center', marginTop: 40, paddingHorizontal: 32, gap: 14 },
   emptyHeadline: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displaySM,
     color: Colors.secondary,
     textAlign: 'center',

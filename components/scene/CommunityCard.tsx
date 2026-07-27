@@ -100,7 +100,6 @@ const styles = StyleSheet.create({
   message: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
-    fontStyle: 'italic',
     color: Colors.quoteText,
     borderLeftWidth: 2,
     borderLeftColor: Colors.goldAccent,

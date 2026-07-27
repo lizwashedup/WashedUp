@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   blockWrap: { flex: 1, justifyContent: 'center' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayMD,
     color: Colors.secondary,
     textAlign: 'center',

@@ -193,7 +193,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.caption,
     color: Colors.tertiary,
-    fontStyle: 'italic',
   },
   // Milestone celebration: bold count + a small gold Sparkles mark (gold as a
   // decorative icon, never gold text) + the card's gold top-accent.

@@ -2184,7 +2184,7 @@ const styles = StyleSheet.create({
   placesField: { zIndex: 100, elevation: 100 },
   label: { fontSize: FontSizes.bodyMD, fontFamily: Fonts.sansMedium, color: Colors.textMedium, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  labelOptional: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sans, color: Colors.textLight, fontStyle: 'italic' },
+  labelOptional: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sans, color: Colors.textLight },
   charCount: { fontSize: FontSizes.bodySM, fontFamily: Fonts.sans, color: Colors.textLight },
 
   input: {

@@ -99,14 +99,14 @@ const styles = StyleSheet.create({
     width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: Colors.terracotta,
     alignItems: 'center', justifyContent: 'center', marginBottom: 22,
   },
-  headline: { fontFamily: Fonts.displayItalic, fontSize: 30, color: Colors.darkWarm, textAlign: 'center', lineHeight: 34 },
-  headlineSecond: { fontFamily: Fonts.displayItalic, fontSize: 30, color: Colors.darkWarm, textAlign: 'center', lineHeight: 34, marginTop: -2 },
+  headline: { fontFamily: Fonts.display, fontSize: 30, color: Colors.darkWarm, textAlign: 'center', lineHeight: 34 },
+  headlineSecond: { fontFamily: Fonts.display, fontSize: 30, color: Colors.darkWarm, textAlign: 'center', lineHeight: 34, marginTop: -2 },
   sub: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, textAlign: 'center', lineHeight: 22, marginTop: 12, maxWidth: 280 },
   planCard: {
     width: '100%', backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
     borderRadius: 16, paddingHorizontal: 16, paddingVertical: 16, marginTop: 22,
   },
-  planTitle: { fontFamily: Fonts.displayItalic, fontSize: 19, color: Colors.darkWarm },
+  planTitle: { fontFamily: Fonts.display, fontSize: 19, color: Colors.darkWarm },
   planMeta: { fontFamily: Fonts.sans, fontSize: 13, color: Colors.secondary, marginTop: 4, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 20 },
   shareBtn: {

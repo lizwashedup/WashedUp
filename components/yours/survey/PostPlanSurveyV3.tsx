@@ -934,7 +934,7 @@ const styles = StyleSheet.create({
   planContext: { ...StyleSheet.absoluteFillObject },
   cardBehindWrap: { paddingHorizontal: 20 },
   cardBehindEyebrow: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
     color: Colors.asphalt,
     marginBottom: 12,
@@ -953,7 +953,7 @@ const styles = StyleSheet.create({
   cardBehindImgFallback: { backgroundColor: Colors.yoursGhostBg },
   cardBehindBody: { flex: 1, minWidth: 0 },
   cardBehindTitle: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displaySM,
     color: Colors.asphalt,
   },
@@ -995,7 +995,7 @@ const styles = StyleSheet.create({
     color: Colors.tertiary,
   },
   title: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
     color: Colors.asphalt,
     marginTop: 4,
@@ -1139,7 +1139,7 @@ const styles = StyleSheet.create({
 
   // ── Step 3 keep chips ──
   keepHeadline: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     lineHeight: 28,
@@ -1210,7 +1210,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   toastTitle: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displaySM,
     color: Colors.white,
     lineHeight: 26,

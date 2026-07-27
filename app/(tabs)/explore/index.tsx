@@ -409,7 +409,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.secondary,
     textAlign: 'center',
-    fontStyle: 'italic',
   },
   nudgeLinkWrap: {
     marginTop: 12,

@@ -56,7 +56,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: 28,
     lineHeight: 32,
     color: Colors.darkWarm,

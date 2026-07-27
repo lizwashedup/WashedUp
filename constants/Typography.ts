@@ -10,7 +10,6 @@
 export const Fonts = {
   display: 'CormorantGaramond_400Regular',
   displayBold: 'CormorantGaramond_700Bold',
-  displayItalic: 'CormorantGaramond_400Regular_Italic',
   headline: 'PlusJakartaSans_700Bold',
   headlineMedium: 'PlusJakartaSans_500Medium',
   sans: 'DMSans_400Regular',

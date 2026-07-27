@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
   scroll: { paddingBottom: 48, paddingTop: 8 },
 
   notFound: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displaySM,
     color: Colors.tertiary,
   },
@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
     color: Colors.terracotta,
   },
   name: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
     color: Colors.terracotta,
     textAlign: 'center',
@@ -637,7 +637,7 @@ const styles = StyleSheet.create({
 
   keepLink: { alignSelf: 'center', marginTop: 16, paddingVertical: 4 },
   keepLinkText: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.bodyLG,
     color: Colors.secondary,
   },
@@ -709,7 +709,7 @@ const styles = StyleSheet.create({
 
   emptyBlock: { alignItems: 'center', marginTop: 36, paddingHorizontal: 32 },
   emptyHeadline: {
-    fontFamily: Fonts.displayItalic,
+    fontFamily: Fonts.display,
     fontSize: FontSizes.displaySM,
     color: Colors.secondary,
     textAlign: 'center',

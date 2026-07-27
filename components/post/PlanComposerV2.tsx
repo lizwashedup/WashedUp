@@ -876,7 +876,11 @@ export default function PlanComposerV2() {
           <Text style={styles.cancel}>cancel</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>new plan</Text>
-        <TouchableOpacity onPress={handleSubmit} disabled={!canPost} hitSlop={12}>
+        {/* Stays tappable when the form is incomplete so handleSubmit can surface
+            the "Almost there, a couple things first" list. Only a genuine
+            in-flight post (loading/imageLoading) blocks the tap; the greyed
+            look is still keyed to !canPost. */}
+        <TouchableOpacity onPress={handleSubmit} disabled={loading || imageLoading} hitSlop={12}>
           <Text style={[styles.postInline, !canPost && styles.postInlineOff]}>post</Text>
         </TouchableOpacity>
       </View>
@@ -1177,7 +1181,7 @@ export default function PlanComposerV2() {
         <TouchableOpacity
           style={[styles.postBtn, !canPost && styles.postBtnOff]}
           onPress={handleSubmit}
-          disabled={!canPost}
+          disabled={loading || imageLoading}
           activeOpacity={0.85}
         >
           {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.postBtnText}>post the plan</Text>}
@@ -1432,7 +1436,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
     paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12,
   },
-  summaryTitle: { fontFamily: Fonts.displayItalic, fontSize: 16, color: Colors.darkWarm },
+  summaryTitle: { fontFamily: Fonts.display, fontSize: 16, color: Colors.darkWarm },
   summaryMeta: { fontFamily: Fonts.sans, fontSize: 13, color: Colors.secondary, marginTop: 2 },
   postBtn: {
     backgroundColor: Colors.terracotta, borderRadius: 14, paddingVertical: 15, alignItems: 'center',
@@ -1447,7 +1451,7 @@ const styles = StyleSheet.create({
   // Modals
   modalOverlay: { flex: 1, backgroundColor: Colors.overlayDark40, justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: Colors.cream, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 18 },
-  modalTitle: { fontFamily: Fonts.displayItalic, fontSize: 22, color: Colors.darkWarm, marginBottom: 16 },
+  modalTitle: { fontFamily: Fonts.display, fontSize: 22, color: Colors.darkWarm, marginBottom: 16 },
   modalConfirm: { backgroundColor: Colors.terracotta, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
   modalConfirmText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   timeColumns: { flexDirection: 'row', gap: 12, height: 180 },

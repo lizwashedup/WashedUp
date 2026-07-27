@@ -277,8 +277,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.headline,
   },
   headlineItalic: {
-    fontFamily: Fonts.displayItalic,
-    fontStyle: 'italic',
+    fontFamily: Fonts.display,
     color: Colors.brand,
     textDecorationLine: 'underline',
     textDecorationColor: Colors.brand,
