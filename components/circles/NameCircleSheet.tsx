@@ -216,7 +216,7 @@ export default function NameCircleSheet({
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: Colors.overlayDark40 },
   backdropTap: { flex: 1 },
   sheet: {
     backgroundColor: Colors.parchment,
