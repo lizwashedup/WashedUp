@@ -1494,7 +1494,7 @@ const styles = StyleSheet.create({
     color: Colors.warmGray,
   },
   handleAvailability: { marginTop: 6, marginBottom: 4 },
-  handleAvailable: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.successGreen, marginTop: 6, marginBottom: 4 },
+  handleAvailable: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.gold, marginTop: 6, marginBottom: 4 },
   handleTaken: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 6, marginBottom: 4 },
   editHelp: {
     fontFamily: Fonts.sans,

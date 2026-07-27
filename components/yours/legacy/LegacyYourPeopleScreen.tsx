@@ -1410,7 +1410,7 @@ const styles = StyleSheet.create({
     textAlign: 'left',
   },
   handleAvailability: { marginTop: 6, marginBottom: 4 },
-  handleAvailable: { fontSize: FontSizes.caption, color: Colors.successGreen, fontFamily: Fonts.sansMedium, marginTop: 6, marginBottom: 4 },
+  handleAvailable: { fontSize: FontSizes.caption, color: Colors.gold, fontFamily: Fonts.sansMedium, marginTop: 6, marginBottom: 4 },
   handleTaken: { fontSize: FontSizes.caption, color: Colors.errorRed, fontFamily: Fonts.sansMedium, marginTop: 6, marginBottom: 4 },
   handleError: { fontSize: FontSizes.bodySM, color: Colors.errorRed, marginBottom: 8 },
   saveHandleBtn: {
@@ -1522,7 +1522,7 @@ const styles = StyleSheet.create({
   invitePlanAttendingLabel: {
     fontSize: FontSizes.caption,
     fontFamily: Fonts.sansMedium,
-    color: Colors.successGreen,
+    color: Colors.gold,
     paddingHorizontal: 8,
     paddingVertical: 2,
     backgroundColor: Colors.inputBg,

@@ -25,7 +25,7 @@ const brand = {
   inputBg: '#F0EBE3', // Input field background
 
   // ── Semantic ─────────────────────────────────────────────────────────────
-  successGreen: '#4CAF50',
+  // no successGreen: success is the gold family, never green (Golden Hour v2.0)
   goingConfirmedFill: 'rgba(197,165,90,0.28)', // gold #C5A55A @ 28%: confirmed "Going" affirmation fill (warm success, NOT green); mirrors surveyChipFill
   errorRed: '#E53935',
   errorBgLight: '#FEE2E2',
