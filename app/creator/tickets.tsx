@@ -326,6 +326,21 @@ export default function TicketSetupScreen() {
               <Text style={styles.payoutMeta}>
                 stripe handles your bank details and identity. washedup never sees them.
               </Text>
+              {payout && payout.requirementsDue.length > 0 && (
+                <View style={styles.payoutDueBox}>
+                  {/* copy to the taste gate: the specific asks, never a vague
+                      sentence (P4). Labels come from describeStripeRequirement. */}
+                  <Text style={styles.payoutDueTitle}>stripe still needs</Text>
+                  {payout.requirementsDue.map((label) => (
+                    <Text key={label} style={styles.payoutDueItem}>· {label}</Text>
+                  ))}
+                </View>
+              )}
+              {payout && payout.exists && payout.detailsSubmitted && payout.requirementsDue.length === 0 && (
+                /* copy to the taste gate: submitted, capabilities not granted
+                   yet, nothing listed as due = Stripe is reviewing */
+                <Text style={styles.payoutMeta}>everything is in. stripe is taking a last look.</Text>
+              )}
               <TouchableOpacity style={styles.payoutBtn} onPress={handleOnboard} activeOpacity={0.85}>
                 {onboardBusy ? (
                   <ActivityIndicator size="small" color={Colors.white} />
@@ -590,6 +605,15 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   payoutBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
+  payoutDueBox: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 3,
+  },
+  payoutDueTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt },
+  payoutDueItem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 4 },
   sectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },

@@ -139,12 +139,63 @@ export interface PayoutState {
   payoutsEnabled: boolean;
   detailsSubmitted: boolean;
   commissionBps: number;
+  /** human labels for what Stripe still needs (currently_due + past_due) */
+  requirementsDue: string[];
+}
+
+/**
+ * requirements_due stores the FULL Stripe `requirements` object (the drain
+ * writes `obj.requirements ?? {}` on account.updated, read 2026-07-27), so
+ * the outstanding items are its currently_due + past_due string arrays.
+ * Read defensively: the column can be {}, or an older row could hold a bare
+ * array; anything unrecognized yields [].
+ */
+function extractDueKeys(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object') return [];
+  const lists = Array.isArray(raw)
+    ? [raw]
+    : [(raw as { past_due?: unknown }).past_due, (raw as { currently_due?: unknown }).currently_due];
+  const keys = new Set<string>();
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const k of list) if (typeof k === 'string' && k) keys.add(k);
+  }
+  return [...keys];
+}
+
+/**
+ * A Stripe requirement key ("individual.verification.document"), said like a
+ * person. Substring-matched against the known shapes Express onboarding
+ * actually asks for; the fallback humanizes the key's last segment so an
+ * unmapped requirement still names itself instead of vanishing into a vague
+ * sentence. All labels are LIZ COPY at the taste gate.
+ */
+export function describeStripeRequirement(key: string): string {
+  const k = key.toLowerCase();
+  /* copy to the taste gate: every label below */
+  if (k.includes('external_account')) return 'a bank account for payouts';
+  if (k.includes('verification.additional_document')) return 'one more verification document';
+  if (k.includes('verification.document')) return 'a photo id';
+  if (k.includes('id_number') || k.includes('ssn_last_4')) return 'an id number (like an ssn)';
+  if (k.includes('.dob')) return 'date of birth';
+  if (k.includes('.address')) return 'a mailing address';
+  if (k.includes('first_name') || k.includes('last_name')) return 'legal name';
+  if (k.includes('.email')) return 'an email address';
+  if (k.includes('.phone')) return 'a phone number';
+  if (k.includes('tos_acceptance')) return "agreeing to stripe's terms";
+  if (k.includes('business_profile.url')) return 'a website or social link';
+  if (k.includes('business_profile.mcc') || k.includes('business_profile.product_description')) {
+    return 'what kind of thing you sell';
+  }
+  if (k.includes('business_type')) return 'individual or company';
+  const last = key.replace(/\[\d+\]/g, '').split('.').pop() ?? key;
+  return last.replace(/_/g, ' ');
 }
 
 export async function getMyPayoutState(userId: string): Promise<PayoutState> {
   const { data, error } = await supabase
     .from('organizer_stripe_accounts')
-    .select('charges_enabled, payouts_enabled, details_submitted, commission_bps')
+    .select('charges_enabled, payouts_enabled, details_submitted, commission_bps, requirements_due')
     .eq('user_id', userId)
     .maybeSingle();
   if (error || !data) {
@@ -154,14 +205,18 @@ export async function getMyPayoutState(userId: string): Promise<PayoutState> {
       payoutsEnabled: false,
       detailsSubmitted: false,
       commissionBps: FALLBACK_COMMISSION_BPS,
+      requirementsDue: [],
     };
   }
+  // dedupe after labeling: two keys can share one human label
+  const labels = [...new Set(extractDueKeys(data.requirements_due).map(describeStripeRequirement))];
   return {
     exists: true,
     chargesEnabled: !!data.charges_enabled,
     payoutsEnabled: !!data.payouts_enabled,
     detailsSubmitted: !!data.details_submitted,
     commissionBps: data.commission_bps ?? FALLBACK_COMMISSION_BPS,
+    requirementsDue: labels,
   };
 }
 
