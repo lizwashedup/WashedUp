@@ -197,6 +197,23 @@ export default function CreatorMenuScreen() {
           </>
         )}
 
+        {/* getting paid (7-27 ship ruling item 4, web-menu parity): the
+            payouts front door, for BOTH host types, no event needed */}
+        {/* LIZ COPY (proposed, taste gate) */}
+        <Text style={styles.sectionLabel}>money</Text>
+        <TouchableOpacity
+          style={styles.organizerCard}
+          onPress={() => router.push('/creator/payouts' as never)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.organizerBody}>
+            {/* LIZ COPY (proposed, taste gate; mirrors web's menu row) */}
+            <Text style={styles.organizerName}>getting paid</Text>
+            <Text style={styles.organizerMeta}>set up payouts with stripe, before or after your first event.</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
+        </TouchableOpacity>
+
         {isAdmin(myUserId) && !viewingAsEventHost && (
           <TouchableOpacity
             style={styles.adminViewAs}

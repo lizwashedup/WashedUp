@@ -51,6 +51,7 @@ import {
   type TicketTier,
   type TierDraft,
 } from '../../lib/ticketing';
+import { PayoutsCard } from '../../components/creator/PayoutsCard';
 import { TierEditorSheet } from '../../components/creator/TierEditorSheet';
 import { QuestionEditorSheet, type QuestionDraft } from '../../components/creator/QuestionEditorSheet';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -307,52 +308,9 @@ export default function TicketSetupScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {!!event && <Text style={styles.eventTitle}>{event.title}</Text>}
 
-        {/* payouts (doc 61 §2: Stripe Express hosts everything) */}
-        <View style={styles.payoutCard}>
-          {payoutReady ? (
-            <>
-              {/* copy to the taste gate */}
-              <Text style={styles.payoutTitle}>payouts are set up</Text>
-              <Text style={styles.payoutMeta}>
-                your rate is locked at {((payout?.commissionBps ?? 0) / 100).toFixed(payout && payout.commissionBps % 100 === 0 ? 0 : 2)}% per paid ticket.
-              </Text>
-            </>
-          ) : (
-            <>
-              {/* copy to the taste gate */}
-              <Text style={styles.payoutTitle}>
-                {payout?.exists ? 'finish setting up payouts' : 'set up payouts'}
-              </Text>
-              <Text style={styles.payoutMeta}>
-                stripe handles your bank details and identity. washedup never sees them.
-              </Text>
-              {payout && payout.requirementsDue.length > 0 && (
-                <View style={styles.payoutDueBox}>
-                  {/* copy to the taste gate: the specific asks, never a vague
-                      sentence (P4). Labels come from describeStripeRequirement. */}
-                  <Text style={styles.payoutDueTitle}>stripe still needs</Text>
-                  {payout.requirementsDue.map((label) => (
-                    <Text key={label} style={styles.payoutDueItem}>· {label}</Text>
-                  ))}
-                </View>
-              )}
-              {payout && payout.exists && payout.detailsSubmitted && payout.requirementsDue.length === 0 && (
-                /* copy to the taste gate: submitted, capabilities not granted
-                   yet, nothing listed as due = Stripe is reviewing */
-                <Text style={styles.payoutMeta}>everything is in. stripe is taking a last look.</Text>
-              )}
-              <TouchableOpacity style={styles.payoutBtn} onPress={handleOnboard} activeOpacity={0.85}>
-                {onboardBusy ? (
-                  <ActivityIndicator size="small" color={Colors.white} />
-                ) : (
-                  <Text style={styles.payoutBtnText}>
-                    {payout?.exists ? 'continue with stripe' : 'start with stripe'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
+        {/* payouts (doc 61 §2): the SAME card as the standalone getting-paid
+            front door, so the two never drift (7-27 item 4) */}
+        <PayoutsCard payout={payout} onboardBusy={onboardBusy} onOnboard={handleOnboard} />
 
         {/* tiers */}
         <View style={styles.sectionHeader}>
@@ -586,34 +544,6 @@ const styles = StyleSheet.create({
   headerSpacer: { flex: 1 },
   content: { padding: 20, paddingBottom: 40, gap: 10 },
   eventTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt, marginBottom: 4 },
-  payoutCard: {
-    backgroundColor: Colors.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 16,
-    gap: 8,
-    marginBottom: 8,
-  },
-  payoutTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  payoutMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, lineHeight: 19 },
-  payoutBtn: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  payoutBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
-  payoutDueBox: {
-    backgroundColor: Colors.inputBg,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 3,
-  },
-  payoutDueTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt },
-  payoutDueItem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 4 },
   sectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
