@@ -10,6 +10,7 @@
  * (available:false); it wakes on the re-cut apply with no client deploy.
  */
 
+import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
 
 /** PostgREST "relation does not exist": the proposal is not applied. */
@@ -575,9 +576,17 @@ function humanCheckoutError(raw: string | null | undefined): string {
 }
 
 export async function startTicketCheckout(tierId: string, qty: number): Promise<CheckoutResult> {
+  // 87 F1 idempotency (Cowork 7-27): ONE stable checkout_key per user
+  // checkout action, minted here because one call IS one action today (the
+  // sheet's tap runs a single invoke, no auto-retry). A new tap = a new
+  // key by construction. If retry logic is ever added, it belongs INSIDE
+  // this function, reusing this same key. v7 of the edge fn ignores the
+  // field; v8 passes it to begin_ticket_checkout so a retried action lands
+  // on one hold and one order.
+  const checkoutKey = Crypto.randomUUID();
   const { data, error } = await supabase.functions.invoke('create-ticket-checkout', {
     // origin drives the Stripe success/cancel return; the fn allow-lists it
-    body: { tier_id: tierId, qty, origin: 'https://washedup.app' },
+    body: { tier_id: tierId, qty, origin: 'https://washedup.app', checkout_key: checkoutKey },
   });
   if (error) {
     // functions.invoke surfaces non-2xx as an error with the JSON body. That
