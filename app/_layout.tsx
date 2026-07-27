@@ -5,7 +5,6 @@ import { useFonts } from 'expo-font';
 import {
   CormorantGaramond_400Regular,
   CormorantGaramond_700Bold,
-  CormorantGaramond_400Regular_Italic,
 } from '@expo-google-fonts/cormorant-garamond';
 import {
   DMSans_400Regular,
@@ -146,7 +145,6 @@ function RootLayout() {
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     CormorantGaramond_400Regular,
     CormorantGaramond_700Bold,
-    CormorantGaramond_400Regular_Italic,
     DMSans_400Regular,
     DMSans_500Medium,
     DMSans_600SemiBold,
