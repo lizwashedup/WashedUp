@@ -37,7 +37,7 @@ import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPo
 import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 import { getCommunityPage, getMemberFaces, type CommunityPageEvent } from '../../lib/communityPage';
 import { getLeaderCards } from '../../lib/communityLeader';
-import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
+import { getJoinGate, getMyMembership, leaveCommunity } from '../../lib/communityJoin';
 import { getCommunityChatPayload, joinTopic } from '../../lib/communityChat';
 import { formatEventDateLA } from '../../lib/laDate';
 import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
@@ -342,6 +342,34 @@ export default function CommunityPageScreen() {
     }
   }
 
+  const handleLeave = () => {
+    if (!id) return;
+    setAlertInfo({
+      /* copy to the taste gate */
+      title: 'leave this community?',
+      message: 'you can ask to join again later.',
+      buttons: [
+        { text: 'stay', style: 'cancel' },
+        {
+          text: 'leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await leaveCommunity(id);
+              queryClient.invalidateQueries({ queryKey: ['community-membership', id] });
+              queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+              queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
+              router.back();
+            } catch (e) {
+              // the RPC's last-leader guard raises here; surface it, do not swallow
+              setAlertInfo({ title: 'still here', message: friendlyError(e, 'You could not leave right now.') });
+            }
+          },
+        },
+      ],
+    });
+  };
+
   const memberBlocks = page.blocks.filter((b) => b.id !== heroBlock?.id).map(renderBlock);
 
   return (
@@ -441,6 +469,13 @@ export default function CommunityPageScreen() {
                 </View>
               ))}
             </View>
+          )}
+
+          {isMember && !previewMode && membership?.status === 'active' && (
+            <TouchableOpacity onPress={handleLeave} hitSlop={8} style={styles.leaveWrap} accessibilityRole="button">
+              {/* copy to the taste gate */}
+              <Text style={styles.leaveLink}>leave community</Text>
+            </TouchableOpacity>
           )}
 
           {!isMember && (
@@ -624,6 +659,9 @@ const styles = StyleSheet.create({
   },
   bodyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
   quietLine: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 4 },
+  // leaving is a quiet action, never the terracotta accent
+  leaveWrap: { alignItems: 'center', marginTop: 28, paddingVertical: 12 },
+  leaveLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary },
   emptyLine: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary },
   // poster-led event rows (slice-1 compact-card language): thumb, words in
   // their own zone, the house separator in the meta line

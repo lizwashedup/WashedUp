@@ -71,6 +71,16 @@ export async function requestToJoinCommunity(communityId: string, answers: JoinA
   if (error) throw error;
 }
 
+/**
+ * Leave a community. The prod RPC has a last-leader guard: the sole leader
+ * cannot walk out on a community, so it raises there and the caller surfaces
+ * that message. Anyone else leaves cleanly.
+ */
+export async function leaveCommunity(communityId: string): Promise<void> {
+  const { error } = await supabase.rpc('leave_community', { p_community_id: communityId });
+  if (error) throw error;
+}
+
 /** My own join answers (self-readable by RLS); the intro seeds the empty thread. */
 export async function getMyIntroAnswer(communityId: string): Promise<string | null> {
   const { data: { user } } = await supabase.auth.getUser();

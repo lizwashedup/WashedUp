@@ -26,6 +26,8 @@ import { ArrowLeft, Bell, BellOff } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
+import { ReportModal } from '../../components/modals/ReportModal';
+import { useBlock } from '../../hooks/useBlock';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
@@ -48,6 +50,9 @@ export default function CommunityTopicScreen() {
   const [sending, setSending] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+  const [showReport, setShowReport] = useState(false);
+  const { blockUser } = useBlock();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
@@ -135,6 +140,21 @@ export default function CommunityTopicScreen() {
     }
   };
 
+  // report / block a member from a long-press on their message (mirrors chat).
+  // Blocking refetches so their messages drop out via the block filter.
+  const openMemberMenu = (userId: string, name: string) => {
+    if (!userId || userId === myId) return;
+    hapticLight();
+    setAlertInfo({
+      title: name,
+      buttons: [
+        { text: 'report', onPress: () => { setReportTarget({ id: userId, name }); setShowReport(true); } },
+        { text: 'block', style: 'destructive', onPress: () => blockUser(userId, name, () => queryClient.invalidateQueries({ queryKey: messagesKey })) },
+        { text: 'cancel', style: 'cancel' },
+      ],
+    });
+  };
+
   const renderMessage = ({ item }: { item: TopicMessage }) => {
     const mine = item.sender_id === myId;
     return (
@@ -146,10 +166,15 @@ export default function CommunityTopicScreen() {
             <Text style={styles.faceInitial}>{(item.sender_name ?? '?').slice(0, 1).toLowerCase()}</Text>
           </View>
         ))}
-        <View style={[styles.bubble, mine && styles.bubbleMine]}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onLongPress={() => !mine && openMemberMenu(item.sender_id, item.sender_name ?? 'someone')}
+          style={[styles.bubble, mine && styles.bubbleMine]}
+          accessibilityHint={!mine ? 'hold to report or block' : undefined}
+        >
           {!mine && <Text style={styles.senderName}>{item.sender_name ?? 'someone'}</Text>}
           <Text style={[styles.messageText, mine && styles.messageTextMine]}>{item.body}</Text>
-        </View>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -223,6 +248,15 @@ export default function CommunityTopicScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {reportTarget && (
+        <ReportModal
+          visible={showReport}
+          onClose={() => { setShowReport(false); setReportTarget(null); }}
+          reportedUserId={reportTarget.id}
+          reportedUserName={reportTarget.name}
+        />
+      )}
 
       <BrandedAlert
         visible={!!alertInfo}

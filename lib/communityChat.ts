@@ -11,6 +11,7 @@
 
 import { supabase } from './supabase';
 import { getTodayInLA } from './laDate';
+import { getBlockedWith } from './blocking';
 
 // -- the cards (Chats tab section) ---------------------------------------------
 
@@ -297,7 +298,14 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
     .order('created_at', { ascending: false })
     .limit(30);
   if (error) throw error;
-  const broadcasts = rows ?? [];
+  const fetched = rows ?? [];
+  if (fetched.length === 0) return [];
+
+  // hide messages from anyone blocked (either direction). System cards with a
+  // null sender always stay. This runs for the initial load AND every realtime
+  // refetch (the thread screen invalidates this query on insert).
+  const blocked = await getBlockedWith(user?.id, fetched.map((b) => b.sender_id));
+  const broadcasts = fetched.filter((b) => !b.sender_id || !blocked.has(b.sender_id));
   if (broadcasts.length === 0) return [];
 
   const ids = broadcasts.map((b) => b.id);
@@ -567,6 +575,13 @@ async function attachSenderProfiles<T extends { sender_id: string }>(
   rows: T[],
 ): Promise<(T & { sender_name: string | null; sender_photo: string | null })[]> {
   if (rows.length === 0) return [];
+  // drop messages from anyone blocked (either direction) before doing anything
+  // else. Covers topic messages and broadcast replies (both flow through here).
+  const { data: { user } } = await supabase.auth.getUser();
+  const blocked = await getBlockedWith(user?.id, rows.map((r) => r.sender_id));
+  const shown = blocked.size > 0 ? rows.filter((r) => !blocked.has(r.sender_id)) : rows;
+  if (shown.length === 0) return [];
+  rows = shown;
   const ids = Array.from(new Set(rows.map((r) => r.sender_id)));
   const { data: profiles } = await supabase
     .from('profiles_public')
