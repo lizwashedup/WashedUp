@@ -113,6 +113,9 @@ export default function EventFormScreen() {
   const [seeded, setSeeded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // §3.0 preview: a dedicated in-flight flag so a double-tap cannot fire two
+  // draft-creates, without touching the main save button's spinner
+  const [previewing, setPreviewing] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'problem'>('idle');
 
@@ -546,6 +549,62 @@ export default function EventFormScreen() {
     }
   };
 
+  // §3.0 phone: "preview as guest" opens the real public renderer at
+  // /event/[id]?preview=guest (organizer-gated there). The event needs an id to
+  // navigate to, and the save must be VISIBLE (autosave's savedLine), never
+  // silent - a row made on the user's behalf without them seeing it is the same
+  // failure class as a defaulted policy they never chose.
+  const handlePreview = async () => {
+    // re-entry guard: a double-tap on a brand-new create must not fire two
+    // draft-creates (a duplicate). previewing is dedicated so the main CTA's
+    // spinner is left alone.
+    if (saving || previewing) return;
+    // draft-legal field set; a missing title/category surfaces here so we never
+    // preview an event the public renderer cannot load
+    const fields = collectFields();
+    if (!fields) return;
+    hapticLight();
+    setPreviewing(true);
+    try {
+    if (id) {
+      // an existing DRAFT is safe to flush so the preview is current; a LIVE
+      // event must never be mutated by a preview tap, so it previews its saved
+      // (published) state as-is (the accepted saved-state fidelity call)
+      if (isDraft) {
+        try {
+          setAutosaveState('saving');
+          await updateOperatorEvent(id, fields, null);
+          await syncCoords(id);
+          setAutosaveState('saved');
+        } catch {
+          setAutosaveState('problem');
+        }
+      }
+      router.push(`/event/${id}?preview=guest` as never);
+      return;
+    }
+    // NEW CREATE: no autosave runs until a draft exists, so there is nothing to
+    // flush here - this is a VISIBLE first draft-create through the SAME
+    // createOperatorEvent that "save as a draft" uses (not a new writer). The
+    // replace then makes this screen the draft editor, so a later publish
+    // updates that draft instead of creating a duplicate.
+    const communityId = fromCommunity && community ? community.id : null;
+    try {
+      setAutosaveState('saving');
+      const newId = await createOperatorEvent(fields, communityId, false);
+      await syncCoords(newId);
+      setAutosaveState('saved');
+      router.replace(`/creator/event-form?id=${newId}` as never);
+      router.push(`/event/${newId}?preview=guest` as never);
+    } catch (e) {
+      setAutosaveState('problem');
+      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+    }
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
   const loadingEdit = (editing || !!duplicateFrom) && !seeded;
 
   // The pickers speak CalendarDay and 12-hour parts; the form's canonical
@@ -577,6 +636,12 @@ export default function EventFormScreen() {
           <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
             <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
+          {!loadingEdit && (
+            /* §3.0 phone: persistent "preview as guest" (LIZ COPY, taste gate) */
+            <TouchableOpacity onPress={handlePreview} disabled={saving || previewing} hitSlop={12}>
+              <Text style={styles.previewAction}>preview as guest</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {loadingEdit ? (
@@ -590,8 +655,10 @@ export default function EventFormScreen() {
               /* LIZ COPY */
               <Text style={styles.statusLine}>same event, fresh date. pick the new one.</Text>
             )}
-            {isDraft && autosaveState !== 'idle' && (
-              /* law 19: the organizer can SEE that their work is safe */
+            {autosaveState !== 'idle' && (
+              /* law 19: the organizer can SEE that their work is safe. Shown for
+                 draft autosave AND for a preview-triggered save on a new create,
+                 so a row is never written on their behalf silently */
               <Text style={[styles.savedLine, autosaveState === 'problem' && styles.savedLineProblem]}>
                 {/* copy to the taste gate */}
                 {autosaveState === 'saving'
@@ -944,7 +1011,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 },
+  previewAction: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   content: { padding: 20, paddingBottom: 60 },
   title: {
     fontFamily: Fonts.display,

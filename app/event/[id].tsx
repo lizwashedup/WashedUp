@@ -82,6 +82,9 @@ interface ExploreEvent {
   public_name: string | null;
   community_id: string | null;
   host_user_id: string | null;
+  // guest preview needs the status: a non-Live event renders as a WILL-look
+  // preview (a real guest gets nothing for it under RLS), never a DOES-look one
+  status: string | null;
 }
 
 interface LinkedPlan {
@@ -156,7 +159,10 @@ function venueMapsUrl(venue: string, address: string | null): string {
 }
 
 export default function EventDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // §3.0 guest preview: the creator opens /event/[id]?preview=guest to see the
+  // real public renderer. The param is honored ONLY for the organizer (below),
+  // exactly as the community page gates ?preview to the leader.
+  const { id, preview } = useLocalSearchParams<{ id: string; preview?: string }>();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
@@ -204,7 +210,7 @@ export default function EventDetailScreen() {
     queryFn: async (): Promise<ExploreEvent | null> => {
       const { data, error } = await supabase
         .from('explore_events')
-        .select('id, title, description, description_blocks, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id')
+        .select('id, title, description, description_blocks, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id, status')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -213,6 +219,24 @@ export default function EventDetailScreen() {
     enabled: !!id,
     staleTime: 60_000,
   });
+
+  // §3.0 guest preview, gated to the organizer. host_user_id === viewer covers
+  // the creator (a community event's host_user_id is the leader who posted it);
+  // RLS already blocks anyone else from loading a Draft, so a non-organizer
+  // with the param on a Live event just sees the normal page (param ignored).
+  const isOrganizerViewer = !!userId && !!event?.host_user_id && event.host_user_id === userId;
+  const previewMode = isOrganizerViewer && preview === 'guest';
+  // a non-Live event is not visible to a real guest at all, so the chrome must
+  // promise how it WILL look once published, never claim this is how it looks
+  const previewUnpublished = previewMode && event?.status !== 'Live';
+  // in preview the top strip already clears the status bar, so the hero
+  // controls drop the inset (mirrors the community page's controlTop)
+  const heroControlTop = previewMode ? 8 : insets.top + 8;
+  const showPreviewNotice = useCallback(() => {
+    hapticLight();
+    // LIZ COPY (taste gate): the buttons are inert while previewing
+    setAlertInfo({ title: 'just a preview', message: 'this is how it looks to a guest. the buttons work once it goes up.' });
+  }, []);
 
   // THE CHAT LAW (docs 09 + 21, doc 00 2026-07-21): a community event's
   // conversation is its OWN chat (rsvp enrolls via the 7-07 trigger) and
@@ -650,6 +674,21 @@ export default function EventDetailScreen() {
 
   return (
     <View style={styles.container}>
+      {previewMode && (
+        /* §3.0 guest preview strip. Conditional truth: a Live event IS what a
+           guest sees; a non-Live event is invisible to a real guest (RLS), so
+           the copy promises how it WILL look once published. Exact wording is
+           Liz's copy; the Live/unpublished split is built now, not retrofitted. */
+        <View style={[styles.previewBar, { paddingTop: insets.top + 4 }]}>
+          <Text style={styles.previewBarText}>
+            {previewUnpublished ? 'how your page will look once it goes up' : 'how a guest sees it'}
+          </Text>
+          <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+            {/* LIZ COPY: back to editing */}
+            <Text style={styles.previewBarDone}>done</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <ScrollView decelerationRate="normal" showsVerticalScrollIndicator={false}>
         <View style={styles.heroContainer}>
           {event.image_url ? (
@@ -668,14 +707,14 @@ export default function EventDetailScreen() {
           )}
 
           <TouchableOpacity
-            style={[styles.circleButton, { top: insets.top + 8, left: 16 }]}
+            style={[styles.circleButton, { top: heroControlTop, left: 16 }]}
             onPress={() => router.back()}
           >
             <ArrowLeft size={20} color={Colors.asphalt} strokeWidth={2} />
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.circleButton, { top: insets.top + 8, right: 60 }]}
+            style={[styles.circleButton, { top: heroControlTop, right: 60 }]}
             onPress={async () => {
               hapticLight();
               try {
@@ -689,8 +728,9 @@ export default function EventDetailScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.circleButton, { top: insets.top + 8, right: 16 }]}
+            style={[styles.circleButton, { top: heroControlTop, right: 16 }]}
             onPress={() => {
+              if (previewMode) { showPreviewNotice(); return; }
               hapticLight();
               wishlistMutation.mutate();
             }}
@@ -880,6 +920,7 @@ export default function EventDetailScreen() {
                 <TouchableOpacity
                   style={[styles.followPill, followState.following && styles.followPillOn]}
                   onPress={() => {
+                    if (previewMode) { showPreviewNotice(); return; }
                     hapticLight();
                     followMutation.mutate();
                   }}
@@ -1061,14 +1102,20 @@ export default function EventDetailScreen() {
         {ticketSummary?.onSale ? (
           <TouchableOpacity
             style={styles.rsvpButton}
-            onPress={() => { hapticMedium(); setCheckoutVisible(true); }}
+            onPress={() => {
+              if (previewMode) { showPreviewNotice(); return; }
+              hapticMedium(); setCheckoutVisible(true);
+            }}
           >
             <Text style={styles.rsvpButtonText}>get tickets</Text>
           </TouchableOpacity>
         ) : COMMUNITIES_ENABLED && (
           <TouchableOpacity
             style={[styles.rsvpButton, myRsvp === 'going' && styles.rsvpButtonGoing]}
-            onPress={handleCountMeIn}
+            onPress={() => {
+              if (previewMode) { showPreviewNotice(); return; }
+              handleCountMeIn();
+            }}
             disabled={rsvpBusy}
           >
             {rsvpBusy ? (
@@ -1143,6 +1190,19 @@ export default function EventDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
+  // §3.0 guest-preview strip: quiet, neutral, a "done" that returns to editing
+  previewBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    backgroundColor: Colors.cardBg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  previewBarText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  previewBarDone: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.textMedium, textAlign: 'center' },
   goBackBtn: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 },
