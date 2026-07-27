@@ -36,6 +36,7 @@ import {
   getMyPayoutState,
   getQuestions,
   getTiers,
+  isPayoutReady,
   createQuestion,
   updateQuestion,
   retireQuestion,
@@ -182,6 +183,41 @@ export default function TicketSetupScreen() {
     },
   });
 
+  // buyers only ever SEE a tier once it is on_sale on a Live event (RLS), so
+  // this flip is how tickets become buyable at all. Going on sale with a PAID
+  // tier requires both Stripe capabilities (the P3 selling gate); there is no
+  // server-side gate until proposal 87 lands, so this client check is the law
+  // for now. Free tiers flip freely: free checkout never touches Stripe.
+  const toggleSaleMutation = useMutation({
+    mutationFn: async (tier: TicketTier) => {
+      const next = tier.status === 'on_sale' ? 'closed' : 'on_sale';
+      const result = await updateTier(tier.id, { status: next });
+      if (!result.ok) throw new Error(result.message ?? 'save failed');
+    },
+    onSuccess: () => {
+      hapticSuccess();
+      invalidateTiers();
+    },
+    onError: (e: any) => {
+      hapticError();
+      setAlertInfo({ title: 'that did not save', message: e?.message ?? 'give it another try.' });
+    },
+  });
+
+  const handleToggleSale = useCallback((tier: TicketTier) => {
+    if (tier.status !== 'on_sale' && tier.price_cents > 0 && !isPayoutReady(payout)) {
+      hapticError();
+      setAlertInfo({
+        /* copy to the taste gate */
+        title: 'payouts first',
+        message: 'a paid ticket can go on sale the moment stripe finishes your payout setup. the card up top takes you there.',
+      });
+      return;
+    }
+    hapticLight();
+    toggleSaleMutation.mutate(tier);
+  }, [payout, toggleSaleMutation]);
+
   const handleDeleteTier = useCallback((tier: TicketTier) => {
     setAlertInfo({
       /* copy to the taste gate */
@@ -245,7 +281,7 @@ export default function TicketSetupScreen() {
     if (ok) queryClient.invalidateQueries({ queryKey: ['event-faqs', id] });
   }, [queryClient, id]);
 
-  const payoutReady = !!payout?.payoutsEnabled && !!payout?.chargesEnabled;
+  const payoutReady = isPayoutReady(payout);
   // law 11: three or four, one of them recommended
   const recommendedId = recommendedTierId(tiers);
   const tiersFull = tiers.length >= TIER_COUNT_MAX;
@@ -343,6 +379,18 @@ export default function TicketSetupScreen() {
                   {tier.visibility === 'hidden' ? ' · hidden' : ''}
                   {` · ${tier.status === 'on_sale' ? 'on sale' : tier.status}`}
                 </Text>
+                <TouchableOpacity
+                  onPress={() => handleToggleSale(tier)}
+                  disabled={toggleSaleMutation.isPending}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                >
+                  {/* copy to the taste gate: the flip that makes a tier
+                      buyable (RLS shows buyers on_sale tiers only) */}
+                  <Text style={styles.tierSaleLink}>
+                    {tier.status === 'on_sale' ? 'pause sales' : 'put it on sale'}
+                  </Text>
+                </TouchableOpacity>
               </View>
               <TouchableOpacity onPress={() => handleDeleteTier(tier)} hitSlop={10}>
                 <Text style={styles.tierRemove}>remove</Text>
@@ -569,6 +617,8 @@ const styles = StyleSheet.create({
   addBtnDisabled: { opacity: 0.4 },
   tierMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventAction.error },
+  // a ghost link, not a second filled button (law 1)
+  tierSaleLink: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta, marginTop: 4 },
   // law 1: the payout CTA is this screen's single primary action, so
   // add-a-ticket takes the secondary treatment rather than competing
   addBtn: {

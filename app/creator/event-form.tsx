@@ -44,6 +44,8 @@ import EventPlaceSearch from '../../components/creator/EventPlaceSearch';
 import { EventLocationMap } from '../../components/creator/EventLocationMap';
 import { getCreatorAccess } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
+import { supabase } from '../../lib/supabase';
+import { eventHasPaidTier, getMyPayoutState, isPayoutReady } from '../../lib/ticketing';
 import {
   announceEventToMembers,
   createOperatorEvent,
@@ -473,6 +475,23 @@ export default function EventFormScreen() {
     if (!fields || !id || saving) return;
     setSaving(true);
     try {
+      // the P3 selling gate: a draft with a PAID tier cannot go Live until
+      // both Stripe capabilities exist. eventHasPaidTier throws on a failed
+      // read, so a flaky check blocks the publish (fail closed) instead of
+      // letting paid tickets ship without payout rails. Free-only and
+      // un-ticketed events publish as before.
+      if (await eventHasPaidTier(id)) {
+        const { data: { user } } = await supabase.auth.getUser();
+        const payout = user ? await getMyPayoutState(user.id) : null;
+        if (!isPayoutReady(payout)) {
+          showError(
+            /* copy to the taste gate */
+            'payouts first',
+            'this event has a paid ticket. finish payout setup on the tickets screen and publish right after.',
+          );
+          return;
+        }
+      }
       await updateOperatorEvent(id, fields, 'Live');
       await syncCoords(id);
       hapticSuccess();

@@ -165,6 +165,33 @@ export async function getMyPayoutState(userId: string): Promise<PayoutState> {
   };
 }
 
+/**
+ * The selling gate (7-27 brief P3): publish and on_sale both require BOTH
+ * Stripe capabilities. details_submitted alone is not readiness; an account
+ * can submit details and still have either capability withheld.
+ */
+export function isPayoutReady(p: PayoutState | null | undefined): boolean {
+  return !!p && p.chargesEnabled && p.payoutsEnabled;
+}
+
+/**
+ * True when the event has at least one paid tier, the publish-gate input.
+ * THROWS on a failed read rather than guessing: the gate fails closed
+ * (a publish blocked by a flaky read is recoverable; paid tickets live
+ * without payout rails are not). Free-only events never gate: free checkout
+ * settles without Stripe ("free means free").
+ */
+export async function eventHasPaidTier(eventId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('ticket_tiers')
+    .select('id')
+    .eq('event_id', eventId)
+    .gt('price_cents', 0)
+    .limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
 // The onboarding edge function name is Cowork's ruling (2026-07-21):
 // the ticketing lane deploys to this exact slug.
 export const ONBOARDING_EDGE_FN = 'ticket-connect-onboarding';
