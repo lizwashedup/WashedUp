@@ -957,6 +957,17 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* your tickets (7-27 ship ruling item 3): the wallet's standing entry,
+            above the settings groups because it is the user's own stuff, not a
+            setting. Label ruled by Liz, logged as taste debt. */}
+        <View style={[styles.settingsGroup, styles.ticketsGroup]}>
+          {renderSettingsRow(
+            /* LIZ COPY (ruled 7-27): matches the wallet screen's own header */
+            { icon: 'ticket-outline', label: 'your tickets', onPress: () => router.push('/tickets' as never) },
+            true,
+          )}
+        </View>
+
         {/* Notifications */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Notifications</Text>
@@ -1175,6 +1186,8 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     overflow: 'hidden',
   },
+  // the tickets group sits right under the profile header, no section title
+  ticketsGroup: { marginTop: 8 },
   settingsRow: {
     flexDirection: 'row',
     alignItems: 'center',
