@@ -63,7 +63,11 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
 
   const selected = tiers?.find((t) => t.id === selectedId) ?? null;
   const perOrderMax = selected?.per_order_max ?? 10;
-  const allIn = selected ? computeFeePreview(selected.price_cents, 0).buyerTotalCents * qty : 0;
+  // §3: the 30 cent fixed fee is per ORDER, so the shown total runs the
+  // formula over the order's combined face, never per-ticket-times-qty
+  // (2 x $20 charges $41.51; the old multiply showed $41.82). The
+  // per-ticket "each" line below stays per-unit by design.
+  const allIn = selected ? computeFeePreview(selected.price_cents * qty, 0).buyerTotalCents : 0;
   const isFree = selected?.price_cents === 0;
 
   const handleGo = async () => {
