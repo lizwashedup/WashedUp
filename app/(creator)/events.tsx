@@ -128,6 +128,24 @@ export default function CreatorEventsScreen() {
               {/* copy to the taste gate (launch sprint 7-21) */}
               <Text style={styles.cardAction}>tickets</Text>
             </TouchableOpacity>
+            {!opts?.draft && (
+              <>
+                <TouchableOpacity
+                  onPress={() => router.push(`/creator/attendees?id=${e.id}` as never)}
+                  hitSlop={8}
+                >
+                  {/* copy to the taste gate (spec 100) */}
+                  <Text style={styles.cardAction}>who's coming</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => router.push(`/creator/door?id=${e.id}` as never)}
+                  hitSlop={8}
+                >
+                  {/* copy to the taste gate (spec 100 P0 #5) */}
+                  <Text style={styles.cardAction}>at the door</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         )}
       </View>
@@ -277,6 +295,6 @@ const styles = StyleSheet.create({
     color: Colors.tertiary,
     marginTop: 6,
   },
-  cardActionRow: { flexDirection: 'row', alignItems: 'baseline', gap: 14 },
+  cardActionRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 14, rowGap: 8 },
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, marginTop: 8 },
 });

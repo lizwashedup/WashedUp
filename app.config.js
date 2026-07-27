@@ -53,6 +53,10 @@ module.exports = {
       // (ios/ is gitignored, so the manual edit doesn't reach EAS). Fixes the
       // iOS "Install pods" failure on cloud builds.
       './plugins/withIosModularHeaders',
+      // expo-camera powers door check-in's ticket scan (spec 100 P0 #5). The
+      // permission string is the iOS/Android prompt shown at first use.
+      // LIZ COPY (taste gate).
+      ['expo-camera', { cameraPermission: 'washedup uses the camera to scan tickets at your door.' }],
     ],
     updates: {
       url: 'https://u.expo.dev/9584097f-8f32-4fce-ae36-e87c1ffd50cc',
