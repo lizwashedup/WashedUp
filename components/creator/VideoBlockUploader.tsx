@@ -171,11 +171,26 @@ export function VideoBlockUploader({ eventId, disabled, onReady }: VideoBlockUpl
           </View>
         )}
         <TouchableOpacity
-          onPress={() => {
-            onReady(stage.path, undefined);
+          onPress={async () => {
+            if (savingPoster) return;
+            // guardrail 6: the poster is PINNED, not implied. "use the first
+            // frame" persists frame 0 as a real image exactly like a chosen
+            // frame, so the page never depends on a seek to paint. Only when
+            // no frame could be generated at all does the block go up bare.
+            const first = frames[0];
+            if (first) {
+              hapticLight();
+              setSavingPoster(true);
+              const poster = await uploadPosterFrame(eventId, first.thumb);
+              setSavingPoster(false);
+              onReady(stage.path, poster ?? undefined);
+            } else {
+              onReady(stage.path, undefined);
+            }
             setStage({ kind: 'idle' });
             setFrames([]);
           }}
+          disabled={savingPoster}
           hitSlop={8}
         >
           {/* copy to the taste gate */}

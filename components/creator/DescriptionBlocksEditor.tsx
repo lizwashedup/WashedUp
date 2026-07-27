@@ -8,7 +8,7 @@
  * of record; this editor mirrors its limits in copy.
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -42,12 +42,26 @@ interface DescriptionBlocksEditorProps {
   onChange: (next: DescriptionBlock[]) => void;
   /** photos and video upload into the event's OWN folder, so they need a
    *  saved event id. Text and faq blocks ride the create payload and work
-   *  before a draft exists; when canAddMedia is false the media pills wait. */
+   *  before a draft exists. When canAddMedia is false the media pills run
+   *  onUnlockMedia instead (the form's in-place draft-create, 7-27 ship
+   *  ruling item 2), so photos stay ONE obvious action on a new form too. */
   canAddMedia?: boolean;
   mediaHint?: string;
+  onUnlockMedia?: (kind: 'photos' | 'video') => void;
+  /** set by the unlock flow's replace (openPhotos=1): reopen the picker
+   *  once so the organizer's photos tap survives the draft-create */
+  autoOpenPhotos?: boolean;
 }
 
-export function DescriptionBlocksEditor({ eventId, blocks, onChange, canAddMedia = true, mediaHint }: DescriptionBlocksEditorProps) {
+export function DescriptionBlocksEditor({
+  eventId,
+  blocks,
+  onChange,
+  canAddMedia = true,
+  mediaHint,
+  onUnlockMedia,
+  autoOpenPhotos,
+}: DescriptionBlocksEditorProps) {
   const [uploading, setUploading] = useState(false);
   const [uploadProblems, setUploadProblems] = useState<string[]>([]);
   const mutate = onChange;
@@ -73,9 +87,17 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange, canAddMedia
   }, [blocks, uploading, eventId, mutate]);
 
   const faqMarkerPlaced = blocks.some((b) => b.type === 'faq');
-  const imageCount = blocks.filter((b) => b.type === 'image').length;
   // the soft cap sits UNDER 70's hard ceiling so the counters agree
   const full = blocks.length >= Math.min(BLOCKS_MAX, GALLERY_SOFT_CAP);
+
+  // the unlock flow's landing: the organizer tapped photos, the draft was
+  // created, and the screen replaced; reopen the picker exactly once
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoOpenPhotos || !canAddMedia || autoOpened.current) return;
+    autoOpened.current = true;
+    handleAddImages();
+  }, [autoOpenPhotos, canAddMedia, handleAddImages]);
 
   const move = (index: number, delta: number) => {
     const target = index + delta;
@@ -140,8 +162,10 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange, canAddMedia
                 />
                 {index === firstImageIndex ? (
                   <View style={styles.coverBadge}>
-                    {/* copy to the taste gate (law 15) */}
-                    <Text style={styles.coverBadgeText}>cover</Text>
+                    {/* copy to the taste gate (law 15). NOT "cover": the real
+                        cover is the locked 4:5 poster above (guardrail 3);
+                        this badge only marks the photo that leads the body */}
+                    <Text style={styles.coverBadgeText}>first</Text>
                   </View>
                 ) : (
                   <TouchableOpacity
@@ -150,7 +174,7 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange, canAddMedia
                     activeOpacity={0.85}
                   >
                     {/* copy to the taste gate (law 15) */}
-                    <Text style={styles.makeCoverText}>make cover</Text>
+                    <Text style={styles.makeCoverText}>show it first</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -181,7 +205,25 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange, canAddMedia
         </View>
       ))}
 
+      {/* 7-27 ship ruling item 2: photos lead the row, and on a NEW form the
+          media pills stay live: they run the form's in-place draft-create
+          (onUnlockMedia) instead of graying out, so adding a photo is ONE
+          obvious action either way */}
       <View style={styles.addRow}>
+        <TouchableOpacity
+          style={[styles.addPill, (full || uploading || (!canAddMedia && !onUnlockMedia)) && styles.addPillDisabled]}
+          onPress={canAddMedia ? handleAddImages : () => onUnlockMedia?.('photos')}
+          disabled={full || uploading || (!canAddMedia && !onUnlockMedia)}
+          activeOpacity={0.85}
+        >
+          {uploading ? (
+            <ActivityIndicator size="small" color={Colors.terracotta} />
+          ) : (
+            <ImagePlus size={14} color={Colors.terracotta} strokeWidth={2.5} />
+          )}
+          {/* copy to the taste gate (doc 76: many at once) */}
+          <Text style={styles.addPillText}>photos</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.addPill, full && styles.addPillDisabled]}
           onPress={() => {
@@ -195,25 +237,23 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange, canAddMedia
           <Plus size={14} color={Colors.terracotta} strokeWidth={2.5} />
           <Text style={styles.addPillText}>text</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.addPill, (full || uploading || !canAddMedia) && styles.addPillDisabled]}
-          onPress={handleAddImages}
-          disabled={full || uploading || !canAddMedia}
-          activeOpacity={0.85}
-        >
-          {uploading ? (
-            <ActivityIndicator size="small" color={Colors.terracotta} />
-          ) : (
-            <ImagePlus size={14} color={Colors.terracotta} strokeWidth={2.5} />
-          )}
-          {/* copy to the taste gate (doc 76: many at once) */}
-          <Text style={styles.addPillText}>photos</Text>
-        </TouchableOpacity>
-        <VideoBlockUploader
-          eventId={eventId}
-          disabled={full || uploading || !canAddMedia}
-          onReady={(path, poster) => mutate([...blocks, { type: 'video', path, poster }])}
-        />
+        {canAddMedia ? (
+          <VideoBlockUploader
+            eventId={eventId}
+            disabled={full || uploading}
+            onReady={(path, poster) => mutate([...blocks, { type: 'video', path, poster }])}
+          />
+        ) : (
+          <TouchableOpacity
+            style={[styles.addPill, (full || !onUnlockMedia) && styles.addPillDisabled]}
+            onPress={() => onUnlockMedia?.('video')}
+            disabled={full || !onUnlockMedia}
+            activeOpacity={0.85}
+          >
+            <Video size={14} color={Colors.terracotta} strokeWidth={2.5} />
+            <Text style={styles.addPillText}>video</Text>
+          </TouchableOpacity>
+        )}
         {!faqMarkerPlaced && (
           <TouchableOpacity
             style={[styles.addPill, full && styles.addPillDisabled]}
@@ -239,7 +279,7 @@ export function DescriptionBlocksEditor({ eventId, blocks, onChange, canAddMedia
       {/* law 16: the limits are stated BEFORE a file is chosen */}
       {canAddMedia && <Text style={styles.limitText}>video: {VIDEO_LIMITS_LINE}</Text>}
 
-      {imageCount > 0 && (
+      {blocks.length > 0 && (
         /* law 15: the live count counts BLOCKS, under 70's hard ceiling */
         <Text style={styles.limitText}>{blocks.length} of {GALLERY_SOFT_CAP} blocks</Text>
       )}

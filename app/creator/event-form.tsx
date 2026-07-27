@@ -82,7 +82,7 @@ function parseDateString(s: string): CalendarDay | null {
 export default function EventFormScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { id, duplicateFrom, templateId } = useLocalSearchParams<{ id?: string; duplicateFrom?: string; templateId?: string }>();
+  const { id, duplicateFrom, templateId, openPhotos } = useLocalSearchParams<{ id?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string }>();
   const editing = !!id;
 
   const [title, setTitle] = useState('');
@@ -119,6 +119,10 @@ export default function EventFormScreen() {
   // §3.0 preview: a dedicated in-flight flag so a double-tap cannot fire two
   // draft-creates, without touching the main save button's spinner
   const [previewing, setPreviewing] = useState(false);
+  // 7-27 ship ruling item 2: tapping photos/video on a brand-new form saves
+  // the draft in place (the preview flow's proven move) instead of sitting
+  // disabled; its own flag so a double-tap cannot fire two draft-creates
+  const [unlockingMedia, setUnlockingMedia] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'problem'>('idle');
 
@@ -569,6 +573,36 @@ export default function EventFormScreen() {
     }
   };
 
+  // 7-27 ship ruling item 2: media needs a saved event id (the folder pin),
+  // so the photos/video pills on a NEW form run this instead of sitting
+  // disabled: a VISIBLE draft-create through the same createOperatorEvent
+  // as "save as a draft", then the replace makes this screen the draft
+  // editor with openPhotos=1 re-opening the picker. Missing title/category
+  // surfaces as the RPC's own message, which names exactly what is needed.
+  const handleUnlockMedia = async (kind: 'photos' | 'video') => {
+    if (saving || previewing || unlockingMedia) return;
+    const fields = collectFields();
+    if (!fields) return;
+    hapticLight();
+    setUnlockingMedia(true);
+    try {
+      setAutosaveState('saving');
+      const communityId = fromCommunity && community ? community.id : null;
+      const newId = await createOperatorEvent(fields, communityId, false);
+      await syncCoords(newId);
+      setAutosaveState('saved');
+      // openPhotos only for the photos tap: the video uploader is its own
+      // multi-stage flow, so it is re-tapped rather than auto-launched
+      const suffix = kind === 'photos' ? '&openPhotos=1' : '';
+      router.replace(`/creator/event-form?id=${newId}${suffix}` as never);
+    } catch (e) {
+      setAutosaveState('problem');
+      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+    } finally {
+      setUnlockingMedia(false);
+    }
+  };
+
   // §3.0 phone: "preview as guest" opens the real public renderer at
   // /event/[id]?preview=guest (organizer-gated there). The event needs an id to
   // navigate to, and the save must be VISIBLE (autosave's savedLine), never
@@ -753,12 +787,14 @@ export default function EventFormScreen() {
             <Text style={styles.fieldLabel}>the page itself</Text>
             <Text style={styles.fieldHint}>photos, the story between them, and your good-to-know cards. this is the body of your page.</Text>
             <DescriptionBlocksEditor
+              onUnlockMedia={!id ? handleUnlockMedia : undefined}
+              autoOpenPhotos={openPhotos === '1'}
               eventId={id ?? ''}
               blocks={blocks ?? []}
               onChange={setBlocks}
               canAddMedia={!!id}
               /* copy to the taste gate */
-              mediaHint="save a draft first to add photos and video."
+              mediaHint="photos and video save your draft first, on their own."
             />
 
             <View style={styles.zoneDivider} />

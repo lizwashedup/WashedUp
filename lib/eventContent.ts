@@ -23,8 +23,9 @@ export type DescriptionBlock =
   // poster = a REAL image pinned to the event's own folder, so the page
   // paints instantly instead of risking the black flash a seek offset
   // allows (ruled 2026-07-22, superseding the interim posterTime).
-  // Proposal 83 amends the validator to allow-list and PIN this key the
-  // way image paths are pinned; until 83 applies nothing ships to prod.
+  // 7-27 ship ruling: this ships NOW. The live validator (read 7-27)
+  // accepts the key (no per-block allow-list yet) and the client pins the
+  // path by construction; proposal 83 (at gate) adds the server-side pin.
   | { type: 'video'; path: string; alt?: string; poster?: string }
   | { type: 'faq' };
 
