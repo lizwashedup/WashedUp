@@ -243,9 +243,16 @@ export default function OrderCompleteScreen() {
         {!!order?.event_date && (
           <Text style={styles.eventMeta}>{formatEventDateLA(order.event_date)}</Text>
         )}
-        {!!order && (
-          <Text style={styles.ref}>ref {order.id.slice(0, 8).toUpperCase()}</Text>
-        )}
+        {/* the door checks each seat's reference_code, so those are the only
+            codes worth printing; the order id is not a ticket. A paid checkout
+            settles within ~a minute, so seats can be briefly empty here; the
+            wallet ("see your tickets") is the durable home with the QR. */}
+        {!!order && order.seats.filter((s) => !s.voided).map((s) => (
+          <Text key={s.id} style={styles.ref}>
+            {/* copy to the taste gate: per-seat label */}
+            {order.qty > 1 ? `ticket ${s.position_index} · ` : ''}{s.reference_code}
+          </Text>
+        ))}
 
         {!done && questions.length > 0 && (
           <View style={styles.questions}>

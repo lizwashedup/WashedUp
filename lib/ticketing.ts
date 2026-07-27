@@ -518,6 +518,19 @@ export async function startTicketCheckout(tierId: string, qty: number): Promise<
 
 // ─── C2/C3: the buyer's orders + answers (own-rows RLS) ──────────────────
 
+/**
+ * One seat of an order. reference_code is what the door checks
+ * (record_ticket_checkin) and what the wallet renders as the QR; the order id
+ * is never a ticket code. Positions are created at settle (settle_ticket_hold),
+ * so a 'paid' order always has them; a still-pending paid checkout does not.
+ */
+export interface MySeat {
+  id: string;
+  position_index: number;
+  reference_code: string;
+  voided: boolean;
+}
+
 export interface MyOrder {
   id: string;
   event_id: string;
@@ -527,6 +540,25 @@ export interface MyOrder {
   created_at: string;
   event_title: string | null;
   event_date: string | null;
+  seats: MySeat[];
+}
+
+const ORDER_SELECT =
+  'id, event_id, qty, total_cents, status, created_at, explore_events(title, event_date), ' +
+  'ticket_order_positions(id, position_index, reference_code, voided_at)';
+
+function mapSeats(o: Record<string, unknown>): MySeat[] {
+  const rows = (o.ticket_order_positions as {
+    id: string; position_index: number; reference_code: string; voided_at: string | null;
+  }[] | null) ?? [];
+  return rows
+    .map((p) => ({
+      id: p.id,
+      position_index: p.position_index,
+      reference_code: p.reference_code,
+      voided: p.voided_at != null,
+    }))
+    .sort((a, b) => a.position_index - b.position_index);
 }
 
 export async function getMyOrders(): Promise<MyOrder[]> {
@@ -534,7 +566,7 @@ export async function getMyOrders(): Promise<MyOrder[]> {
   if (!user) return [];
   const { data, error } = await supabase
     .from('ticket_orders')
-    .select('id, event_id, qty, total_cents, status, created_at, explore_events(title, event_date)')
+    .select(ORDER_SELECT)
     .eq('buyer_user_id', user.id)
     // a settled order (free or paid) is 'paid'; 'confirmed'/'free' are not valid
     // statuses (the CHECK is pending/paid/canceled/refunded), so filtering on
@@ -543,7 +575,9 @@ export async function getMyOrders(): Promise<MyOrder[]> {
     .eq('status', 'paid')
     .order('created_at', { ascending: false });
   if (error) return [];
-  return (data ?? []).map((o: Record<string, unknown>) => {
+  // supabase-js cannot infer the multi-embed row shape, so it widens to its
+  // error type; the query is valid, so read the rows as untyped records
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((o) => {
     const ev = o.explore_events as { title?: string; event_date?: string } | null;
     return {
       id: o.id as string,
@@ -554,6 +588,7 @@ export async function getMyOrders(): Promise<MyOrder[]> {
       created_at: o.created_at as string,
       event_title: ev?.title ?? null,
       event_date: ev?.event_date ?? null,
+      seats: mapSeats(o),
     };
   });
 }
@@ -561,15 +596,19 @@ export async function getMyOrders(): Promise<MyOrder[]> {
 export async function getOrder(orderId: string): Promise<MyOrder | null> {
   const { data, error } = await supabase
     .from('ticket_orders')
-    .select('id, event_id, qty, total_cents, status, created_at, explore_events(title, event_date)')
+    .select(ORDER_SELECT)
     .eq('id', orderId)
     .maybeSingle();
   if (error || !data) return null;
-  const ev = (data as Record<string, unknown>).explore_events as { title?: string; event_date?: string } | null;
+  // same multi-embed widening as getMyOrders: read the row as an untyped record
+  const row = data as unknown as Record<string, unknown>;
+  const ev = row.explore_events as { title?: string; event_date?: string } | null;
   return {
-    id: data.id, event_id: data.event_id, qty: data.qty, total_cents: data.total_cents,
-    status: data.status, created_at: data.created_at,
+    id: row.id as string, event_id: row.event_id as string,
+    qty: row.qty as number, total_cents: row.total_cents as number,
+    status: row.status as string, created_at: row.created_at as string,
     event_title: ev?.title ?? null, event_date: ev?.event_date ?? null,
+    seats: mapSeats(row),
   };
 }
 
