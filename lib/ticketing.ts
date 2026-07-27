@@ -475,23 +475,41 @@ export type CheckoutResult =
  * url (paid) or an immediate free confirmation. TEST MODE until Liz's live
  * word - the fn hard-refuses a non-test key, surfaced here as a plain note.
  */
+/**
+ * Never show a buyer a raw server string. The checkout path leaks Postgres and
+ * PostgREST text ("Could not find the function ... in the schema cache",
+ * "insufficient availability (0 left)", raw UUIDs from settle_ticket_hold). Map
+ * the handful of buyer-meaningful cases to warm copy; everything else (schema
+ * cache, raw pg, uuids, nulls, permission) collapses to one safe line.
+ */
+function humanCheckoutError(raw: string | null | undefined): string {
+  const s = (raw ?? '').toLowerCase();
+  if (/(sold out|availability|no tickets|\bleft\b|unavailable)/.test(s)) return 'there are not that many tickets left.';
+  if (/(per[ -]?order|limit|maximum|too many)/.test(s)) return 'that is more than you can buy in one order.';
+  if (/(not on sale|sales? (have )?ended|closed|not available)/.test(s)) return 'these tickets are not on sale right now.';
+  if (/(sign|auth|not signed)/.test(s)) return 'sign in to get tickets.';
+  // schema cache / raw pg / uuids / anything unrecognized never reaches a buyer
+  return 'checkout could not start. give it a moment and try again.';
+}
+
 export async function startTicketCheckout(tierId: string, qty: number): Promise<CheckoutResult> {
   const { data, error } = await supabase.functions.invoke('create-ticket-checkout', {
     // origin drives the Stripe success/cancel return; the fn allow-lists it
     body: { tier_id: tierId, qty, origin: 'https://washedup.app' },
   });
   if (error) {
-    // functions.invoke surfaces non-2xx as an error with the JSON body; the
-    // fn's 409s carry buyer-facing reasons (sold out, per-order limit, ...)
+    // functions.invoke surfaces non-2xx as an error with the JSON body. That
+    // body can be a curated reason OR raw Postgres; sanitize either way so no
+    // schema-cache / uuid text ever reaches the buyer.
     const ctx = (error as { context?: { body?: unknown } }).context;
-    let message = 'checkout could not start. try again.';
+    let raw: string | null = null;
     try {
       const parsed = typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
       if (parsed && typeof (parsed as { error?: string }).error === 'string') {
-        message = (parsed as { error: string }).error;
+        raw = (parsed as { error: string }).error;
       }
-    } catch { /* keep the default */ }
-    return { kind: 'error', message };
+    } catch { /* raw stays null */ }
+    return { kind: 'error', message: humanCheckoutError(raw ?? error.message) };
   }
   if (data?.free && data?.order_id) return { kind: 'free', orderId: data.order_id };
   if (data?.url && data?.order_id) return { kind: 'paid', url: data.url, orderId: data.order_id };
@@ -518,7 +536,11 @@ export async function getMyOrders(): Promise<MyOrder[]> {
     .from('ticket_orders')
     .select('id, event_id, qty, total_cents, status, created_at, explore_events(title, event_date)')
     .eq('buyer_user_id', user.id)
-    .in('status', ['paid', 'confirmed', 'free'])
+    // a settled order (free or paid) is 'paid'; 'confirmed'/'free' are not valid
+    // statuses (the CHECK is pending/paid/canceled/refunded), so filtering on
+    // them silently dropped real tickets. This screen shows no refund state, so
+    // refunded orders are excluded rather than rendered as if valid.
+    .eq('status', 'paid')
     .order('created_at', { ascending: false });
   if (error) return [];
   return (data ?? []).map((o: Record<string, unknown>) => {
