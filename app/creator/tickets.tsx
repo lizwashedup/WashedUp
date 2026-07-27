@@ -44,6 +44,17 @@ import {
   type TierDraft,
 } from '../../lib/ticketing';
 import { TierEditorSheet } from '../../components/creator/TierEditorSheet';
+import { QuestionEditorSheet } from '../../components/creator/QuestionEditorSheet';
+import {
+  QUESTION_MAX,
+  createQuestion,
+  deactivateQuestion,
+  getEventQuestions,
+  questionTypeLabel,
+  updateQuestion,
+  type QuestionDraft,
+  type TicketQuestion,
+} from '../../lib/ticketQuestions';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 export default function TicketSetupScreen() {
@@ -52,6 +63,8 @@ export default function TicketSetupScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [editingTier, setEditingTier] = useState<TicketTier | null>(null);
+  const [questionEditorVisible, setQuestionEditorVisible] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState<TicketQuestion | null>(null);
   const [onboardBusy, setOnboardBusy] = useState(false);
   const [faqQuestion, setFaqQuestion] = useState('');
   const [faqAnswer, setFaqAnswer] = useState('');
@@ -96,9 +109,62 @@ export default function TicketSetupScreen() {
     staleTime: 30_000,
   });
 
+  const { data: questions = [], isLoading: questionsLoading } = useQuery({
+    queryKey: ['ticket-questions', id],
+    queryFn: () => getEventQuestions(id!),
+    enabled: !!id,
+    staleTime: 15_000,
+  });
+
   const invalidateTiers = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['ticket-tiers', id] });
   }, [queryClient, id]);
+
+  const invalidateQuestions = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['ticket-questions', id] });
+  }, [queryClient, id]);
+
+  const saveQuestionMutation = useMutation({
+    mutationFn: async (draft: QuestionDraft) => {
+      const result = editingQuestion
+        ? await updateQuestion(editingQuestion.id, draft)
+        : await createQuestion(id!, draft, questions.length);
+      if (!result.ok) throw new Error(result.message ?? 'save failed');
+    },
+    onSuccess: () => {
+      hapticSuccess();
+      setQuestionEditorVisible(false);
+      setEditingQuestion(null);
+      invalidateQuestions();
+    },
+    onError: (e: any) => {
+      hapticError();
+      setAlertInfo({ title: 'that did not save', message: e?.message ?? 'give it another try.' });
+    },
+  });
+
+  const handleRemoveQuestion = useCallback((question: TicketQuestion) => {
+    setAlertInfo({
+      /* copy to the taste gate */
+      title: 'remove this question?',
+      message: question.prompt,
+      buttons: [
+        { text: 'keep it', style: 'cancel' },
+        {
+          text: 'remove it',
+          onPress: async () => {
+            const ok = await deactivateQuestion(question.id);
+            if (ok) {
+              hapticSuccess();
+              invalidateQuestions();
+            } else {
+              hapticError();
+            }
+          },
+        },
+      ],
+    });
+  }, [invalidateQuestions]);
 
   const saveTierMutation = useMutation({
     mutationFn: async (draft: TierDraft) => {
@@ -186,6 +252,13 @@ export default function TicketSetupScreen() {
   // law 11: three or four, one of them recommended
   const recommendedId = recommendedTierId(tiers);
   const tiersFull = tiers.length >= TIER_COUNT_MAX;
+  // §3.8 house rule (also trigger-enforced): at most 11 active questions
+  const questionsFull = questions.length >= QUESTION_MAX;
+  const questionMeta = (q: TicketQuestion): string => {
+    const parts = [questionTypeLabel(q.qtype), q.required ? 'required' : 'optional'];
+    parts.push(q.scope === 'per_attendee' ? 'each ticket' : 'per order');
+    return parts.join(' · ');
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -352,6 +425,64 @@ export default function TicketSetupScreen() {
             </TouchableOpacity>
           </>
         )}
+
+        {/* buyer questions (§3.8): asked right after purchase, up to 11,
+            never blocking the sale. Rendered like the tiers list. */}
+        <View style={styles.sectionHeader}>
+          {/* copy to the taste gate */}
+          <Text style={styles.sectionTitle}>what you'll ask buyers</Text>
+        </View>
+        {/* copy to the taste gate (§3.8 timing) */}
+        <Text style={styles.emptyText}>asked right after they buy, never in the way of the sale.</Text>
+
+        {questionsLoading ? (
+          <ActivityIndicator size="small" color={Colors.terracotta} />
+        ) : questions.length === 0 ? (
+          /* copy to the taste gate (empty-state invitation) */
+          <Text style={styles.emptyText}>no questions yet. add one if you need something from buyers.</Text>
+        ) : (
+          questions.map((q) => (
+            <TouchableOpacity
+              key={q.id}
+              style={styles.tierCard}
+              onPress={() => {
+                hapticLight();
+                setEditingQuestion(q);
+                setQuestionEditorVisible(true);
+              }}
+              activeOpacity={0.85}
+            >
+              <View style={styles.tierCardBody}>
+                <Text style={styles.tierName} numberOfLines={2}>{q.prompt}</Text>
+                <Text style={styles.tierMeta}>{questionMeta(q)}</Text>
+              </View>
+              <TouchableOpacity onPress={() => handleRemoveQuestion(q)} hitSlop={10}>
+                <Text style={styles.tierRemove}>remove</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          ))
+        )}
+
+        <TouchableOpacity
+          style={[styles.addBtn, questionsFull && styles.addBtnDisabled]}
+          onPress={() => {
+            if (questionsFull) return;
+            hapticLight();
+            setEditingQuestion(null);
+            setQuestionEditorVisible(true);
+          }}
+          disabled={questionsFull}
+          activeOpacity={0.85}
+        >
+          <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
+          {/* copy to the taste gate */}
+          <Text style={styles.addBtnText}>add a question</Text>
+        </TouchableOpacity>
+
+        {questionsFull && (
+          /* copy to the taste gate: the 11 house rule, framed as taste */
+          <Text style={styles.emptyText}>eleven is the most. the shorter the list, the more people finish it.</Text>
+        )}
       </ScrollView>
 
       <TierEditorSheet
@@ -363,6 +494,17 @@ export default function TicketSetupScreen() {
         onClose={() => {
           setEditorVisible(false);
           setEditingTier(null);
+        }}
+      />
+
+      <QuestionEditorSheet
+        visible={questionEditorVisible}
+        question={editingQuestion}
+        busy={saveQuestionMutation.isPending}
+        onSave={(draft) => saveQuestionMutation.mutate(draft)}
+        onClose={() => {
+          setQuestionEditorVisible(false);
+          setEditingQuestion(null);
         }}
       />
 
