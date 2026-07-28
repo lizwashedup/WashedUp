@@ -1189,7 +1189,7 @@ export default function PlanComposerV2() {
         {COMMUNITIES_ENABLED && (
           <TouchableOpacity
             onPress={handleSaveDraft}
-            disabled={!canSaveDraft}
+            disabled={loading || imageLoading}
             hitSlop={8}
             style={styles.draftLinkWrap}
           >

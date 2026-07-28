@@ -100,6 +100,38 @@ export default function ApplyCommunityScreen() {
     responsibilityAck &&
     terms;
 
+  // What's still unfilled, in the form's own words, so a tap on the greyed
+  // "send it in" explains itself instead of doing nothing.
+  const missingFields = (): string[] => {
+    const m: string[] = [];
+    if (yourName.trim().length === 0) m.push('your name');
+    if (communityName.trim().length === 0) m.push('name your community');
+    if (concept.trim().length === 0) m.push('what is it?');
+    if (audience.trim().length === 0) m.push('who is it for?');
+    if (!cadence) m.push('how often will things happen?');
+    else if (cadence === 'other' && cadenceOther.trim().length === 0) m.push('tell us (how often)');
+    if (whyYou.trim().length === 0) m.push('why you?');
+    if (cleanLinks.length === 0) m.push('show us proof (at least one link)');
+    if (!affiliation) m.push('are you connected to a business, venue, or brand?');
+    else if (affiliation === 'yes' && affiliationDetail.trim().length === 0) m.push('tell us (affiliation)');
+    if (!responsibilityAck) m.push('agree a community is a responsibility');
+    if (!terms) m.push('agree to the terms');
+    return m;
+  };
+
+  const attemptSubmit = () => {
+    if (submitting) return;
+    if (!valid) {
+      hapticError();
+      setAlertInfo({
+        title: 'Almost there',
+        message: `A few things still need filling in:\n\n• ${missingFields().join('\n• ')}`,
+      });
+      return;
+    }
+    handleSubmit();
+  };
+
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
@@ -235,7 +267,7 @@ export default function ApplyCommunityScreen() {
             </TouchableOpacity>
 
             <TermsCheck checked={terms} onToggle={() => setTerms((t) => !t)} />
-            <SubmitButton disabled={!valid} submitting={submitting} onPress={handleSubmit} />
+            <SubmitButton inactive={!valid} submitting={submitting} onPress={attemptSubmit} />
           </ScrollView>
         </KeyboardAvoidingView>
       )}

@@ -193,17 +193,22 @@ export function TermsCheck({ checked, onToggle }: { checked: boolean; onToggle: 
 }
 
 export function SubmitButton({
-  disabled,
+  disabled = false,
+  inactive = false,
   submitting,
   onPress,
 }: {
-  disabled: boolean;
+  disabled?: boolean;
+  // `inactive` greys the button (form incomplete) but keeps it TAPPABLE, so the
+  // press handler can explain what's missing instead of the tap being swallowed.
+  // Only `disabled`/`submitting` actually block the press.
+  inactive?: boolean;
   submitting: boolean;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity
-      style={[styles.submitBtn, (disabled || submitting) && styles.submitBtnDisabled]}
+      style={[styles.submitBtn, (inactive || disabled || submitting) && styles.submitBtnDisabled]}
       onPress={onPress}
       disabled={disabled || submitting}
       activeOpacity={0.85}

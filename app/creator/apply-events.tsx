@@ -106,6 +106,37 @@ export default function ApplyEventsScreen() {
     about.trim().length > 0 &&
     terms;
 
+  // What's still unfilled, in the form's own words, so a tap on the greyed
+  // "send it in" explains itself instead of doing nothing.
+  const missingFields = (): string[] => {
+    const m: string[] = [];
+    if (!applicantType) m.push('what are you?');
+    else if (applicantType === 'other' && applicantTypeOther.trim().length === 0) m.push('tell us');
+    if (yourName.trim().length === 0) m.push('your name');
+    if (applicantType && !isJustMe && publicName.trim().length === 0) m.push('the name people know you by');
+    if (categories.length === 0) m.push('what kind of events?');
+    if (!frequency) m.push('how often?');
+    if (cleanLinks.length === 0) m.push('show us proof (at least one link)');
+    if (isVenue && venueAddress.trim().length === 0) m.push("where's your spot?");
+    if (!ticketing) m.push('how do people get tickets today?');
+    if (about.trim().length === 0) m.push('tell us about what you run');
+    if (!terms) m.push('agree to the terms');
+    return m;
+  };
+
+  const attemptSubmit = () => {
+    if (submitting) return;
+    if (!valid) {
+      hapticError();
+      setAlertInfo({
+        title: 'Almost there',
+        message: `A few things still need filling in:\n\n• ${missingFields().join('\n• ')}`,
+      });
+      return;
+    }
+    handleSubmit();
+  };
+
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
@@ -217,7 +248,7 @@ export default function ApplyEventsScreen() {
             />
 
             <TermsCheck checked={terms} onToggle={() => setTerms((t) => !t)} />
-            <SubmitButton disabled={!valid} submitting={submitting} onPress={handleSubmit} />
+            <SubmitButton inactive={!valid} submitting={submitting} onPress={attemptSubmit} />
           </ScrollView>
         </KeyboardAvoidingView>
       )}

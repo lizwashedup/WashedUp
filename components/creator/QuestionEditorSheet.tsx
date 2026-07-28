@@ -22,7 +22,7 @@ import { Plus, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
-import { hapticLight } from '../../lib/haptics';
+import { hapticLight, hapticError } from '../../lib/haptics';
 import {
   QUESTION_OPTIONS_MAX,
   QUESTION_PROMPT_MAX,
@@ -91,7 +91,11 @@ export function QuestionEditorSheet({ visible, question, busy, onSave, onClose }
   };
 
   const handleSave = () => {
-    if (!canSave || busy) return;
+    if (busy) return;
+    // Tappable-when-incomplete: a bad tap gives a haptic and the inline
+    // "add at least two options" hint (shown below) explains the non-obvious
+    // choice-type requirement, instead of the button silently doing nothing.
+    if (!canSave) { hapticError(); return; }
     onSave({
       prompt: prompt.trim(),
       qtype,
@@ -111,7 +115,7 @@ export function QuestionEditorSheet({ visible, question, busy, onSave, onClose }
           </TouchableOpacity>
           {/* copy to the taste gate */}
           <Text style={styles.headerTitle}>{question ? 'edit question' : 'a question'}</Text>
-          <TouchableOpacity onPress={handleSave} disabled={!canSave || busy} hitSlop={12}>
+          <TouchableOpacity onPress={handleSave} disabled={busy} hitSlop={12}>
             <Text style={[styles.save, (!canSave || busy) && styles.saveOff]}>save</Text>
           </TouchableOpacity>
         </View>
@@ -172,6 +176,9 @@ export function QuestionEditorSheet({ visible, question, busy, onSave, onClose }
                     {/* copy to the taste gate */}
                     <Text style={styles.addOptionText}>another option</Text>
                   </TouchableOpacity>
+                )}
+                {cleanOptions.length < 2 && (
+                  <Text style={styles.optionHint}>add at least two options so it&apos;s a real choice.</Text>
                 )}
               </>
             )}
@@ -244,6 +251,7 @@ const styles = StyleSheet.create({
   saveOff: { color: Colors.textLight },
   content: { padding: 20, paddingBottom: 40 },
   label: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary, marginBottom: 6, marginTop: 16 },
+  optionHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 4 },
   labelHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginBottom: 8, marginTop: -2 },
   input: {
     backgroundColor: Colors.white,
