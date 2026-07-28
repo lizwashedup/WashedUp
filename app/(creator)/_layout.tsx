@@ -31,8 +31,6 @@ export default function CreatorLayout() {
     staleTime: 30_000,
   });
 
-  if (!COMMUNITIES_ENABLED) return <Redirect href="/(tabs)/plans" />;
-
   if (isLoading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.parchment }}>
@@ -41,7 +39,14 @@ export default function CreatorLayout() {
     );
   }
 
-  if (!hasCreatorAccess(access)) return <Redirect href="/(tabs)/profile" />;
+  // Grant-gated public-dark (mirrors the profile switch row, 7-21, and web's
+  // /c fix): a real grant admits its holder even while the flag is off, and
+  // RLS enforces the same grants server-side. Everyone else bounces exactly
+  // as before: plans while the flag is off, profile once it is on, so the
+  // area stays dark to the public either way.
+  if (!hasCreatorAccess(access)) {
+    return <Redirect href={COMMUNITIES_ENABLED ? '/(tabs)/profile' : '/(tabs)/plans'} />;
+  }
 
   const leader = isLeaderAccess(access);
   const tabBarHeight = Platform.OS === 'ios' ? 52 + insets.bottom : 60;
