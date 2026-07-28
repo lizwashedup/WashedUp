@@ -540,10 +540,12 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       } else if (type === 'people_ping' && data?.eventId) {
         // A ping IS the plan, open the plan detail, not the chat.
         safePush(`/plan/${data.eventId}`);
-      } else if (COMMUNITIES_ENABLED && type === 'community_join_request') {
+      } else if (type === 'community_join_request') {
         // A join request is the leader's to answer: the wants-in list lives
-        // on the creator members tab (grant-gated server-side; a non-creator
-        // tapping a stale push gets redirected out of the shell safely).
+        // on the creator members tab. No flag guard: only grant-holders get
+        // this push, and the creator shell itself admits by grant, so a
+        // non-creator tapping a stale push still gets redirected out of the
+        // shell safely while the flag keeps the surface dark to the public.
         safePush('/(creator)/members');
       } else if (COMMUNITIES_ENABLED && type === 'community_event') {
         // "just posted <event>" lands on Scene, where the event lives. The
