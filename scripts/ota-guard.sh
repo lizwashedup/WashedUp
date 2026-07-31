@@ -49,6 +49,19 @@ if [ -n "$(git status --porcelain)" ]; then
   fail "working tree is dirty. Commit or stash so the OTA matches main HEAD."
 fi
 
+# 2b. main HEAD must match origin/main. The publish ships the working tree,
+#     and a second work lane can stack unpushed (held, unreviewed) commits on
+#     local main between your own HEAD check and the publish. That exact miss
+#     shipped the held 7-31 commit set to iOS production (rolled back within
+#     minutes). Fetch first so the comparison uses the real remote, not a
+#     stale ref. Flow consequence: push main, then publish, in that order.
+git fetch origin main --quiet || fail "could not fetch origin/main to verify HEAD (offline?)."
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+  echo "local main:  $(git rev-parse --short HEAD)" >&2
+  echo "origin/main: $(git rev-parse --short origin/main)" >&2
+  fail "main HEAD does not match origin/main. Push or park the extra commits, then publish."
+fi
+
 # 3. No tracked source may import native modules missing from the live binary.
 #    Keep this denylist in sync with what the *shipped* binary actually bundles;
 #    anything added here needs a new EAS build, not an OTA.
@@ -87,4 +100,4 @@ for var in $(grep -rhoE 'EXPO_PUBLIC_[A-Z0-9_]+' app components hooks lib consta
   fi
 done
 
-echo "✅ OTA guard passed — on main, clean tree, commit $(git rev-parse --short HEAD), no forbidden native imports, .env.local keys all non-empty."
+echo "✅ OTA guard passed — on main, clean tree, HEAD matches origin/main, commit $(git rev-parse --short HEAD), no forbidden native imports, .env.local keys all non-empty."
