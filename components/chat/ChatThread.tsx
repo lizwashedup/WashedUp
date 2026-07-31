@@ -264,6 +264,10 @@ interface BubbleProps {
   mentionNames?: Set<string>;
 }
 
+// The bare system-row templates the app writes today (app/plan/[id].tsx).
+// Anchored exact-match so legacy name-embedded lines are never double-prefixed.
+const BARE_SYSTEM_TEMPLATES = /^(joined the plan|had to leave the plan|cancelled this plan)$/i;
+
 const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
   if (message.message_type === 'system') {
     // A system message carrying a plan reference renders as the compact plan card
@@ -276,6 +280,13 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
       );
     }
     let displayContent = message.content;
+    // Current-era system rows store the bare verb phrase and carry the actor
+    // only in user_id, so the line rendered nameless ("joined Cali splash!").
+    // Prefix the sender's name for exactly those templates; older rows (the
+    // "X just joined the group!" era) already embed the name.
+    if (BARE_SYSTEM_TEMPLATES.test(displayContent.trim()) && message.sender?.first_name) {
+      displayContent = `${message.sender.first_name} ${displayContent.trim()}`;
+    }
     if (contextTitle) {
       displayContent = displayContent
         .replace(/joined the plan/gi, `joined ${contextTitle}`)
@@ -1631,8 +1642,15 @@ function ChatThread(props: ChatThreadProps) {
       const olderItem = enrichedItems[index + 1];
       const olderMsg = olderItem && !('type' in olderItem) ? (olderItem as ChatMessage) : null;
 
-      const isGroupedWithOlder = !!(olderMsg?.user_id === msg.user_id && isSameDay(olderMsg.created_at, msg.created_at));
-      const isGroupedWithNewer = !!(newerMsg?.user_id === msg.user_id && isSameDay(msg.created_at, newerMsg.created_at));
+      // System rows (the join line) carry the actor's user_id, so raw
+      // user_id equality made a member's first real message after joining
+      // count as grouped and hid their name label. Only user-authored
+      // bubbles participate in grouping, on either side.
+      const groupsWith = (other: ChatMessage | null) =>
+        !!other && other.message_type !== 'system' && msg.message_type !== 'system' &&
+        other.user_id === msg.user_id && isSameDay(other.created_at, msg.created_at);
+      const isGroupedWithOlder = groupsWith(olderMsg);
+      const isGroupedWithNewer = groupsWith(newerMsg);
 
       const showAvatar = !isOwn && !isGroupedWithNewer;
       const showName = !isOwn && !isGroupedWithOlder;
