@@ -59,12 +59,6 @@ const GOING_COUNT_THRESHOLD = 5;
 // a listing with a date but no time still deserves a calendar entry;
 // evening is the house default for LA events
 const DEFAULT_EVENT_START_TIME = '19:00:00';
-// LIZ COPY RULED verbatim (doc 96 required checkout line, approved 7-26,
-// shipped on her word 7-31): the event-page refund disclosure. Never
-// reworded here. Renders only when tickets sell through OUR checkout;
-// a link-out event's refunds are not ours to describe.
-const EVENT_REFUND_DISCLOSURE =
-  "refunds follow the organizer's policy. the card processing charge isn't returned on a change of mind refund. if the event is canceled or changed in a major way, you get the full amount back.";
 // §4c more-from rail: poster cards, soonest first
 const MORE_FROM_RAIL_LIMIT = 6;
 const MORE_CARD_WIDTH = 150;
@@ -868,10 +862,6 @@ export default function EventDetailScreen() {
             </View>
           )}
 
-          {ticketSummary?.onSale && (
-            <Text style={styles.refundDisclosure}>{EVENT_REFUND_DISCLOSURE}</Text>
-          )}
-
           {/* the link-out is the one thing the link-first launch depends on
               (doc 37: prominence): a full-width button above the fold,
               shown whenever a link exists, labeled by context */}
@@ -1325,7 +1315,6 @@ const styles = StyleSheet.create({
   moreCardTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   moreCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
   metaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, flex: 1, lineHeight: 20 },
-  refundDisclosure: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray, lineHeight: 18, marginTop: 4 },
   descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 14 },
   descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, lineHeight: 22 },
   // the secondary-button pattern: outline terracotta, never competing with
