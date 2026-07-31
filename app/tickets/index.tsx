@@ -11,17 +11,20 @@
  */
 
 import React from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'react-native-qrcode-svg';
 import { ArrowLeft, Ticket } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { formatEventDateLA } from '../../lib/laDate';
-import { formatCents, getMyOrders, type MySeat } from '../../lib/ticketing';
+import {
+  REFUND_DISCLOSURE, executeRefund, formatCents, getMyOrders, previewRefund,
+  type MyOrder, type MySeat,
+} from '../../lib/ticketing';
 
 // the scanner reads from arm's length in door light; smaller and a 10-char
 // code still scans, but this size is comfortable on every supported width
@@ -63,6 +66,76 @@ function SeatTicket({ seat, qty }: { seat: MySeat; qty: number }) {
         />
       </View>
       <Text style={styles.seatCode}>{seat.reference_code}</Text>
+    </View>
+  );
+}
+
+/**
+ * Buyer self-refund (doc 108; web wallet f370d4b is the lockstep reference).
+ * The affordance renders ONLY from the server's preview answer
+ * (can_buyer_self_refund is the §5 preset gate); the client never decides
+ * eligibility. The refund call itself sends no kind and no seats: the fn
+ * forces buyer_request on the whole remaining order and re-checks the gate.
+ */
+function OrderRefund({ order }: { order: MyOrder }) {
+  const queryClient = useQueryClient();
+  const { data: preview } = useQuery({
+    queryKey: ['ticket-refund-preview', order.id],
+    queryFn: () => previewRefund(order.id),
+    staleTime: 30_000,
+  });
+
+  const refund = useMutation({
+    mutationFn: () => executeRefund(order.id),
+    onSuccess: (outcome) => {
+      if (outcome.ok) {
+        queryClient.invalidateQueries({ queryKey: ['my-ticket-orders'] });
+        queryClient.invalidateQueries({ queryKey: ['ticket-refund-preview', order.id] });
+        /* LIZ COPY (web's shipped strings, mirrored): pending is still success */
+        Alert.alert(
+          'refund on its way',
+          outcome.pending
+            ? 'your refund is on its way. it can take a minute to show here.'
+            : 'refunded. it lands back on your card in a few days.',
+        );
+      } else {
+        Alert.alert('about that refund', outcome.message);
+      }
+    },
+  });
+
+  if (!preview?.allowed || !preview.canSelfRefund) return null;
+
+  const confirmRefund = () => {
+    Alert.alert(
+      /* LIZ COPY (web's confirm line, mirrored) */
+      `refund ${formatCents(preview.refundAmountCents)} to your card?`,
+      REFUND_DISCLOSURE,
+      [
+        { text: 'keep my tickets', style: 'cancel' },
+        { text: 'yes, refund it', style: 'destructive', onPress: () => refund.mutate() },
+      ],
+    );
+  };
+
+  return (
+    <View style={styles.refundBlock}>
+      {/* §5 disclosure: LIZ COPY RULED verbatim, never reworded */}
+      <Text style={styles.refundDisclosure}>{REFUND_DISCLOSURE}</Text>
+      <TouchableOpacity
+        style={styles.refundButton}
+        onPress={confirmRefund}
+        disabled={refund.isPending}
+        accessibilityRole="button"
+        accessibilityLabel="refund this order"
+      >
+        {refund.isPending ? (
+          <ActivityIndicator size="small" color={EventAction.secondaryLabel} />
+        ) : (
+          /* LIZ COPY (web's trigger label, mirrored) */
+          <Text style={styles.refundButtonText}>refund this order</Text>
+        )}
+      </TouchableOpacity>
     </View>
   );
 }
@@ -111,6 +184,7 @@ export default function YourTicketsScreen() {
               {o.seats.map((seat) => (
                 <SeatTicket key={seat.id} seat={seat} qty={o.qty} />
               ))}
+              <OrderRefund order={o} />
             </View>
           ))
         )}
@@ -156,4 +230,17 @@ const styles = StyleSheet.create({
     letterSpacing: 3, textDecorationLine: 'line-through',
   },
   seatVoidedNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  refundBlock: {
+    alignItems: 'center', gap: EventSpacing.sm,
+    borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: EventSpacing.md,
+  },
+  refundDisclosure: {
+    fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium,
+    textAlign: 'center', paddingHorizontal: EventSpacing.sm,
+  },
+  refundButton: {
+    minHeight: 44, borderRadius: 999, borderWidth: 1.5, borderColor: EventAction.secondaryBorder,
+    paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center',
+  },
+  refundButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: EventAction.secondaryLabel },
 });

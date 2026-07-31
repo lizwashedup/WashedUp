@@ -11,6 +11,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,21 +21,24 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, Ban, ScanLine } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
+import { executeRefund, formatCents, previewRefund } from '../../lib/ticketing';
 import { countAttendees, getEventAttendees, isLiveSeat, type DoorAttendee } from '../../lib/ticketAttendees';
 
 type StatusFilter = 'all' | 'in' | 'notin' | 'refunded';
 
 export default function AttendeesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [tier, setTier] = useState<string | null>(null);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
 
   const { data: attendees = [], isLoading } = useQuery({
     queryKey: ['event-attendees', id],
@@ -72,6 +76,69 @@ export default function AttendeesScreen() {
     if (a.refundedCents > 0 || a.voided) return 'refunded';
     if (!isLiveSeat(a)) return a.orderStatus;
     return a.checkedIn ? 'checked in' : 'not in yet';
+  };
+
+  /**
+   * Organizer refund (doc 108; web's AttendeeTable 67d5ee2 is the lockstep
+   * reference): voluntary buyer_request only, per seat via 1-based
+   * position_indexes or the whole remaining order. organizer_cancel is the
+   * §4 cancellation slice and is deliberately NOT wired here. Amounts shown
+   * come from the server preview (money is DB law), never client arithmetic.
+   */
+  const chooseRefund = async (a: DoorAttendee, mode: 'seat' | 'order') => {
+    setRefundingId(a.positionId);
+    const target = {
+      kind: 'buyer_request' as const,
+      positionIndexes: mode === 'seat' ? [a.positionIndex] : null,
+    };
+    const preview = await previewRefund(a.orderId, target);
+    setRefundingId(null);
+    if (!preview || !preview.allowed) {
+      /* LIZ COPY (web's shipped string, mirrored) */
+      Alert.alert('about that refund', "that refund isn't available for this order.");
+      return;
+    }
+    Alert.alert(
+      /* LIZ COPY: the previewed amount is the fact being confirmed */
+      `refund ${formatCents(preview.refundAmountCents)} to the buyer?`,
+      mode === 'seat' ? `this seat only, for ${a.buyerName}.` : `${a.buyerName}'s whole remaining order.`,
+      [
+        { text: 'never mind', style: 'cancel' },
+        { text: 'yes, refund it', style: 'destructive', onPress: () => runRefund(a, target) },
+      ],
+    );
+  };
+
+  const runRefund = async (a: DoorAttendee, target: { kind: 'buyer_request'; positionIndexes: number[] | null }) => {
+    setRefundingId(a.positionId);
+    const outcome = await executeRefund(a.orderId, target);
+    setRefundingId(null);
+    if (outcome.ok) {
+      queryClient.invalidateQueries({ queryKey: ['event-attendees', id] });
+      /* LIZ COPY (web's shipped strings, mirrored); pending is still success */
+      Alert.alert(
+        'refund sent',
+        outcome.pending
+          ? 'the refund went through and is finishing up. this list catches up in a minute.'
+          : `refunded ${formatCents(outcome.refundAmountCents)} to the buyer.`,
+      );
+    } else {
+      Alert.alert('about that refund', outcome.message);
+    }
+  };
+
+  const startRefund = (a: DoorAttendee) => {
+    hapticLight();
+    Alert.alert(
+      /* copy to the taste gate */
+      `refund ${a.buyerName}?`,
+      'the ticket price goes back to their card.',
+      [
+        { text: 'never mind', style: 'cancel' },
+        { text: 'this seat', onPress: () => chooseRefund(a, 'seat') },
+        { text: 'whole order', onPress: () => chooseRefund(a, 'order') },
+      ],
+    );
   };
 
   return (
@@ -166,6 +233,23 @@ export default function AttendeesScreen() {
                       {line}
                     </Text>
                   </View>
+                  {/* refund lives on live seats only; the fn re-checks server-side */}
+                  {isLiveSeat(a) && (
+                    <TouchableOpacity
+                      style={styles.refundPill}
+                      onPress={() => startRefund(a)}
+                      disabled={refundingId != null}
+                      accessibilityRole="button"
+                      accessibilityLabel={`refund ${a.buyerName}`}
+                    >
+                      {refundingId === a.positionId ? (
+                        <ActivityIndicator size="small" color={Colors.darkWarm} />
+                      ) : (
+                        /* copy to the taste gate */
+                        <Text style={styles.refundPillText}>refund</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
                 </View>
               );
             })
@@ -210,4 +294,10 @@ const styles = StyleSheet.create({
   statusText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   statusIn: { color: Colors.brandDeep },
   statusRefunded: { color: Colors.textMedium },
+  refundPill: {
+    // §8: real 44pt controls, no undersized tap targets
+    minHeight: 44, minWidth: 64, borderRadius: 999, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center',
+  },
+  refundPillText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
 });

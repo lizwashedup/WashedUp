@@ -12,6 +12,8 @@ import { supabase } from './supabase';
 
 export interface DoorAttendee {
   positionId: string;
+  /** the seat's order: what a refund call targets (doc 108) */
+  orderId: string;
   positionIndex: number;
   referenceCode: string;
   buyerName: string;
@@ -38,7 +40,7 @@ export async function getEventAttendees(eventId: string): Promise<DoorAttendee[]
     .from('ticket_order_positions')
     .select(
       'id, position_index, reference_code, voided_at, refunded_cents, ' +
-      'ticket_orders!inner ( event_id, buyer_name_snapshot, status, ticket_tiers ( name ) ), ' +
+      'ticket_orders!inner ( id, event_id, buyer_name_snapshot, status, ticket_tiers ( name ) ), ' +
       'ticket_checkins ( result )',
     )
     .eq('ticket_orders.event_id', eventId)
@@ -50,6 +52,7 @@ export async function getEventAttendees(eventId: string): Promise<DoorAttendee[]
   const rows = (data ?? []) as unknown as Record<string, unknown>[];
   return rows.map((row) => {
     const order = row.ticket_orders as {
+      id?: string;
       buyer_name_snapshot?: string;
       status?: string;
       ticket_tiers?: { name?: string } | null;
@@ -57,6 +60,7 @@ export async function getEventAttendees(eventId: string): Promise<DoorAttendee[]
     const checkins = (row.ticket_checkins as { result?: string }[] | null) ?? [];
     return {
       positionId: row.id as string,
+      orderId: order?.id ?? '',
       positionIndex: row.position_index as number,
       referenceCode: row.reference_code as string,
       buyerName: order?.buyer_name_snapshot?.trim() || 'guest',

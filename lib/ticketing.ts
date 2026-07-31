@@ -703,6 +703,112 @@ export async function getOrder(orderId: string): Promise<MyOrder | null> {
   };
 }
 
+// ─── refunds (doc 108 contract; ticket-refund v5, LIVE) ──────────────────
+//     the web lib is the lockstep reference (f370d4b/67d5ee2): same
+//     shapes, same copy
+
+/** §5 disclosure, LIZ COPY RULED verbatim 7-28, both platforms. Renders
+    beside every buyer self-refund affordance; never reworded here. */
+export const REFUND_DISCLOSURE =
+  "the ticket price comes back. card processing already went to the card company, so that part can't.";
+
+export interface RefundPreview {
+  allowed: boolean;
+  canSelfRefund: boolean;
+  refundAmountCents: number;
+  positionCount: number;
+}
+
+export type RefundOutcome =
+  /** refunded; recording may still be settling when pending is true (the
+      contract's stripe-succeeded-recording-failed shape: money moved, the
+      drain + backstop reconcile, so the user sees success, not an error) */
+  | { ok: true; refundAmountCents: number; positionsVoided: number; pending: boolean }
+  | { ok: false; message: string };
+
+/** Raw server text never reaches a user (the humanCheckoutError rule). */
+function humanRefundError(raw: string | null | undefined): string {
+  const s = (raw ?? '').toLowerCase();
+  /* copy to the taste gate: web's shipped strings, mirrored verbatim */
+  if (/(sign|auth|jwt|not signed)/.test(s)) return 'sign in to manage this order.';
+  if (/(window|closed|too late|past|started|cutoff)/.test(s)) return 'this order can no longer be refunded here. reply to your receipt and a person will help.';
+  if (/(already|refunded|voided|nothing left|no remaining)/.test(s)) return 'this order is already refunded.';
+  if (/(not allowed|forbidden|not permitted|only the)/.test(s)) return "this order can't be refunded from this account.";
+  return 'the refund could not go through. give it a moment and try again.';
+}
+
+export type RefundTarget = {
+  /** organizer callers only; buyers omit (the server forces buyer_request) */
+  kind?: 'buyer_request';
+  /** 1-based seat subset (organizer); null/omitted = all remaining seats */
+  positionIndexes?: number[] | null;
+};
+
+async function invokeRefund(
+  orderId: string,
+  action: 'preview' | 'refund',
+  target: RefundTarget,
+): Promise<{ data: Record<string, unknown> | null; raw: string | null }> {
+  const body: Record<string, unknown> = { order_id: orderId, action };
+  if (target.kind) body.kind = target.kind;
+  if (target.positionIndexes !== undefined) body.position_indexes = target.positionIndexes;
+  const { data, error } = await supabase.functions.invoke('ticket-refund', { body });
+  if (error) {
+    // native functions.invoke carries the JSON body on error.context.body
+    // (string), not a Response like web; same {error} shape underneath
+    let raw: string | null = null;
+    try {
+      const ctx = (error as { context?: { body?: unknown } }).context;
+      const parsed = typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
+      if (parsed && typeof (parsed as { error?: string }).error === 'string') {
+        raw = (parsed as { error: string }).error;
+      }
+    } catch { /* raw stays null */ }
+    return { data: null, raw: raw ?? error.message ?? null };
+  }
+  return { data: (data ?? null) as Record<string, unknown> | null, raw: null };
+}
+
+/** action:"preview": no Stripe call, nothing recorded; the wallet and the
+    attendee views render their refund affordances from this answer only. */
+export async function previewRefund(
+  orderId: string,
+  target: RefundTarget = {},
+): Promise<RefundPreview | null> {
+  const { data } = await invokeRefund(orderId, 'preview', target);
+  if (!data || data.ok !== true) return null;
+  return {
+    allowed: data.allowed === true,
+    canSelfRefund: data.can_self_refund === true,
+    refundAmountCents: typeof data.refund_amount_cents === 'number' ? data.refund_amount_cents : 0,
+    positionCount: typeof data.position_count === 'number' ? data.position_count : 0,
+  };
+}
+
+/** The refund itself. Contract shapes handled here so callers see one of two
+    outcomes: done (possibly still settling) or a human message. A 200 with
+    warnings[] IS success (post-refund leg reconciliation is server-side). */
+export async function executeRefund(
+  orderId: string,
+  target: RefundTarget = {},
+): Promise<RefundOutcome> {
+  const { data, raw } = await invokeRefund(orderId, 'refund', target);
+  if (data && data.ok === true) {
+    return {
+      ok: true,
+      refundAmountCents: typeof data.refund_amount_cents === 'number' ? data.refund_amount_cents : 0,
+      positionsVoided: typeof data.positions_voided === 'number' ? data.positions_voided : 0,
+      pending: false,
+    };
+  }
+  // stripe-succeeded-recording-failed: money moved; recording is idempotent
+  // and the drain + backstop reconcile. success.
+  if (raw && /succeeded at stripe/i.test(raw)) {
+    return { ok: true, refundAmountCents: 0, positionsVoided: 0, pending: true };
+  }
+  return { ok: false, message: humanRefundError(raw) };
+}
+
 /**
  * The canonical buyer-answer value shapes (set by Cowork 2026-07-26). Web's
  * organizer reader + CSV export read the SAME rows, so these must not drift:
