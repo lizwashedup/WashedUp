@@ -28,7 +28,7 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
-import { formatEventDateLA, getTodayInLA } from '../../lib/laDate';
+import { formatEventDateLA, getTodayInLA, laWallTimeToUTC } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
 import {
@@ -106,13 +106,22 @@ function formatFullDate(dateStr: string | null, timeStr: string | null): string 
   const dayLabel = formatEventDateLA(dateStr, { weekday: 'long', month: 'long', day: 'numeric' });
   if (timeStr) {
     let t: string;
-    // Handle full ISO timestamps (e.g. "2025-03-22T18:00:00+00:00") and
-    // time-only strings (e.g. "18:00:00") gracefully.
+    // Full ISO timestamps (e.g. "2025-03-22T18:00:00+00:00") render the
+    // stored instant on the LA clock, never the device clock (web twin's
+    // pin; a bare "18:00:00" must not reach this branch, hence the T/space
+    // guard, because some engines parse it as a device-local Date).
     const ts = new Date(timeStr);
-    if (!isNaN(ts.getTime())) {
-      t = ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    if (!isNaN(ts.getTime()) && (timeStr.includes('T') || timeStr.includes(' '))) {
+      t = ts.toLocaleTimeString('en-US', {
+        timeZone: 'America/Los_Angeles',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
     } else {
-      // Fallback: parse a plain "HH:MM" or "HH:MM:SS" time string
+      // A plain "HH:MM[:SS]" is already an LA wall time: print it literally.
+      // setHours + toLocaleTimeString both run on the device clock, so the
+      // zone cancels out and the given wall time is what renders.
       const parts = timeStr.split(':');
       const h = parts[0] ?? '0';
       const m = parts[1] ?? '0';
@@ -125,16 +134,28 @@ function formatFullDate(dateStr: string | null, timeStr: string | null): string 
   return dayLabel;
 }
 
+// A bare HH:MM[:SS] is an LA wall time. Handing `${date}T${time}` to
+// new Date parses on the DEVICE clock, which lands the calendar entry
+// hours off on a non-LA phone; pin through laWallTimeToUTC instead.
+function laEventInstantIso(dateStr: string, timeStr: string): string | null {
+  const dm = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const tm = timeStr.match(/^(\d{1,2}):(\d{2})/);
+  if (!dm || !tm) return null;
+  return laWallTimeToUTC(
+    Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), Number(tm[1]), Number(tm[2]),
+  ).toISOString();
+}
+
 // start_time is a full ISO timestamp OR a plain HH:MM[:SS] string (see
-// formatFullDate); addToCalendar needs one parseable datetime
+// formatFullDate); addToCalendar needs one parseable absolute datetime
 function eventStartIso(dateStr: string | null, timeStr: string | null): string | null {
   if (!dateStr) return null;
   if (timeStr) {
     const ts = new Date(timeStr);
-    if (!isNaN(ts.getTime())) return timeStr;
-    return `${dateStr}T${timeStr}`;
+    if (!isNaN(ts.getTime()) && (timeStr.includes('T') || timeStr.includes(' '))) return timeStr;
+    return laEventInstantIso(dateStr, timeStr);
   }
-  return `${dateStr}T${DEFAULT_EVENT_START_TIME}`;
+  return laEventInstantIso(dateStr, DEFAULT_EVENT_START_TIME);
 }
 
 interface MoreFromEvent {
