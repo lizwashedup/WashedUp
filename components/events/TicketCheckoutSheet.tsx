@@ -55,6 +55,12 @@ function tierMin(t: TicketTier): number {
   return Math.max(1, t.per_order_min ?? 1);
 }
 
+// LIZ COPY RULED verbatim (accuracy-approved, shipped on her word 7-31):
+// the checkout-modal refund disclosure, doc 96's §5 state-it-at-checkout
+// condition. Never reworded here.
+const CHECKOUT_REFUND_DISCLOSURE =
+  "refunds follow this event's policy. if you get one, the ticket price comes back to you, not the card processing. if the organizer cancels or makes a big change, you get all of it back.";
+
 async function loadSellableTiers(eventId: string): Promise<SellableTier[]> {
   const all = await getTiers(eventId);
   const onSale = all.filter((t) => t.status === 'on_sale' && t.visibility !== 'hidden');
@@ -245,8 +251,13 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                 )}
               </TouchableOpacity>
               {!isFree && !!selected && (
-                /* copy to the taste gate */
-                <Text style={styles.feesNote}>all in, fees included. you pay on the next screen.</Text>
+                <>
+                  {/* copy to the taste gate */}
+                  <Text style={styles.feesNote}>all in, fees included. you pay on the next screen.</Text>
+                  {/* the §5 processing-treatment disclosure, stated AT checkout
+                      (doc 96); free tiers have no money to disclose */}
+                  <Text style={styles.refundNote}>{CHECKOUT_REFUND_DISCLOSURE}</Text>
+                </>
               )}
             </ScrollView>
           )}
@@ -315,4 +326,5 @@ const styles = StyleSheet.create({
   ctaDisabled: { opacity: 0.4 },
   ctaText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: EventAction.onPrimary },
   feesNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, textAlign: 'center', marginTop: EventSpacing.sm },
+  refundNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, textAlign: 'center', marginTop: EventSpacing.xs },
 });
