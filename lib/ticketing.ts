@@ -101,6 +101,8 @@ export interface TierDraft {
   description: string | null;
   price_cents: number;
   quantity_cap: number | null;
+  /** doc 109 (group tickets): 1 = no minimum; the column is NOT NULL */
+  per_order_min: number;
   per_order_max: number | null;
   visibility: TierVisibility;
   status: TierStatus;

@@ -59,6 +59,7 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
   const [description, setDescription] = useState('');
   const [priceText, setPriceText] = useState('');
   const [capText, setCapText] = useState('');
+  const [perOrderMinText, setPerOrderMinText] = useState('');
   const [perOrderMaxText, setPerOrderMaxText] = useState('');
   const [hidden, setHidden] = useState(false);
 
@@ -68,6 +69,8 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
     setDescription(tier?.description ?? '');
     setPriceText(tier ? (tier.price_cents === 0 ? '' : (tier.price_cents / 100).toFixed(2)) : '');
     setCapText(tier?.quantity_cap ? String(tier.quantity_cap) : '');
+    // 1 is the column's no-minimum default; only a real minimum shows
+    setPerOrderMinText(tier && tier.per_order_min > 1 ? String(tier.per_order_min) : '');
     setPerOrderMaxText(tier?.per_order_max ? String(tier.per_order_max) : '');
     setHidden(tier?.visibility === 'hidden');
   }, [visible, tier]);
@@ -87,7 +90,23 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
           ? 'that is past the $10,000 ceiling.'
           : null;
 
-  const canSave = name.trim().length > 0 && priceProblem === null && !busy;
+  // doc 109 (group tickets): min >= 1, never above the per-order max or the
+  // tier's own cap; a blank input means 1 (the column's no-minimum default)
+  const perOrderMinDraft = perOrderMinText.trim() ? parseInt(perOrderMinText, 10) : null;
+  const perOrderMaxDraft = perOrderMaxText.trim() ? parseInt(perOrderMaxText, 10) : null;
+  const capDraft = capText.trim() ? parseInt(capText, 10) : null;
+  const minProblem =
+    perOrderMinDraft === null
+      ? null
+      : isNaN(perOrderMinDraft) || perOrderMinDraft < 1
+        ? /* copy to the taste gate */ 'the minimum has to be at least 1.'
+        : perOrderMaxDraft !== null && !isNaN(perOrderMaxDraft) && perOrderMinDraft > perOrderMaxDraft
+          ? /* copy to the taste gate */ 'the minimum cannot be more than the most per order.'
+          : capDraft !== null && !isNaN(capDraft) && perOrderMinDraft > capDraft
+            ? /* copy to the taste gate */ 'the minimum cannot be more than how many exist.'
+            : null;
+
+  const canSave = name.trim().length > 0 && priceProblem === null && minProblem === null && !busy;
 
   const handleSave = () => {
     if (!canSave || priceCents === null) return;
@@ -100,6 +119,7 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
       description: description.trim() ? description.trim().slice(0, TIER_DESCRIPTION_MAX) : null,
       price_cents: priceCents,
       quantity_cap: cap && cap > 0 ? cap : null,
+      per_order_min: perOrderMinDraft && perOrderMinDraft > 1 ? perOrderMinDraft : 1,
       per_order_max: perOrderMax && perOrderMax >= 1 ? perOrderMax : null,
       visibility,
       status: tier?.status ?? 'draft',
@@ -188,15 +208,33 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
                 keyboardType="number-pad"
               />
 
-              <Text style={styles.label}>most per order (blank = no limit)</Text>
-              <TextInput
-                style={styles.input}
-                value={perOrderMaxText}
-                onChangeText={setPerOrderMaxText}
-                placeholder="no limit"
-                placeholderTextColor={Colors.textLight}
-                keyboardType="number-pad"
-              />
+              {/* doc 109: the per-order pair, minimum beside most, one design */}
+              <View style={styles.pairRow}>
+                <View style={styles.pairCol}>
+                  {/* copy to the taste gate */}
+                  <Text style={styles.label}>minimum per order (blank = 1)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={perOrderMinText}
+                    onChangeText={setPerOrderMinText}
+                    placeholder="1"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={styles.pairCol}>
+                  <Text style={styles.label}>most per order (blank = no limit)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={perOrderMaxText}
+                    onChangeText={setPerOrderMaxText}
+                    placeholder="no limit"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="number-pad"
+                  />
+                </View>
+              </View>
+              {!!minProblem && <Text style={styles.problem}>{minProblem}</Text>}
 
               <TouchableOpacity style={styles.checkRow} onPress={() => setHidden(!hidden)} activeOpacity={0.7}>
                 <View style={[styles.checkbox, hidden && styles.checkboxChecked]}>
@@ -267,6 +305,8 @@ const styles = StyleSheet.create({
   previewLabelStrong: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   previewValueStrong: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   freeNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, marginTop: 8 },
+  pairRow: { flexDirection: 'row', gap: 12 },
+  pairCol: { flex: 1 },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
   checkbox: {
     width: 22,

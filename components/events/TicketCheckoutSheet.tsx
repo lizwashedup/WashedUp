@@ -27,6 +27,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { openUrl } from '../../lib/url';
+import { supabase } from '../../lib/supabase';
 import {
   computeFeePreview,
   formatCents,
@@ -34,6 +35,40 @@ import {
   startTicketCheckout,
   type TicketTier,
 } from '../../lib/ticketing';
+
+// doc 109 (group tickets): a tier the buyer cannot lawfully buy renders
+// sold-out-style and is never selectable, so the server's 409 is
+// unreachable from here. Availability is real (get_ticket_tier_availability,
+// orders + holds) and fail-closed to "unknown" = buyable, the same reading
+// getPublicTicketSummary uses; the server still holds the real gate.
+interface SellableTier {
+  tier: TicketTier;
+  /** null = uncapped or unknown */
+  remaining: number | null;
+  /** capped, counted, and nothing left */
+  soldOut: boolean;
+  /** capped, counted, and fewer left than the tier's per-order minimum */
+  underMinimum: boolean;
+}
+
+function tierMin(t: TicketTier): number {
+  return Math.max(1, t.per_order_min ?? 1);
+}
+
+async function loadSellableTiers(eventId: string): Promise<SellableTier[]> {
+  const all = await getTiers(eventId);
+  const onSale = all.filter((t) => t.status === 'on_sale' && t.visibility !== 'hidden');
+  return Promise.all(
+    onSale.map(async (tier) => {
+      const { data: left } = await supabase.rpc('get_ticket_tier_availability', { p_tier_id: tier.id });
+      const remaining = typeof left === 'number' ? left : null;
+      const counted = tier.quantity_cap !== null && remaining !== null;
+      const soldOut = counted && (remaining as number) <= 0;
+      const underMinimum = counted && !soldOut && (remaining as number) < tierMin(tier);
+      return { tier, remaining, soldOut, underMinimum };
+    }),
+  );
+}
 
 interface TicketCheckoutSheetProps {
   visible: boolean;
@@ -44,7 +79,7 @@ interface TicketCheckoutSheetProps {
 }
 
 export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed }: TicketCheckoutSheetProps) {
-  const [tiers, setTiers] = useState<TicketTier[] | null>(null);
+  const [tiers, setTiers] = useState<SellableTier[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -53,22 +88,36 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
   useEffect(() => {
     if (!visible) return;
     setProblem(null);
-    setQty(1);
-    getTiers(eventId).then((all) => {
-      const onSale = all.filter((t) => t.status === 'on_sale' && t.visibility !== 'hidden');
-      setTiers(onSale);
-      setSelectedId(onSale[0]?.id ?? null);
+    loadSellableTiers(eventId).then((rows) => {
+      setTiers(rows);
+      // a blocked tier is never the default selection (doc 109)
+      const first = rows.find((r) => !r.soldOut && !r.underMinimum) ?? null;
+      setSelectedId(first?.tier.id ?? null);
+      setQty(first ? tierMin(first.tier) : 1);
     });
   }, [visible, eventId]);
 
-  const selected = tiers?.find((t) => t.id === selectedId) ?? null;
+  const selectedRow = tiers?.find((r) => r.tier.id === selectedId) ?? null;
+  const selected = selectedRow?.tier ?? null;
+  // the stepper's floor is the tier's minimum (doc 109); its ceiling is the
+  // per-order max, never past what actually remains on a counted tier
+  const qtyMin = selected ? tierMin(selected) : 1;
   const perOrderMax = selected?.per_order_max ?? 10;
+  const qtyMax = Math.max(
+    qtyMin,
+    selectedRow?.remaining != null && selected?.quantity_cap != null
+      ? Math.min(perOrderMax, selectedRow.remaining)
+      : perOrderMax,
+  );
   // §3: the 30 cent fixed fee is per ORDER, so the shown total runs the
   // formula over the order's combined face, never per-ticket-times-qty
   // (2 x $20 charges $41.51; the old multiply showed $41.82). The
   // per-ticket "each" line below stays per-unit by design.
   const allIn = selected ? computeFeePreview(selected.price_cents * qty, 0).buyerTotalCents : 0;
   const isFree = selected?.price_cents === 0;
+  // a free tier with a real minimum still needs the stepper (doc 109);
+  // a plain free tier keeps its one-tap reserve
+  const showStepper = !!selected && (!isFree || qtyMin > 1);
 
   const handleGo = async () => {
     if (!selected || busy) return;
@@ -112,38 +161,55 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
             <Text style={styles.empty}>tickets are not on sale right now.</Text>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false}>
-              {tiers.map((tier) => {
+              {tiers.map(({ tier, soldOut, underMinimum }) => {
                 const active = tier.id === selectedId;
+                const blocked = soldOut || underMinimum;
                 const each = computeFeePreview(tier.price_cents, 0).buyerTotalCents;
+                const min = tierMin(tier);
                 return (
                   <TouchableOpacity
                     key={tier.id}
-                    style={[styles.tier, active && styles.tierActive]}
+                    style={[styles.tier, active && styles.tierActive, blocked && styles.tierBlocked]}
                     onPress={() => {
                       hapticLight();
                       setSelectedId(tier.id);
-                      setQty(1);
+                      setQty(min);
                     }}
+                    disabled={blocked}
+                    accessibilityState={{ disabled: blocked, selected: active }}
                     activeOpacity={0.85}
                   >
                     <View style={styles.tierBody}>
-                      <Text style={styles.tierName}>{tier.name}</Text>
-                      {!!tier.description && <Text style={styles.tierDesc}>{tier.description}</Text>}
+                      <Text style={[styles.tierName, blocked && styles.tierTextBlocked]}>{tier.name}</Text>
+                      {!!tier.description && !blocked && <Text style={styles.tierDesc}>{tier.description}</Text>}
+                      {/* doc 109: a real minimum names itself on the card */}
+                      {min > 1 && !blocked && (
+                        /* copy to the taste gate */
+                        <Text style={styles.tierMinNote}>{min} ticket minimum</Text>
+                      )}
+                      {soldOut && (
+                        /* copy to the taste gate */
+                        <Text style={styles.tierBlockedNote}>sold out</Text>
+                      )}
+                      {underMinimum && (
+                        /* RULED copy (doc 109): the buyer never reaches the server 409 */
+                        <Text style={styles.tierBlockedNote}>not enough left for this ticket's minimum</Text>
+                      )}
                     </View>
-                    <Text style={styles.tierPrice}>
+                    <Text style={[styles.tierPrice, blocked && styles.tierTextBlocked]}>
                       {tier.price_cents === 0 ? 'free' : formatCents(each)}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
 
-              {!!selected && !isFree && (
+              {showStepper && (
                 <View style={styles.qtyRow}>
                   {/* copy to the taste gate */}
                   <Text style={styles.qtyLabel}>how many</Text>
                   <View style={styles.stepper}>
                     <TouchableOpacity
-                      onPress={() => { hapticLight(); setQty((q) => Math.max(1, q - 1)); }}
+                      onPress={() => { hapticLight(); setQty((q) => Math.max(qtyMin, q - 1)); }}
                       hitSlop={8}
                       style={styles.stepBtn}
                     >
@@ -151,7 +217,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                     </TouchableOpacity>
                     <Text style={styles.qtyValue}>{qty}</Text>
                     <TouchableOpacity
-                      onPress={() => { hapticLight(); setQty((q) => Math.min(perOrderMax, q + 1)); }}
+                      onPress={() => { hapticLight(); setQty((q) => Math.min(qtyMax, q + 1)); }}
                       hitSlop={8}
                       style={styles.stepBtn}
                     >
@@ -216,6 +282,11 @@ const styles = StyleSheet.create({
     marginBottom: EventSpacing.sm,
   },
   tierActive: { borderColor: EventAction.primary },
+  // sold-out style (doc 109): quiet, never selectable, no new accents
+  tierBlocked: { opacity: 0.55 },
+  tierTextBlocked: { color: Colors.textLight },
+  tierMinNote: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  tierBlockedNote: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierBody: { flex: 1, gap: 2 },
   tierName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   tierDesc: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
