@@ -705,6 +705,27 @@ export async function getOrder(orderId: string): Promise<MyOrder | null> {
   };
 }
 
+// ─── doc 111: the organizer's "after they buy" message ───────────────────
+
+/**
+ * The organizer's post-purchase note for an event (doc 111; column lands
+ * with SQL-96, at the seat's gate). Self-flipping: while the column does
+ * not exist the read errors and this returns null, so the order-complete
+ * screen and the wallet render nothing. Reads under the existing
+ * Live-events RLS; identifier binding lives in lib/creatorEvents
+ * (AFTER_PURCHASE_COLUMN, seat-verified against SQL-96).
+ */
+export async function getAfterPurchaseMessage(eventId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('explore_events')
+    .select('after_purchase_message')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const raw = (data as Record<string, unknown>).after_purchase_message;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+}
+
 // ─── refunds (doc 108 contract; ticket-refund v5, LIVE) ──────────────────
 //     the web lib is the lockstep reference (f370d4b/67d5ee2): same
 //     shapes, same copy

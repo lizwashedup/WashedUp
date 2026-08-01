@@ -31,6 +31,7 @@ import { EventAction, EventSpacing } from '../../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../../lib/haptics';
 import { formatEventDateLA } from '../../../lib/laDate';
 import {
+  getAfterPurchaseMessage,
   getOrder,
   getQuestions,
   recordAnswer,
@@ -91,6 +92,13 @@ export default function OrderCompleteScreen() {
     queryKey: ['order-questions', order?.event_id],
     queryFn: () => getQuestions(order!.event_id),
     enabled: !!order?.event_id,
+  });
+  // doc 111: the organizer's "after they buy" note; null until SQL-96 lands
+  const { data: organizerNote } = useQuery({
+    queryKey: ['after-purchase-message', order?.event_id],
+    queryFn: () => getAfterPurchaseMessage(order!.event_id),
+    enabled: !!order?.event_id,
+    staleTime: 60_000,
   });
 
   const qty = order?.qty ?? 1;
@@ -254,6 +262,16 @@ export default function OrderCompleteScreen() {
           </Text>
         ))}
 
+        {/* doc 111: the organizer speaking, quiet card, the documented
+            gold-border quote treatment (no new accents) */}
+        {!!organizerNote && (
+          <View style={styles.organizerNote}>
+            {/* copy to the taste gate */}
+            <Text style={styles.organizerNoteLabel}>from the organizer</Text>
+            <Text style={styles.organizerNoteText}>{organizerNote}</Text>
+          </View>
+        )}
+
         {!done && questions.length > 0 && (
           <View style={styles.questions}>
             {/* copy to the taste gate */}
@@ -327,6 +345,17 @@ const styles = StyleSheet.create({
   eventTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, marginTop: EventSpacing.sm, textAlign: 'center' },
   eventMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: 2 },
   ref: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginTop: EventSpacing.sm, letterSpacing: 1 },
+  organizerNote: {
+    alignSelf: 'stretch', backgroundColor: Colors.white, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border,
+    borderLeftWidth: 2, borderLeftColor: Colors.goldAccent,
+    padding: 14, marginTop: EventSpacing.lg, gap: 4,
+  },
+  organizerNoteLabel: {
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary,
+    letterSpacing: 0.5, textTransform: 'uppercase',
+  },
+  organizerNoteText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.quoteText, lineHeight: 20 },
   questions: { alignSelf: 'stretch', marginTop: EventSpacing.xl, gap: EventSpacing.lg },
   qHeader: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   qGroup: { gap: EventSpacing.sm },

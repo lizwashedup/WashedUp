@@ -53,6 +53,7 @@ import {
   getEventTemplate,
   getOperatorEvent,
   pickAndUploadEventImage,
+  probeAfterPurchase,
   saveEventTemplate,
   setOperatorEventCoords,
   updateOperatorEvent,
@@ -113,6 +114,20 @@ export default function EventFormScreen() {
   const [pinToChat, setPinToChat] = useState(true);
   const [eventStatus, setEventStatus] = useState<string>('Live');
   const [eventCommunityId, setEventCommunityId] = useState<string | null>(null);
+  // doc 111: the "after they buy" message. The field renders ONLY when the
+  // SQL-96 column probe succeeds (join-gate pattern), so it self-flips on
+  // apply and can never silently drop an organizer's text before then.
+  const [afterPurchaseOpen, setAfterPurchaseOpen] = useState(false);
+  const [afterPurchaseMsg, setAfterPurchaseMsg] = useState('');
+
+  // doc 111 door probe: edit loads the stored message with it; create just
+  // asks whether the column exists yet
+  useEffect(() => {
+    probeAfterPurchase(editing ? id : null).then(({ open, value }) => {
+      setAfterPurchaseOpen(open);
+      if (value !== null) setAfterPurchaseMsg(value);
+    });
+  }, [editing, id]);
   const [seeded, setSeeded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -331,6 +346,10 @@ export default function EventFormScreen() {
       // undefined (create, or an edit that never opened the editor) leaves
       // the stored body untouched; [] clears it.
       description_blocks: blocks,
+      // doc 111: rides only when the SQL-96 door is open (undefined = the
+      // param is never sent); the loaded value always travels back, so the
+      // full-overwrite contract holds
+      after_purchase_message: afterPurchaseOpen ? (afterPurchaseMsg.trim() || null) : undefined,
     };
   };
 
@@ -937,6 +956,25 @@ export default function EventFormScreen() {
             <Text style={styles.fieldLabel}>ticket price</Text>
             <TextInput style={styles.input} value={ticketPrice} onChangeText={setTicketPrice} placeholder="leave empty if free" placeholderTextColor={Colors.inkSoft} keyboardType="decimal-pad" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
 
+            {/* doc 111: the "after they buy" message; renders only once the
+                SQL-96 column exists (join-gate pattern, self-flips on apply) */}
+            {afterPurchaseOpen && (
+              <>
+                {/* LIZ COPY (proposed, taste gate) */}
+                <Text style={styles.fieldLabel}>after they buy</Text>
+                <Text style={styles.fieldHint}>lands on their confirmation and stays on their tickets. things like parking, arrival time, what to wear.</Text>
+                <TextInput
+                  style={[styles.input, styles.inputTall]}
+                  value={afterPurchaseMsg}
+                  onChangeText={setAfterPurchaseMsg}
+                  placeholder="what should they know once they're in?"
+                  placeholderTextColor={Colors.inkSoft}
+                  multiline
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+              </>
+            )}
+
             <Text style={styles.fieldLabel}>public listing name</Text>
             <Text style={styles.fieldHint}>a brand or venue name to front the listing. leave empty to show yours.</Text>
             <TextInput style={styles.input} value={publicName} onChangeText={setPublicName} maxLength={80} placeholder="a brand or venue name" placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
@@ -1118,6 +1156,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   fieldHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginBottom: 6 },
+  // doc 111: the multiline "after they buy" message
+  inputTall: { minHeight: 96, textAlignVertical: 'top' },
   input: {
     backgroundColor: Colors.parchment,
     borderRadius: 12,

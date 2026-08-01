@@ -22,9 +22,31 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { formatEventDateLA } from '../../lib/laDate';
 import {
-  REFUND_DISCLOSURE, executeRefund, formatCents, getMyOrders, previewRefund,
+  REFUND_DISCLOSURE, executeRefund, formatCents, getAfterPurchaseMessage,
+  getMyOrders, previewRefund,
   type MyOrder, type MySeat,
 } from '../../lib/ticketing';
+
+/**
+ * doc 111: the organizer's "after they buy" note stays on the tickets, the
+ * documented gold-border quote treatment (the organizer speaking, no new
+ * accents). Renders nothing until SQL-96's column lands (self-flipping read).
+ */
+function OrganizerNote({ eventId }: { eventId: string }) {
+  const { data: note } = useQuery({
+    queryKey: ['after-purchase-message', eventId],
+    queryFn: () => getAfterPurchaseMessage(eventId),
+    staleTime: 60_000,
+  });
+  if (!note) return null;
+  return (
+    <View style={styles.organizerNote}>
+      {/* copy to the taste gate */}
+      <Text style={styles.organizerNoteLabel}>from the organizer</Text>
+      <Text style={styles.organizerNoteText}>{note}</Text>
+    </View>
+  );
+}
 
 // the scanner reads from arm's length in door light; smaller and a 10-char
 // code still scans, but this size is comfortable on every supported width
@@ -181,6 +203,7 @@ export default function YourTicketsScreen() {
                   </Text>
                 </View>
               </View>
+              <OrganizerNote eventId={o.event_id} />
               {o.seats.map((seat) => (
                 <SeatTicket key={seat.id} seat={seat} qty={o.qty} />
               ))}
@@ -230,6 +253,17 @@ const styles = StyleSheet.create({
     letterSpacing: 3, textDecorationLine: 'line-through',
   },
   seatVoidedNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  organizerNote: {
+    backgroundColor: Colors.white, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border,
+    borderLeftWidth: 2, borderLeftColor: Colors.goldAccent,
+    padding: 12, gap: 4,
+  },
+  organizerNoteLabel: {
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary,
+    letterSpacing: 0.5, textTransform: 'uppercase',
+  },
+  organizerNoteText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.quoteText, lineHeight: 19 },
   refundBlock: {
     alignItems: 'center', gap: EventSpacing.sm,
     borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: EventSpacing.md,
