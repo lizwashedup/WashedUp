@@ -31,7 +31,7 @@ import { EventAction, EventSpacing } from '../../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../../lib/haptics';
 import { formatEventDateLA } from '../../../lib/laDate';
 import {
-  getAfterPurchaseMessage,
+  getConfirmationMessage,
   getOrder,
   getQuestions,
   recordAnswer,
@@ -95,8 +95,8 @@ export default function OrderCompleteScreen() {
   });
   // doc 111: the organizer's "after they buy" note; null until SQL-96 lands
   const { data: organizerNote } = useQuery({
-    queryKey: ['after-purchase-message', order?.event_id],
-    queryFn: () => getAfterPurchaseMessage(order!.event_id),
+    queryKey: ['confirmation-message', order?.event_id],
+    queryFn: () => getConfirmationMessage(order!.event_id),
     enabled: !!order?.event_id,
     staleTime: 60_000,
   });

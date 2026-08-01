@@ -57,33 +57,32 @@ export interface OperatorEventFields {
   /** doc 111: the "after they buy" message. undefined = the SQL-96 door is
    *  closed and the param is NEVER sent (pre-apply saves are byte-identical
    *  to today); string/null only once the column probe succeeded. */
-  after_purchase_message?: string | null;
+  confirmation_message?: string | null;
 }
 
-// ─── doc 111: the "after they buy" message (SQL-96, at the seat's gate) ───
-// SEAT BINDING REQUIRED: these two identifiers are the client's read of
-// SQL-96's names, written before the proposal's bytes were readable. Verify
-// against the applied proposal and rebind HERE if they differ. Until the
-// column exists on prod every door below stays closed (the join-gate
-// pattern), so a wrong name is inert: the field never renders, the param is
+// ─── doc 111: the "after they buy" message (SQL-96) ───────────────────────
+// Identifiers BOUND TO SQL-96 CANON (Cowork ruling 8-1):
+// explore_events.confirmation_message + p_confirmation_message on both
+// operator RPCs. Until the column exists on prod every door below stays
+// closed (the join-gate pattern): the field never renders, the param is
 // never sent, and no organizer text can be silently dropped.
-export const AFTER_PURCHASE_COLUMN = 'after_purchase_message';
-const AFTER_PURCHASE_RPC_PARAM = 'p_after_purchase_message';
+export const CONFIRMATION_MESSAGE_COLUMN = 'confirmation_message';
+const CONFIRMATION_MESSAGE_RPC_PARAM = 'p_confirmation_message';
 
 /**
  * The door probe + value read in one query. Edit passes the event id and
  * gets the stored message back; create probes with a 1-row read. A missing
  * column (SQL-96 not applied) reads as door-closed, never as an error.
  */
-export async function probeAfterPurchase(
+export async function probeConfirmationMessage(
   eventId?: string | null,
 ): Promise<{ open: boolean; value: string | null }> {
-  let q = supabase.from('explore_events').select(AFTER_PURCHASE_COLUMN).limit(1);
+  let q = supabase.from('explore_events').select(CONFIRMATION_MESSAGE_COLUMN).limit(1);
   if (eventId) q = q.eq('id', eventId);
   const { data, error } = await q;
   if (error) return { open: false, value: null };
   const row = (data ?? [])[0] as Record<string, unknown> | undefined;
-  const raw = eventId && row ? row[AFTER_PURCHASE_COLUMN] : null;
+  const raw = eventId && row ? row[CONFIRMATION_MESSAGE_COLUMN] : null;
   return { open: true, value: typeof raw === 'string' && raw.trim() ? raw : null };
 }
 
@@ -158,12 +157,12 @@ export async function createOperatorEvent(
 ): Promise<string> {
   // doc 111: the param rides ONLY when the door probe opened the field
   // (undefined = never sent), so a pre-SQL-96 call is byte-identical to today
-  const afterPurchase =
-    fields.after_purchase_message !== undefined
-      ? { [AFTER_PURCHASE_RPC_PARAM]: fields.after_purchase_message }
+  const confirmationMessage =
+    fields.confirmation_message !== undefined
+      ? { [CONFIRMATION_MESSAGE_RPC_PARAM]: fields.confirmation_message }
       : {};
   const { data, error } = await supabase.rpc('operator_create_explore_event', {
-    ...afterPurchase,
+    ...confirmationMessage,
     p_title: fields.title,
     p_description: fields.description || null,
     p_image_url: fields.image_url || null,
@@ -192,12 +191,12 @@ export async function updateOperatorEvent(
   status: string | null,
 ): Promise<void> {
   // doc 111: same conditional ride as create (see there)
-  const afterPurchase =
-    fields.after_purchase_message !== undefined
-      ? { [AFTER_PURCHASE_RPC_PARAM]: fields.after_purchase_message }
+  const confirmationMessage =
+    fields.confirmation_message !== undefined
+      ? { [CONFIRMATION_MESSAGE_RPC_PARAM]: fields.confirmation_message }
       : {};
   const { error } = await supabase.rpc('operator_update_explore_event', {
-    ...afterPurchase,
+    ...confirmationMessage,
     p_event_id: eventId,
     p_title: fields.title,
     p_description: fields.description || null,

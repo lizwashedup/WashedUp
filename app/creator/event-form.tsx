@@ -53,7 +53,7 @@ import {
   getEventTemplate,
   getOperatorEvent,
   pickAndUploadEventImage,
-  probeAfterPurchase,
+  probeConfirmationMessage,
   saveEventTemplate,
   setOperatorEventCoords,
   updateOperatorEvent,
@@ -123,7 +123,7 @@ export default function EventFormScreen() {
   // doc 111 door probe: edit loads the stored message with it; create just
   // asks whether the column exists yet
   useEffect(() => {
-    probeAfterPurchase(editing ? id : null).then(({ open, value }) => {
+    probeConfirmationMessage(editing ? id : null).then(({ open, value }) => {
       setAfterPurchaseOpen(open);
       if (value !== null) setAfterPurchaseMsg(value);
     });
@@ -349,7 +349,7 @@ export default function EventFormScreen() {
       // doc 111: rides only when the SQL-96 door is open (undefined = the
       // param is never sent); the loaded value always travels back, so the
       // full-overwrite contract holds
-      after_purchase_message: afterPurchaseOpen ? (afterPurchaseMsg.trim() || null) : undefined,
+      confirmation_message: afterPurchaseOpen ? (afterPurchaseMsg.trim() || null) : undefined,
     };
   };
 

@@ -22,7 +22,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { formatEventDateLA } from '../../lib/laDate';
 import {
-  REFUND_DISCLOSURE, executeRefund, formatCents, getAfterPurchaseMessage,
+  REFUND_DISCLOSURE, executeRefund, formatCents, getConfirmationMessage,
   getMyOrders, previewRefund,
   type MyOrder, type MySeat,
 } from '../../lib/ticketing';
@@ -34,8 +34,8 @@ import {
  */
 function OrganizerNote({ eventId }: { eventId: string }) {
   const { data: note } = useQuery({
-    queryKey: ['after-purchase-message', eventId],
-    queryFn: () => getAfterPurchaseMessage(eventId),
+    queryKey: ['confirmation-message', eventId],
+    queryFn: () => getConfirmationMessage(eventId),
     staleTime: 60_000,
   });
   if (!note) return null;
