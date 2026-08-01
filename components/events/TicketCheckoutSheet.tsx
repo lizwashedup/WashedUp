@@ -37,12 +37,12 @@ import {
   type TicketTier,
 } from '../../lib/ticketing';
 import {
+  addonRemaining,
   listBuyerAddons,
-  probePromosAddons,
-  quotePromoCode,
+  quoteCheckout,
   type AddonSelection,
-  type PromoQuote,
-  type TicketAddon,
+  type EventAddon,
+  type PriceQuote,
 } from '../../lib/ticketPromosAddons';
 
 // doc 109 (group tickets): a tier the buyer cannot lawfully buy renders
@@ -99,17 +99,19 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  // docs 113/114 buyer half: everything below is invisible until the tables
-  // land (join-gate), and a promo NEVER reprices from client math: only the
-  // server's quote answer changes the button.
-  const [promoDoorOpen, setPromoDoorOpen] = useState(false);
-  const [addonsList, setAddonsList] = useState<TicketAddon[]>([]);
+  // docs 113/114 buyer half (canon). A promo NEVER reprices from client
+  // math: only quote_ticket_checkout's answer changes the button. That RPC
+  // is authenticated-only, so a signed-out buyer keeps the undiscounted
+  // price and the code rides to checkout, which prices it for real.
+  const [addonsList, setAddonsList] = useState<EventAddon[]>([]);
   const [addonQty, setAddonQty] = useState<Record<string, number>>({});
   const [codeFieldOpen, setCodeFieldOpen] = useState(false);
   const [codeText, setCodeText] = useState('');
-  const [quote, setQuote] = useState<PromoQuote | null>(null);
+  /** the code that rides to checkout (verified, or unverifiable-but-typed) */
+  const [appliedCode, setAppliedCode] = useState<string | null>(null);
+  const [quote, setQuote] = useState<PriceQuote | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
-  const [quoteFailed, setQuoteFailed] = useState(false);
+  const [codeNote, setCodeNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -117,8 +119,9 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
     setAddonQty({});
     setCodeFieldOpen(false);
     setCodeText('');
+    setAppliedCode(null);
     setQuote(null);
-    setQuoteFailed(false);
+    setCodeNote(null);
     loadSellableTiers(eventId).then((rows) => {
       setTiers(rows);
       // a blocked tier is never the default selection (doc 109)
@@ -126,16 +129,12 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
       setSelectedId(first?.tier.id ?? null);
       setQty(first ? tierMin(first.tier) : 1);
     });
-    probePromosAddons().then(({ promos, addons }) => {
-      setPromoDoorOpen(promos);
-      if (addons) listBuyerAddons(eventId).then(setAddonsList);
-    });
+    listBuyerAddons(eventId).then(setAddonsList);
   }, [visible, eventId]);
 
-  // any change to what's being bought invalidates the server's last quote
+  // any change to what is being bought invalidates the server's last price
   const clearQuote = () => {
     setQuote(null);
-    setQuoteFailed(false);
   };
 
   const selectedRow = tiers?.find((r) => r.tier.id === selectedId) ?? null;
@@ -157,12 +156,12 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
   // doc 114: extras and codes ride PAID checkouts only (the free path never
   // opens Stripe's page, so there is nothing for them to ride)
   const showExtras = !!selected && !isFree && addonsList.length > 0;
-  const showPromoEntry = !!selected && !isFree && promoDoorOpen;
+  const showPromoEntry = !!selected && !isFree;
   const selections: AddonSelection[] = Object.entries(addonQty)
     .filter(([, n]) => n > 0)
-    .map(([addon_id, n]) => ({ addon_id, qty: n }));
+    .map(([add_on_id, n]) => ({ add_on_id, qty: n }));
   const addonsFaceCents = selections.reduce((sum, s) => {
-    const a = addonsList.find((x) => x.id === s.addon_id);
+    const a = addonsList.find((x) => x.id === s.add_on_id);
     return sum + (a ? a.price_cents * s.qty : 0);
   }, 0);
   // §3: the 30 cent fixed fee is per ORDER, so the shown total runs the
@@ -180,17 +179,31 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
     if (!selected || quoteBusy || !codeText.trim()) return;
     hapticLight();
     setQuoteBusy(true);
-    setQuoteFailed(false);
-    const answer = await quotePromoCode(selected.id, qty, codeText, selections);
+    setCodeNote(null);
+    const answer = await quoteCheckout(selected.id, qty, codeText, selections);
     setQuoteBusy(false);
-    if (answer) {
+    if (answer && answer.ok && answer.promoValid) {
       hapticSuccess();
       setQuote(answer);
-    } else {
+      setAppliedCode(codeText.trim());
+      return;
+    }
+    if (answer) {
+      // the server looked and said no: say what it said, change no price
       hapticError();
       setQuote(null);
-      setQuoteFailed(true);
+      setAppliedCode(null);
+      /* copy to the taste gate */
+      setCodeNote(answer.promoReason ?? answer.reason ?? "that code didn't take.");
+      return;
     }
+    // unreachable (signed out, or a hiccup): the ruled fallback is to keep
+    // the undiscounted price and let checkout do the real pricing, so the
+    // code still rides along rather than being silently dropped
+    setQuote(null);
+    setAppliedCode(codeText.trim());
+    /* copy to the taste gate */
+    setCodeNote("we'll check this code at checkout.");
   };
 
   const handleGo = async () => {
@@ -199,7 +212,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
     setBusy(true);
     setProblem(null);
     const result = await startTicketCheckout(selected.id, qty, {
-      promoCode: quote?.code,
+      promoCode: appliedCode,
       addons: selections,
     });
     setBusy(false);
@@ -313,7 +326,8 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                   <Text style={styles.extrasHeader}>extras</Text>
                   {addonsList.map((a) => {
                     const n = addonQty[a.id] ?? 0;
-                    const aMax = a.per_order_max ?? 10;
+                    const left = addonRemaining(a);
+                    const aMax = Math.min(a.per_order_max ?? 10, left ?? Number.MAX_SAFE_INTEGER);
                     return (
                       <View key={a.id} style={styles.addonRow}>
                         <View style={styles.addonBody}>
@@ -350,23 +364,33 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                   changes the price */}
               {showPromoEntry && (
                 <View style={styles.promoBlock}>
-                  {!codeFieldOpen && !quote ? (
+                  {!codeFieldOpen && !appliedCode ? (
                     <TouchableOpacity onPress={() => { hapticLight(); setCodeFieldOpen(true); }} hitSlop={8} accessibilityRole="button">
                       {/* copy to the taste gate */}
                       <Text style={styles.promoLink}>have a code?</Text>
                     </TouchableOpacity>
-                  ) : quote ? (
+                  ) : appliedCode ? (
                     /* copy to the taste gate */
                     <Text style={styles.promoApplied}>
-                      {quote.code} applied
-                      <Text style={styles.promoRemove} onPress={() => { hapticLight(); clearQuote(); setCodeText(''); }}>  remove</Text>
+                      {appliedCode} applied
+                      <Text
+                        style={styles.promoRemove}
+                        onPress={() => {
+                          hapticLight();
+                          setAppliedCode(null);
+                          setQuote(null);
+                          setCodeNote(null);
+                          setCodeText('');
+                          setCodeFieldOpen(false);
+                        }}
+                      >  remove</Text>
                     </Text>
                   ) : (
                     <View style={styles.promoRow}>
                       <TextInput
                         style={styles.promoInput}
                         value={codeText}
-                        onChangeText={(v) => { setCodeText(v); setQuoteFailed(false); }}
+                        onChangeText={(v) => { setCodeText(v); setCodeNote(null); }}
                         placeholder="your code"
                         placeholderTextColor={Colors.textLight}
                         autoCapitalize="characters"
@@ -388,10 +412,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                       </TouchableOpacity>
                     </View>
                   )}
-                  {quoteFailed && (
-                    /* copy to the taste gate */
-                    <Text style={styles.promoMiss}>that code didn't take.</Text>
-                  )}
+                  {!!codeNote && <Text style={styles.promoMiss}>{codeNote}</Text>}
                 </View>
               )}
 
@@ -408,7 +429,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                 ) : (
                   <Text style={styles.ctaText}>
                     {/* law 9: the all-in total, fees included, before the handoff */}
-                    {isFree ? 'reserve' : `pay ${formatCents(allIn)}`}
+                    {isFree || quote?.isFree ? 'reserve' : `pay ${formatCents(allIn)}`}
                   </Text>
                 )}
               </TouchableOpacity>

@@ -580,10 +580,10 @@ function humanCheckoutError(raw: string | null | undefined): string {
 export async function startTicketCheckout(
   tierId: string,
   qty: number,
-  // docs 113/114: promo + add-ons ride the same call. The keys travel only
-  // when provided, and the buyer surfaces that provide them are probe-gated
-  // behind the schema, so a pre-apply checkout is byte-identical to today.
-  extras?: { promoCode?: string; addons?: { addon_id: string; qty: number }[] },
+  // docs 113/114 (canon): promo + add-ons ride the same call under the
+  // canon body keys. Both travel only when provided, so a checkout without
+  // them is byte-identical to today's.
+  extras?: { promoCode?: string | null; addons?: { add_on_id: string; qty: number }[] },
 ): Promise<CheckoutResult> {
   // 87 F1 idempotency (Cowork 7-27): ONE stable checkout_key per user
   // checkout action, minted here because one call IS one action today (the
@@ -598,7 +598,7 @@ export async function startTicketCheckout(
     tier_id: tierId, qty, origin: 'https://washedup.app', checkout_key: checkoutKey,
   };
   if (extras?.promoCode) body.promo_code = extras.promoCode;
-  if (extras?.addons && extras.addons.length > 0) body.addons = extras.addons;
+  if (extras?.addons && extras.addons.length > 0) body.add_ons = extras.addons;
   const { data, error } = await supabase.functions.invoke('create-ticket-checkout', { body });
   if (error) {
     // functions.invoke surfaces non-2xx as an error with the JSON body. That

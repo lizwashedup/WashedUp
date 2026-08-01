@@ -52,18 +52,19 @@ import {
   type TierDraft,
 } from '../../lib/ticketing';
 import {
+  addonRemaining,
   createAddon,
-  createPromotion,
+  createPromoCode,
   deleteAddon,
-  deletePromotion,
+  deletePromoCode,
   listAddons,
-  listPromotions,
-  probePromosAddons,
+  listPromoCodes,
+  setPromoActive,
   updateAddon,
   type AddonDraft,
-  type PromotionDraft,
-  type TicketAddon,
-  type TicketPromotion,
+  type EventAddon,
+  type PromoCode,
+  type PromoDraft,
 } from '../../lib/ticketPromosAddons';
 import { PayoutsCard } from '../../components/creator/PayoutsCard';
 import { TierEditorSheet } from '../../components/creator/TierEditorSheet';
@@ -87,7 +88,7 @@ export default function TicketSetupScreen() {
   // succeeds (the doc-111 join-gate pattern), self-flipping on schema apply
   const [promoEditorVisible, setPromoEditorVisible] = useState(false);
   const [addonEditorVisible, setAddonEditorVisible] = useState(false);
-  const [editingAddon, setEditingAddon] = useState<TicketAddon | null>(null);
+  const [editingAddon, setEditingAddon] = useState<EventAddon | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   useEffect(() => {
@@ -136,21 +137,16 @@ export default function TicketSetupScreen() {
     staleTime: 15_000,
   });
 
-  const { data: doors } = useQuery({
-    queryKey: ['promos-addons-doors'],
-    queryFn: probePromosAddons,
-    staleTime: 60_000,
-  });
-  const { data: promotions = [] } = useQuery({
-    queryKey: ['ticket-promotions', id],
-    queryFn: () => listPromotions(id!),
-    enabled: !!id && doors?.promos === true,
+  const { data: promoCodes = [] } = useQuery({
+    queryKey: ['ticket-promo-codes', id],
+    queryFn: () => listPromoCodes(id!),
+    enabled: !!id,
     staleTime: 15_000,
   });
   const { data: addons = [] } = useQuery({
-    queryKey: ['ticket-addons', id],
+    queryKey: ['event-add-ons', id],
     queryFn: () => listAddons(id!),
-    enabled: !!id && doors?.addons === true,
+    enabled: !!id,
     staleTime: 15_000,
   });
 
@@ -205,14 +201,14 @@ export default function TicketSetupScreen() {
   }, [invalidateQuestions]);
 
   const savePromoMutation = useMutation({
-    mutationFn: async (draft: PromotionDraft) => {
-      const result = await createPromotion(id!, draft);
+    mutationFn: async (draft: PromoDraft) => {
+      const result = await createPromoCode(id!, draft);
       if (!result.ok) throw new Error(result.message ?? 'save failed');
     },
     onSuccess: () => {
       hapticSuccess();
       setPromoEditorVisible(false);
-      queryClient.invalidateQueries({ queryKey: ['ticket-promotions', id] });
+      queryClient.invalidateQueries({ queryKey: ['ticket-promo-codes', id] });
     },
     onError: (e: any) => {
       hapticError();
@@ -220,7 +216,22 @@ export default function TicketSetupScreen() {
     },
   });
 
-  const handleDeletePromo = useCallback((promo: TicketPromotion) => {
+  const togglePromoMutation = useMutation({
+    mutationFn: async (promo: PromoCode) => {
+      const result = await setPromoActive(promo.id, !promo.active);
+      if (!result.ok) throw new Error(result.message ?? 'save failed');
+    },
+    onSuccess: () => {
+      hapticSuccess();
+      queryClient.invalidateQueries({ queryKey: ['ticket-promo-codes', id] });
+    },
+    onError: (e: any) => {
+      hapticError();
+      setAlertInfo({ title: 'that did not save', message: e?.message ?? 'give it another try.' });
+    },
+  });
+
+  const handleDeletePromo = useCallback((promo: PromoCode) => {
     setAlertInfo({
       /* copy to the taste gate */
       title: 'remove this code?',
@@ -231,10 +242,10 @@ export default function TicketSetupScreen() {
           text: 'remove it',
           style: 'destructive',
           onPress: async () => {
-            const ok = await deletePromotion(promo.id);
+            const ok = await deletePromoCode(promo.id);
             if (ok) {
               hapticSuccess();
-              queryClient.invalidateQueries({ queryKey: ['ticket-promotions', id] });
+              queryClient.invalidateQueries({ queryKey: ['ticket-promo-codes', id] });
             } else {
               hapticError();
             }
@@ -248,14 +259,14 @@ export default function TicketSetupScreen() {
     mutationFn: async (draft: AddonDraft) => {
       const result = editingAddon
         ? await updateAddon(editingAddon.id, draft)
-        : await createAddon(id!, draft, addons.length);
+        : await createAddon(id!, draft);
       if (!result.ok) throw new Error(result.message ?? 'save failed');
     },
     onSuccess: () => {
       hapticSuccess();
       setAddonEditorVisible(false);
       setEditingAddon(null);
-      queryClient.invalidateQueries({ queryKey: ['ticket-addons', id] });
+      queryClient.invalidateQueries({ queryKey: ['event-add-ons', id] });
     },
     onError: (e: any) => {
       hapticError();
@@ -263,7 +274,23 @@ export default function TicketSetupScreen() {
     },
   });
 
-  const handleDeleteAddon = useCallback((addon: TicketAddon) => {
+  const toggleAddonSaleMutation = useMutation({
+    mutationFn: async (addon: EventAddon) => {
+      const next = addon.status === 'on_sale' ? 'draft' : 'on_sale';
+      const result = await updateAddon(addon.id, { status: next });
+      if (!result.ok) throw new Error(result.message ?? 'save failed');
+    },
+    onSuccess: () => {
+      hapticSuccess();
+      queryClient.invalidateQueries({ queryKey: ['event-add-ons', id] });
+    },
+    onError: (e: any) => {
+      hapticError();
+      setAlertInfo({ title: 'that did not save', message: e?.message ?? 'give it another try.' });
+    },
+  });
+
+  const handleDeleteAddon = useCallback((addon: EventAddon) => {
     setAlertInfo({
       /* copy to the taste gate */
       title: 'remove this extra?',
@@ -277,7 +304,7 @@ export default function TicketSetupScreen() {
             const ok = await deleteAddon(addon.id);
             if (ok) {
               hapticSuccess();
-              queryClient.invalidateQueries({ queryKey: ['ticket-addons', id] });
+              queryClient.invalidateQueries({ queryKey: ['event-add-ons', id] });
             } else {
               hapticError();
             }
@@ -516,86 +543,105 @@ export default function TicketSetupScreen() {
           <Text style={styles.emptyText}>four is the most. fewer choices sell better.</Text>
         )}
 
-        {/* promotions (doc 113): invisible until the table lands (join-gate) */}
-        {doors?.promos === true && (
-          <>
-            <View style={styles.sectionHeader}>
-              {/* copy to the taste gate */}
-              <Text style={styles.sectionTitle}>codes</Text>
+        {/* codes (doc 113): ticket_promo_codes is live, so this ships now */}
+        <View style={styles.sectionHeader}>
+          {/* copy to the taste gate */}
+          <Text style={styles.sectionTitle}>codes</Text>
+        </View>
+        {promoCodes.length === 0 ? (
+          /* copy to the taste gate */
+          <Text style={styles.emptyText}>no codes yet. early birds love one.</Text>
+        ) : (
+          promoCodes.map((p) => (
+            <View key={p.id} style={styles.tierCard}>
+              <View style={styles.tierCardBody}>
+                <Text style={styles.tierName}>{p.code}</Text>
+                <Text style={styles.tierMeta}>
+                  {/* canon: percent is 1-100, flat is cents */}
+                  {p.discount_type === 'percent' ? `${p.discount_value}% off` : `${formatCents(p.discount_value)} off`}
+                  {p.max_uses != null ? ` · ${p.uses_count} of ${p.max_uses} used` : ` · ${p.uses_count} used`}
+                  {p.unlocks_hidden ? ' · unlocks hidden' : ''}
+                  {p.active ? '' : ' · paused'}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => { hapticLight(); togglePromoMutation.mutate(p); }}
+                  disabled={togglePromoMutation.isPending}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                >
+                  {/* copy to the taste gate */}
+                  <Text style={styles.tierSaleLink}>{p.active ? 'pause it' : 'turn it back on'}</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity onPress={() => handleDeletePromo(p)} hitSlop={10}>
+                <Text style={styles.tierRemove}>remove</Text>
+              </TouchableOpacity>
             </View>
-            {promotions.length === 0 ? (
-              /* copy to the taste gate */
-              <Text style={styles.emptyText}>no codes yet. early birds love one.</Text>
-            ) : (
-              promotions.map((p) => (
-                <View key={p.id} style={styles.tierCard}>
-                  <View style={styles.tierCardBody}>
-                    <Text style={styles.tierName}>{p.code}</Text>
-                    <Text style={styles.tierMeta}>
-                      {p.percent_off != null ? `${p.percent_off}% off` : `${formatCents(p.amount_off_cents ?? 0)} off`}
-                      {p.uses_cap != null ? ` · ${p.uses_count} of ${p.uses_cap} used` : ` · ${p.uses_count} used`}
+          ))
+        )}
+        <TouchableOpacity
+          style={styles.addBtn}
+          onPress={() => { hapticLight(); setPromoEditorVisible(true); }}
+          activeOpacity={0.85}
+        >
+          <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
+          {/* copy to the taste gate */}
+          <Text style={styles.addBtnText}>add a code</Text>
+        </TouchableOpacity>
+
+        {/* extras (doc 114): event_add_ons is live, so this ships now */}
+        <View style={styles.sectionHeader}>
+          {/* copy to the taste gate */}
+          <Text style={styles.sectionTitle}>extras</Text>
+        </View>
+        {addons.length === 0 ? (
+          /* copy to the taste gate */
+          <Text style={styles.emptyText}>no extras yet. parking, food, merch, whatever goes with the night.</Text>
+        ) : (
+          addons.map((a) => {
+            const left = addonRemaining(a);
+            return (
+              <TouchableOpacity
+                key={a.id}
+                style={styles.tierCard}
+                onPress={() => { hapticLight(); setEditingAddon(a); setAddonEditorVisible(true); }}
+                activeOpacity={0.85}
+              >
+                <View style={styles.tierCardBody}>
+                  <Text style={styles.tierName}>{a.name}</Text>
+                  <Text style={styles.tierMeta}>
+                    {a.price_cents === 0 ? 'free' : formatCents(a.price_cents)}
+                    {left != null ? ` · ${left} of ${a.quantity_cap} left` : ''}
+                    {` · ${a.status === 'on_sale' ? 'on sale' : a.status}`}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => { hapticLight(); toggleAddonSaleMutation.mutate(a); }}
+                    disabled={toggleAddonSaleMutation.isPending}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                  >
+                    {/* copy to the taste gate: buyers only ever see on_sale extras */}
+                    <Text style={styles.tierSaleLink}>
+                      {a.status === 'on_sale' ? 'pause sales' : 'put it on sale'}
                     </Text>
-                  </View>
-                  <TouchableOpacity onPress={() => handleDeletePromo(p)} hitSlop={10}>
-                    <Text style={styles.tierRemove}>remove</Text>
                   </TouchableOpacity>
                 </View>
-              ))
-            )}
-            <TouchableOpacity
-              style={styles.addBtn}
-              onPress={() => { hapticLight(); setPromoEditorVisible(true); }}
-              activeOpacity={0.85}
-            >
-              <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
-              {/* copy to the taste gate */}
-              <Text style={styles.addBtnText}>add a code</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* add-ons (doc 114): invisible until the table lands (join-gate) */}
-        {doors?.addons === true && (
-          <>
-            <View style={styles.sectionHeader}>
-              {/* copy to the taste gate */}
-              <Text style={styles.sectionTitle}>extras</Text>
-            </View>
-            {addons.length === 0 ? (
-              /* copy to the taste gate */
-              <Text style={styles.emptyText}>no extras yet. parking, food, merch, whatever goes with the night.</Text>
-            ) : (
-              addons.map((a) => (
-                <TouchableOpacity
-                  key={a.id}
-                  style={styles.tierCard}
-                  onPress={() => { hapticLight(); setEditingAddon(a); setAddonEditorVisible(true); }}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.tierCardBody}>
-                    <Text style={styles.tierName}>{a.name}</Text>
-                    <Text style={styles.tierMeta}>
-                      {a.price_cents === 0 ? 'free' : formatCents(a.price_cents)}
-                      {a.quantity_cap ? ` · ${a.quantity_cap} exist` : ''}
-                    </Text>
-                  </View>
-                  <TouchableOpacity onPress={() => handleDeleteAddon(a)} hitSlop={10}>
-                    <Text style={styles.tierRemove}>remove</Text>
-                  </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDeleteAddon(a)} hitSlop={10}>
+                  <Text style={styles.tierRemove}>remove</Text>
                 </TouchableOpacity>
-              ))
-            )}
-            <TouchableOpacity
-              style={styles.addBtn}
-              onPress={() => { hapticLight(); setEditingAddon(null); setAddonEditorVisible(true); }}
-              activeOpacity={0.85}
-            >
-              <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
-              {/* copy to the taste gate */}
-              <Text style={styles.addBtnText}>add an extra</Text>
-            </TouchableOpacity>
-          </>
+              </TouchableOpacity>
+            );
+          })
         )}
+        <TouchableOpacity
+          style={styles.addBtn}
+          onPress={() => { hapticLight(); setEditingAddon(null); setAddonEditorVisible(true); }}
+          activeOpacity={0.85}
+        >
+          <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
+          {/* copy to the taste gate */}
+          <Text style={styles.addBtnText}>add an extra</Text>
+        </TouchableOpacity>
 
         {/* FAQs (proposal 70; doc 76 names the section) */}
         <View style={styles.sectionHeader}>

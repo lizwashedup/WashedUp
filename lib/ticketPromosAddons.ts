@@ -1,138 +1,147 @@
 /**
- * Docs 113 + 114 client half: promo codes + add-ons, built in parallel with
- * the schema (the doc-111 pattern, executed again). EVERYTHING here is
- * dormant until the tables land on prod: creator sections and buyer
- * surfaces render only when a probe succeeds, so nothing exists for anyone
- * until the schema does, and a wrong binding is inert, never a data trap.
+ * Docs 113 + 114 client half: promo codes + add-ons. BOUND TO CANON
+ * (seat-verified on prod, 2026-08-01).
  *
- * Money law: a buyer-facing price changed by a promo comes ONLY from the
- * server's answer (quotePromoCode). The client never computes a discount.
+ * Promos ride the EXISTING ticket_promo_codes table, so this half has no
+ * dormancy: it is live the moment the client ships. Add-ons ride
+ * event_add_ons (buyer-readable for on_sale rows on Live events);
+ * order_add_ons is service_role-written and clients NEVER insert order
+ * lines, they only hand picks to checkout.
+ *
+ * Money law: a buyer-facing price comes ONLY from the server
+ * (quote_ticket_checkout). The client never computes a discount.
  */
 
 import { supabase } from './supabase';
 
-// ─── BINDINGS (docs 113/114, schema authored in parallel) ─────────────────
-// SEAT BINDING REQUIRED at review: every identifier the wire sees lives
-// here. Rebind to the applied proposals' canon if any name differs; the
-// probes keep wrong names inert in the meantime.
-export const PROMO_TABLE = 'ticket_promotions';
-export const ADDON_TABLE = 'ticket_addons';
-/** create-ticket-checkout body keys the purchase call carries (doc 113/114
- *  checkout halves); the fn ignores unknown keys, and both buyer surfaces
- *  are probe-gated, so these ride only once the schema exists. */
+// ─── BINDINGS (canon, seat-verified 2026-08-01) ───────────────────────────
+export const PROMO_TABLE = 'ticket_promo_codes';
+export const ADDON_TABLE = 'event_add_ons';
+/** the pricing door: authenticated + service_role, NOT anon */
+export const QUOTE_RPC = 'quote_ticket_checkout';
+/** create-ticket-checkout body keys */
 export const CHECKOUT_PROMO_KEY = 'promo_code';
-export const CHECKOUT_ADDONS_KEY = 'addons';
-/** PROPOSED server door for repricing (seat binds): the checkout fn
- *  answers a no-charge quote for tier+qty+code+addons. */
-export const QUOTE_ACTION_KEY = 'action';
-export const QUOTE_ACTION_VALUE = 'quote';
+export const CHECKOUT_ADDONS_KEY = 'add_ons';
+
+/** house convention (ruling 1): percent is 1-100, flat is CENTS. */
+export type DiscountType = 'percent' | 'flat';
+export type AddonStatus = 'draft' | 'on_sale';
 
 // ─── shapes ────────────────────────────────────────────────────────────────
 
-export interface TicketPromotion {
+export interface PromoCode {
   id: string;
   event_id: string;
   code: string;
-  /** exactly one of the two is set */
-  percent_off: number | null;
-  amount_off_cents: number | null;
-  uses_cap: number | null;
+  discount_type: DiscountType;
+  discount_value: number;
+  unlocks_hidden: boolean;
+  max_uses: number | null;
   uses_count: number;
   starts_at: string | null;
   ends_at: string | null;
+  active: boolean;
 }
 
-export interface PromotionDraft {
+export interface PromoDraft {
   code: string;
-  percent_off: number | null;
-  amount_off_cents: number | null;
-  uses_cap: number | null;
+  discount_type: DiscountType;
+  discount_value: number;
+  unlocks_hidden: boolean;
+  max_uses: number | null;
   starts_at: string | null;
   ends_at: string | null;
+  active: boolean;
 }
 
-export interface TicketAddon {
+export interface EventAddon {
   id: string;
   event_id: string;
   name: string;
   description: string | null;
-  price_cents: number;
   image_url: string | null;
+  price_cents: number;
   quantity_cap: number | null;
   per_order_max: number | null;
-  sort_order: number;
+  sales_open_at: string | null;
+  sales_close_at: string | null;
+  sold_count: number;
+  status: AddonStatus;
 }
 
 export interface AddonDraft {
   name: string;
   description: string | null;
-  price_cents: number;
   image_url: string | null;
+  price_cents: number;
   quantity_cap: number | null;
   per_order_max: number | null;
+  status: AddonStatus;
 }
 
 const PROMO_COLUMNS =
-  'id, event_id, code, percent_off, amount_off_cents, uses_cap, uses_count, starts_at, ends_at';
+  'id, event_id, code, discount_type, discount_value, unlocks_hidden, max_uses, uses_count, starts_at, ends_at, active';
 const ADDON_COLUMNS =
-  'id, event_id, name, description, price_cents, image_url, quantity_cap, per_order_max, sort_order';
+  'id, event_id, name, description, image_url, price_cents, quantity_cap, per_order_max, sales_open_at, sales_close_at, sold_count, status';
 
-// ─── probes (the join-gate doors) ──────────────────────────────────────────
-
-async function tableOpen(table: string): Promise<boolean> {
-  const { error } = await supabase.from(table).select('id').limit(1);
-  return !error;
+/** One add-on pick on an order. The key is canon (add_on_id, not addon_id). */
+export interface AddonSelection {
+  add_on_id: string;
+  qty: number;
 }
 
-/** Both doors in one ask, for the creator screen. */
-export async function probePromosAddons(): Promise<{ promos: boolean; addons: boolean }> {
-  const [promos, addons] = await Promise.all([tableOpen(PROMO_TABLE), tableOpen(ADDON_TABLE)]);
-  return { promos, addons };
-}
+// ─── creator: promo codes (organizer ALL-access + ownership WITH CHECK) ───
 
-// ─── creator CRUD (direct table ops under RLS, the ticket_tiers pattern) ──
-
-export async function listPromotions(eventId: string): Promise<TicketPromotion[]> {
+export async function listPromoCodes(eventId: string): Promise<PromoCode[]> {
   const { data, error } = await supabase
     .from(PROMO_TABLE)
     .select(PROMO_COLUMNS)
     .eq('event_id', eventId)
     .order('code', { ascending: true });
   if (error) return [];
-  return (data ?? []) as unknown as TicketPromotion[];
+  return (data ?? []) as unknown as PromoCode[];
 }
 
-export async function createPromotion(
+/** The unique index is case-insensitive on (event_id, lower(code)), so a
+ *  duplicate comes back as a constraint error and is surfaced, not hidden. */
+export async function createPromoCode(
   eventId: string,
-  draft: PromotionDraft,
+  draft: PromoDraft,
 ): Promise<{ ok: boolean; message: string | null }> {
   const { error } = await supabase.from(PROMO_TABLE).insert({ event_id: eventId, ...draft });
   return { ok: !error, message: error?.message ?? null };
 }
 
-export async function deletePromotion(promoId: string): Promise<boolean> {
+export async function setPromoActive(
+  promoId: string,
+  active: boolean,
+): Promise<{ ok: boolean; message: string | null }> {
+  const { error } = await supabase.from(PROMO_TABLE).update({ active }).eq('id', promoId);
+  return { ok: !error, message: error?.message ?? null };
+}
+
+export async function deletePromoCode(promoId: string): Promise<boolean> {
   const { error } = await supabase.from(PROMO_TABLE).delete().eq('id', promoId);
   return !error;
 }
 
-export async function listAddons(eventId: string): Promise<TicketAddon[]> {
+// ─── creator: add-ons ──────────────────────────────────────────────────────
+
+export async function listAddons(eventId: string): Promise<EventAddon[]> {
   const { data, error } = await supabase
     .from(ADDON_TABLE)
     .select(ADDON_COLUMNS)
     .eq('event_id', eventId)
-    .order('sort_order', { ascending: true });
+    .order('name', { ascending: true });
   if (error) return [];
-  return (data ?? []) as unknown as TicketAddon[];
+  return (data ?? []) as unknown as EventAddon[];
 }
 
 export async function createAddon(
   eventId: string,
   draft: AddonDraft,
-  sortOrder: number,
 ): Promise<{ ok: boolean; message: string | null }> {
-  const { error } = await supabase
-    .from(ADDON_TABLE)
-    .insert({ event_id: eventId, ...draft, sort_order: sortOrder });
+  const { error } = await supabase.from(ADDON_TABLE).insert({ event_id: eventId, ...draft });
   return { ok: !error, message: error?.message ?? null };
 }
 
@@ -149,49 +158,80 @@ export async function deleteAddon(addonId: string): Promise<boolean> {
   return !error;
 }
 
-// ─── buyer reads ───────────────────────────────────────────────────────────
+// ─── buyer: what is actually buyable right now ────────────────────────────
 
-/** The event's buyable add-ons; [] while the table (or RLS read) is absent,
- *  which keeps the buyer step invisible until doc 114 lands. */
-export async function listBuyerAddons(eventId: string): Promise<TicketAddon[]> {
-  return listAddons(eventId);
-}
-
-/** One add-on selection on an order. */
-export interface AddonSelection {
-  addon_id: string;
-  qty: number;
-}
-
-// ─── the server's repricing answer (money is never client math) ───────────
-
-export interface PromoQuote {
-  totalCents: number;
-  code: string;
+/** Remaining stock, or null when the add-on is uncapped. */
+export function addonRemaining(a: EventAddon): number | null {
+  return a.quantity_cap == null ? null : Math.max(0, a.quantity_cap - (a.sold_count ?? 0));
 }
 
 /**
- * PROPOSED CONTRACT (doc 113's checkout half; seat binds): ask the checkout
- * fn for a no-charge quote of tier+qty+code(+add-ons). Only a recognizable
- * affirmative answer reprices anything; every other shape (fn without quote
- * support, bad code, expired window, network) returns null and the sheet
- * keeps the undiscounted price. A promo can therefore never show a price
- * the server did not say.
+ * The buyer's list: on_sale only, inside its sales window, not sold out.
+ * RLS already scopes the read to on_sale rows on Live events (ruling 3);
+ * this is the client half of the same law, so a draft or spent add-on can
+ * never be picked. Window bounds are instants, so a plain now-comparison is
+ * timezone-safe.
  */
-export async function quotePromoCode(
+export async function listBuyerAddons(eventId: string): Promise<EventAddon[]> {
+  const all = await listAddons(eventId);
+  const now = Date.now();
+  return all.filter((a) => {
+    if (a.status !== 'on_sale') return false;
+    if (a.sales_open_at && new Date(a.sales_open_at).getTime() > now) return false;
+    if (a.sales_close_at && new Date(a.sales_close_at).getTime() <= now) return false;
+    const left = addonRemaining(a);
+    return left === null || left > 0;
+  });
+}
+
+// ─── the server's price (money is never client math) ──────────────────────
+
+export interface PriceQuote {
+  ok: boolean;
+  faceCents: number;
+  discountCents: number;
+  processingCents: number;
+  addonTotalCents: number;
+  totalCents: number;
+  isFree: boolean;
+  promoValid: boolean;
+  promoReason: string | null;
+  reason: string | null;
+}
+
+/**
+ * quote_ticket_checkout: the one place a shown price can come from. The RPC
+ * is authenticated-only, so a signed-out buyer gets null here; the sheet
+ * then shows the undiscounted price and lets checkout do the real pricing
+ * (the ruled fallback). Returns null on ANY unreadable answer, so a missing
+ * or changed door can never fabricate a number.
+ */
+export async function quoteCheckout(
   tierId: string,
   qty: number,
-  code: string,
+  promoCode: string | null,
   addons: AddonSelection[],
-): Promise<PromoQuote | null> {
-  const body: Record<string, unknown> = {
-    [QUOTE_ACTION_KEY]: QUOTE_ACTION_VALUE,
-    tier_id: tierId,
-    qty,
-    [CHECKOUT_PROMO_KEY]: code.trim(),
+): Promise<PriceQuote | null> {
+  const { data, error } = await supabase.rpc(QUOTE_RPC, {
+    p_tier_id: tierId,
+    p_qty: qty,
+    p_promo_code: promoCode?.trim() ? promoCode.trim() : null,
+    p_add_ons: addons.length > 0 ? addons : null,
+  });
+  if (error || !data) return null;
+  // RETURNS TABLE hands back an array; a scalar record hands back an object
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+  if (!row || typeof row.total_cents !== 'number') return null;
+  return {
+    ok: row.ok === true,
+    faceCents: typeof row.face_cents === 'number' ? row.face_cents : 0,
+    discountCents: typeof row.discount_cents === 'number' ? row.discount_cents : 0,
+    processingCents: typeof row.processing_cents === 'number' ? row.processing_cents : 0,
+    addonTotalCents: typeof row.addon_total_cents === 'number' ? row.addon_total_cents : 0,
+    totalCents: row.total_cents,
+    isFree: row.is_free === true,
+    promoValid: row.promo_valid === true,
+    promoReason: typeof row.promo_reason === 'string' ? row.promo_reason : null,
+    reason: typeof row.reason === 'string' ? row.reason : null,
   };
-  if (addons.length > 0) body[CHECKOUT_ADDONS_KEY] = addons;
-  const { data, error } = await supabase.functions.invoke('create-ticket-checkout', { body });
-  if (error || !data || data.ok !== true || typeof data.total_cents !== 'number') return null;
-  return { totalCents: data.total_cents, code: code.trim() };
 }

@@ -28,12 +28,12 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
 import { pickAndUploadEventImage } from '../../lib/creatorEvents';
 import { TIER_DESCRIPTION_MAX, TIER_NAME_MAX } from '../../lib/ticketing';
-import { type AddonDraft, type TicketAddon } from '../../lib/ticketPromosAddons';
+import { type AddonDraft, type EventAddon } from '../../lib/ticketPromosAddons';
 
 interface AddonEditorSheetProps {
   visible: boolean;
   /** null = creating a new add-on */
-  addon: TicketAddon | null;
+  addon: EventAddon | null;
   busy: boolean;
   onSave: (draft: AddonDraft) => void;
   onClose: () => void;
@@ -95,6 +95,9 @@ export function AddonEditorSheet({ visible, addon, busy, onSave, onClose }: Addo
       image_url: imageUrl || null,
       quantity_cap: cap && cap > 0 ? cap : null,
       per_order_max: perOrderMax && perOrderMax >= 1 ? perOrderMax : null,
+      // a new extra starts as a draft; the list's own flip puts it on sale
+      // (the tier pattern), so nothing goes buyable by the act of existing
+      status: addon?.status ?? 'draft',
     });
   };
 

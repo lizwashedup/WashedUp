@@ -20,19 +20,19 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { X } from 'lucide-react-native';
+import { Check, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
 import { laWallTimeToUTC } from '../../lib/laDate';
-import { type PromotionDraft } from '../../lib/ticketPromosAddons';
+import { type PromoDraft } from '../../lib/ticketPromosAddons';
 
 const CODE_MAX = 40;
 
 interface PromotionEditorSheetProps {
   visible: boolean;
   busy: boolean;
-  onSave: (draft: PromotionDraft) => void;
+  onSave: (draft: PromoDraft) => void;
   onClose: () => void;
 }
 
@@ -53,6 +53,9 @@ export function PromotionEditorSheet({ visible, busy, onSave, onClose }: Promoti
   const [usesText, setUsesText] = useState('');
   const [startText, setStartText] = useState('');
   const [endText, setEndText] = useState('');
+  // canon ruling 4: creatable now; the buyer-side hidden-tier reveal is a
+  // named follow-on, so this only stores the intent
+  const [unlocksHidden, setUnlocksHidden] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -62,6 +65,7 @@ export function PromotionEditorSheet({ visible, busy, onSave, onClose }: Promoti
     setUsesText('');
     setStartText('');
     setEndText('');
+    setUnlocksHidden(false);
   }, [visible]);
 
   const value = valueText.trim() ? Number(valueText.replace(/[^0-9.]/g, '')) : NaN;
@@ -87,13 +91,16 @@ export function PromotionEditorSheet({ visible, busy, onSave, onClose }: Promoti
     hapticLight();
     onSave({
       code: code.trim().toUpperCase().slice(0, CODE_MAX),
-      percent_off: isPercent ? value : null,
-      amount_off_cents: isPercent ? null : Math.round(value * 100),
-      uses_cap: uses && uses >= 1 ? uses : null,
+      discount_type: isPercent ? 'percent' : 'flat',
+      // canon ruling 1: percent is 1-100, flat is CENTS (dollars in the UI)
+      discount_value: isPercent ? Math.round(value) : Math.round(value * 100),
+      unlocks_hidden: unlocksHidden,
+      max_uses: uses && uses >= 1 ? uses : null,
       // the window rides LA calendar days: starts at that day's first
       // minute, ends at that day's last (the LA-clock law)
       starts_at: startText.trim() ? laDayInstant(startText, false) : null,
       ends_at: endText.trim() ? laDayInstant(endText, true) : null,
+      active: true,
     });
   };
 
@@ -195,6 +202,20 @@ export function PromotionEditorSheet({ visible, busy, onSave, onClose }: Promoti
               {!!problem && <Text style={styles.problem}>{problem}</Text>}
 
               <TouchableOpacity
+                style={styles.checkRow}
+                onPress={() => { hapticLight(); setUnlocksHidden(!unlocksHidden); }}
+                activeOpacity={0.7}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: unlocksHidden }}
+              >
+                <View style={[styles.checkbox, unlocksHidden && styles.checkboxChecked]}>
+                  {unlocksHidden && <Check size={14} color={Colors.white} strokeWidth={3} />}
+                </View>
+                {/* copy to the taste gate */}
+                <Text style={styles.checkLabel}>this code also unlocks hidden tickets</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
                 onPress={handleSave}
                 disabled={!canSave}
@@ -249,6 +270,13 @@ const styles = StyleSheet.create({
   pairRow: { flexDirection: 'row', gap: 12 },
   pairCol: { flex: 1 },
   problem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 6 },
+  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, minHeight: 44 },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxChecked: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
+  checkLabel: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   saveBtn: {
     backgroundColor: Colors.terracotta,
     borderRadius: 999,
