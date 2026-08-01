@@ -18,6 +18,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -35,6 +36,14 @@ import {
   startTicketCheckout,
   type TicketTier,
 } from '../../lib/ticketing';
+import {
+  listBuyerAddons,
+  probePromosAddons,
+  quotePromoCode,
+  type AddonSelection,
+  type PromoQuote,
+  type TicketAddon,
+} from '../../lib/ticketPromosAddons';
 
 // doc 109 (group tickets): a tier the buyer cannot lawfully buy renders
 // sold-out-style and is never selectable, so the server's 409 is
@@ -90,10 +99,26 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // docs 113/114 buyer half: everything below is invisible until the tables
+  // land (join-gate), and a promo NEVER reprices from client math: only the
+  // server's quote answer changes the button.
+  const [promoDoorOpen, setPromoDoorOpen] = useState(false);
+  const [addonsList, setAddonsList] = useState<TicketAddon[]>([]);
+  const [addonQty, setAddonQty] = useState<Record<string, number>>({});
+  const [codeFieldOpen, setCodeFieldOpen] = useState(false);
+  const [codeText, setCodeText] = useState('');
+  const [quote, setQuote] = useState<PromoQuote | null>(null);
+  const [quoteBusy, setQuoteBusy] = useState(false);
+  const [quoteFailed, setQuoteFailed] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     setProblem(null);
+    setAddonQty({});
+    setCodeFieldOpen(false);
+    setCodeText('');
+    setQuote(null);
+    setQuoteFailed(false);
     loadSellableTiers(eventId).then((rows) => {
       setTiers(rows);
       // a blocked tier is never the default selection (doc 109)
@@ -101,7 +126,17 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
       setSelectedId(first?.tier.id ?? null);
       setQty(first ? tierMin(first.tier) : 1);
     });
+    probePromosAddons().then(({ promos, addons }) => {
+      setPromoDoorOpen(promos);
+      if (addons) listBuyerAddons(eventId).then(setAddonsList);
+    });
   }, [visible, eventId]);
+
+  // any change to what's being bought invalidates the server's last quote
+  const clearQuote = () => {
+    setQuote(null);
+    setQuoteFailed(false);
+  };
 
   const selectedRow = tiers?.find((r) => r.tier.id === selectedId) ?? null;
   const selected = selectedRow?.tier ?? null;
@@ -115,22 +150,58 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
       ? Math.min(perOrderMax, selectedRow.remaining)
       : perOrderMax,
   );
-  // §3: the 30 cent fixed fee is per ORDER, so the shown total runs the
-  // formula over the order's combined face, never per-ticket-times-qty
-  // (2 x $20 charges $41.51; the old multiply showed $41.82). The
-  // per-ticket "each" line below stays per-unit by design.
-  const allIn = selected ? computeFeePreview(selected.price_cents * qty, 0).buyerTotalCents : 0;
   const isFree = selected?.price_cents === 0;
   // a free tier with a real minimum still needs the stepper (doc 109);
   // a plain free tier keeps its one-tap reserve
   const showStepper = !!selected && (!isFree || qtyMin > 1);
+  // doc 114: extras and codes ride PAID checkouts only (the free path never
+  // opens Stripe's page, so there is nothing for them to ride)
+  const showExtras = !!selected && !isFree && addonsList.length > 0;
+  const showPromoEntry = !!selected && !isFree && promoDoorOpen;
+  const selections: AddonSelection[] = Object.entries(addonQty)
+    .filter(([, n]) => n > 0)
+    .map(([addon_id, n]) => ({ addon_id, qty: n }));
+  const addonsFaceCents = selections.reduce((sum, s) => {
+    const a = addonsList.find((x) => x.id === s.addon_id);
+    return sum + (a ? a.price_cents * s.qty : 0);
+  }, 0);
+  // §3: the 30 cent fixed fee is per ORDER, so the shown total runs the
+  // formula over the order's combined face (tier seats + extras), never
+  // per-ticket-times-qty (2 x $20 charges $41.51; the old multiply showed
+  // $41.82). The per-ticket "each" line below stays per-unit by design.
+  // A promo total comes ONLY from the server's quote, never client math.
+  const allIn = quote
+    ? quote.totalCents
+    : selected
+      ? computeFeePreview(selected.price_cents * qty + addonsFaceCents, 0).buyerTotalCents
+      : 0;
+
+  const applyCode = async () => {
+    if (!selected || quoteBusy || !codeText.trim()) return;
+    hapticLight();
+    setQuoteBusy(true);
+    setQuoteFailed(false);
+    const answer = await quotePromoCode(selected.id, qty, codeText, selections);
+    setQuoteBusy(false);
+    if (answer) {
+      hapticSuccess();
+      setQuote(answer);
+    } else {
+      hapticError();
+      setQuote(null);
+      setQuoteFailed(true);
+    }
+  };
 
   const handleGo = async () => {
     if (!selected || busy) return;
     hapticLight();
     setBusy(true);
     setProblem(null);
-    const result = await startTicketCheckout(selected.id, qty);
+    const result = await startTicketCheckout(selected.id, qty, {
+      promoCode: quote?.code,
+      addons: selections,
+    });
     setBusy(false);
     if (result.kind === 'error') {
       hapticError();
@@ -180,6 +251,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                       hapticLight();
                       setSelectedId(tier.id);
                       setQty(min);
+                      clearQuote();
                     }}
                     disabled={blocked}
                     accessibilityState={{ disabled: blocked, selected: active }}
@@ -215,7 +287,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                   <Text style={styles.qtyLabel}>how many</Text>
                   <View style={styles.stepper}>
                     <TouchableOpacity
-                      onPress={() => { hapticLight(); setQty((q) => Math.max(qtyMin, q - 1)); }}
+                      onPress={() => { hapticLight(); setQty((q) => Math.max(qtyMin, q - 1)); clearQuote(); }}
                       hitSlop={8}
                       style={styles.stepBtn}
                     >
@@ -223,13 +295,103 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                     </TouchableOpacity>
                     <Text style={styles.qtyValue}>{qty}</Text>
                     <TouchableOpacity
-                      onPress={() => { hapticLight(); setQty((q) => Math.min(qtyMax, q + 1)); }}
+                      onPress={() => { hapticLight(); setQty((q) => Math.min(qtyMax, q + 1)); clearQuote(); }}
                       hitSlop={8}
                       style={styles.stepBtn}
                     >
                       <Plus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
                     </TouchableOpacity>
                   </View>
+                </View>
+              )}
+
+              {/* doc 114: the optional extras step, between the tier pick and
+                  pay; invisible until the table lands */}
+              {showExtras && (
+                <View style={styles.extras}>
+                  {/* copy to the taste gate */}
+                  <Text style={styles.extrasHeader}>extras</Text>
+                  {addonsList.map((a) => {
+                    const n = addonQty[a.id] ?? 0;
+                    const aMax = a.per_order_max ?? 10;
+                    return (
+                      <View key={a.id} style={styles.addonRow}>
+                        <View style={styles.addonBody}>
+                          <Text style={styles.addonName}>{a.name}</Text>
+                          <Text style={styles.addonPrice}>{a.price_cents === 0 ? 'free' : formatCents(a.price_cents)}</Text>
+                          {!!a.description && <Text style={styles.addonDesc}>{a.description}</Text>}
+                        </View>
+                        <View style={styles.stepper}>
+                          <TouchableOpacity
+                            onPress={() => { hapticLight(); setAddonQty((m) => ({ ...m, [a.id]: Math.max(0, n - 1) })); clearQuote(); }}
+                            hitSlop={8}
+                            style={styles.stepBtn}
+                            accessibilityLabel={`fewer ${a.name}`}
+                          >
+                            <Minus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
+                          </TouchableOpacity>
+                          <Text style={styles.qtyValue}>{n}</Text>
+                          <TouchableOpacity
+                            onPress={() => { hapticLight(); setAddonQty((m) => ({ ...m, [a.id]: Math.min(aMax, n + 1) })); clearQuote(); }}
+                            hitSlop={8}
+                            style={styles.stepBtn}
+                            accessibilityLabel={`more ${a.name}`}
+                          >
+                            <Plus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* doc 113: the quiet code entry; only the server's answer ever
+                  changes the price */}
+              {showPromoEntry && (
+                <View style={styles.promoBlock}>
+                  {!codeFieldOpen && !quote ? (
+                    <TouchableOpacity onPress={() => { hapticLight(); setCodeFieldOpen(true); }} hitSlop={8} accessibilityRole="button">
+                      {/* copy to the taste gate */}
+                      <Text style={styles.promoLink}>have a code?</Text>
+                    </TouchableOpacity>
+                  ) : quote ? (
+                    /* copy to the taste gate */
+                    <Text style={styles.promoApplied}>
+                      {quote.code} applied
+                      <Text style={styles.promoRemove} onPress={() => { hapticLight(); clearQuote(); setCodeText(''); }}>  remove</Text>
+                    </Text>
+                  ) : (
+                    <View style={styles.promoRow}>
+                      <TextInput
+                        style={styles.promoInput}
+                        value={codeText}
+                        onChangeText={(v) => { setCodeText(v); setQuoteFailed(false); }}
+                        placeholder="your code"
+                        placeholderTextColor={Colors.textLight}
+                        autoCapitalize="characters"
+                        autoCorrect={false}
+                        accessibilityLabel="promo code"
+                      />
+                      <TouchableOpacity
+                        style={styles.promoApplyBtn}
+                        onPress={applyCode}
+                        disabled={quoteBusy || !codeText.trim()}
+                        accessibilityRole="button"
+                      >
+                        {quoteBusy ? (
+                          <ActivityIndicator size="small" color={Colors.darkWarm} />
+                        ) : (
+                          /* copy to the taste gate */
+                          <Text style={styles.promoApplyText}>apply</Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {quoteFailed && (
+                    /* copy to the taste gate */
+                    <Text style={styles.promoMiss}>that code didn't take.</Text>
+                  )}
                 </View>
               )}
 
@@ -316,6 +478,33 @@ const styles = StyleSheet.create({
   },
   qtyValue: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, minWidth: 20, textAlign: 'center' },
   problem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error, marginTop: EventSpacing.sm },
+  extras: { marginTop: EventSpacing.sm, gap: EventSpacing.sm },
+  extrasHeader: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  addonRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
+    padding: 12,
+  },
+  addonBody: { flex: 1, gap: 2 },
+  addonName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  addonPrice: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt },
+  addonDesc: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  promoBlock: { marginTop: EventSpacing.sm, gap: 6 },
+  promoLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textDecorationLine: 'underline' },
+  promoRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  promoInput: {
+    flex: 1, backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 14, paddingVertical: 10, minHeight: 44,
+    fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.asphalt, letterSpacing: 1,
+  },
+  promoApplyBtn: {
+    minHeight: 44, minWidth: 72, borderRadius: 999, borderWidth: 1.5, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14,
+  },
+  promoApplyText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
+  promoApplied: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
+  promoRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium, textDecorationLine: 'underline' },
+  promoMiss: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error },
   cta: {
     backgroundColor: EventAction.primary,
     borderRadius: 999,

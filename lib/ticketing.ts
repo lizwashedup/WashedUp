@@ -577,7 +577,14 @@ function humanCheckoutError(raw: string | null | undefined): string {
   return 'checkout could not start. give it a moment and try again.';
 }
 
-export async function startTicketCheckout(tierId: string, qty: number): Promise<CheckoutResult> {
+export async function startTicketCheckout(
+  tierId: string,
+  qty: number,
+  // docs 113/114: promo + add-ons ride the same call. The keys travel only
+  // when provided, and the buyer surfaces that provide them are probe-gated
+  // behind the schema, so a pre-apply checkout is byte-identical to today.
+  extras?: { promoCode?: string; addons?: { addon_id: string; qty: number }[] },
+): Promise<CheckoutResult> {
   // 87 F1 idempotency (Cowork 7-27): ONE stable checkout_key per user
   // checkout action, minted here because one call IS one action today (the
   // sheet's tap runs a single invoke, no auto-retry). A new tap = a new
@@ -586,10 +593,13 @@ export async function startTicketCheckout(tierId: string, qty: number): Promise<
   // field; v8 passes it to begin_ticket_checkout so a retried action lands
   // on one hold and one order.
   const checkoutKey = Crypto.randomUUID();
-  const { data, error } = await supabase.functions.invoke('create-ticket-checkout', {
+  const body: Record<string, unknown> = {
     // origin drives the Stripe success/cancel return; the fn allow-lists it
-    body: { tier_id: tierId, qty, origin: 'https://washedup.app', checkout_key: checkoutKey },
-  });
+    tier_id: tierId, qty, origin: 'https://washedup.app', checkout_key: checkoutKey,
+  };
+  if (extras?.promoCode) body.promo_code = extras.promoCode;
+  if (extras?.addons && extras.addons.length > 0) body.addons = extras.addons;
+  const { data, error } = await supabase.functions.invoke('create-ticket-checkout', { body });
   if (error) {
     // functions.invoke surfaces non-2xx as an error with the JSON body. That
     // body can be a curated reason OR raw Postgres; sanitize either way so no
