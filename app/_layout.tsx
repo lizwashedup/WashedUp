@@ -64,6 +64,7 @@ import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
+import { clearPendingDestination, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
 import { maybeRequestReviewAfterTopRating } from '../lib/reviewAsk';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
@@ -267,6 +268,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     const href = pendingDeepLinkRef.current;
     if (!href) return;
     pendingDeepLinkRef.current = null;
+    // it is being honored now, so the durable copy must not fire again
+    clearPendingDestination();
     router.push(href as any);
   }, [router]);
   const safePush = (href: string) => {
@@ -640,17 +643,30 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     // washedup.app/r/<code> (QR / referral) is disjoint from the
     // auth/callback recovery URLs handled above; handle it additively so
     // it never interferes with recovery or the phone gate.
+    // audit finding 5: a shared link opened while signed out used to be
+    // destroyed by the auth bounce below (it replaces the route without
+    // ever looking at the URL). Write the destination down the moment it
+    // arrives; the tabs layout consumes it once the person is actually
+    // inside the app, so the gate is respected and the link is not lost.
+    const captureDestination = (url: string) => {
+      const dest = parseAppDestination(url);
+      if (!dest) return;
+      stashPendingDestination(dest);
+      safePush(dest);
+    };
     Linking.getInitialURL()
       .then((url) => {
         if (!url) return;
         parseSessionFromUrl(url);
         if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
+        captureDestination(url);
       })
       .catch((e) => logError(e, 'layout.getInitialURL'));
     const sub = Linking.addEventListener('url', ({ url }) => {
       if (!url) return;
       parseSessionFromUrl(url);
       if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
+      captureDestination(url);
     });
     return () => sub.remove();
   }, []);

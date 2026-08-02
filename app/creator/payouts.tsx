@@ -7,7 +7,7 @@
  * comes asking "when do I get my money".
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -21,12 +21,12 @@ import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import { getMyPayoutState, requestOnboardingLink } from '../../lib/ticketing';
 import { PayoutsCard } from '../../components/creator/PayoutsCard';
-import { BrandedAlert } from '../../components/BrandedAlert';
+import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 export default function GettingPaidScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [onboardBusy, setOnboardBusy] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string } | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)).catch(() => {});
@@ -43,18 +43,27 @@ export default function GettingPaidScreen() {
     if (onboardBusy) return;
     hapticLight();
     setOnboardBusy(true);
-    const url = await requestOnboardingLink();
+    const result = await requestOnboardingLink();
     setOnboardBusy(false);
-    if (url) {
-      openUrl(url);
-    } else {
-      setAlertInfo({
-        /* copy to the taste gate */
-        title: 'payout setup is almost ready',
-        message: 'the setup link is not live yet. your tickets save now and go on sale the moment it is.',
-      });
+    if (result.ok) {
+      openUrl(result.url);
+      return;
     }
+    setAlertInfo({
+      /* copy to the taste gate: the real reason, and a way to try again */
+      title: 'that did not open',
+      message: result.message,
+      buttons: [
+        { text: 'not now', style: 'cancel' },
+        { text: 'try again', onPress: () => { handleOnboardRef.current?.(); } },
+      ],
+    });
   }, [onboardBusy]);
+
+  // the retry button calls back into the latest handler without making the
+  // callback depend on itself
+  const handleOnboardRef = useRef<(() => void) | null>(null);
+  handleOnboardRef.current = handleOnboard;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -84,6 +93,7 @@ export default function GettingPaidScreen() {
         visible={!!alertInfo}
         title={alertInfo?.title ?? ''}
         message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
     </SafeAreaView>

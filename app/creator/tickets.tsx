@@ -5,7 +5,7 @@
  * FAQ editor - dormant until proposal 70's re-cut applies.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -395,18 +395,27 @@ export default function TicketSetupScreen() {
     if (onboardBusy) return;
     hapticLight();
     setOnboardBusy(true);
-    const url = await requestOnboardingLink();
+    const result = await requestOnboardingLink();
     setOnboardBusy(false);
-    if (url) {
-      openUrl(url);
-    } else {
-      setAlertInfo({
-        /* copy to the taste gate */
-        title: 'payout setup is almost ready',
-        message: 'the setup link is not live yet. your tickets save now and go on sale the moment it is.',
-      });
+    if (result.ok) {
+      openUrl(result.url);
+      return;
     }
+    setAlertInfo({
+      /* copy to the taste gate: the real reason, and a way to try again */
+      title: 'that did not open',
+      message: result.message,
+      buttons: [
+        { text: 'not now', style: 'cancel' },
+        { text: 'try again', onPress: () => { handleOnboardRef.current?.(); } },
+      ],
+    });
   }, [onboardBusy]);
+
+  // the retry button calls back into the latest handler without making the
+  // callback depend on itself
+  const handleOnboardRef = useRef<(() => void) | null>(null);
+  handleOnboardRef.current = handleOnboard;
 
   const handleAddFaq = useCallback(async () => {
     if (!id || !faqQuestion.trim() || !faqAnswer.trim()) return;
@@ -499,8 +508,16 @@ export default function TicketSetupScreen() {
                   {tier.price_cents === 0 ? 'free' : formatCents(tier.price_cents)}
                   {tier.quantity_cap ? ` · ${tier.quantity_cap} exist` : ''}
                   {tier.visibility === 'hidden' ? ' · hidden' : ''}
-                  {` · ${tier.status === 'on_sale' ? 'on sale' : tier.status}`}
                 </Text>
+                {/* draft is the state that silently loses sales, so it says
+                    what it MEANS instead of hiding in the meta line */}
+                {tier.status === 'on_sale' ? (
+                  /* copy to the taste gate */
+                  <Text style={styles.stateOnSale}>on sale</Text>
+                ) : (
+                  /* copy to the taste gate */
+                  <Text style={styles.stateDraft}>nobody can buy this yet</Text>
+                )}
                 <TouchableOpacity
                   onPress={() => handleToggleSale(tier)}
                   disabled={toggleSaleMutation.isPending}
@@ -612,8 +629,14 @@ export default function TicketSetupScreen() {
                   <Text style={styles.tierMeta}>
                     {a.price_cents === 0 ? 'free' : formatCents(a.price_cents)}
                     {left != null ? ` · ${left} of ${a.quantity_cap} left` : ''}
-                    {` · ${a.status === 'on_sale' ? 'on sale' : a.status}`}
                   </Text>
+                  {a.status === 'on_sale' ? (
+                    /* copy to the taste gate */
+                    <Text style={styles.stateOnSale}>on sale</Text>
+                  ) : (
+                    /* copy to the taste gate */
+                    <Text style={styles.stateDraft}>nobody can buy this yet</Text>
+                  )}
                   <TouchableOpacity
                     onPress={() => { hapticLight(); toggleAddonSaleMutation.mutate(a); }}
                     disabled={toggleAddonSaleMutation.isPending}
@@ -828,6 +851,8 @@ const styles = StyleSheet.create({
   tierNameRow: { flexDirection: 'row', alignItems: 'center', gap: EventSpacing.sm },
   tierName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   // the recommended marker is the GOLD family, never a second accent
+  stateOnSale: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.brandDeep },
+  stateDraft: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorBrand },
   popularBadge: {
     backgroundColor: EventAction.successFill,
     borderRadius: 999,

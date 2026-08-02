@@ -1,5 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
+  AppState,
   View,
   Text,
   ScrollView,
@@ -18,6 +19,7 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess,
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight, MoreHorizontal, BadgeCheck } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import { consumePendingCheckout } from '../../lib/pendingLink';
 import LinkifiedText from '../../components/LinkifiedText';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -199,6 +201,21 @@ export default function EventDetailScreen() {
       .getUser()
       .then(({ data }) => setUserId(data.user?.id ?? null))
       .catch(() => {});
+  }, []);
+
+  // Audit finding 2: paying happens in a browser, and Stripe's success page
+  // is a web url this app does not claim, so nothing used to bring the buyer
+  // back. This screen is the one they left, so when it comes back to the
+  // foreground it takes them to the order they just paid for. (The tabs
+  // layout consumes the same record if the app was killed mid-payment.)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      consumePendingCheckout().then((orderId) => {
+        if (orderId) router.push(`/tickets/order/${orderId}` as never);
+      });
+    });
+    return () => sub.remove();
   }, []);
 
   const handleCreatorMenu = useCallback((creatorId: string, creatorName: string) => {
@@ -855,7 +872,14 @@ export default function EventDetailScreen() {
             </>
           )}
 
-          {ticketPrice !== null && (
+          {/* The price of a washedup-ticketed event comes from its TIERS
+              (the sticky bar's "from" row), never from the legacy
+              explore_events.ticket_price free-text field: that field can
+              advertise a number for an event whose tickets are all still
+              drafts. It survives here for LINK-OUT listings only, which
+              have no tiers and no other price signal. */}
+          {ticketPrice !== null && !!event.external_url
+            && !ticketSummary?.onSale && !ticketSummary?.allSoldOut && (
             <View style={styles.metaRow}>
               <Ticket size={16} color={Colors.warmGray} strokeWidth={2} />
               <Text style={styles.metaText}>{formatTicketPrice(ticketPrice)}</Text>

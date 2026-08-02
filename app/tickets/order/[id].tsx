@@ -36,6 +36,7 @@ import {
   getQuestions,
   recordAnswer,
   type AnswerValue,
+  type MyOrder,
   type TicketQuestion,
 } from '../../../lib/ticketing';
 
@@ -83,11 +84,21 @@ export default function OrderCompleteScreen() {
   const [done, setDone] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
 
+  // A card charge settles a beat after Stripe returns, and seats only exist
+  // once it does. Now that a paid buyer is brought straight here (finding
+  // 2), keep asking until the seats show up rather than greeting them with
+  // an empty ticket.
   const { data: order } = useQuery({
     queryKey: ['ticket-order', id],
     queryFn: () => getOrder(id!),
     enabled: !!id,
+    refetchInterval: (query) => {
+      const o = query.state.data as MyOrder | null | undefined;
+      if (!o) return 4000;
+      return o.seats.some((s) => !s.voided) ? false : 4000;
+    },
   });
+  const settling = !!order && !order.seats.some((s) => !s.voided);
   const { data: questions = [] } = useQuery({
     queryKey: ['order-questions', order?.event_id],
     queryFn: () => getQuestions(order!.event_id),
@@ -255,6 +266,11 @@ export default function OrderCompleteScreen() {
             codes worth printing; the order id is not a ticket. A paid checkout
             settles within ~a minute, so seats can be briefly empty here; the
             wallet ("see your tickets") is the durable home with the QR. */}
+        {settling && (
+          /* copy to the taste gate */
+          <Text style={styles.settlingNote}>your ticket is being made. it lands here in a moment.</Text>
+        )}
+
         {!!order && order.seats.filter((s) => !s.voided).map((s) => (
           <Text key={s.id} style={styles.ref}>
             {/* copy to the taste gate: per-seat label */}
@@ -345,6 +361,7 @@ const styles = StyleSheet.create({
   eventTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, marginTop: EventSpacing.sm, textAlign: 'center' },
   eventMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: 2 },
   ref: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginTop: EventSpacing.sm, letterSpacing: 1 },
+  settlingNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: EventSpacing.sm, textAlign: 'center' },
   organizerNote: {
     alignSelf: 'stretch', backgroundColor: Colors.white, borderRadius: 12,
     borderWidth: 1, borderColor: Colors.border,

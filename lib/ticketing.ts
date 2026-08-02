@@ -254,14 +254,47 @@ export async function eventHasPaidTier(eventId: string): Promise<boolean> {
 // the ticketing lane deploys to this exact slug.
 export const ONBOARDING_EDGE_FN = 'ticket-connect-onboarding';
 
-export async function requestOnboardingLink(): Promise<string | null> {
+export type OnboardingLinkResult =
+  | { ok: true; url: string }
+  | { ok: false; message: string };
+
+/**
+ * The Stripe onboarding link. This used to swallow EVERY failure into null,
+ * and both callers read that null as "the feature is not built yet" and told
+ * organizers the setup link was not live. The function has been deployed the
+ * whole time, so that message was false and cost us partners (audit finding
+ * 3). Now a failure comes back as a real, retryable reason.
+ */
+export async function requestOnboardingLink(): Promise<OnboardingLinkResult> {
   try {
     const { data, error } = await supabase.functions.invoke(ONBOARDING_EDGE_FN, { body: {} });
-    if (error) return null;
-    return typeof data?.url === 'string' ? data.url : null;
-  } catch {
-    return null;
+    if (error) {
+      // the fn's own JSON body carries the useful reason when it has one
+      let raw: string | null = null;
+      try {
+        const ctx = (error as { context?: { body?: unknown } }).context;
+        const parsed = typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
+        if (parsed && typeof (parsed as { error?: string }).error === 'string') {
+          raw = (parsed as { error: string }).error;
+        }
+      } catch { /* raw stays null */ }
+      return { ok: false, message: humanOnboardingError(raw ?? error.message) };
+    }
+    if (typeof data?.url === 'string' && data.url) return { ok: true, url: data.url };
+    return { ok: false, message: humanOnboardingError(null) };
+  } catch (e: any) {
+    return { ok: false, message: humanOnboardingError(e?.message ?? null) };
   }
+}
+
+/** Never a raw server string, but never a lie about the product either. */
+function humanOnboardingError(raw: string | null | undefined): string {
+  const s = (raw ?? '').toLowerCase();
+  /* copy to the taste gate */
+  if (/(sign|auth|jwt|not signed)/.test(s)) return 'sign in again and give it another try.';
+  if (/(network|fetch|timeout|offline)/.test(s)) return 'that did not reach stripe. check your connection and try again.';
+  if (/(grant|permission|not allowed|forbidden)/.test(s)) return 'this account is not set up to sell yet. reply to your welcome email and we will sort it.';
+  return 'stripe did not hand back a setup link. give it another try in a moment.';
 }
 
 // ─── event FAQs (proposal 70, NOT applied - dormant until the re-cut) ────

@@ -18,6 +18,11 @@ import SunriseIcon from '../../components/yours/icons/SunriseIcon';
 import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
 import { SCENE_STAGE, getSeenSceneStage, SCENE_BADGE_KEY } from '../../lib/sceneStage';
 import { TermsReacceptance } from '../../components/legal/TermsReacceptance';
+import {
+  clearPendingDestination,
+  consumePendingCheckout,
+  consumePendingDestination,
+} from '../../lib/pendingLink';
 
 function PostTabIcon() {
   return (
@@ -86,6 +91,29 @@ async function fetchUnreadChatCount(): Promise<number> {
 export default function TabLayout() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
+
+  // Audit findings 2 and 5, consumed HERE because reaching the tabs is the
+  // proof that the person is fully inside the app: past the auth gate, the
+  // phone-migration gate and onboarding. So resuming a link can never
+  // bypass a gate, and it survives the signed-out bounce (and the trip out
+  // to Stripe) that used to destroy it.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // a finished checkout outranks a saved link: they just paid
+      const orderId = await consumePendingCheckout();
+      if (cancelled) return;
+      if (orderId) {
+        await clearPendingDestination();
+        router.push(`/tickets/order/${orderId}` as never);
+        return;
+      }
+      const href = await consumePendingDestination();
+      if (cancelled || !href) return;
+      router.push(href as never);
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const insets = useSafeAreaInsets();
   const isAndroid = Platform.OS === 'android';
   const androidBottomInset = Math.max(insets.bottom, 12);

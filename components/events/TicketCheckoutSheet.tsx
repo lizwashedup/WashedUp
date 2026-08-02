@@ -28,6 +28,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { openUrl } from '../../lib/url';
+import { stashPendingCheckout } from '../../lib/pendingLink';
 import { supabase } from '../../lib/supabase';
 import {
   computeFeePreview,
@@ -132,9 +133,16 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
     listBuyerAddons(eventId).then(setAddonsList);
   }, [visible, eventId]);
 
-  // any change to what is being bought invalidates the server's last price
+  // Any change to what is being bought invalidates the server's last price.
+  // The applied code goes WITH it: a code that is still advertised as
+  // applied while the button shows the undiscounted total means the shown
+  // price and the charged price can differ, which law 9 forbids. Re-apply
+  // is one tap; a wrong number is a broken promise.
   const clearQuote = () => {
     setQuote(null);
+    setAppliedCode(null);
+    setCodeNote(null);
+    setCodeFieldOpen(false);
   };
 
   const selectedRow = tiers?.find((r) => r.tier.id === selectedId) ?? null;
@@ -226,8 +234,14 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
       onFreeConfirmed(result.orderId);
       return;
     }
-    // paid: hand off to hosted Stripe Checkout
+    // Paid: hand off to hosted Stripe Checkout. The order id was being
+    // thrown away here, and Stripe's success page is a WEB url the app does
+    // not claim, so a buyer paid and then never returned into the app at
+    // all: no order-complete, no organizer questions, no sign anything
+    // happened (audit finding 2). Write the order down before we leave, and
+    // whoever sees the app come back takes them to it.
     hapticSuccess();
+    await stashPendingCheckout(result.orderId);
     openUrl(result.url);
     onClose();
   };

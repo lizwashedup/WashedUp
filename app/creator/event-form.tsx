@@ -45,7 +45,7 @@ import { EventLocationMap } from '../../components/creator/EventLocationMap';
 import { getCreatorAccess } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { supabase } from '../../lib/supabase';
-import { eventHasPaidTier, getMyPayoutState, isPayoutReady } from '../../lib/ticketing';
+import { eventHasPaidTier, getMyPayoutState, getTiers, isPayoutReady } from '../../lib/ticketing';
 import {
   announceEventToMembers,
   createOperatorEvent,
@@ -394,6 +394,37 @@ export default function EventFormScreen() {
     });
   };
 
+  /**
+   * Audit finding 4: a partner can set up tiers, publish, share the link and
+   * sell nothing, because tiers are born as drafts and buyers only ever see
+   * on_sale ones. Publishing does not block on it (a free RSVP event is
+   * legitimate), but it must never happen silently: if this event HAS
+   * tickets and not one of them is on sale, say so plainly and offer the
+   * one screen that fixes it.
+   */
+  const warnIfNothingOnSale = async (eventId: string, onDone: () => void) => {
+    let tiers: { status: string }[] = [];
+    try {
+      tiers = await getTiers(eventId);
+    } catch {
+      onDone();
+      return;
+    }
+    if (tiers.length === 0 || tiers.some((t) => t.status === 'on_sale')) {
+      onDone();
+      return;
+    }
+    setAlertInfo({
+      /* copy to the taste gate */
+      title: 'your tickets are still drafts',
+      message: 'this event is up, but nobody can buy a ticket until you put one on sale.',
+      buttons: [
+        { text: 'later', style: 'cancel', onPress: onDone },
+        { text: 'set them up', onPress: () => { onDone(); router.push(`/creator/tickets?id=${eventId}` as never); } },
+      ],
+    });
+  };
+
   const handleSave = async () => {
     const fields = collectFields({ requireDate: true });
     if (!fields || saving) return;
@@ -404,7 +435,7 @@ export default function EventFormScreen() {
         await syncCoords(id);
         hapticSuccess();
         afterSave();
-        router.back();
+        await warnIfNothingOnSale(id, () => router.back());
       } else {
         const communityId = fromCommunity && community ? community.id : null;
         const newId = await createOperatorEvent(fields, communityId);
@@ -414,7 +445,7 @@ export default function EventFormScreen() {
         if (communityId) {
           offerAnnounce(newId);
         } else {
-          router.back();
+          await warnIfNothingOnSale(newId, () => router.back());
         }
       }
     } catch (e) {
@@ -953,8 +984,13 @@ export default function EventFormScreen() {
                 silent pass-through so existing events' stored links
                 survive an edit-save untouched. */}
 
-            <Text style={styles.fieldLabel}>ticket price</Text>
-            <TextInput style={styles.input} value={ticketPrice} onChangeText={setTicketPrice} placeholder="leave empty if free" placeholderTextColor={Colors.inkSoft} keyboardType="decimal-pad" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            {/* the legacy free-text "ticket price" input is GONE (audit
+                finding 8): it wrote explore_events.ticket_price, which no
+                buyer flow reads, so organizers typed a price here and
+                believed tickets were set up while the real tiers stayed
+                draft. Real prices live on the tickets screen. The state
+                stays as a silent pass-through so existing listings' stored
+                values survive a save untouched, exactly like externalUrl. */}
 
             {/* doc 111: the "after they buy" message; renders only once the
                 SQL-96 column exists (join-gate pattern, self-flips on apply) */}
