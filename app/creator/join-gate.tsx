@@ -133,7 +133,7 @@ export default function JoinGateScreen() {
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Text style={styles.title}>your join gate</Text>
             <Text style={styles.hint}>
-              what people see when they ask to join {community.name}. all three make
+              what people see when they join {community.name}. all three make
               the door feel like yours.
             </Text>
 
@@ -154,7 +154,8 @@ export default function JoinGateScreen() {
                 JOIN_GATE_ENABLED flag is on AND the join_policy column read
                 succeeds (getJoinPolicy non-null). Flag off, or column absent,
                 keeps it hidden with no dead control. Both platforms flip in
-                lockstep on the same flag. Default is approval-required. */}
+                lockstep on the same flag. Proposal 91's default is OPEN:
+                anyone joins instantly, and approval is the opt-in. */}
             {JOIN_GATE_ENABLED && joinPolicy !== null && (
               <>
                 <Text style={styles.fieldLabel}>who gets in</Text>
@@ -163,16 +164,6 @@ export default function JoinGateScreen() {
                 </Text>
                 <View style={styles.policyRow}>
                   <TouchableOpacity
-                    style={[styles.policyPill, joinPolicy === 'approval_required' && styles.policyPillOn]}
-                    onPress={() => { hapticLight(); setJoinPolicyLocal('approval_required'); }}
-                    activeOpacity={0.85}
-                  >
-                    {/* copy to the taste gate */}
-                    <Text style={[styles.policyText, joinPolicy === 'approval_required' && styles.policyTextOn]}>
-                      you approve them
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
                     style={[styles.policyPill, joinPolicy === 'open' && styles.policyPillOn]}
                     onPress={() => { hapticLight(); setJoinPolicyLocal('open'); }}
                     activeOpacity={0.85}
@@ -180,6 +171,16 @@ export default function JoinGateScreen() {
                     {/* copy to the taste gate */}
                     <Text style={[styles.policyText, joinPolicy === 'open' && styles.policyTextOn]}>
                       anyone can join
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.policyPill, joinPolicy === 'approval_required' && styles.policyPillOn]}
+                    onPress={() => { hapticLight(); setJoinPolicyLocal('approval_required'); }}
+                    activeOpacity={0.85}
+                  >
+                    {/* copy to the taste gate */}
+                    <Text style={[styles.policyText, joinPolicy === 'approval_required' && styles.policyTextOn]}>
+                      you approve them
                     </Text>
                   </TouchableOpacity>
                 </View>

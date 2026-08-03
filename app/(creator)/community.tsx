@@ -85,7 +85,7 @@ export default function CreatorCommunityScreen() {
     // LIZ COPY
     setAlertInfo({
       title: 'open your page?',
-      message: 'right now only you see it. publishing makes it real: people can find it, read it, and ask to join.',
+      message: 'right now only you see it. publishing makes it real: people can find it, read it, and join.',
       buttons: [
         { text: 'not yet', style: 'cancel' },
         {

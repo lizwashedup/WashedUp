@@ -40,12 +40,16 @@ import { getLeaderCards } from '../../lib/communityLeader';
 interface Props {
   visible: boolean;
   gate: JoinGate;
+  /** proposal 91: the community's join_policy is 'open', so sending this
+   *  puts the person straight in rather than into a queue. Everything the
+   *  form collects still applies; only the promise changes. */
+  joinsInstantly?: boolean;
   onClose: () => void;
   /** Fires after the request lands; the host flips to its pending state. */
   onRequested: () => void;
 }
 
-export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Props) {
+export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onClose, onRequested }: Props) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -208,11 +212,18 @@ export function JoinCommunityPopup({ visible, gate, onClose, onRequested }: Prop
               {sending ? (
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
-                <Text style={styles.sendBtnText}>ask to join</Text>
+                <Text style={styles.sendBtnText}>{joinsInstantly ? 'join' : 'ask to join'}</Text>
               )}
             </TouchableOpacity>
             {/* LIZ COPY */}
-            <Text style={styles.gateNote}>a real person approves every request.</Text>
+            {/* LIZ COPY: the promise has to match the policy. Telling an
+                open community's visitor that a person reviews them would be
+                false, and telling a gated one that they are in would be worse */}
+            <Text style={styles.gateNote}>
+              {joinsInstantly
+                ? "you're in as soon as you send this."
+                : 'a real person approves every request.'}
+            </Text>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>

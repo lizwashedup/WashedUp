@@ -38,6 +38,9 @@ import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 import { getCommunityPage, getMemberFaces, type CommunityPageEvent } from '../../lib/communityPage';
 import { getLeaderCards } from '../../lib/communityLeader';
 import { getJoinGate, getMyMembership, leaveCommunity } from '../../lib/communityJoin';
+// proposal 91's policy read lives with the leader toggle; the door and the
+// toggle must agree, so both read the same self-flipping function
+import { getJoinPolicy } from '../../lib/creatorMode';
 import { getCommunityChatPayload, joinTopic } from '../../lib/communityChat';
 import { formatEventDateLA } from '../../lib/laDate';
 import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
@@ -80,6 +83,17 @@ export default function CommunityPageScreen() {
     queryFn: () => getCommunityPage(id!),
     enabled: !!id,
   });
+  // proposal 91: null while the column is absent, which is today's server
+  // behavior (every join is reviewed), so the door keeps saying "ask to
+  // join" until the migration lands and then tells the truth on its own
+  const { data: joinPolicy = null } = useQuery({
+    queryKey: ['community-join-policy', id],
+    queryFn: () => getJoinPolicy(id!),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+  const joinsInstantly = joinPolicy === 'open';
+
   const { data: membership } = useQuery({
     queryKey: ['community-membership', id],
     queryFn: () => getMyMembership(id!),
@@ -347,7 +361,9 @@ export default function CommunityPageScreen() {
     setAlertInfo({
       /* copy to the taste gate */
       title: 'leave this community?',
-      message: 'you can ask to join again later.',
+      message: joinsInstantly
+        ? 'you can join again whenever you like.'
+        : 'you can ask to join again later.',
       buttons: [
         { text: 'stay', style: 'cancel' },
         {
@@ -501,14 +517,23 @@ export default function CommunityPageScreen() {
                   onPress={() => {
                     if (previewMode) {
                       // LIZ COPY
-                      setAlertInfo({ title: 'just a preview', message: 'the ask to join button works for visitors.' });
+                      setAlertInfo({
+                        title: 'just a preview',
+                        message: joinsInstantly
+                          ? 'the join button works for visitors.'
+                          : 'the ask to join button works for visitors.',
+                      });
                       return;
                     }
                     setPopupOpen(true);
                   }}
                 >
-                  {/* LIZ COPY */}
-                  <Text style={styles.joinBtnText}>ask to join {'→'}</Text>
+                  {/* LIZ COPY: proposal 91 - the door says what it does. an
+                      open community lets someone in on the spot, so calling
+                      it "ask to join" would be a lie in both directions */}
+                  <Text style={styles.joinBtnText}>
+                    {joinsInstantly ? 'join' : 'ask to join'} {'→'}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -529,6 +554,7 @@ export default function CommunityPageScreen() {
         <JoinCommunityPopup
           visible={popupOpen}
           gate={gate}
+          joinsInstantly={joinsInstantly}
           onClose={() => setPopupOpen(false)}
           onRequested={() => {
             setPopupOpen(false);
