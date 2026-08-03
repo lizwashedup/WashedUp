@@ -1,4 +1,56 @@
 import { Alert, Linking } from 'react-native';
+import { router } from 'expo-router';
+
+/**
+ * A link to our OWN domain must be routed in app, never handed to the OS.
+ *
+ * app.json claims washedup.app on both platforms (iOS associatedDomains
+ * "applinks:washedup.app", Android intentFilters with autoVerify on /e/,
+ * /plans/ and /r/). So when a link like https://washedup.app/e/<id> is tapped
+ * INSIDE the app and we call Linking.openURL, the OS looks up the verified
+ * handler for that URL, finds this very app, and hands the URL straight back
+ * to the app that is already open. Nothing navigates and the tap reads as
+ * dead, which is what a plan link pasted into a chat did (report 8-02).
+ *
+ * Routing here takes the OS out of the path, so the tap behaves the same on
+ * both platforms and the person stays in the app instead of bouncing out to a
+ * browser to read a page the app already renders.
+ */
+const OWN_LINK = /^https?:\/\/(?:www\.)?washedup\.app(\/[^?#\s]*)?/i;
+
+/**
+ * Only paths with a real native route may be routed in app: app/e/[id].tsx
+ * (the short link landing, which itself disambiguates plan from event) and
+ * app/plans/[slug].tsx. Anything else on the domain, /r/ referral redirects
+ * included, still goes to the browser because there is no screen to land on.
+ */
+const OWN_ROUTE = /^\/(e|plans)\/([^/?#]+)\/?$/;
+
+/**
+ * An id or slug never legitimately ends in sentence punctuation, but the chat
+ * linkifier captures every non space character, so a link written mid sentence
+ * ("it is here: https://washedup.app/e/<id>.") arrives with the period stuck
+ * to it and would otherwise resolve to nothing.
+ */
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
+
+/** The in app route for one of our own links, or null when it is not ours. */
+export function internalRouteFor(url: string): string | null {
+  const own = url.match(OWN_LINK);
+  if (!own) return null;
+  const route = (own[1] ?? '').match(OWN_ROUTE);
+  if (!route) return null;
+  const raw = route[2].replace(TRAILING_PUNCTUATION, '');
+  if (!raw) return null;
+  let segment = raw;
+  try {
+    segment = decodeURIComponent(raw);
+  } catch {
+    // A malformed percent escape stays as written: the landing screen says
+    // "this one is gone" for itself rather than us throwing on the way there.
+  }
+  return `/${route[1]}/${segment}`;
+}
 
 /**
  * Ensures URL has a protocol before opening.
@@ -11,6 +63,13 @@ export function openUrl(url: string): void {
     trimmed.startsWith('http://') || trimmed.startsWith('https://')
       ? trimmed
       : `https://${trimmed}`;
+
+  const internal = internalRouteFor(withProtocol);
+  if (internal) {
+    router.push(internal as never);
+    return;
+  }
+
   Linking.openURL(withProtocol).catch(() => {
     Alert.alert('Could not open link', 'The link may be invalid or unsupported on this device.');
   });
