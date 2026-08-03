@@ -36,6 +36,7 @@ import { SkeletonProfile } from '../../components/SkeletonCard';
 import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import * as Updates from 'expo-updates';
 import { getCreatorAccess, hasCreatorAccess, creatorLandingRoute, isLeaderAccess, type CreatorAccess } from '../../lib/creatorMode';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { checkContent } from '../../lib/contentFilter';
@@ -501,6 +502,15 @@ export default function ProfileScreen() {
   ];
   const supportRows = [
     { icon: 'mail-outline', label: 'Contact Us', onPress: () => openExternal('mailto:hello@washedup.app', 'profile.openMailto') },
+    // Permanent instrumentation (approved 8-2). We spent a long stretch
+    // inferring which bundle a device was running because the app never said.
+    // channel = which branch this build listens to; the id = which OTA it
+    // actually applied ('embedded' = it has never taken one).
+    {
+      icon: 'information-circle-outline',
+      label: `${Updates.channel ?? 'no channel'} · ${Updates.updateId?.slice(0, 8) ?? 'embedded'}`,
+      onPress: () => {},
+    },
   ];
   // ── Loading ─────────────────────────────────────────────────────────────────
 
