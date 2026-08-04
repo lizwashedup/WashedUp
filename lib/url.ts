@@ -82,6 +82,24 @@ export function openUrl(url: string): void {
  */
 export const URL_REGEX = /(https?:\/\/[^\s]+|www\.[^\s]+)/;
 
+/**
+ * The ONE link in a piece of text, or null when it holds none or several.
+ *
+ * A chat bubble renders its link as a `<Text onPress>` nested inside the
+ * bubble's long press `Pressable`. A nested text press is the fragile kind of
+ * touch target: on Android an ancestor holding the responder can swallow it,
+ * which is the shape of the 8-02 report that a shared plan link did nothing
+ * when tapped. When a message carries exactly one link, the bubble itself can
+ * therefore act as the tap target too, which no ancestor can intercept.
+ * Restricted to exactly one link so a bubble is never ambiguous about which
+ * one it would open.
+ */
+export function soleUrlIn(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const urls = splitOnUrls(text).filter((part) => part.isUrl);
+  return urls.length === 1 ? urls[0].text : null;
+}
+
 /** First URL found in the text, or null. Used to lift a pasted link out of a description. */
 export function extractFirstUrl(text: string | null | undefined): string | null {
   if (!text) return null;

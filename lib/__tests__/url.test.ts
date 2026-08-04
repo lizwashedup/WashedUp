@@ -2,7 +2,7 @@ jest.mock('expo-router', () => ({ router: { push: jest.fn() } }));
 
 import { Linking } from 'react-native';
 import { router } from 'expo-router';
-import { internalRouteFor, openUrl } from '../url';
+import { internalRouteFor, openUrl, soleUrlIn } from '../url';
 
 const PLAN_ID = 'fe50d58b-0071-4818-bfbe-0b0e936650ea';
 
@@ -45,6 +45,28 @@ describe('internalRouteFor', () => {
     expect(internalRouteFor('https://example.com/e/abc')).toBeNull();
     expect(internalRouteFor('https://notwashedup.app/e/abc')).toBeNull();
     expect(internalRouteFor('https://washedup.app.evil.com/e/abc')).toBeNull();
+  });
+});
+
+describe('soleUrlIn', () => {
+  it('finds the one link in a message that has prose around it', () => {
+    const text = `Alright, here's the new event. Looking forward to meeting y'all!\n\nHospital of Emotions (new date)\nhttps://washedup.app/e/${PLAN_ID}`;
+    expect(soleUrlIn(text)).toBe(`https://washedup.app/e/${PLAN_ID}`);
+  });
+
+  it('returns null when the message has no link', () => {
+    expect(soleUrlIn('Mondays or Fridays would work best for me')).toBeNull();
+    expect(soleUrlIn('')).toBeNull();
+    expect(soleUrlIn(null)).toBeNull();
+    expect(soleUrlIn(undefined)).toBeNull();
+  });
+
+  it('returns null when the message has more than one link, so the bubble is never ambiguous', () => {
+    expect(soleUrlIn('https://washedup.app/e/a and https://example.com/b')).toBeNull();
+  });
+
+  it('counts a bare www link', () => {
+    expect(soleUrlIn('see www.example.com for details')).toBe('www.example.com');
   });
 });
 
