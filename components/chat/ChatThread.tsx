@@ -43,7 +43,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import type { AnchorRect } from '../menu/MenuCard';
 import SunriseIcon from '../yours/icons/SunriseIcon';
 import ChatPlanCard from './ChatPlanCard';
-import { openUrl } from '../../lib/url';
+import { openUrl, soleUrlIn } from '../../lib/url';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../hooks/useChat';
 import MiniProfileCard from '../MiniProfileCard';
@@ -324,6 +324,16 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
     () => (message.message_type === 'user' ? (message.content?.match(URL_PATTERN)?.[0] ?? null) : null),
     [message.message_type, message.content],
   );
+  // A message carrying exactly one link makes the whole bubble a second way
+  // into that link. The inline link Text stays the primary target; this is the
+  // one an ancestor cannot swallow, which is the failure shape reported on
+  // 8-02 (a shared plan link that did nothing when tapped on Android). The
+  // bubble had no onPress at all before, so this only adds a way through and
+  // can never override an existing one.
+  const bubbleUrl = useMemo(
+    () => (message.message_type === 'user' ? soleUrlIn(message.content) : null),
+    [message.message_type, message.content],
+  );
   // Cache the emoji-only verdict per content -- the regex/Segmenter test is
   // cheap individually but runs for every bubble on every list re-render.
   const isEmojiOnlyMsg = useMemo(() => isEmojiOnly(message.content), [message.content]);
@@ -384,6 +394,7 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
         )}
 
         <Pressable
+          onPress={bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
           onLongPress={handleLongPress}
           delayLongPress={400}
         >
