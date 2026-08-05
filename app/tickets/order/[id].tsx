@@ -17,7 +17,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -35,51 +34,20 @@ import {
   getOrder,
   getQuestions,
   recordAnswer,
-  type AnswerValue,
   type MyOrder,
-  type TicketQuestion,
 } from '../../../lib/ticketing';
-
-/** the raw per-(question, seat) draft; converted to an AnswerValue at send. */
-interface AnswerRaw {
-  text?: string;
-  choice?: string;
-  choices?: string[];
-  accepted?: boolean;
-}
-
-/** null seat = a per_order question; a number = a per_attendee seat (1..qty). */
-type Seat = number | null;
-const cellKey = (questionId: string, seat: Seat): string => `${questionId}:${seat ?? 'order'}`;
-
-/** build the canonical value shape, or null when the seat was left blank. */
-function toAnswerValue(q: TicketQuestion, raw: AnswerRaw | undefined): AnswerValue | null {
-  if (!raw) return null;
-  switch (q.qtype) {
-    case 'short_text':
-    case 'paragraph': {
-      const t = (raw.text ?? '').trim();
-      return t ? { text: t } : null;
-    }
-    case 'single_select':
-    case 'dropdown': {
-      const c = (raw.choice ?? '').trim();
-      return c ? { choice: c } : null;
-    }
-    case 'multi_select': {
-      const cs = (raw.choices ?? []).filter((x) => x.trim().length > 0);
-      return cs.length ? { choices: cs } : null;
-    }
-    case 'terms':
-      return raw.accepted ? { accepted: true, accepted_at: new Date().toISOString() } : null;
-    default:
-      return null;
-  }
-}
+import {
+  QuestionForm,
+  cellKey,
+  collectCells,
+  type AnswerDraft,
+  type AnswerRaw,
+  type Seat,
+} from '../../../components/tickets/QuestionForm';
 
 export default function OrderCompleteScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [answers, setAnswers] = useState<Record<string, AnswerRaw>>({});
+  const [answers, setAnswers] = useState<AnswerDraft>({});
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -113,27 +81,17 @@ export default function OrderCompleteScreen() {
   });
 
   const qty = order?.qty ?? 1;
-  const seatsFor = useCallback(
-    (q: TicketQuestion): Seat[] =>
-      q.scope === 'per_attendee' ? Array.from({ length: qty }, (_, i) => i + 1) : [null],
-    [qty],
-  );
 
-  const setCell = (questionId: string, seat: Seat, patch: AnswerRaw) => {
-    setAnswers((prev) => ({ ...prev, [cellKey(questionId, seat)]: { ...prev[cellKey(questionId, seat)], ...patch } }));
-  };
+  const setCell = useCallback((questionId: string, seat: Seat, patch: AnswerRaw) => {
+    const key = cellKey(questionId, seat);
+    setAnswers((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  }, []);
 
   // every (question, seat) pair that carries a real value
-  const filledCells = useMemo(() => {
-    const out: { q: TicketQuestion; seat: Seat; value: AnswerValue }[] = [];
-    for (const q of questions) {
-      for (const seat of seatsFor(q)) {
-        const value = toAnswerValue(q, answers[cellKey(q.id, seat)]);
-        if (value) out.push({ q, seat, value });
-      }
-    }
-    return out;
-  }, [questions, answers, seatsFor]);
+  const filledCells = useMemo(
+    () => collectCells(questions, answers, qty),
+    [questions, answers, qty],
+  );
 
   const submit = useCallback(async () => {
     if (!id || saving) return;
@@ -160,95 +118,6 @@ export default function OrderCompleteScreen() {
     setDone(true);
     hapticSuccess();
   }, [id, saving, filledCells]);
-
-  const renderInput = (q: TicketQuestion, seat: Seat) => {
-    const key = cellKey(q.id, seat);
-    const raw = answers[key] ?? {};
-    const opts = q.options ?? [];
-
-    if (q.qtype === 'short_text' || q.qtype === 'paragraph') {
-      return (
-        <TextInput
-          style={[styles.qInput, q.qtype === 'paragraph' && styles.qInputMultiline]}
-          value={raw.text ?? ''}
-          onChangeText={(v) => setCell(q.id, seat, { text: v })}
-          placeholder="your answer"
-          placeholderTextColor={Colors.textLight}
-          multiline={q.qtype === 'paragraph'}
-          accessibilityLabel={q.prompt}
-        />
-      );
-    }
-
-    if (q.qtype === 'single_select' || q.qtype === 'dropdown') {
-      return (
-        <View style={styles.chipWrap}>
-          {opts.map((opt) => {
-            const on = raw.choice === opt;
-            return (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.chip, on && styles.chipOn]}
-                onPress={() => { hapticLight(); setCell(q.id, seat, { choice: on ? '' : opt }); }}
-                activeOpacity={0.85}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
-                accessibilityLabel={opt}
-              >
-                <Text style={[styles.chipText, on && styles.chipTextOn]}>{opt}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      );
-    }
-
-    if (q.qtype === 'multi_select') {
-      const chosen = raw.choices ?? [];
-      return (
-        <View style={styles.chipWrap}>
-          {opts.map((opt) => {
-            const on = chosen.includes(opt);
-            return (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.chip, on && styles.chipOn]}
-                onPress={() => {
-                  hapticLight();
-                  setCell(q.id, seat, { choices: on ? chosen.filter((c) => c !== opt) : [...chosen, opt] });
-                }}
-                activeOpacity={0.85}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: on }}
-                accessibilityLabel={opt}
-              >
-                <Text style={[styles.chipText, on && styles.chipTextOn]}>{opt}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      );
-    }
-
-    // terms: the prompt IS the agreement text; a single accept toggle
-    const accepted = !!raw.accepted;
-    return (
-      <TouchableOpacity
-        style={styles.termsRow}
-        onPress={() => { hapticLight(); setCell(q.id, seat, { accepted: !accepted }); }}
-        activeOpacity={0.85}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: accepted }}
-        accessibilityLabel={`I agree: ${q.prompt}`}
-      >
-        <View style={[styles.checkbox, accepted && styles.checkboxOn]}>
-          {accepted && <Check size={14} color={EventAction.onPrimary} strokeWidth={3} />}
-        </View>
-        {/* copy to the taste gate */}
-        <Text style={styles.termsLabel}>I agree</Text>
-      </TouchableOpacity>
-    );
-  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -292,24 +161,12 @@ export default function OrderCompleteScreen() {
           <View style={styles.questions}>
             {/* copy to the taste gate */}
             <Text style={styles.qHeader}>a couple of quick things from the organizer</Text>
-            {questions.map((q: TicketQuestion) => (
-              <View key={q.id} style={styles.qGroup}>
-                <Text style={styles.qPrompt}>
-                  {q.prompt}
-                  {/* copy to the taste gate */}
-                  {q.required ? '' : '  (optional)'}
-                </Text>
-                {seatsFor(q).map((seat) => (
-                  <View key={cellKey(q.id, seat)} style={styles.qCell}>
-                    {seat !== null && (
-                      /* copy to the taste gate: per-seat label for per_attendee */
-                      <Text style={styles.seatLabel}>ticket {seat}</Text>
-                    )}
-                    {renderInput(q, seat)}
-                  </View>
-                ))}
-              </View>
-            ))}
+            <QuestionForm
+              questions={questions}
+              qty={qty}
+              draft={answers}
+              onCellChange={setCell}
+            />
 
             {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
 
@@ -375,31 +232,6 @@ const styles = StyleSheet.create({
   organizerNoteText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.quoteText, lineHeight: 20 },
   questions: { alignSelf: 'stretch', marginTop: EventSpacing.xl, gap: EventSpacing.lg },
   qHeader: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  qGroup: { gap: EventSpacing.sm },
-  qPrompt: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  qCell: { gap: EventSpacing.xs },
-  seatLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary, letterSpacing: 0.5, textTransform: 'uppercase' },
-  qInput: {
-    backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.asphalt,
-  },
-  qInputMultiline: { minHeight: 72, textAlignVertical: 'top' },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
-    paddingHorizontal: 14, paddingVertical: 9, minHeight: 44, justifyContent: 'center',
-  },
-  chipOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
-  chipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  chipTextOn: { color: Colors.white },
-  termsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, minHeight: 44 },
-  checkbox: {
-    width: 24, height: 24, borderRadius: 6, borderWidth: 1.5, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white,
-  },
-  checkboxOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
-  termsLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   errorText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventAction.error },
   cta: {
     alignSelf: 'stretch', backgroundColor: EventAction.primary, borderRadius: 999,

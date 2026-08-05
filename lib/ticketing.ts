@@ -616,7 +616,12 @@ export async function startTicketCheckout(
   // docs 113/114 (canon): promo + add-ons ride the same call under the
   // canon body keys. Both travel only when provided, so a checkout without
   // them is byte-identical to today's.
-  extras?: { promoCode?: string | null; addons?: { add_on_id: string; qty: number }[] },
+  extras?: {
+    promoCode?: string | null;
+    addons?: { add_on_id: string; qty: number }[];
+    // doc 118: the organizer's buyer questions, collected BEFORE payment.
+    answers?: CheckoutAnswer[];
+  },
 ): Promise<CheckoutResult> {
   // 87 F1 idempotency (Cowork 7-27): ONE stable checkout_key per user
   // checkout action, minted here because one call IS one action today (the
@@ -632,6 +637,7 @@ export async function startTicketCheckout(
   };
   if (extras?.promoCode) body.promo_code = extras.promoCode;
   if (extras?.addons && extras.addons.length > 0) body.add_ons = extras.addons;
+  if (extras?.answers && extras.answers.length > 0) body.answers = extras.answers;
   const { data, error } = await supabase.functions.invoke('create-ticket-checkout', { body });
   if (error) {
     // functions.invoke surfaces non-2xx as an error with the JSON body. That
@@ -889,6 +895,24 @@ export type AnswerValue =
   | { choice: string }
   | { choices: string[] }
   | { accepted: boolean; accepted_at: string };
+
+/**
+ * One answer as it rides the checkout body (doc 118 contract). attendee_index
+ * is OMITTED for a per_order question rather than sent as null, and the whole
+ * `answers` key is dropped when the event has no questions, so a checkout
+ * without them is byte-identical to today's.
+ *
+ * The client gate is courtesy only: the edge function is the enforcement, and
+ * it writes these rows itself inside the transaction that creates the order
+ * (ticket_answers.order_id is NOT NULL, so an answer cannot exist before the
+ * order does). Sending these early is harmless: a server that does not yet
+ * know the key ignores it.
+ */
+export interface CheckoutAnswer {
+  question_id: string;
+  value: AnswerValue;
+  attendee_index?: number;
+}
 
 /**
  * Records one buyer answer (C2, own-order RLS). Answers are PER SEAT:

@@ -33,10 +33,21 @@ import { supabase } from '../../lib/supabase';
 import {
   computeFeePreview,
   formatCents,
+  getQuestions,
   getTiers,
   startTicketCheckout,
+  type TicketQuestion,
   type TicketTier,
 } from '../../lib/ticketing';
+import {
+  QuestionForm,
+  buildCheckoutAnswers,
+  cellKey,
+  missingRequiredPrompts,
+  type AnswerDraft,
+  type AnswerRaw,
+  type Seat,
+} from '../tickets/QuestionForm';
 import {
   addonRemaining,
   listBuyerAddons,
@@ -113,11 +124,18 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
   const [quote, setQuote] = useState<PriceQuote | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [codeNote, setCodeNote] = useState<string | null>(null);
+  // doc 118: the organizer's buyer questions, asked BEFORE payment. Until
+  // SQL-99 widens the read, ticket_questions only answers a buyer who
+  // already has an order for this event, so this comes back empty and the
+  // whole step stays invisible. Same self-flipping shape as doc 111.
+  const [questions, setQuestions] = useState<TicketQuestion[]>([]);
+  const [answers, setAnswers] = useState<AnswerDraft>({});
 
   useEffect(() => {
     if (!visible) return;
     setProblem(null);
     setAddonQty({});
+    setAnswers({});
     setCodeFieldOpen(false);
     setCodeText('');
     setAppliedCode(null);
@@ -131,6 +149,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
       setQty(first ? tierMin(first.tier) : 1);
     });
     listBuyerAddons(eventId).then(setAddonsList);
+    getQuestions(eventId).then(setQuestions).catch(() => setQuestions([]));
   }, [visible, eventId]);
 
   // Any change to what is being bought invalidates the server's last price.
@@ -183,6 +202,18 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
       ? computeFeePreview(selected.price_cents * qty + addonsFaceCents, 0).buyerTotalCents
       : 0;
 
+  // doc 118. The questions ride PAID and FREE checkouts alike: an organizer's
+  // consent or dietary question matters just as much on a free seat.
+  const showQuestions = !!selected && questions.length > 0;
+  // Seats above the current qty are simply not asked and not sent, so lowering
+  // the count never leaks a stale seat and raising it again keeps what was
+  // already typed.
+  const missingRequired = showQuestions ? missingRequiredPrompts(questions, answers, qty) : [];
+  const setCell = (questionId: string, seat: Seat, patch: AnswerRaw) => {
+    const key = cellKey(questionId, seat);
+    setAnswers((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  };
+
   const applyCode = async () => {
     if (!selected || quoteBusy || !codeText.trim()) return;
     hapticLight();
@@ -222,6 +253,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
     const result = await startTicketCheckout(selected.id, qty, {
       promoCode: appliedCode,
       addons: selections,
+      answers: buildCheckoutAnswers(questions, answers, qty),
     });
     setBusy(false);
     if (result.kind === 'error') {
@@ -430,12 +462,36 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                 </View>
               )}
 
+              {/* doc 118: the organizer's questions, before the money. Stays
+                  invisible until SQL-99 lets a buyer read them. */}
+              {showQuestions && (
+                <View style={styles.questions}>
+                  {/* copy to the taste gate */}
+                  <Text style={styles.questionsHeader}>a couple of quick things from the organizer</Text>
+                  <QuestionForm
+                    questions={questions}
+                    qty={qty}
+                    draft={answers}
+                    onCellChange={setCell}
+                  />
+                </View>
+              )}
+
               {!!problem && <Text style={styles.problem}>{problem}</Text>}
 
+              {/* courtesy only: the server enforces required-ness. Name what is
+                  missing rather than disabling in silence. */}
+              {missingRequired.length > 0 && (
+                /* copy to the taste gate */
+                <Text style={styles.problem}>
+                  still needed: {missingRequired.join(', ')}
+                </Text>
+              )}
+
               <TouchableOpacity
-                style={[styles.cta, (!selected || busy) && styles.ctaDisabled]}
+                style={[styles.cta, (!selected || busy || missingRequired.length > 0) && styles.ctaDisabled]}
                 onPress={handleGo}
-                disabled={!selected || busy}
+                disabled={!selected || busy || missingRequired.length > 0}
                 activeOpacity={0.85}
               >
                 {busy ? (
@@ -540,6 +596,8 @@ const styles = StyleSheet.create({
   promoApplied: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   promoRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium, textDecorationLine: 'underline' },
   promoMiss: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error },
+  questions: { marginTop: EventSpacing.md, gap: EventSpacing.lg },
+  questionsHeader: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   cta: {
     backgroundColor: EventAction.primary,
     borderRadius: 999,
