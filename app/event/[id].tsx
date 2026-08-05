@@ -1180,7 +1180,12 @@ export default function EventDetailScreen() {
               style={styles.postPlanButton}
               onPress={() => {
                 hapticMedium();
-                router.push(`/community-thread/${eventTopicId}`);
+                // eventTopicId is a community_topics.id, so it belongs to the
+                // TOPIC screen. Pushing it at /community-thread sent the send
+                // through sendCommunityMessage, which inserts into
+                // community_broadcasts with community_id = a topic id: RLS
+                // refused it and the member saw the raw policy error.
+                router.push(`/community-topic/${eventTopicId}`);
               }}
             >
               {/* copy to the taste gate (doc 69 Q5) */}

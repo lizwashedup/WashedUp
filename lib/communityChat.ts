@@ -421,6 +421,31 @@ export interface TopicMessage {
   sender_photo: string | null;
 }
 
+/**
+ * The topic row itself. The screen used to load messages and nothing else,
+ * so it had no idea whether the room was still open: an archived topic still
+ * rendered a live composer and the send came back as a raw RLS refusal. The
+ * archive cron runs daily over community event topics, so every past event's
+ * room is in exactly that state.
+ */
+export interface TopicMeta {
+  id: string;
+  name: string;
+  archived: boolean;
+  community_id: string;
+  explore_event_id: string | null;
+}
+
+export async function getTopicMeta(topicId: string): Promise<TopicMeta | null> {
+  const { data, error } = await supabase
+    .from('community_topics')
+    .select('id, name, archived, community_id, explore_event_id')
+    .eq('id', topicId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as TopicMeta;
+}
+
 export async function getTopicMessages(topicId: string): Promise<TopicMessage[]> {
   const { data, error } = await supabase
     .from('community_topic_messages')

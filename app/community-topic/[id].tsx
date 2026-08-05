@@ -37,6 +37,7 @@ import {
   hasSaidHiInTopic,
   markTopicRead,
   sendTopicMessage,
+  getTopicMeta,
   setTopicNotifications,
   type TopicMessage,
 } from '../../lib/communityChat';
@@ -57,6 +58,19 @@ export default function CommunityTopicScreen() {
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
   }, []);
+
+  // Is this room still open? An archived topic refuses inserts at the policy
+  // level, so the composer must say so rather than let the send come back as
+  // a raw RLS error. Unknown (a read that fails) is treated as OPEN: the
+  // server still holds the real gate, and guessing closed would silence a
+  // room that works.
+  const { data: topicMeta } = useQuery({
+    queryKey: ['topic-meta', id],
+    queryFn: () => getTopicMeta(id!),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+  const archived = topicMeta?.archived === true;
 
   const { data: payload } = useQuery({
     queryKey: ['community-chat-cards'],
@@ -225,6 +239,12 @@ export default function CommunityTopicScreen() {
           />
         )}
 
+        {archived ? (
+          <View style={styles.closedNote}>
+            {/* copy to the taste gate */}
+            <Text style={styles.closedText}>this room is closed. the event has passed.</Text>
+          </View>
+        ) : (
         <View style={styles.composer}>
           <TextInput
             style={styles.input}
@@ -247,6 +267,7 @@ export default function CommunityTopicScreen() {
             )}
           </TouchableOpacity>
         </View>
+        )}
       </KeyboardAvoidingView>
 
       {reportTarget && (
@@ -345,6 +366,17 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.parchment,
+  },
+  closedNote: {
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  closedText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    textAlign: 'center',
   },
   input: {
     flex: 1,
