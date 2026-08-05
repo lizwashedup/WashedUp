@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import { wasOtpRecentlySent, markOtpSent } from '../../lib/navState';
 import { useSubmitGuard } from '../../hooks/useSubmitGuard';
 import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 import PhoneInput from '../../components/auth/PhoneInput';
+import { getKnownAccount, lastFour, nationalDigits } from '../../lib/knownAccount';
 
 const TERMS_URL = 'https://washedup.app/terms';
 const PRIVACY_URL = 'https://washedup.app/privacy';
@@ -34,6 +35,32 @@ export default function PhoneEntryScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  // An account already signed in on this device. Present ONLY when a session
+  // ended on its own; a deliberate log out clears the marker, so choosing to
+  // leave still lands on the cold screen. Never a token, just the number.
+  const [resumeTail, setResumeTail] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getKnownAccount().then((known) => {
+      if (cancelled || !known) return;
+      const digits = nationalDigits(known.phone);
+      if (!digits) return;
+      setResumeTail(lastFour(known.phone));
+      // prefill so signing back in is one tap, not a retyped number
+      setPhone((current) => (current ? current : digits));
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // "not you" / a shared device: drop the memory for this screen only and let
+  // them type any number. The marker itself is left alone; a real sign-in
+  // overwrites it.
+  const useDifferentNumber = useCallback(() => {
+    setResumeTail(null);
+    setPhone('');
+    setError(null);
+  }, []);
 
   const scrollToBottomOnFocus = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
@@ -159,6 +186,14 @@ export default function PhoneEntryScreen() {
           </View>
 
           <View style={styles.bottomBlock}>
+            {/* copy to the taste gate: this is a RE-auth, not a signup. It must
+                not claim more certainty than a device marker gives, and it must
+                always leave a way out for a shared phone. */}
+            {!!resumeTail && (
+              <Text style={styles.resumeLine}>
+                your session ended. sign back in ending {resumeTail}.
+              </Text>
+            )}
             <Text style={styles.label}>phone number</Text>
             <PhoneInput
               value={phone}
@@ -180,7 +215,14 @@ export default function PhoneEntryScreen() {
               </Text>
             </TouchableOpacity>
 
-            <Text style={styles.reassure}>new or returning, your number is your login.</Text>
+            {resumeTail ? (
+              <TouchableOpacity onPress={useDifferentNumber} hitSlop={8} accessibilityRole="button">
+                {/* copy to the taste gate */}
+                <Text style={styles.reassure}>use a different number</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.reassure}>new or returning, your number is your login.</Text>
+            )}
 
             {/* Escape hatch for existing email/Apple/Google users — without
                 this they'd accidentally create a duplicate account by
@@ -249,6 +291,12 @@ const styles = StyleSheet.create({
     color: Colors.creamMuted,
     textAlign: 'center',
     marginTop: 12,
+  },
+  resumeLine: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 14,
+    color: Colors.creamHigh,
+    marginBottom: 10,
   },
   contact: {
     fontFamily: Fonts.sans,

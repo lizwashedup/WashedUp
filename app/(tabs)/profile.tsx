@@ -41,7 +41,8 @@ import { getCreatorAccess, hasCreatorAccess, creatorLandingRoute, isLeaderAccess
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
-import { lastUnauthRedirectAt } from '../../lib/navState';
+import { lastUnauthRedirectAt, deliberateSignOutAt } from '../../lib/navState';
+import { forgetAccount } from '../../lib/knownAccount';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 import {
@@ -213,7 +214,16 @@ export default function ProfileScreen() {
         {
           text: 'Log Out',
           style: 'destructive',
-          onPress: () => supabase.auth.signOut(),
+          onPress: () => {
+            // A chosen exit: forget this device and land on the cold screen,
+            // not the "sign back in" one. Clear DIRECTLY as well as stamping:
+            // a slow signOut() round trip can outlive the stamp's 1.5s window,
+            // and the listener would then read a chosen exit as involuntary
+            // and offer to sign back into the account they just left.
+            deliberateSignOutAt.ts = Date.now();
+            forgetAccount();
+            supabase.auth.signOut();
+          },
         },
       ],
     });
@@ -428,6 +438,12 @@ export default function ProfileScreen() {
       // the listener's SIGNED_OUT handler skips its own router.replace and
       // we don't see a double-navigation bounce.
       lastUnauthRedirectAt.ts = Date.now();
+      // The account is gone: forget the device too, so the next screen is the
+      // cold one and never an offer to sign back into what was just deleted.
+      // Direct clear as well as the stamp, for the same reason as log out: a
+      // slow signOut() can outlive the 1.5s window.
+      deliberateSignOutAt.ts = Date.now();
+      forgetAccount();
       router.replace(unauthedRoute() as never);
       try {
         await supabase.auth.signOut();

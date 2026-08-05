@@ -30,6 +30,24 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? DEFAULT_ANO
 // guarantees the holder lets go first.
 const REQUEST_TIMEOUT_MS = 8000;
 
+// The token endpoint gets its own, longer ceiling, and this one is about
+// losing accounts rather than losing time.
+//
+// A refresh ROTATES: the server consumes the presented token and issues a
+// new one. If we abort at 8s AFTER the server rotated but BEFORE the client
+// persisted the reply, the device is left holding a token the server has
+// already spent. That abort is harmless by itself (auth-js wraps it as
+// AuthRetryableFetchError and keeps the session), but the next tick presents
+// the spent token, the server answers with a definitive invalid_grant, and
+// THAT is not retryable: auth-js calls _removeSession() and the user is
+// signed out with no warning. On prod that lands them on the cold
+// acquisition screen, where known users re-register.
+//
+// So: give a rotation the best chance to land. Still strictly below GoTrue's
+// 10s processLock acquire timeout, which is the invariant the 8s above
+// exists to protect (the holder must let go before a waiter times out).
+const AUTH_TOKEN_TIMEOUT_MS = 9000;
+
 const timeoutFetch: typeof fetch = (input, init) => {
   // Avoid referencing the global `Request` (instanceof would throw on every
   // fetch if it were ever undefined). A Request-like object exposes `.url`;
@@ -48,7 +66,8 @@ const timeoutFetch: typeof fetch = (input, init) => {
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const ceiling = url.includes('/auth/v1/token') ? AUTH_TOKEN_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), ceiling);
 
   // Respect a caller-supplied AbortSignal too, so an upstream cancel still
   // propagates (and we don't leak our timer).

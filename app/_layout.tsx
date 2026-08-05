@@ -21,7 +21,7 @@ import { setAudioModeAsync } from 'expo-audio';
 import * as SplashScreen from 'expo-splash-screen';
 import { OneSignal } from 'react-native-onesignal';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, LogBox, Platform } from 'react-native';
+import { AppState, Linking, LogBox, Platform } from 'react-native';
 import 'react-native-reanimated';
 
 // Silence dev-only redboxes that aren't real bugs:
@@ -45,7 +45,7 @@ import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
 import { fetchNeedsPhoneMigration } from '../lib/authGate';
 import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
-import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt, authedUserIdRef } from '../lib/navState';
+import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt, authedUserIdRef, deliberateSignOutAt } from '../lib/navState';
 import Colors from '../constants/Colors';
 import {
   usePushNotifications,
@@ -65,6 +65,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
 import { clearPendingDestination, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
+import { forgetAccount, rememberAccount } from '../lib/knownAccount';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
 import { maybeRequestReviewAfterTopRating } from '../lib/reviewAsk';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
@@ -861,8 +862,45 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         consumePendingReferral();
       }
 
+      // Remember that an account lives on this device (never a token, just
+      // the number), so a session that dies later can offer to sign back in
+      // rather than offering to make a second account.
+      if (event === 'SIGNED_IN' && session?.user?.phone) {
+        rememberAccount(session.user.phone);
+      }
+
       if (!session?.user) {
-        pendingDeepLinkRef.current = null;
+        // Did they choose this? A deliberate exit stamps navState immediately
+        // before signOut(); anything else is a session that died on its own.
+        const deliberate = Date.now() - deliberateSignOutAt.ts < 1500;
+
+        if (deliberate) {
+          // chosen exit: forget the device and land cold, as before
+          forgetAccount();
+          pendingDeepLinkRef.current = null;
+        } else {
+          // The session died under them. Two things must survive it.
+          //
+          // 1. Where they were going. This used to be nulled here, which is
+          //    why a buyer coming back from Stripe lost the order screen on
+          //    top of losing the session.
+          const href = pendingDeepLinkRef.current;
+          if (href) stashPendingDestination(href);
+          pendingDeepLinkRef.current = null;
+          // 2. The fact that an account exists on this device, so
+          //    /phone-entry can offer to sign back in instead of offering to
+          //    make a second account (the duplicate-account defect).
+          Sentry.captureMessage('auth: involuntary sign out', {
+            level: 'warning',
+            tags: { area: 'auth' },
+            extra: {
+              app_state: AppState.currentState,
+              had_pending_destination: !!href,
+              last_known_user: authedUserIdRef.current ?? null,
+            },
+          });
+        }
+
         authedUserIdRef.current = null;
         setAuthedUserId(null);
         const unauth = unauthedRoute();

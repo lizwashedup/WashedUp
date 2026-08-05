@@ -26,6 +26,22 @@ export const verifyCodeSelfRoutingRef = { current: false };
 export const lastUnauthRedirectAt = { ts: 0 };
 
 /**
+ * Timestamp of the most recent DELIBERATE sign-out: log out, delete account,
+ * an abandoned onboarding, the migration gate's back-out. Callers set
+ * `Date.now()` immediately before their `signOut()`.
+ *
+ * The auth listener reads it to tell a chosen exit from a session that died
+ * on its own. A deliberate exit clears the known-account marker and lands on
+ * the cold screen; anything else keeps the marker and lands on the resume
+ * screen. Getting this backwards would tell someone who just logged out to
+ * sign back in, so callers stamp it and the listener never guesses.
+ *
+ * Same shape and lifetime as lastUnauthRedirectAt above: a ~1.5s window is
+ * plenty, since signOut() emits SIGNED_OUT on the next tick.
+ */
+export const deliberateSignOutAt = { ts: 0 };
+
+/**
  * One-shot flag flipped by any auth-success path (login.tsx after a
  * successful sign-in via email/Apple/Google, verify-code.tsx after OTP
  * success). The plans tab consumes it on mount to show the WelcomeLoading
