@@ -267,6 +267,16 @@ export const COPY = {
   circleLeaveStay: 'Stay',
   circleLeaveGo: 'Leave',
   circleLeaveError: "Couldn't leave just now. Try again.",
+  // Delete a DM from the chat list (doc 120). Deleting is leave_circle under
+  // the hood: it drops the chat from YOUR list only, the other person keeps
+  // their copy, and messaging again starts a fresh thread. Every string in
+  // this block is a placeholder.
+  dmDeleteTitle: 'Delete this chat?', // LIZ COPY
+  dmDeleteBody: (name: string) =>
+    `This deletes the chat from your list. ${name} keeps their copy. Messaging them again starts a new chat.`, // LIZ COPY
+  dmDeleteKeep: 'Keep it', // LIZ COPY
+  dmDeleteGo: 'Delete', // LIZ COPY
+  dmDeleteError: "Couldn't delete just now. Try again.", // LIZ COPY
   // Load failure.
   circleLoadError: "This circle didn't load.",
   // Circle chat (the shared chat surface) + its header.

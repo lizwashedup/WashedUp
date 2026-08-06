@@ -22,7 +22,17 @@ import { withTimeout } from '../../../lib/withTimeout';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 import { consumeChatListDirty } from '../../../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
-import { COMMUNITIES_ENABLED, GROUPS_ENABLED, YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
+import {
+  CHAT_DELETE_ENABLED,
+  COMMUNITIES_ENABLED,
+  GROUPS_ENABLED,
+  YOURS_PAGE_ENABLED,
+} from '../../../constants/FeatureFlags';
+import { COPY } from '../../../components/yours/state/constants';
+import { hapticSelection } from '../../../lib/haptics';
+import { useAuthUserId } from '../../../components/yours/state/useAuthUserId';
+import { useLeaveCircle } from '../../../hooks/useLeaveCircle';
+import { BrandedAlert } from '../../../components/BrandedAlert';
 import { useQuery } from '@tanstack/react-query';
 import { getCommunityChatRows, type CommunityChatRowData } from '../../../lib/communityChat';
 import { CommunityChatRow } from '../../../components/chats/CommunityChatRow';
@@ -114,12 +124,23 @@ function chatHref(chat: ChatPreview): string {
 
 const ChatSeparator = () => <View style={styles.separator} />;
 
-const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPreview; onPress: () => void }) {
+const ChatRow = React.memo(function ChatRow({
+  chat,
+  onPress,
+  onLongPress,
+}: {
+  chat: ChatPreview;
+  onPress: () => void;
+  // Circle rows only (doc 120): long-press opens the delete-chat /
+  // leave-circle confirm. Undefined on plan rows, so they are untouched.
+  onLongPress?: () => void;
+}) {
   const hasUnread = chat.unread_count > 0;
 
   return (
     <TouchableOpacity
       onPress={onPress}
+      onLongPress={onLongPress}
       activeOpacity={0.7}
       style={[styles.row, hasUnread && styles.rowUnread, chat.is_past && styles.rowPast]}
     >
@@ -197,8 +218,14 @@ const ChatRow = React.memo(function ChatRow({ chat, onPress }: { chat: ChatPrevi
 
 export default function ChatsScreen() {
   const router = useRouter();
-  const { chats, loading, refetch } = useChatList();
+  const { chats, loading, refetch, removeChat } = useChatList();
   const [refreshing, setRefreshing] = React.useState(false);
+  // Delete chat / leave circle from the list (doc 120, CHAT_DELETE_ENABLED).
+  // pendingLeave drives the confirm sheet; leaveError the failure alert.
+  const { data: authUserId } = useAuthUserId();
+  const leaveCircle = useLeaveCircle(authUserId);
+  const [pendingLeave, setPendingLeave] = React.useState<ChatPreview | null>(null);
+  const [leaveError, setLeaveError] = React.useState<string | null>(null);
   const [pastExpanded, setPastExpanded] = React.useState(false);
   // Off prod (GROUPS_ENABLED false) this stays 'all' and the segmented control
   // is never rendered, so the list is identical to today.
@@ -267,6 +294,31 @@ export default function ChatsScreen() {
     try { await refetch(); } finally { setRefreshing(false); }
   }, [refetch]);
 
+  // Confirmed delete/leave: remove the row optimistically, then call the
+  // shared leave_circle mutation (same code path as circle settings). A
+  // 'not_member' result comes back as success data, so an already-gone row
+  // just stays removed. On a real error, restore the list and say so.
+  const confirmLeave = useCallback(() => {
+    const chat = pendingLeave;
+    if (!chat || leaveCircle.isPending) return;
+    removeChat(chat.conversationId);
+    leaveCircle.mutate(chat.conversationId, {
+      onError: () => {
+        setLeaveError(chat.is_dm ? COPY.dmDeleteError : COPY.circleLeaveError);
+        refetch(true);
+      },
+    });
+  }, [pendingLeave, leaveCircle, removeChat, refetch]);
+
+  // Long-press affordance on circle rows only (flag-gated): DMs read as
+  // "delete chat", named circles as "leave circle" (doc 120 N1/N2). Plan
+  // rows never get one (N3: no delete that quietly exits a plan).
+  const handleRowLongPress = useCallback((chat: ChatPreview) => {
+    if (!CHAT_DELETE_ENABLED || chat.kind !== 'circle') return;
+    hapticSelection();
+    setPendingLeave(chat);
+  }, []);
+
   // Filter by section first (plans = event chats, circles = circle chats),
   // then split active vs past within the section.
   const sectionChats = useMemo(() => {
@@ -322,10 +374,15 @@ export default function ChatsScreen() {
       <ChatRow
         chat={item.chat}
         onPress={() => router.push(chatHref(item.chat) as any)}
+        onLongPress={
+          CHAT_DELETE_ENABLED && item.chat.kind === 'circle'
+            ? () => handleRowLongPress(item.chat)
+            : undefined
+        }
       />
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  }, [router, handleRowLongPress]);
 
   if (loading) {
     return (
@@ -454,6 +511,36 @@ export default function ChatsScreen() {
           ) : null}
         />
       )}
+
+      {/* Delete chat / leave circle confirm (doc 120). DMs get the honest
+          "your list only, they keep their copy" frame; named circles reuse
+          the exact strings the circle-settings leave path shows. */}
+      <BrandedAlert
+        visible={pendingLeave != null}
+        title={pendingLeave?.is_dm ? COPY.dmDeleteTitle : COPY.circleLeaveTitle}
+        message={
+          pendingLeave?.is_dm
+            ? COPY.dmDeleteBody(pendingLeave.title)
+            : COPY.circleLeaveBody
+        }
+        buttons={[
+          {
+            text: pendingLeave?.is_dm ? COPY.dmDeleteKeep : COPY.circleLeaveStay,
+            style: 'cancel',
+          },
+          {
+            text: pendingLeave?.is_dm ? COPY.dmDeleteGo : COPY.circleLeaveGo,
+            style: 'destructive',
+            onPress: confirmLeave,
+          },
+        ]}
+        onClose={() => setPendingLeave(null)}
+      />
+      <BrandedAlert
+        visible={leaveError != null}
+        title={leaveError ?? ''}
+        onClose={() => setLeaveError(null)}
+      />
     </SafeAreaView>
   );
 }

@@ -334,6 +334,13 @@ export function useChatList() {
     fetchChats();
   }, [fetchChats]);
 
+  // Optimistic removal for delete-chat / leave-circle (doc 120). Dropping the
+  // row also drops its id from convIdsRef (the effect below), so the realtime
+  // handler stops patching a conversation the user just left.
+  const removeChat = useCallback((conversationId: string) => {
+    setChats(prev => prev.filter(c => c.conversationId !== conversationId));
+  }, []);
+
   const convIdsRef = useRef(new Set<string>());
   useEffect(() => {
     convIdsRef.current = new Set(chats.map(c => c.conversationId));
@@ -408,5 +415,5 @@ export function useChatList() {
     };
   }, [fetchChats]);
 
-  return { chats, loading, refetch: fetchChats };
+  return { chats, loading, refetch: fetchChats, removeChat };
 }

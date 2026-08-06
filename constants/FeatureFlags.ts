@@ -136,3 +136,22 @@ export const COMMUNITIES_ENABLED = process.env.EXPO_PUBLIC_COMMUNITIES_ENABLED =
  * applied to prod and Liz gives the word.
  */
 export const JOIN_GATE_ENABLED = process.env.EXPO_PUBLIC_JOIN_GATE_ENABLED === 'true';
+
+/**
+ * Delete a chat from the Chats list (doc 120).
+ *
+ * When false (default): the chat list behaves exactly as shipped. No
+ * long-press affordance on any row.
+ *
+ * When true: DM rows get a long-press "delete chat" affordance and group
+ * circle rows get the same affordance labeled "leave circle". Both call the
+ * existing leave_circle RPC (client-only; no new SQL). The chat drops from
+ * your list; the other side keeps their copy; messaging again starts a
+ * fresh thread.
+ *
+ * Local dev: set EXPO_PUBLIC_CHAT_DELETE_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident. Do not flip on for
+ * a real build until Liz rewrites the placeholder copy and gives the word.
+ */
+export const CHAT_DELETE_ENABLED = process.env.EXPO_PUBLIC_CHAT_DELETE_ENABLED === 'true';
