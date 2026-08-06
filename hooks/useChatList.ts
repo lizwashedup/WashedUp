@@ -314,6 +314,7 @@ export function useChatList() {
       const previews = [...eventPreviews, ...circlePreviews];
       if (previews.length === 0) {
         setChats([]);
+        setLoading(false);
         return;
       }
 
@@ -325,8 +326,14 @@ export function useChatList() {
         .sort((a, b) => b.start_time.localeCompare(a.start_time));
 
       setChats([...active, ...past]);
-    } finally {
+      // Only a COMPLETED load clears the skeleton (T1, doc 121). The old
+      // finally-based clear meant a transient auth lock or failed fetch
+      // flipped loading off with no data, flashing the "join a plan" empty
+      // state at users who have chats; now those paths keep the skeleton and
+      // the next focus refetch fills in silently.
       setLoading(false);
+    } catch {
+      // keep whatever is on screen; a later refetch reconciles
     }
   }, []);
 

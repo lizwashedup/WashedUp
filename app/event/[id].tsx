@@ -27,7 +27,7 @@ import { useBlock } from '../../hooks/useBlock';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, MEMBER_STATE_ENABLED } from '../../constants/FeatureFlags';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
 import { formatEventDateLA, getTodayInLA, laWallTimeToUTC } from '../../lib/laDate';
@@ -506,6 +506,25 @@ export default function EventDetailScreen() {
     enabled: COMMUNITIES_ENABLED && !!frontingTarget,
     staleTime: 60_000,
   });
+  // T9 (doc 121): joining auto-follows DB-side, so an active member always
+  // reads as "following" on the pill. A member should see member state; the
+  // follow pill is for non-members. Own-row read (RLS user_id = auth.uid()).
+  const { data: viewerMembershipStatus = null } = useQuery({
+    queryKey: ['community-membership', event?.community_id, userId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('community_members')
+        .select('status')
+        .eq('community_id', event!.community_id!)
+        .eq('user_id', userId!)
+        .maybeSingle();
+      return (data?.status as string | null) ?? null;
+    },
+    enabled: MEMBER_STATE_ENABLED && COMMUNITIES_ENABLED && !!event?.community_id && !!userId,
+    staleTime: 30_000,
+  });
+  const viewerIsMemberHere = MEMBER_STATE_ENABLED && viewerMembershipStatus === 'active';
+
   const followMutation = useMutation({
     mutationFn: async () => {
       if (!frontingTarget || !userId || !followState) throw new Error('not ready');
@@ -961,7 +980,16 @@ export default function EventDetailScreen() {
                   )}
                 </View>
               </View>
-              {!!userId && !!followState?.available && (
+              {/* T9 (doc 121): member state outranks follow state. An active
+                  member of the fronting community never sees a follow pill,
+                  because join auto-follows and "following" reads as a demotion
+                  of what they actually are. */}
+              {viewerIsMemberHere ? (
+                <View style={[styles.followPill, styles.followPillOn]}>
+                  {/* LIZ COPY */}
+                  <Text style={[styles.followPillText, styles.followPillTextOn]}>member</Text>
+                </View>
+              ) : !!userId && !!followState?.available ? (
                 <TouchableOpacity
                   style={[styles.followPill, followState.following && styles.followPillOn]}
                   onPress={() => {
@@ -977,7 +1005,7 @@ export default function EventDetailScreen() {
                     {followState.following ? 'following' : 'follow'}
                   </Text>
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
           )}
 

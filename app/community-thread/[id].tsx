@@ -20,6 +20,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Bell, BellOff, CalendarDays } from 'lucide-react-native';
@@ -232,6 +233,16 @@ export default function CommunityThreadScreen() {
           renderItem={({ item }) =>
             item.kind === 'message' ? (
               <View style={[styles.messageRow, item.sender_id === myId && styles.messageRowMine]}>
+                {/* T3 (doc 121): faces in the main chat, exactly the topic
+                    rooms' treatment; broadcast and intro cards keep their
+                    distinct look (that redesign is T5, gated on T2) */}
+                {item.sender_id !== myId && (item.sender_photo ? (
+                  <Image source={{ uri: item.sender_photo }} style={styles.face} contentFit="cover" />
+                ) : (
+                  <View style={[styles.face, styles.facePlaceholder]}>
+                    <Text style={styles.faceInitial}>{(item.sender_name ?? '?').slice(0, 1).toLowerCase()}</Text>
+                  </View>
+                ))}
                 <TouchableOpacity
                   activeOpacity={0.9}
                   onLongPress={() => { if (item.sender_id && item.sender_id !== myId) openMemberMenu(item.sender_id, item.sender_name ?? 'someone'); }}
@@ -382,8 +393,11 @@ const styles = StyleSheet.create({
   welcomeFrom: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 4 },
   welcomeBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
   flex: { flex: 1 },
-  messageRow: { flexDirection: 'row', marginBottom: 10 },
+  messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 10 },
   messageRowMine: { justifyContent: 'flex-end' },
+  face: { width: 28, height: 28, borderRadius: 14 },
+  facePlaceholder: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
+  faceInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
   bubble: {
     maxWidth: '78%',
     backgroundColor: Colors.cardBg,

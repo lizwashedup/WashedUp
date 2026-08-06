@@ -155,3 +155,20 @@ export const JOIN_GATE_ENABLED = process.env.EXPO_PUBLIC_JOIN_GATE_ENABLED === '
  * a real build until Liz rewrites the placeholder copy and gives the word.
  */
 export const CHAT_DELETE_ENABLED = process.env.EXPO_PUBLIC_CHAT_DELETE_ENABLED === 'true';
+
+/**
+ * Member state on the event page's put-on-by card (doc 121 T9).
+ *
+ * When false (default): today's behavior. Joining a community auto-follows
+ * (proposal 68's trigger), so an active member always reads as "following"
+ * on the follow pill.
+ *
+ * When true: an active member of the fronting community sees a member pill
+ * instead of the follow pill; follow is for non-members only. The member
+ * string is a LIZ COPY placeholder, so this stays off until she rewrites it.
+ *
+ * Local dev: set EXPO_PUBLIC_MEMBER_STATE_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const MEMBER_STATE_ENABLED = process.env.EXPO_PUBLIC_MEMBER_STATE_ENABLED === 'true';

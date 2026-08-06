@@ -255,7 +255,10 @@ export default function ChatsScreen() {
       // refetch immediately, bypassing the throttle; otherwise throttle to 30s.
       if (consumeChatListDirty() || nowTs - lastChatsFocusFetchRef.current > 30_000) {
         lastChatsFocusFetchRef.current = nowTs;
-        refetch();
+        // T1 (doc 121): silent. The loud form flips the whole screen to the
+        // skeleton for the seconds the ~5 queries take, wiping content that
+        // was already on screen every time the tab regains focus.
+        refetch(true);
         // communities section rides the same throttle; no-op when the flag is off
         if (COMMUNITIES_ENABLED) {
           queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
@@ -291,7 +294,9 @@ export default function ChatsScreen() {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    try { await refetch(); } finally { setRefreshing(false); }
+    // silent: the RefreshControl spinner is the loading indicator here; the
+    // loud form would blank the list to the skeleton under the user's pull
+    try { await refetch(true); } finally { setRefreshing(false); }
   }, [refetch]);
 
   // Confirmed delete/leave: remove the row optimistically, then call the

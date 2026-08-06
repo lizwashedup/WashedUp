@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { Home } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -40,16 +41,23 @@ export const CommunityChatRow = React.memo(function CommunityChatRow({ row, onPr
       activeOpacity={0.7}
       style={[styles.row, hasUnread && styles.rowUnread]}
     >
-      <View
-        style={[
-          styles.avatar,
-          row.kind === 'community' && row.accent ? { backgroundColor: row.accent } : null,
-        ]}
-      >
-        <Text style={[styles.avatarInitial, row.kind === 'community' && row.accent ? styles.avatarInitialOnAccent : null]}>
-          {row.title.slice(0, 1).toLowerCase()}
-        </Text>
-      </View>
+      {row.image ? (
+        // T3 (doc 121): the community's cover (rooms: the event image). The
+        // letter tile below stays the no-image fallback. expo-image's default
+        // memory-disk cache means the list hits the network once per URL.
+        <Image source={{ uri: row.image }} style={styles.avatarImage} contentFit="cover" />
+      ) : (
+        <View
+          style={[
+            styles.avatar,
+            row.kind === 'community' && row.accent ? { backgroundColor: row.accent } : null,
+          ]}
+        >
+          <Text style={[styles.avatarInitial, row.kind === 'community' && row.accent ? styles.avatarInitialOnAccent : null]}>
+            {row.title.slice(0, 1).toLowerCase()}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.content}>
         <View style={styles.top}>
@@ -93,6 +101,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarImage: { width: 52, height: 52, borderRadius: 12, backgroundColor: Colors.inputBg },
   avatarInitial: { fontFamily: Fonts.display, fontSize: FontSizes.displayMD, color: Colors.terracotta },
   avatarInitialOnAccent: { color: Colors.white },
   content: { flex: 1, gap: 2 },

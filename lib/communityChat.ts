@@ -83,6 +83,9 @@ export interface CommunityChatRowData {
   lastAt: string | null;
   unread: number;
   accent: string | null;
+  /** the community's first cover image (rooms: the event's image when it has
+   *  one), doc 121 T3; null keeps the letter placeholder */
+  image: string | null;
 }
 
 /**
@@ -120,28 +123,62 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
   // null last_message_at and sinks to the very bottom of the unified list,
   // which read as "the row is missing" on the tour (part 4, bug 2).
   const topicJoinedAt = new Map<string, string>();
-  if (joinedTopicIds.length > 0) {
-    const [{ data: recent }, { data: myTopicRows }] = await Promise.all([
-      supabase
-        .from('community_topic_messages')
-        .select('topic_id, body, created_at')
-        .in('topic_id', joinedTopicIds)
-        .order('created_at', { ascending: false })
-        .limit(120),
-      user
-        ? supabase
-            .from('community_topic_members')
-            .select('topic_id, joined_at')
-            .eq('user_id', user.id)
-            .in('topic_id', joinedTopicIds)
-        : Promise.resolve({ data: [] } as any),
-    ]);
-    for (const m of (recent ?? []) as { topic_id: string; body: string }[]) {
-      if (!previewByTopic.has(m.topic_id)) previewByTopic.set(m.topic_id, m.body);
-    }
-    for (const r of (myTopicRows ?? []) as { topic_id: string; joined_at: string | null }[]) {
-      if (r.joined_at) topicJoinedAt.set(r.topic_id, r.joined_at);
-    }
+  // T3 (doc 121): the pictures. A community row wears its first cover image
+  // (the same resolution getMyCommunities uses); an event room wears its
+  // event's image, falling back to the community cover. expo-image caches
+  // these on device, so the list pays the download once.
+  const communityIds = Array.from(new Set([
+    ...cards.map((c) => c.community_id),
+    ...attendee_topics.map((t) => t.community_id),
+  ]));
+  const eventIds = Array.from(new Set([
+    ...cards.flatMap((c) => c.topics.map((t) => t.explore_event_id).filter(Boolean) as string[]),
+    ...attendee_topics.map((t) => t.explore_event_id),
+  ]));
+  const [{ data: recent }, { data: myTopicRows }, { data: coverBlocks }, { data: eventRows }] = await Promise.all([
+    joinedTopicIds.length > 0
+      ? supabase
+          .from('community_topic_messages')
+          .select('topic_id, body, created_at')
+          .in('topic_id', joinedTopicIds)
+          .order('created_at', { ascending: false })
+          .limit(120)
+      : Promise.resolve({ data: [] } as any),
+    joinedTopicIds.length > 0 && user
+      ? supabase
+          .from('community_topic_members')
+          .select('topic_id, joined_at')
+          .eq('user_id', user.id)
+          .in('topic_id', joinedTopicIds)
+      : Promise.resolve({ data: [] } as any),
+    communityIds.length > 0
+      ? supabase
+          .from('community_blocks')
+          .select('community_id, content, position')
+          .in('community_id', communityIds)
+          .eq('block_type', 'cover')
+          .eq('visible', true)
+          .order('position', { ascending: true })
+      : Promise.resolve({ data: [] } as any),
+    eventIds.length > 0
+      ? supabase.from('explore_events').select('id, image_url').in('id', eventIds)
+      : Promise.resolve({ data: [] } as any),
+  ]);
+  for (const m of (recent ?? []) as { topic_id: string; body: string }[]) {
+    if (!previewByTopic.has(m.topic_id)) previewByTopic.set(m.topic_id, m.body);
+  }
+  for (const r of (myTopicRows ?? []) as { topic_id: string; joined_at: string | null }[]) {
+    if (r.joined_at) topicJoinedAt.set(r.topic_id, r.joined_at);
+  }
+  const coverByCommunity = new Map<string, string>();
+  for (const b of (coverBlocks ?? []) as { community_id: string; content: any }[]) {
+    if (coverByCommunity.has(b.community_id)) continue;
+    const images = Array.isArray(b.content?.images) ? (b.content.images as string[]) : [];
+    if (images.length > 0) coverByCommunity.set(b.community_id, images[0]);
+  }
+  const imageByEvent = new Map<string, string>();
+  for (const e of (eventRows ?? []) as { id: string; image_url: string | null }[]) {
+    if (e.image_url) imageByEvent.set(e.id, e.image_url);
   }
 
   const rows: CommunityChatRowData[] = [];
@@ -158,6 +195,7 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
       lastAt: c.latest_broadcast?.created_at ?? joinedAtByCommunity.get(c.community_id) ?? null,
       unread: c.unread_broadcasts,
       accent: c.accent_color,
+      image: coverByCommunity.get(c.community_id) ?? null,
     });
     for (const t of c.topics) {
       if (!t.joined) continue;
@@ -175,6 +213,10 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
         lastAt: t.last_message_at ?? topicJoinedAt.get(t.id) ?? null,
         unread: t.unread,
         accent: c.accent_color,
+        image:
+          (t.explore_event_id ? imageByEvent.get(t.explore_event_id) : null) ??
+          coverByCommunity.get(c.community_id) ??
+          null,
       });
     }
   }
@@ -192,6 +234,7 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
       lastAt: at.last_message_at ?? at.joined_at,
       unread: at.unread,
       accent: at.accent_color,
+      image: imageByEvent.get(at.explore_event_id) ?? coverByCommunity.get(at.community_id) ?? null,
     });
   }
   // newest activity first, community rows float above their rooms on ties
@@ -247,6 +290,7 @@ export interface CommunityBroadcast {
   created_at: string;
   sender_id: string | null;
   sender_name: string | null;
+  sender_photo: string | null;
   kind: 'broadcast' | 'intro' | 'message';
   payload: IntroPayload | null;
   reactions: BroadcastReaction[];
@@ -314,12 +358,17 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
     supabase.from('community_broadcast_reactions').select('broadcast_id, emoji, user_id').in('broadcast_id', ids),
     supabase.from('community_broadcast_replies').select('broadcast_id').in('broadcast_id', ids),
     senderIds.length > 0
-      ? supabase.from('profiles_public').select('id, first_name_display').in('id', senderIds)
+      ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', senderIds)
       : Promise.resolve({ data: [] } as any),
   ]);
 
   const nameById = new Map<string, string | null>(
     (profiles ?? []).map((p: any) => [p.id as string, (p.first_name_display ?? null) as string | null]),
+  );
+  // T3 (doc 121): faces in the main community chat, same source the topic
+  // rooms already use (profiles_public, one identity everywhere)
+  const photoById = new Map<string, string | null>(
+    (profiles ?? []).map((p: any) => [p.id as string, (p.profile_photo_url ?? null) as string | null]),
   );
   const replyCounts = new Map<string, number>();
   (replies ?? []).forEach((r: any) => replyCounts.set(r.broadcast_id, (replyCounts.get(r.broadcast_id) ?? 0) + 1));
@@ -336,6 +385,7 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
   return broadcasts.map((b) => ({
     ...b,
     sender_name: b.sender_id ? (nameById.get(b.sender_id) ?? null) : null,
+    sender_photo: b.sender_id ? (photoById.get(b.sender_id) ?? null) : null,
     reactions: Array.from((reactionMap.get(b.id) ?? new Map()).entries()).map(
       ([emoji, e]: [string, { count: number; mine: boolean }]) => ({ emoji, count: e.count, mine: e.mine }),
     ),
