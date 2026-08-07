@@ -14,7 +14,7 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, Platform, ActionSheetIOS, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { GROUPS_ENABLED } from '../../../../constants/FeatureFlags';
+import { GROUPS_ENABLED, CHAT_ENGINE_ENABLED } from '../../../../constants/FeatureFlags';
 import Colors from '../../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../../constants/Typography';
 import { COPY } from '../../../../components/yours/state/constants';
@@ -22,6 +22,12 @@ import { useAuthUserId } from '../../../../components/yours/state/useAuthUserId'
 import { useCircle } from '../../../../hooks/useCircle';
 import { circleDisplay } from '../../../../lib/circles/display';
 import ChatThread, { ChatThreadMember } from '../../../../components/chat/ChatThread';
+import ChatEngineThread from '../../../../components/chat-engine/ChatEngineThread';
+
+// DMs + circles are the FIRST surfaces on the doc-123 engine. Same props
+// either way; with the flag off this resolves to the legacy ChatThread and
+// the screen renders exactly the shipped code.
+const ThreadComponent = CHAT_ENGINE_ENABLED ? ChatEngineThread : ChatThread;
 import AddPeopleSheet from '../../../../components/circles/AddPeopleSheet';
 import CirclePlanComposer from '../../../../components/circles/plan/CirclePlanComposer';
 import MenuCard, { type AnchorRect } from '../../../../components/menu/MenuCard';
@@ -168,7 +174,7 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
 
   return (
     <>
-      <ChatThread
+      <ThreadComponent
         kind="circle"
         id={circleId}
         title={disp?.title ?? '...'}

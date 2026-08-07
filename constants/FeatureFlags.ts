@@ -172,3 +172,23 @@ export const CHAT_DELETE_ENABLED = process.env.EXPO_PUBLIC_CHAT_DELETE_ENABLED =
  * (CI / prod / EAS), so it cannot ship on by accident.
  */
 export const MEMBER_STATE_ENABLED = process.env.EXPO_PUBLIC_MEMBER_STATE_ENABLED === 'true';
+
+/**
+ * The one chat engine (doc 123).
+ *
+ * When false (default): every chat surface renders exactly as shipped --
+ * the FlatList-based ChatThread for plans/circles/DMs, the standalone
+ * community thread/topic screens. Byte-identical to today.
+ *
+ * When true: migrated surfaces render through the new ChatEngineThread
+ * (components/chat-engine/): FlashList v2 list, cursor-paged history
+ * (newest page first), batched realtime inserts, cached sender profiles.
+ * Surfaces migrate one at a time (DMs/circles first, then plan chats,
+ * then community threads/topics); an unmigrated surface ignores the flag.
+ *
+ * Local dev: set EXPO_PUBLIC_CHAT_ENGINE_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident. Do not flip on for
+ * a real build until the doc-123 bar is measured and passed on device.
+ */
+export const CHAT_ENGINE_ENABLED = process.env.EXPO_PUBLIC_CHAT_ENGINE_ENABLED === 'true';
