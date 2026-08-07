@@ -11,6 +11,13 @@ import { capDisplayCount } from '../../../constants/GroupLimits';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import ChatThread, { ChatThreadMember } from '../../../components/chat/ChatThread';
+import ChatEngineThread from '../../../components/chat-engine/ChatEngineThread';
+import { CHAT_ENGINE_ENABLED } from '../../../constants/FeatureFlags';
+
+// Plan chat is the SECOND surface on the doc-123 engine (after DMs/circles).
+// Same props either way; with the flag off this resolves to the legacy
+// ChatThread and the screen renders exactly the shipped code.
+const ThreadComponent = CHAT_ENGINE_ENABLED ? ChatEngineThread : ChatThread;
 
 // ─── Event header data ──────────────────────────────────────────────────────
 // The plan-chat screen is a thin wrapper around the shared <ChatThread>: it
@@ -148,7 +155,7 @@ export default function PlanChatScreen() {
   }
 
   return (
-    <ChatThread
+    <ThreadComponent
       kind="event"
       id={id}
       title={event?.title ?? '...'}

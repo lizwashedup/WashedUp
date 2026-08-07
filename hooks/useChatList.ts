@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { withTimeout } from '../lib/withTimeout';
-import { GROUPS_ENABLED } from '../constants/FeatureFlags';
+import { GROUPS_ENABLED, CHAT_ENGINE_ENABLED } from '../constants/FeatureFlags';
 import { circleDisplay, type DisplayMember } from '../lib/circles/display';
+import { seedSender } from '../lib/chatEngine/senderCache';
 
 export interface ChatPreview {
   // A conversation row is either a plan (event) chat or a circle chat.
@@ -138,6 +139,67 @@ async function fetchCircleChats(userId: string, senderCache?: Map<string, string
         member_avatars: avatarMap[circle.id] ?? [],
       };
     });
+}
+
+/**
+ * SQL-100 path: ONE get_my_circle_chat_cards() round trip replaces the six
+ * queries in fetchCircleChats. Reachable only behind CHAT_ENGINE_ENABLED,
+ * and only as an ATTEMPT: any error (including the RPC not yet applied to
+ * prod) falls back to the legacy path, so this ships dark until apply + flag.
+ * Card shapes are defined in SQL-100-circle-chat-cards-proposal.sql.
+ */
+async function fetchCircleChatsViaCards(userId: string, senderCache?: Map<string, string>): Promise<ChatPreview[]> {
+  const { data, error } = await supabase.rpc('get_my_circle_chat_cards');
+  if (error) throw error;
+
+  return ((data ?? []) as any[]).map((card: any): ChatPreview => {
+    const members: DisplayMember[] = (card.members ?? []).map((m: any) => ({
+      user_id: m.user_id,
+      name: m.first_name ?? null,
+      avatar_url: m.avatar_url ?? null,
+    }));
+    // Seed both sender caches from the roster: the realtime handler's name
+    // cache here, and the chat engine's profile cache so a thread opened from
+    // this list paints names/faces without its own profile round-trip.
+    members.forEach((m) => {
+      if (!m.user_id) return;
+      if (m.name) senderCache?.set(m.user_id, m.name);
+      seedSender({ id: m.user_id, first_name: m.name, avatar_url: m.avatar_url });
+    });
+
+    const disp = circleDisplay(card.name ?? '', members, userId);
+    const lastMsg = card.last_message ?? null;
+    let preview: string | null = null;
+    if (lastMsg) {
+      const isOwn = lastMsg.user_id === userId;
+      const senderName = isOwn ? 'You' : (lastMsg.sender_name ?? null);
+      const text = lastMsg.message_type === 'audio' || lastMsg.audio_url
+        ? 'sent a voice message'
+        : lastMsg.image_url ? 'sent a photo' : lastMsg.content;
+      preview = senderName ? `${senderName}: ${text}` : text;
+    }
+
+    return {
+      kind: 'circle',
+      conversationId: card.circle_id,
+      title: disp.title,
+      category: null,
+      // DM rows render the counterpart's face; real circles use the monogram.
+      image_url: disp.isDm ? disp.otherAvatar : null,
+      is_dm: disp.isDm,
+      start_time: card.created_at,
+      member_count: card.member_count ?? 0,
+      ticket_url: null,
+      last_message: preview,
+      last_message_at: lastMsg?.created_at ?? null,
+      unread_count: card.unread_count ?? 0,
+      is_past: false,
+      member_avatars: members
+        .map((m) => m.avatar_url)
+        .filter((url): url is string => !!url)
+        .slice(0, 4),
+    };
+  });
 }
 
 export function useChatList() {
@@ -305,7 +367,17 @@ export function useChatList() {
       let circlePreviews: ChatPreview[] = [];
       if (GROUPS_ENABLED) {
         try {
-          circlePreviews = await fetchCircleChats(user.id, senderNameCacheRef.current);
+          if (CHAT_ENGINE_ENABLED) {
+            // SQL-100 cards first; ANY failure (RPC not applied, RLS, network)
+            // falls straight back to the legacy six-query path.
+            try {
+              circlePreviews = await fetchCircleChatsViaCards(user.id, senderNameCacheRef.current);
+            } catch {
+              circlePreviews = await fetchCircleChats(user.id, senderNameCacheRef.current);
+            }
+          } else {
+            circlePreviews = await fetchCircleChats(user.id, senderNameCacheRef.current);
+          }
         } catch {
           circlePreviews = [];
         }
