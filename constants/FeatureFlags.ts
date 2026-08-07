@@ -192,3 +192,21 @@ export const MEMBER_STATE_ENABLED = process.env.EXPO_PUBLIC_MEMBER_STATE_ENABLED
  * a real build until the doc-123 bar is measured and passed on device.
  */
 export const CHAT_ENGINE_ENABLED = process.env.EXPO_PUBLIC_CHAT_ENGINE_ENABLED === 'true';
+
+/**
+ * Chat perf HUD for the doc-106 s5 device measurement pass.
+ *
+ * When false (default): nothing renders, no timing work runs. Ships OFF.
+ *
+ * When true AND the chat engine is on: engine threads show a small timing
+ * pill (cold open -> first layout, -> data ready, last send -> render) so
+ * the production-build device pass reads real numbers instead of stopwatch
+ * guesses. Dev menus and the RN perf monitor do not exist in production
+ * builds; this is the only quantitative window.
+ *
+ * Local dev / preview: set EXPO_PUBLIC_CHAT_PERF_HUD=true (in .env.local or
+ * the EAS PREVIEW environment alongside the engine flag). Env-driven and
+ * ships OFF wherever the var is unset, so it cannot ship on by accident.
+ * Never set it in the EAS production environment.
+ */
+export const CHAT_PERF_HUD = process.env.EXPO_PUBLIC_CHAT_PERF_HUD === 'true';

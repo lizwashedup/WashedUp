@@ -45,6 +45,7 @@ import { openUrl, soleUrlIn } from '../../lib/url';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import type { ChatMessage } from '../../hooks/useChat';
 import { useChatEngine } from '../../hooks/useChatEngine';
+import { CHAT_PERF_HUD } from '../../constants/FeatureFlags';
 import type { ChatThreadProps } from '../chat/ChatThread';
 import MiniProfileCard from '../MiniProfileCard';
 import AttachmentPanel, { AttachmentKey } from '../chat/AttachmentSheet';
@@ -811,6 +812,30 @@ function ChatEngineThread(props: ChatThreadProps) {
     );
   }, [props.headerMenu]);
   const { messages, loading, loadingOlder, hasMore, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch } = useChatEngine({ kind: props.kind, id });
+
+  // ── doc-106 s5 perf markers ──────────────────────────────────────────
+  // Production builds have no dev menu and no RN perf monitor, so the
+  // device measurement pass reads these instead. Behind CHAT_PERF_HUD
+  // (ships off): when the flag is off nothing renders and no timing state
+  // ever updates.
+  const perfMountRef = useRef(CHAT_PERF_HUD ? performance.now() : 0);
+  const [perfLayoutMs, setPerfLayoutMs] = useState<number | null>(null);
+  const [perfDataMs, setPerfDataMs] = useState<number | null>(null);
+  const [perfSendMs, setPerfSendMs] = useState<number | null>(null);
+  const perfSendStartRef = useRef<number | null>(null);
+  const handlePerfLayout = useCallback(() => {
+    if (!CHAT_PERF_HUD) return;
+    setPerfLayoutMs(prev => prev ?? Math.round(performance.now() - perfMountRef.current));
+  }, []);
+  useEffect(() => {
+    if (!CHAT_PERF_HUD || loading || perfDataMs !== null) return;
+    setPerfDataMs(Math.round(performance.now() - perfMountRef.current));
+  }, [loading, perfDataMs]);
+  useEffect(() => {
+    if (!CHAT_PERF_HUD || perfSendStartRef.current === null) return;
+    setPerfSendMs(Math.round(performance.now() - perfSendStartRef.current));
+    perfSendStartRef.current = null;
+  }, [messages.length]);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
   const [membersExpanded, setMembersExpanded] = useState(false);
@@ -1172,6 +1197,7 @@ function ChatEngineThread(props: ChatThreadProps) {
       editMessage(editingMessageId, text);
       setEditingMessageId(null);
     } else {
+      if (CHAT_PERF_HUD) perfSendStartRef.current = performance.now();
       sendMessage(text, undefined, replyingTo?.id);
       setReplyingTo(null);
       scrollToBottom();
@@ -1742,6 +1768,7 @@ function ChatEngineThread(props: ChatThreadProps) {
             onStartReached={handleStartReached}
             onStartReachedThreshold={START_REACHED_THRESHOLD}
             style={listStyle}
+            onLayout={CHAT_PERF_HUD ? handlePerfLayout : undefined}
             contentContainerStyle={listContentStyle}
             showsVerticalScrollIndicator={false}
             keyboardDismissMode="interactive"
@@ -1957,6 +1984,14 @@ function ChatEngineThread(props: ChatThreadProps) {
           bottomOffset={scrollBtnBottom}
           onPress={handleScrollToBottomPress}
         />
+
+        {CHAT_PERF_HUD && (
+          <View style={chatStyles.perfHud} pointerEvents="none">
+            <Text style={chatStyles.perfHudText}>
+              {`layout ${perfLayoutMs ?? '--'}ms | data ${perfDataMs ?? '--'}ms | send ${perfSendMs ?? '--'}ms`}
+            </Text>
+          </View>
+        )}
 
         {panelOpen && (
           <View style={chatStyles.attachPanelWrap}>
@@ -2189,6 +2224,20 @@ const chatStyles = StyleSheet.create({
   listWrap: { flex: 1 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   olderSpinnerWrap: { paddingVertical: 12, alignItems: 'center' },
+  perfHud: {
+    position: 'absolute',
+    top: 4,
+    right: 8,
+    backgroundColor: Colors.overlayDarker,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  perfHudText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.white,
+  },
   dockAbsolute: {
     position: 'absolute',
     left: 0,
