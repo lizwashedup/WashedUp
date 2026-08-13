@@ -61,7 +61,7 @@ export default function CommunityThreadScreen() {
   const { blockUser } = useBlock();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
+    supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null)).catch(() => {});
   }, []);
 
   // report / block a member from a long-press on their message (mirrors chat).

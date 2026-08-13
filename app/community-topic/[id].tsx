@@ -56,7 +56,7 @@ export default function CommunityTopicScreen() {
   const { blockUser } = useBlock();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
+    supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null)).catch(() => {});
   }, []);
 
   // Is this room still open? An archived topic refuses inserts at the policy

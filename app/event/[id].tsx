@@ -18,6 +18,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight, MoreHorizontal, BadgeCheck } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
+import { logError } from '../../lib/logger';
 import { openUrl } from '../../lib/url';
 import { consumePendingCheckout } from '../../lib/pendingLink';
 import LinkifiedText from '../../components/LinkifiedText';
@@ -608,8 +609,10 @@ export default function EventDetailScreen() {
           });
         }
       }
-    } catch {
+    } catch (err) {
       hapticError();
+      logError(err, 'event.rsvpJoin');
+      setAlertInfo({ title: "that didn't go through", message: 'give it a moment and try again.' });
     } finally {
       setRsvpBusy(false);
     }
@@ -637,8 +640,10 @@ export default function EventDetailScreen() {
               try {
                 await setRsvp(id, false);
                 invalidateRsvp();
-              } catch {
+              } catch (err) {
                 hapticError();
+                logError(err, 'event.rsvpLeave');
+                setAlertInfo({ title: "that didn't go through", message: "you're still on the list. give it a moment and try again." });
               }
             },
           },

@@ -18,9 +18,10 @@ Social activity app for finding people to do things with in Los Angeles. Not a d
 - `expo-haptics` for haptic feedback
 
 ## Design Tokens
+(Summary only. CLAUDE.md in this repo root is the full, authoritative design system, check there for anything not covered here.)
 ```
-primary:    #C4652A  (orange — buttons, accents, brand)
-background: #FFF8F0
+primary:    #B5522E  (terracotta, the ONLY orange accent, see CLAUDE.md)
+background: #FAF5EC
 card:       #FFFFFF
 border:     #F0E6D3
 textDark:   #1A1A1A
@@ -39,7 +40,7 @@ textLight:  #999999
 
 ## Conventions
 - `SafeAreaView` with correct `edges` on every screen
-- `ActivityIndicator` color always `#C4652A`
+- `ActivityIndicator` color always `#B5522E`
 - Ghost protocol (gender/age filtering) lives in `lib/fetchPlans.ts` — do not duplicate or modify
 - No emojis in UI text
 - Card border radius: 16px; button border radius: 14px

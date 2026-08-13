@@ -8,16 +8,16 @@
 /**
  * Phone-number auth flow.
  *
- * When false (current prod default): unauthenticated users land on the
- * existing email/password + Apple/Google login screen. No migration gate
- * is ever shown.
+ * LAUNCH: committed ON. Hardcoded `true` below, with no env override
+ * (unlike the flags after this one): flipping it back off means editing
+ * this file, not setting a var.
  *
- * When true: unauthenticated users land on the new phone-entry screen,
- * and signed-in users with onboarding_status='complete' but no phone on
- * file are routed through the migration gate.
- *
- * DO NOT flip to true in a committed file until phone auth is fully
- * tested + Twilio/Supabase phone provider verified live.
+ * Unauthenticated users land on the phone-entry screen, and signed-in users
+ * with onboarding_status='complete' but no phone on file are routed through
+ * the migration gate. The pre-phone-auth screen (email/password +
+ * Apple/Google, no migration gate) still exists behind this flag's `false`
+ * branches (app/(auth)/login.tsx, app/(auth)/signup.tsx, lib/authGate.ts,
+ * lib/authRouting.ts) but is unreachable while the value stays `true`.
  */
 export const PHONE_AUTH_ENABLED = true;
 
