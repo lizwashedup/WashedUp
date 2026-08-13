@@ -6,10 +6,11 @@
 -- IDOR fixed elsewhere tonight. Found and independently double-verified via
 -- direct file read against a second pass, 2026-08-12.
 --
--- NOT YET APPLIED to production. Built and held locally pending Josh's
--- deploy approval, per standing rule (nothing touches Liz's live Supabase
--- without her review first, and no push without Josh's own separate
--- deploy-phrase approval).
+-- APPLIED to production 2026-08-12 (Josh: "COMMIT AND DEPLOY APPROVED"; Liz
+-- separately gave free rein covering this thread same day). Verified live:
+-- anon_can_execute = false / authenticated_can_execute = true on all four
+-- functions, queried directly post-apply, not just trusted from the apply
+-- tool's own report.
 --
 -- 1. join_event_atomic — HIGH. Any caller can force ANY real user into ANY
 --    event, and fabricate that user's age_at_join/gender_at_join, bypassing
@@ -19,36 +20,8 @@
 --    line 56-57, of the newer join_circle_plan_atomic, "Tighter than
 --    join_event_atomic (which trusts the param): new code, so we only let
 --    a caller join themselves."
---    ** OPEN QUESTION, CHECK BEFORE TREATING THIS AS FIXED: no migration
---    anywhere in this repo ever enabled RLS or added a policy on
---    event_members (grepped, zero hits, unlike 25+ other tables that do
---    have both). The real bypass if RLS is off is a RAW POSTGREST CALL
---    against the table's REST endpoint, not the client's own fallback code
---    (that fallback only fires on error 42883/"function does not exist";
---    after this migration an unauthorized RPC call gets 42501/"permission
---    denied" instead, so the client's own fallback branch never triggers --
---    the risk is a direct HTTP call to /rest/v1/event_members that never
---    goes through the RPC at all). Confirmed live write paths to this table
---    today, any of which need an equivalent RLS policy once RLS is turned
---    on or plan-creation/joining/leaving will start silently failing:
---      - WashedUp/app/plan/[id].tsx:1002-1010 (native, join fallback)
---      - washedup-web/src/app/app/plan/[id]/page.tsx:911-932 (web, join fallback)
---      - WashedUp/app/plan/[id].tsx:1112 (native, leave -- UPDATE status='left')
---      - washedup-web/src/app/app/plan/[id]/page.tsx:339 (web, leave -- same)
---      - washedup-web/src/app/app/create/page.tsx:850,855 (web, publish --
---        INSERT with a retry, this is the real plan-creation write; line 995
---        cited in an earlier draft of this comment is only the draft-save
---        path, not the publish path)
---      - WashedUp/components/post/PlanComposerV2.tsx:799-810 (native, plan
---        creation -- this is the LIVE composer per YOURS_PAGE_ENABLED in
---        app/(tabs)/post/index.tsx; components/post/LegacyComposer.tsx has
---        the same pattern but is dead code, confirmed unreachable by a
---        separate sweep the same night, and does not need a policy)
---    The DO block below asserts this at apply time (RAISE WARNING, not
---    EXCEPTION -- it still lands the fix, but no `supabase db push` run can
---    silently miss it the way a comment can). If it fires, event_members
---    needs real RLS + policies as its own follow-up (a bigger, separate
---    change covering all six paths above -- not guessed at here).
+--    event_members RLS confirmed ON (Josh ran the check live, 2026-08-12),
+--    so this fix is not bypassable via a raw direct table write either.
 -- 2. get_user_moments — MEDIUM. Any caller can read every private plan
 --    reflection (incl. is_public=false) any real user has ever written,
 --    across their entire event history, just by passing their uuid. Not
@@ -58,30 +31,21 @@
 --    user's block list, not the caller's own, so a caller can pass a
 --    different real uuid to see search results as if they were never
 --    blocked by that profile. Name + photo only, no messaging bypass.
--- 4. get_filtered_feed — LOW as a direct read, but the real gap here is
---    STRUCTURAL: this function has TWO live overloads. The one-arg version
---    (p_user_id uuid), created at 20260504000002_get_filtered_feed_drop_in.sql
---    with no matching DROP first (every other CREATE OR REPLACE in this
---    function's history pairs a DROP with it; this is the one exception),
---    was never dropped by anything after it and still has no auth.uid()
---    check and no REVOKE -- hardening only the four-arg signature (added
---    later, a separate overload, does not replace the one-arg) leaves the
---    one-arg fully exposed. This is not dormant: washedup-web/src/app/app/
---    feed/page.tsx:400 calls it with only p_user_id, and WashedUp/lib/
---    fetchPlans.ts:109-114 omits the geo params outside Near-me, so
---    PostgREST resolves both default-feed paths to the vulnerable one-arg
---    overload. Every real client call that DOES pass all four args passes
---    its own id, so nothing server-side enforced it either way -- an
---    inference leak of the caller's real age bracket, gender, and blocks,
---    plus a way to dodge plans hidden by their OWN blocks.
---    Fixed below by dropping the one-arg overload outright (behavior-safe:
---    a one-arg-shaped call then resolves to the four-arg version with NULL
---    geo defaults, which already handles NULL lat/lng/radius by skipping
---    every geo filter and ORDER BY clause -- same rows, same order, the
---    response just gains a null distance_km). The self-test below asserts
---    the one-arg overload is actually gone, not just that the four-arg one
---    has the guard -- the first version of this self-test only checked the
---    hardened signature and would have reported green with this gap open.
+-- 4. get_filtered_feed — LOW as a direct read. Structural gap was a
+--    since-dropped one-arg overload: confirmed ABSENT from prod at apply
+--    time (introspected via pg_proc before writing this version), so the
+--    DROP below is a no-op kept for defense-in-depth, not a live fix.
+--
+--    CORRECTION: this migration's first apply attempt (same day) used a
+--    get_filtered_feed body copied from a stale 20260609140300 dump
+--    comment. Postgres rejected it outright (42P13, cannot change return
+--    type -- nothing partial committed, the whole transaction rolled back
+--    including functions 1-3). The live function had since grown two more
+--    return columns (circle_size, circle_in_count) and swapped its inline
+--    circle-visibility check for a public.event_circle_visible_to() call.
+--    The body below is the verbatim pg_get_functiondef() output pulled
+--    fresh from prod immediately before this apply, with only the
+--    auth.uid() guard added at the top -- no other line touched.
 --
 -- All four get the same fix: an auth.uid() identity check at the top of
 -- the function body, plus REVOKE/GRANT matching this repo's own convention
@@ -243,16 +207,12 @@ REVOKE ALL ON FUNCTION search_users_by_handle(text, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION search_users_by_handle(text, uuid) TO authenticated;
 
 -- ── 4. get_filtered_feed ────────────────────────────────────────────────
--- Reproduces the live prod body verbatim (per 20260609140300's own dump
--- comment) with only the identity guard added. Business logic untouched.
+-- Verbatim live body (pg_get_functiondef, pulled fresh at apply time), plus
+-- the identity guard. See CORRECTION note above for why this isn't the
+-- 20260609140300-dump-based version an earlier draft of this file had.
 
-CREATE OR REPLACE FUNCTION public.get_filtered_feed(
-  p_user_id uuid,
-  p_lat numeric DEFAULT NULL::numeric,
-  p_lng numeric DEFAULT NULL::numeric,
-  p_radius_km numeric DEFAULT NULL::numeric
-)
- RETURNS TABLE(id uuid, title text, description text, location_text text, location_lat numeric, location_lng numeric, start_time timestamp with time zone, status text, member_count integer, max_invites integer, primary_vibe text, gender_rule text, target_age_min integer, target_age_max integer, host_id uuid, host_name text, host_photo text, host_age_group text, spots_remaining integer, city text, host_message text, image_url text, slug text, neighborhood text, is_featured boolean, cluster_root_id uuid, distance_km double precision)
+CREATE OR REPLACE FUNCTION public.get_filtered_feed(p_user_id uuid, p_lat numeric DEFAULT NULL::numeric, p_lng numeric DEFAULT NULL::numeric, p_radius_km numeric DEFAULT NULL::numeric)
+ RETURNS TABLE(id uuid, title text, description text, location_text text, location_lat numeric, location_lng numeric, start_time timestamp with time zone, status text, member_count integer, max_invites integer, primary_vibe text, gender_rule text, target_age_min integer, target_age_max integer, host_id uuid, host_name text, host_photo text, host_age_group text, spots_remaining integer, city text, host_message text, image_url text, slug text, neighborhood text, is_featured boolean, cluster_root_id uuid, distance_km double precision, circle_size integer, circle_in_count integer)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -277,7 +237,6 @@ BEGIN
       e.status::text AS status, e.member_count, e.max_invites, e.primary_vibe, e.gender_rule::text AS gender_rule,
       e.target_age_min, e.target_age_max, pp.id AS host_id, pp.first_name_display AS host_name,
       pp.profile_photo_url AS host_photo, pp.age_group AS host_age_group,
-      -- circle plans report remaining STRANGER spots; normal plans unchanged.
       CASE WHEN e.circle_id IS NOT NULL THEN
         GREATEST(0, COALESCE(e.stranger_cap, 0) - (
           SELECT count(*)::int FROM event_members em2
@@ -289,7 +248,16 @@ BEGIN
       e.slug, e.neighborhood, e.is_featured, get_event_root(e.id) AS raw_root_id,
       CASE WHEN p_lat IS NOT NULL AND p_lng IS NOT NULL AND e.location_lat IS NOT NULL AND e.location_lng IS NOT NULL
         THEN 2 * 6371 * asin(sqrt(power(sin(radians(e.location_lat - p_lat)/2),2) + cos(radians(p_lat))*cos(radians(e.location_lat))*power(sin(radians(e.location_lng - p_lng)/2),2)))
-        ELSE NULL END AS distance_km
+        ELSE NULL END AS distance_km,
+      CASE WHEN e.circle_id IS NOT NULL THEN (
+        SELECT count(*)::int FROM circle_members cm
+        WHERE cm.circle_id = e.circle_id AND cm.status = 'joined'
+      ) END AS circle_size,
+      CASE WHEN e.circle_id IS NOT NULL THEN (
+        SELECT count(*)::int FROM event_members em3
+        WHERE em3.event_id = e.id AND em3.status = 'joined'
+          AND public.is_circle_member(e.circle_id, em3.user_id)
+      ) END AS circle_in_count
     FROM events e JOIN profiles_public pp ON e.creator_user_id = pp.id
     WHERE e.status IN ('forming','active','full')
       AND COALESCE(e.end_time, e.start_time + INTERVAL '3 hours') > NOW()
@@ -301,9 +269,7 @@ BEGIN
       AND (e.gender_rule='mixed' OR (e.gender_rule='women_only' AND v_user_gender='woman') OR (e.gender_rule='men_only' AND v_user_gender='man') OR (e.gender_rule='nonbinary_only' AND v_user_gender='non_binary'))
       AND (e.target_age_min IS NULL OR v_user_age >= e.target_age_min)
       AND (e.target_age_max IS NULL OR v_user_age <= e.target_age_max)
-      -- include open circle plans, drop circle_only from the public feed.
-      AND (e.circle_id IS NULL OR e.circle_visibility = 'open')
-      -- a circle's own members never see its plan in the public feed.
+      AND public.event_circle_visible_to(e.circle_id, e.circle_visibility, p_user_id)
       AND NOT (e.circle_id IS NOT NULL AND public.is_circle_member(e.circle_id, p_user_id))
   ),
   visible AS (
@@ -316,7 +282,7 @@ BEGIN
     v.host_id, v.host_name, v.host_photo, v.host_age_group, v.spots_remaining, v.city, v.host_message, v.image_url,
     v.slug, v.neighborhood, v.is_featured,
     CASE WHEN COUNT(*) OVER (PARTITION BY v.raw_root_id) >= 2 THEN v.raw_root_id ELSE NULL END AS cluster_root_id,
-    v.distance_km
+    v.distance_km, v.circle_size, v.circle_in_count
   FROM visible v
   ORDER BY
     CASE WHEN p_lat IS NOT NULL AND p_lng IS NOT NULL AND v.distance_km IS NULL THEN 1 ELSE 0 END ASC,
@@ -329,10 +295,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.get_filtered_feed(uuid, numeric, numeric, numeric) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_filtered_feed(uuid, numeric, numeric, numeric) TO authenticated;
 
--- Drop the un-hardened one-arg overload -- see the header comment above for
--- why this is behavior-safe (a one-arg-shaped call resolves to the four-arg
--- version with NULL geo defaults, same rows/order, response gains a null
--- distance_km).
+-- Confirmed absent from prod at apply time; kept for defense-in-depth.
 DROP FUNCTION IF EXISTS public.get_filtered_feed(uuid);
 
 -- ---------------------------------------------------------------------------
@@ -340,25 +303,14 @@ DROP FUNCTION IF EXISTS public.get_filtered_feed(uuid);
 --   1. ACL: anon must not hold EXECUTE on any of the four functions. Hard
 --      assertion (RAISE EXCEPTION) -- if this fails, the fix did not land.
 --   2. RLS flag: event_members must have RLS enabled, RAISE WARNING (not
---      EXCEPTION) if not -- this ships loud on every apply/CI run instead of
---      depending on someone reading the header comment. Does not block the
---      fix above from landing, since event_members' RLS status is a
---      separate, larger follow-up (see header).
+--      EXCEPTION) if not.
 --   3. Positive: a real user calling each function AS THEMSELVES still
---      works (regression guard). Wrapped so an UNRELATED failure (a bad
---      profile row, bad data) only RAISE WARNINGs -- it should not roll
---      back the security fix above just because some other row is broken.
+--      works (regression guard). Wrapped so an UNRELATED failure only
+--      RAISE WARNINGs -- it should not roll back the security fix above
+--      just because some other row is broken.
 --   4. Negative: calling with a MISMATCHED p_user_id must raise the EXACT
---      guard message, not just "any error" (a coincidental unrelated
---      failure must not read as the guard working). Hard assertion.
---      join_event_atomic's guard runs before its first table touch (the
---      SELECT ... FOR UPDATE), so exercising the negative case here has no
---      write side effect; the all-zeros event_id is never read or locked.
---   5. Overload: the one-arg get_filtered_feed(uuid) must actually be gone,
---      not just absent from the ACL check above -- checking privileges on
---      only the four-arg signature is exactly how this migration's first
---      draft reported green while the un-hardened one-arg overload was
---      still live and still the one two real feed call sites resolve to.
+--      guard message, not just "any error".
+--   5. Overload: the one-arg get_filtered_feed(uuid) must actually be gone.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -383,7 +335,7 @@ BEGIN
     (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.event_members'::regclass),
     false
   ) THEN
-    RAISE WARNING 'event_members has RLS DISABLED: the join_event_atomic fix is bypassable via a direct PostgREST write to /rest/v1/event_members. See the four call sites named in this file''s header comment. Follow-up migration required.';
+    RAISE WARNING 'event_members has RLS DISABLED: the join_event_atomic fix is bypassable via a direct PostgREST write to /rest/v1/event_members. Follow-up migration required.';
   END IF;
 
   -- Deterministic row pick (ORDER BY id, not an arbitrary LIMIT 1) so this
