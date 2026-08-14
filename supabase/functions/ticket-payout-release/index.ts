@@ -268,14 +268,28 @@ Deno.serve(async (req)=>{
         organizersFailed++;
         continue;
       }
-      // e.g. balance not yet available (Stripe's first-payout hold): mark
-      // failed with the reason; list_ticket_payouts_due selects them again,
-      // and the key above is what makes that retry safe
+      // A retry is only safe when Stripe PROVED it rejected the request. An
+      // error carrying rawType came back from Stripe's API with a decision
+      // (balance_insufficient on the first-payout hold, etc), so no money
+      // moved and 'failed' is right: list_ticket_payouts_due re-selects it.
+      // A connection error, timeout, or api_error proves nothing: Stripe may
+      // have created the payout and lost the response. Those must NOT be
+      // retryable, because the idempotency key above does not cover them.
+      // It is derived from this batch's event id set, so once one more event
+      // comes due for this organizer the next run computes a DIFFERENT key
+      // and Stripe mints a SECOND payout covering the already-paid event.
+      // 'pending' is this file's documented money-moved state: never
+      // re-selected, loud in the log, manual settle owed.
+      const stripeDecided = typeof err?.rawType === 'string' && err.rawType !== 'api_error';
       await service.from('ticket_payouts').update({
-        status: 'failed',
-        failure_message: reason
+        status: stripeDecided ? 'failed' : 'pending',
+        failure_message: (stripeDecided
+          ? reason
+          : `no decision from stripe, money may have moved, manual settle owed: ${reason}`).slice(0, 1000)
       }).in('event_id', writtenEventIds);
-      console.error('ticket-payout-release: payout failed', row.stripe_account_id, reason);
+      console.error(stripeDecided
+        ? `ticket-payout-release: payout failed ${row.stripe_account_id} ${reason}`
+        : `ticket-payout-release: NO STRIPE DECISION, MONEY MAY HAVE MOVED ${row.stripe_account_id} ${idempotencyKey} ${reason}`);
       organizersFailed++;
     }
   }
