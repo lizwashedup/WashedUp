@@ -145,3 +145,7 @@ Green is not in the palette anywhere: the first-join "past the minimum" pill (20
 - Never remove or change existing data fetching logic.
 - When in doubt, ask before making a change.
 - After every change, confirm what files you modified and summarize the changes.
+
+## Session-Learned Rules
+
+- Canonical admin tool is washedup-world, not command-center-next. Decided 2026-08-13, delegated by Josh directly to Claude's judgment ("you tell me which one"). command-center-next has a live anon-key-reachable gap on its 7 Headquarters tables plus dead code (706-line dead stats route, fake /finance data); washedup-world's own commit history already shows it actively porting sections FROM command-center-next. No new admin feature work goes into command-center-next going forward.

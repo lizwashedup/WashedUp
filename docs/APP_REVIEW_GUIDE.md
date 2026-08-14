@@ -101,10 +101,12 @@ Users can reach us via email at [hello@washedup.app](mailto:hello@washedup.app).
 
 ### Test Account
 
-To test the app during review:
+WashedUp logs in with a phone number and a verification code, not email/password. To test the app during review:
 
-- Email: [REPLACE WITH TEST ACCOUNT EMAIL]
-- Password: [REPLACE WITH TEST ACCOUNT PASSWORD]
+- Phone number: +1 202-555-0100
+- Verification code: 123456
+
+This is a permanent Supabase test number reserved for App Review. Entering it never sends a real text message, and the code above always works, it will not expire before this app version is reviewed.
 
 Suggested test flow:
 

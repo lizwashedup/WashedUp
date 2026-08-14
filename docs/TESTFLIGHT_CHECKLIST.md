@@ -25,7 +25,7 @@ To update the app icon for the App Store / TestFlight:
 - [x] Account deletion: RPC + delete-user Edge Function
 - [x] Push notifications: token registration, deep-link on tap
 - [x] Console.warn only in __DEV__ (usePushNotifications)
-- [x] App version: 1.0.0 in app.json
+- [x] App version: 1.0.5 in app.json
 - [x] Bundle ID: com.washedup.app
 - [x] ITSAppUsesNonExemptEncryption: false (for faster review)
 - [x] EAS project configured (projectId in app.json)
