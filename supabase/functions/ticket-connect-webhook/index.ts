@@ -53,13 +53,52 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
  */ const SIGNATURE_TOLERANCE_SECONDS = 300;
 const MAX_BODY_BYTES = 1_000_000;
 // the four per-destination signing secrets — two scopes × two modes; any
-// one alone verifies its own destination's events
-const WEBHOOK_SECRET_ENV_NAMES = [
-  'STRIPE_WEBHOOK_SECRET_ACCOUNT',
-  'STRIPE_WEBHOOK_SECRET_CONNECT',
-  'STRIPE_WEBHOOK_SECRET_ACCOUNT_LIVE',
-  'STRIPE_WEBHOOK_SECRET_CONNECT_LIVE'
+// one alone verifies its own destination's events, and each is now BOUND to
+// the mode and the scope of that destination.
+// LIVEMODE IS ENFORCED below. Before this, a signature match against ANY of
+// the four secrets was accepted and event.livemode was never read, so a
+// leaked TEST whsec (the low-value one: it sits in dev .env files and logs)
+// could sign a forged body that says livemode true, and the drain would then
+// act on it as a real account.updated (flipping payouts_enabled on an
+// unverified organizer, who the release cron then pays) or a real payout.paid.
+// SCOPE IS OBSERVED, not enforced: it is logged so the map below can be
+// validated against real traffic first. Rejecting on a wrong guess here would
+// drop a genuine checkout.session.completed and strand a customer who paid.
+const WEBHOOK_SECRETS = [
+  {
+    name: 'STRIPE_WEBHOOK_SECRET_ACCOUNT',
+    livemode: false,
+    scope: 'account'
+  },
+  {
+    name: 'STRIPE_WEBHOOK_SECRET_CONNECT',
+    livemode: false,
+    scope: 'connect'
+  },
+  {
+    name: 'STRIPE_WEBHOOK_SECRET_ACCOUNT_LIVE',
+    livemode: true,
+    scope: 'account'
+  },
+  {
+    name: 'STRIPE_WEBHOOK_SECRET_CONNECT_LIVE',
+    livemode: true,
+    scope: 'connect'
+  }
 ];
+const SCOPE_EVENT_TYPES: Record<string, string[]> = {
+  account: [
+    'checkout.session.completed',
+    'checkout.session.expired',
+    'charge.refunded',
+    'charge.refund.updated'
+  ],
+  connect: [
+    'account.updated',
+    'payout.paid',
+    'payout.failed'
+  ]
+};
 function json(status, body) {
   return new Response(JSON.stringify(body), {
     status,
@@ -93,9 +132,9 @@ Deno.serve(async (req)=>{
   // secret with a trailing newline passes startsWith('whsec_') and then
   // fails HMAC forever, presenting as a signature bug — the single most
   // common webhook-setup failure.
-  const configured = WEBHOOK_SECRET_ENV_NAMES.map((name)=>({
-      name,
-      secret: (Deno.env.get(name) ?? '').trim()
+  const configured = WEBHOOK_SECRETS.map((e)=>({
+      ...e,
+      secret: (Deno.env.get(e.name) ?? '').trim()
     })).filter((e)=>e.secret.startsWith('whsec_'));
   if (configured.length === 0) {
     return json(500, {
@@ -140,15 +179,18 @@ Deno.serve(async (req)=>{
   // the event's own destination determines which one signs it, a forgery none
   let verified = false;
   let matchedSecretName = null;
-  for (const { name, secret } of configured){
+  let matched = null;
+  for (const entry of configured){
+    const { name, secret } = entry;
     const expected = await hmacSha256Hex(secret, message);
     if (v1s.some((v)=>timingSafeEqual(v, expected))) {
       verified = true;
+      matched = entry;
       matchedSecretName = name; // the env NAME (never the value) — routing proof
       break;
     }
   }
-  if (!verified) {
+  if (!verified || !matched) {
     // log the configured secret NAMES only (never values, never lengths) so a
     // one-secret misconfiguration is distinguishable from an actual forgery —
     // both return the same 401, so this line is the only diagnostic.
@@ -173,11 +215,34 @@ Deno.serve(async (req)=>{
       error: 'not a stripe event'
     });
   }
+  // MODE BINDING. Fail CLOSED on a missing livemode: every Stripe snapshot
+  // event carries it (all 93 rows in ticket_webhook_events do, checked
+  // 2026-08-14), so its absence means malformed or forged, never legitimate.
+  if (typeof event.livemode !== 'boolean') {
+    console.error(`ticket-connect-webhook rejected evt=${eventId} type=${eventType}: no boolean livemode`);
+    return json(400, {
+      error: 'event livemode missing'
+    });
+  }
+  // the actual fix: an event is only accepted under a secret of its OWN mode,
+  // in both directions (a live secret cannot sign a test event either).
+  if (event.livemode !== matched.livemode) {
+    console.error(`ticket-connect-webhook MODE MISMATCH evt=${eventId} type=${eventType} livemode=${event.livemode} signed-by=${matched.name}`);
+    return json(401, {
+      error: 'event mode does not match its signing secret'
+    });
+  }
+  // observed only. A hit means the map above is wrong or a destination is
+  // subscribed past its documented set. Turn this into a 401 once a week of
+  // real traffic logs no hits.
+  if (!(SCOPE_EVENT_TYPES[matched.scope] ?? []).includes(eventType)) {
+    console.error(`ticket-connect-webhook SCOPE UNEXPECTED evt=${eventId} type=${eventType} signed-by=${matched.name} scope=${matched.scope} (observed, not rejected)`);
+  }
   // routing proof (verification only): record which per-destination secret
   // verified this event, by env NAME — never the value. Read back via
   // get_logs to prove each destination's events verify under exactly one
   // secret (and which MODE signed it).
-  console.log(`ticket-connect-webhook verified evt=${eventId} type=${eventType} via=${matchedSecretName}`);
+  console.log(`ticket-connect-webhook verified evt=${eventId} type=${eventType} via=${matchedSecretName} livemode=${event.livemode} scope=${matched.scope}`);
   const service = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
   // the inbox insert — dedupe is the unique constraint, not app logic.
   // upsert+ignoreDuplicates = INSERT ... ON CONFLICT DO NOTHING.

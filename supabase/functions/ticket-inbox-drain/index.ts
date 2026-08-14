@@ -45,12 +45,19 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
  *  - charge.refund.updated → THE reconcile key (Cowork ruling 2026-07-27:
  *      the keyless drain cannot API-fetch, and this is the only refund event
  *      carrying the Refund id + amount; full-vs-partial is decided by the
- *      SQL-92 v2 RPC against OUR order.total_cents, never Stripe's cumulative
- *      totals). status succeeded → reconcile_dashboard_refund(pi, refund id,
- *      refund.amount): FULL voids every position (void_kind admin) + refunds
- *      the order + clears any review flag; PARTIAL flags for manual review
- *      and touches nothing (cumulative partials that total the charge stay
- *      FLAGGED, accepted). failed/canceled/requires_action → the flag door.
+ *      SQL-92 v3 RPC against the amount the refund SHOULD be for its kind,
+ *      recomputed from compute_ticket_refund over the still-live seats, never
+ *      Stripe's cumulative totals and no longer order.total_cents (which is
+ *      only the right yardstick for a gross refund of a whole untouched
+ *      order, so it mis-flagged every face-only buyer_request refund)).
+ *      status succeeded → reconcile_dashboard_refund(pi, refund id,
+ *      refund.amount, refund.metadata.kind): FULL voids every position with
+ *      the refund's OWN kind (metadata when our executor made it, 'admin'
+ *      only for a genuinely unattributed dashboard refund) + refunds the
+ *      order + clears a review flag ONLY if this RPC opened it; PARTIAL flags
+ *      for manual review and touches nothing (cumulative partials that total
+ *      the charge stay FLAGGED, accepted). failed/canceled/requires_action →
+ *      the flag door.
  *      pending → no-op. A null payment_intent rides through to the RPC,
  *      which answers 'no_order' (dashboard charges can carry pi = null).
  *  - charge.refunded → ignored (superseded as reconcile trigger by the
@@ -61,7 +68,17 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
  * Stripe key at all and passes the charge/refund facts to the SQL-92 RPCs,
  * which are the single brain for full-vs-partial and voiding.
  */ const BATCH_SIZE = 20;
-const MAX_ATTEMPTS = 5;
+// attempts are paid one per drain run and the drain runs ONCE A MINUTE, so
+// this number is wall-clock minutes of transient-outage tolerance, not an
+// abstract count. At 5 it was 5 minutes: shorter than a routine Postgres
+// failover or a Supabase incident, which defeated the whole point of the
+// 7-21 rewrite that made transient errors retryable. 60 covers a real
+// outage. It is safe to be this generous ONLY because the age watchdog
+// still fires at minute 10 on a row that is still retrying, so a long
+// budget means "keep trying while a human is already alerted", never "stay
+// silent for an hour". A row that finally exhausts it is stamped
+// alert_state 'open' and alerted on (see stampFailed below).
+const MAX_ATTEMPTS = 60;
 const TERMINAL_RAISE_MARKERS = [
   'cannot settle',
   'does not match its hold'
@@ -91,6 +108,10 @@ function timingSafeEqual(a, b) {
 // the platform after a successful settle. Never throws; never blocks settle.
 async function sendBuyerConfirmation(// deno-lint-ignore no-explicit-any
 service, obj) {
+  // held ACROSS the try/catch on purpose: the claim below stamps the order
+  // "sent" BEFORE anything is sent, so every failure path, including one
+  // that throws, has to be able to give the claim back.
+  let claimedOrderId = null;
   try {
     const resendKey = Deno.env.get('RESEND_API_KEY') ?? '';
     if (!resendKey) {
@@ -115,6 +136,7 @@ service, obj) {
       return;
     }
     if (!claimed || claimed.length === 0) return; // already sent
+    claimedOrderId = orderId;
     const order = claimed[0];
     const { data: event } = await service.from('explore_events').select('title, event_date, venue, confirmation_message').eq('id', order.event_id).maybeSingle();
     const { data: seats } = await service.from('ticket_order_positions').select('position_index, reference_code').eq('order_id', orderId).order('position_index', {
@@ -160,31 +182,50 @@ service, obj) {
     <a href="${WALLET_URL}" style="display:inline-block;margin-top:24px;background:#B5522E;color:#FFFFFF;text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:700;">see your tickets</a>
   </div>
 </div>`;
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: CONFIRMATION_FROM,
-        to: [
-          email
-        ],
-        subject,
-        html,
-        text
-      })
-    });
-    if (!res.ok) {
-      // clear the claim so the miss stays findable; log loudly; settle stands
-      console.error('confirmation email: resend refused', res.status);
+    const releaseClaim = async ()=>{
+      claimedOrderId = null;
       await service.from('ticket_orders').update({
         confirmation_email_sent_at: null,
         confirmation_email_id: null
       }).eq('id', orderId);
+    };
+    let res;
+    try {
+      res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${resendKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: CONFIRMATION_FROM,
+          to: [
+            email
+          ],
+          subject,
+          html,
+          text
+        })
+      });
+    } catch (netErr) {
+      // A THROWN fetch (DNS, TLS, connect timeout) has the SAME outcome as a
+      // refusal: nothing was sent. It used to fall through to the outer catch,
+      // which never released the claim, so the order stayed stamped "sent"
+      // forever with no email ever sent, and the claim blocked every future
+      // attempt. Treated as a refusal now.
+      console.error('confirmation email: resend unreachable', netErr instanceof Error ? netErr.message : 'unknown');
+      await releaseClaim();
       return;
     }
+    if (!res.ok) {
+      // clear the claim so the miss stays findable; log loudly; settle stands
+      console.error('confirmation email: resend refused', res.status);
+      await releaseClaim();
+      return;
+    }
+    // sent for real: the claim is now TRUE and must stand, so nothing below
+    // (including the outer catch) may release it
+    claimedOrderId = null;
     const body = await res.json().catch(()=>({}));
     const emailId = typeof body?.id === 'string' ? body.id : null;
     if (emailId) {
@@ -194,6 +235,20 @@ service, obj) {
     }
   } catch (e) {
     console.error('confirmation email: failed', e instanceof Error ? e.message : 'unknown');
+    // Anything that threw AFTER the claim but BEFORE a confirmed send (the
+    // event/seat lookups, the body build) left the order permanently stamped
+    // "sent" with nothing sent. Nothing in this system ever retries a
+    // confirmation, so that claim was a silent, permanent loss. Give it back.
+    if (claimedOrderId) {
+      try {
+        await service.from('ticket_orders').update({
+          confirmation_email_sent_at: null,
+          confirmation_email_id: null
+        }).eq('id', claimedOrderId);
+      } catch (releaseErr) {
+        console.error('confirmation email: could not release claim', releaseErr instanceof Error ? releaseErr.message : 'unknown');
+      }
+    }
   }
 }
 function escapeHtml(s) {
@@ -244,9 +299,28 @@ Deno.serve(async (req)=>{
       }).eq('id', row.id);
       failed++;
     };
-    // the poison guard, un-bypassable now that the claim always pays first
+    // A FAILURE stamp (2026-08-14). Same processed_at as stampProcessed (the
+    // row is given up on and will not retry) but it also raises alert_state
+    // so a human is actually told. This exists because the age watchdog can
+    // ONLY see rows with processed_at null, so every path that stamps and
+    // walks away was structurally invisible to it, not merely unlikely to
+    // alert. Use this, never stampProcessed, for any outcome a paying
+    // customer would notice: money captured with nothing delivered, or a
+    // refund owed. stampProcessed stays for inert dispositions (ignored
+    // event types, "nothing to do" states) that nobody needs to act on.
+    const stampFailed = async (errNote)=>{
+      await service.from('ticket_webhook_events').update({
+        processed_at: new Date().toISOString(),
+        error: errNote,
+        alert_state: 'open'
+      }).eq('id', row.id);
+    };
+    // the poison guard, un-bypassable now that the claim always pays first.
+    // It stamps at about minute 61 now; the age watchdog already alerted at
+    // minute 10, and this raises a second, louder alert saying the event was
+    // abandoned for good.
     if (claimedAttempts > MAX_ATTEMPTS) {
-      await stampProcessed(`poison: exceeded ${MAX_ATTEMPTS} attempts; see prior error`);
+      await stampFailed(`poison: exceeded ${MAX_ATTEMPTS} attempts, abandoned; see prior error`);
       failed++;
       continue;
     }
@@ -257,24 +331,52 @@ Deno.serve(async (req)=>{
         if (!acctId?.startsWith('acct_')) {
           await stampProcessed('account.updated without an acct id');
         } else {
+          // Stripe does NOT guarantee event ORDER. Two account.updated events
+          // in flight can arrive newest-first, and an unconditional write then
+          // replays a STALE snapshot over current truth, flipping
+          // charges_enabled/payouts_enabled back to a value Stripe has already
+          // moved on from. The guard is Stripe's own event timestamp compared
+          // against the last one applied, enforced in the WHERE clause so two
+          // overlapping drain runs cannot race it. Fallback to "now" when
+          // created is absent keeps today's unguarded behaviour rather than
+          // dropping the write (no live event has ever lacked it: verified
+          // across all 93 rows in ticket_webhook_events).
+          const evCreated = typeof row.payload?.created === 'number' ? new Date(row.payload.created * 1000).toISOString() : new Date().toISOString();
           const { data: updated, error: updErr } = await service.from('organizer_stripe_accounts').update({
             charges_enabled: obj.charges_enabled === true,
             payouts_enabled: obj.payouts_enabled === true,
             details_submitted: obj.details_submitted === true,
-            requirements_due: obj.requirements ?? {}
-          }).eq('stripe_account_id', acctId).select('user_id');
+            requirements_due: obj.requirements ?? {},
+            last_event_at: evCreated,
+            last_event_id: row.stripe_event_id
+          }).eq('stripe_account_id', acctId).lte('last_event_at', evCreated).select('user_id');
           if (updErr) {
             await recordRetryable(`account.updated write failed: ${updErr.message}`);
             continue;
           }
-          await stampProcessed(updated && updated.length > 0 ? null : `no organizer row for ${acctId}`);
+          if (updated && updated.length > 0) {
+            await stampProcessed(null);
+          } else {
+            // zero rows is now ambiguous: no organizer row at all, or a stale
+            // event correctly refused. Ask, so the two never get conflated.
+            const { data: existing, error: exErr } = await service.from('organizer_stripe_accounts').select('user_id').eq('stripe_account_id', acctId).maybeSingle();
+            if (exErr) {
+              await recordRetryable(`account.updated ordering check failed: ${exErr.message}`);
+              continue;
+            }
+            await stampProcessed(existing ? `account.updated out of order (older than applied state), ignored` : `no organizer row for ${acctId}`);
+          }
         }
       } else if (row.type === 'checkout.session.completed') {
         const meta = obj.metadata ?? {};
         const holdId = meta.hold_id;
         const paymentIntent = typeof obj.payment_intent === 'string' ? obj.payment_intent : null;
         if (!holdId) {
-          await stampProcessed('completed session without hold_id metadata');
+          // The buyer's card was CHARGED and there is nothing here to settle
+          // onto: no hold, so no tickets are issued and no refund is queued.
+          // This already happened for real (2026-07-27) and was stamped
+          // processed with nobody told. It is a failure, never a disposition.
+          await stampFailed('completed session without hold_id metadata: buyer was charged, no tickets issued, no refund queued');
         } else {
           const { data: settled, error: rpcErr } = await service.rpc('settle_ticket_hold', {
             p_hold_id: holdId,
@@ -296,7 +398,9 @@ Deno.serve(async (req)=>{
             // doc 112: the money is settled; the email rides after, fire-and-log
             await sendBuyerConfirmation(service, obj);
           } else {
-            await stampProcessed('settle refused (late webhook, no quota) — refund owed');
+            // money captured, quota gone, nothing delivered: a human owes this
+            // buyer a refund and nothing else in the system will say so
+            await stampFailed('settle refused (late webhook, no quota): refund owed');
           }
         }
       } else if (row.type === 'checkout.session.expired') {
@@ -304,22 +408,41 @@ Deno.serve(async (req)=>{
         if (!sessionId?.startsWith('cs_')) {
           await stampProcessed('expired session without an id');
         } else {
-          const { data: order } = await service.from('ticket_orders').select('id, hold_id, status').eq('stripe_checkout_session_id', sessionId).maybeSingle();
+          const { data: order, error: orderErr } = await service.from('ticket_orders').select('id, hold_id, status').eq('stripe_checkout_session_id', sessionId).maybeSingle();
+          if (orderErr) {
+            // the account.updated pattern above, applied here: a transient
+            // read failure must RETRY. Without this it fell into the "no
+            // order" branch and abandoned the cleanup, stranding an active
+            // hold on inventory nobody paid for.
+            await recordRetryable(`expired session order read failed: ${orderErr.message}`);
+            continue;
+          }
           if (!order) {
             await stampProcessed('expired session with no order (abandoned pre-order)');
           } else {
             if (order.status === 'pending') {
-              await service.from('ticket_orders').update({
+              const { error: cancelErr } = await service.from('ticket_orders').update({
                 status: 'canceled'
               }).eq('id', order.id).eq('status', 'pending');
+              if (cancelErr) {
+                await recordRetryable(`expired session order cancel failed: ${cancelErr.message}`);
+                continue;
+              }
             }
             // the partial-failure gap, closed: the hold release is
             // attempted whatever the order's status — a prior run that
             // canceled and crashed no longer strands an active hold
             if (order.status === 'pending' || order.status === 'canceled') {
-              await service.from('ticket_holds').update({
+              const { error: relErr } = await service.from('ticket_holds').update({
                 status: 'released'
               }).eq('id', order.hold_id).eq('status', 'active');
+              if (relErr) {
+                // this write is the whole point of the handler; swallowing its
+                // error left the hold ACTIVE forever while the row was stamped
+                // clean, the exact gap this branch was rewritten to close
+                await recordRetryable(`expired session hold release failed: ${relErr.message}`);
+                continue;
+              }
               await stampProcessed(order.status === 'pending' ? null : 'order already canceled; hold release ensured');
             } else {
               await stampProcessed(`expired session: order already ${order.status}, untouched`);
@@ -351,11 +474,18 @@ Deno.serve(async (req)=>{
         await stampProcessed('ignored: charge.refunded (charge.refund.updated is the reconcile key)');
       } else if (row.type === 'charge.refund.updated') {
         // object = Refund — THE reconcile key. The RPC decides full/partial
-        // against OUR order.total_cents; a null pi answers 'no_order' inside.
+        // against the real amount the refund was SUPPOSED to be for its kind
+        // (a buyer_request refund is face-only, so it never equals
+        // order.total_cents); a null pi answers 'no_order' inside.
         const pi = typeof obj.payment_intent === 'string' ? obj.payment_intent : null;
         const status = typeof obj.status === 'string' ? obj.status : null;
         const refundId = typeof obj.id === 'string' ? obj.id : null;
         const refundAmount = typeof obj.amount === 'number' ? obj.amount : null;
+        // ticket-refund stamps metadata.kind on every refund it creates. It is
+        // the only honest source of the kind: the amount alone cannot tell an
+        // organizer_cancel from a human dashboard refund, and guessing wrote
+        // 'admin' onto real organizer cancels. Absent = a dashboard refund.
+        const refundKind = typeof obj.metadata?.kind === 'string' ? obj.metadata.kind : null;
         if (status === 'succeeded') {
           if (!refundId || refundAmount === null) {
             await stampProcessed('charge.refund.updated missing refund id/amount — cannot reconcile');
@@ -363,7 +493,8 @@ Deno.serve(async (req)=>{
             const { data: res, error: rpcErr } = await service.rpc('reconcile_dashboard_refund', {
               p_payment_intent_id: pi,
               p_stripe_refund_id: refundId,
-              p_refund_amount_cents: refundAmount
+              p_refund_amount_cents: refundAmount,
+              p_refund_kind: refundKind
             });
             if (rpcErr) {
               await recordRetryable(`reconcile errored (retryable): ${rpcErr.message}`);

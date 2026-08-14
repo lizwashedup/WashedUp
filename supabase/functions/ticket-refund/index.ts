@@ -61,14 +61,20 @@ import Stripe from 'npm:stripe@18';
  *     transfer_reversal_cents, app_fee_refund_cents,
  *     processing_shortfall_cents, stripe_refund_id, warnings? }.
  * FAILURE SHAPE: if a post-refund explicit leg fails (reversal or fee
- * refund), the buyer HAS been refunded, so the void IS recorded and the
- * response carries warnings[] naming the failed leg for reconciliation; if
- * recording itself fails after Stripe, 500 with the stripe_refund_id — the
- * drain's charge.refund.updated courier and the SQL-92 backstop reconcile,
- * and record is idempotent so the call is safely retried.
+ * refund), the buyer HAS been refunded, so the void IS recorded — but the
+ * order is ALSO flagged via flag_order_for_refund_review (queryable trail +
+ * durable owner alert) and the response is 207 with needs_review true,
+ * review_reason, and warnings[] naming the failed leg. ok stays true because
+ * the buyer's money really did come back; needs_review is the signal that a
+ * human still has to settle the organizer side. If recording itself fails
+ * after Stripe, 500 with the stripe_refund_id — the drain's
+ * charge.refund.updated courier and the SQL-92 backstop reconcile, and both
+ * record and the Stripe call are idempotent so the call is safely retried.
  *
- * TEST MODE ONLY: STRIPE_TICKET_SECRET_KEY, stripeKeyIsTest-guarded; a live
- * key is refused with 503. The live cutover is Liz's separate word.
+ * LIVE OR TEST: STRIPE_TICKET_SECRET_KEY decides the mode by its own value.
+ * Since Liz's live word (2026-07-31, PBC + EIN seller of record) a live key
+ * is accepted alongside a test key; only a missing or malformed key is
+ * refused with 503.
  */ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -83,6 +89,20 @@ import Stripe from 'npm:stripe@18';
 // commission is implicit in its net (observed lawful end state: buyer +u,
 // organizer −(F−C)/qty exactly, platform −C-share). HOLD lifted. ═══
 const VOLUNTARY_FEE_REFUND_LEG = false;
+// ONE deterministic value per logical refund, used for BOTH jobs: the Stripe
+// idempotency key (a genuine retry of the same refund replays Stripe's answer
+// instead of moving money twice) and the ticket_orders row-claim key (a
+// concurrent DIFFERENT refund on the same order is refused before any Stripe
+// call). Targeting a different seat set, or a different kind, yields a
+// different key, so those are never mistaken for duplicates. Bounded length:
+// 3 + 36 uuid + 1 + 16 kind + 1 + at most 149 (50 seats, index <= 50 by the
+// ticket_positions_index_range check) = 206, inside Stripe's 255-char limit.
+function refundClaimKey(orderId, kind, positions) {
+  const target = positions ? [
+    ...positions
+  ].sort((a, b)=>a - b).join('-') : 'all';
+  return `tr:${orderId}:${kind}:${target}`;
+}
 function json(status, body) {
   return new Response(JSON.stringify(body), {
     status,
@@ -215,6 +235,65 @@ Deno.serve(async (req)=>{
       error: `order is ${order.status}, not refundable`
     });
   }
+  const allowed = isOrganizer || canSelfRefund;
+  // ═══ CONCURRENCY (fix 2): the claim is taken BEFORE compute and BEFORE any
+  // Stripe call, so a second refund racing this one is refused while nothing
+  // has moved. record_ticket_refund's own `for update` runs only AFTER Stripe,
+  // so on its own it can detect a double-spend but never prevent one. Taking
+  // the claim first also stops compute's numbers from going stale underneath
+  // us: nothing else can void a position while we hold it. Every exit from
+  // here on goes through respond(), which releases the claim exactly once.
+  let releaseClaim: (() => PromiseLike<unknown>) | null = null;
+  const respond = async (status, body)=>{
+    if (releaseClaim) {
+      const release = releaseClaim;
+      releaseClaim = null;
+      try {
+        await release();
+      } catch (err) {
+        // a leaked claim self-heals on the staleness window; never mask the
+        // real answer we are about to return
+        console.error('ticket-refund: claim release failed', orderId, err?.message);
+      }
+    }
+    return json(status, body);
+  };
+  // left undefined (not null) on the preview path: Stripe's RequestOptions
+  // types idempotencyKey as string | undefined, and preview never reaches it
+  let idempotencyKey: string | undefined;
+  if (action === 'refund') {
+    // these two gates move ahead of the claim so a refused caller never takes
+    // (and never has to release) a claim
+    if (!allowed) return json(403, {
+      error: 'this order is outside its refund window'
+    });
+    if (!order.stripe_payment_intent_id) return json(409, {
+      error: 'order has no captured payment'
+    });
+    idempotencyKey = refundClaimKey(orderId, kind, positionsArg);
+    const { data: claimed, error: claimErr } = await service.rpc('claim_ticket_refund', {
+      p_order_id: orderId,
+      p_claim_key: idempotencyKey
+    });
+    if (claimErr) {
+      console.error('ticket-refund: claim failed', orderId, claimErr.code, claimErr.message);
+      return json(500, {
+        error: 'could not start the refund.'
+      });
+    }
+    if (claimed !== 'claimed') {
+      return json(409, {
+        // wording chosen so lib/ticketing.ts humanRefundError maps each to the
+        // right shipped line without any client change: 'busy' falls to the
+        // retry line, the other to the already-refunded line
+        error: claimed === 'busy' ? 'another refund on this order is still in progress' : 'this order is already refunded or no longer refundable'
+      });
+    }
+    releaseClaim = ()=>service.rpc('release_ticket_refund_claim', {
+      p_order_id: orderId,
+      p_claim_key: idempotencyKey
+    });
+  }
   // the probed money math — the ONLY source of refund amounts
   const { data: computed, error: cmpErr } = await service.rpc('compute_ticket_refund', {
     p_order_id: orderId,
@@ -224,32 +303,31 @@ Deno.serve(async (req)=>{
   if (cmpErr) {
     if ((cmpErr.code ?? '').startsWith('PGRST')) {
       console.error('ticket-refund: rpc plumbing error', cmpErr.code, cmpErr.message);
-      return json(500, {
+      return await respond(500, {
         error: 'could not compute the refund.'
       });
     }
-    return json(409, {
+    return await respond(409, {
       error: cmpErr.message ?? 'could not compute the refund.'
     });
   }
   const c = Array.isArray(computed) ? computed[0] : computed;
-  if (!c) return json(500, {
+  if (!c) return await respond(500, {
     error: 'could not compute the refund.'
   });
-  if (c.position_count === 0) return json(409, {
+  if (c.position_count === 0) return await respond(409, {
     error: 'nothing left to refund'
   });
   if (positionsArg && c.position_count !== positionsArg.length) {
-    return json(409, {
+    return await respond(409, {
       error: 'some requested positions are not refundable'
     });
   }
-  if (c.refund_amount_cents <= 0) return json(409, {
+  if (c.refund_amount_cents <= 0) return await respond(409, {
     error: 'refund amount is zero'
   });
-  const allowed = isOrganizer || canSelfRefund;
   if (action === 'preview') {
-    return json(200, {
+    return await respond(200, {
       ok: true,
       allowed,
       can_self_refund: canSelfRefund,
@@ -258,17 +336,29 @@ Deno.serve(async (req)=>{
       position_count: c.position_count
     });
   }
-  if (!allowed) return json(403, {
-    error: 'this order is outside its refund window'
-  });
-  if (!order.stripe_payment_intent_id) return json(409, {
-    error: 'order has no captured payment'
-  });
   const stripe = new Stripe(stripeKey, {
     apiVersion: '2025-08-27.basil',
     httpClient: Stripe.createFetchHttpClient()
   });
   const warnings = [];
+  // set when a post-refund leg failed: the buyer is whole but the organizer
+  // or platform side is not, so the order must not read as a clean success
+  let reviewReason = null;
+  // the same door the drain uses for a failed/canceled refund state. Writes
+  // ticket_orders.needs_refund_review + reason + timestamp (idempotent, keeps
+  // the first reason) and raises the durable admin_alert to the owner.
+  const flagForReview = async (reason)=>{
+    const { error: flagErr } = await service.rpc('flag_order_for_refund_review', {
+      p_payment_intent_id: order.stripe_payment_intent_id,
+      p_reason: reason
+    });
+    if (flagErr) {
+      // the trail itself failed to write: this is the one thing that must
+      // never be quiet, so it rides the response too
+      console.error('ticket-refund: refund-review flag failed', orderId, flagErr.code, flagErr.message);
+      warnings.push('refund_review_flag_failed');
+    }
+  };
   let refundId;
   if (c.reverse_transfer_proportional && c.refund_application_fee_full) {
     // organizer_cancel / admin: buyer made whole to the T-share; the
@@ -283,12 +373,14 @@ Deno.serve(async (req)=>{
           order_id: orderId,
           kind
         }
+      }, {
+        idempotencyKey
       });
       refundId = refund.id;
     } catch (err) {
       // seat-required fix (2026-07-27): raw Stripe messages stay in the logs
       console.error('ticket-refund: cancel refund failed', err?.message);
-      return json(502, {
+      return await respond(502, {
         error: 'stripe refund failed',
         detail: null
       });
@@ -305,20 +397,20 @@ Deno.serve(async (req)=>{
         ]
       });
       const charge = pi.latest_charge && typeof pi.latest_charge !== 'string' ? pi.latest_charge : null;
-      if (!charge) return json(409, {
+      if (!charge) return await respond(409, {
         error: 'the payment has no charge to refund'
       });
       transferId = typeof charge.transfer === 'string' ? charge.transfer : charge.transfer?.id ?? null;
       appFeeId = typeof charge.application_fee === 'string' ? charge.application_fee : charge.application_fee?.id ?? null;
     } catch (err) {
       console.error('ticket-refund: payment load failed', err?.message);
-      return json(502, {
+      return await respond(502, {
         error: 'could not load the payment',
         detail: null
       });
     }
     if (!transferId || !appFeeId) {
-      return json(409, {
+      return await respond(409, {
         error: 'the payment is missing its transfer or fee; escalate to support'
       });
     }
@@ -331,19 +423,22 @@ Deno.serve(async (req)=>{
           order_id: orderId,
           kind
         }
+      }, {
+        idempotencyKey
       });
       refundId = refund.id;
     } catch (err) {
       console.error('ticket-refund: voluntary refund failed', err?.message);
-      return json(502, {
+      return await respond(502, {
         error: 'stripe refund failed',
         detail: null
       });
     }
     // leg 2: explicit transfer reversal (face-share − commission-share);
     // leg 3: explicit application-fee refund (commission-share). The buyer is
-    // already refunded, so failures here are WARNED + reconciled, never
-    // silently swallowed and never a reason to leave the void unrecorded.
+    // already refunded, so the void IS still recorded — but a failed leg means
+    // the organizer kept money the platform just handed back, so it gets a
+    // real, queryable record and a real alert, never a log line and a 200.
     if (c.transfer_reversal_cents > 0) {
       try {
         await stripe.transfers.createReversal(transferId, {
@@ -356,6 +451,8 @@ Deno.serve(async (req)=>{
       } catch (err) {
         console.error('ticket-refund: transfer reversal failed', refundId, err?.message);
         warnings.push('transfer_reversal_failed');
+        reviewReason = `transfer_reversal_failed:${refundId}:${c.transfer_reversal_cents}`;
+        await flagForReview(reviewReason);
       }
     }
     if (VOLUNTARY_FEE_REFUND_LEG && c.app_fee_refund_cents > 0) {
@@ -366,6 +463,8 @@ Deno.serve(async (req)=>{
       } catch (err) {
         console.error('ticket-refund: application fee refund failed', refundId, err?.message);
         warnings.push('application_fee_refund_failed');
+        reviewReason = `application_fee_refund_failed:${refundId}:${c.app_fee_refund_cents}`;
+        await flagForReview(reviewReason);
       }
     }
   }
@@ -383,12 +482,12 @@ Deno.serve(async (req)=>{
     // reconciliation (charge.refund.updated -> drain + SQL-92 backstop);
     // record is idempotent so this call is safely retried with the same key
     console.error('ticket-refund: recording failed after stripe', refundId, recErr.code, recErr.message);
-    return json(500, {
+    return await respond(500, {
       error: 'refund succeeded at stripe but recording failed',
       stripe_refund_id: refundId
     });
   }
-  return json(200, {
+  const payload = {
     ok: true,
     order_id: orderId,
     kind,
@@ -401,5 +500,16 @@ Deno.serve(async (req)=>{
     ...warnings.length ? {
       warnings
     } : {}
+  };
+  if (!reviewReason) return await respond(200, payload);
+  // 207, not 200: the buyer's refund really did land (so ok stays true and the
+  // shipped clients still show success rather than telling a refunded buyer to
+  // try again), but a leg is unsettled and a human has to close it. The status
+  // code is what separates this from a clean refund in logs and monitoring;
+  // ticket_orders.needs_refund_review is the queryable trail.
+  return await respond(207, {
+    ...payload,
+    needs_review: true,
+    review_reason: reviewReason
   });
 });

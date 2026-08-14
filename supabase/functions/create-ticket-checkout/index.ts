@@ -236,9 +236,29 @@ Deno.serve(async (req)=>{
       reference_code: b.reference_code
     });
   }
+  const stripe = new Stripe(stripeKey, {
+    apiVersion: '2025-08-27.basil',
+    httpClient: Stripe.createFetchHttpClient()
+  });
+  // (g) THE REPLAY'S OWN SESSION (2026-08-14, paired with the SQL that adds
+  // stripe_checkout_session_id to begin_ticket_checkout's returns): one order
+  // gets ONE payable session, ever. A second session for the same order can
+  // also be paid, and settle_ticket_hold returns early on the already-consumed
+  // hold, so that second charge is captured by Stripe and never reconciled or
+  // refunded. Null on every first pass; set only on a replayed order.
+  const priorSessionId = typeof b.stripe_checkout_session_id === 'string' && b.stripe_checkout_session_id.startsWith('cs_') ? b.stripe_checkout_session_id : null;
   // releases the hold and cancels the pending order so a fresh tap (with a
-  // fresh key) starts clean; used by (c) and by session-create failure
+  // fresh key) starts clean; used by (c) and by session-create failure. A
+  // prior session is expired at Stripe first: an open session outliving its
+  // canceled order is payable money with nothing left to settle onto.
   async function unwindPending() {
+    if (priorSessionId) {
+      try {
+        await stripe.checkout.sessions.expire(priorSessionId);
+      } catch (err) {
+        console.error('create-ticket-checkout: could not expire stale session', priorSessionId, err instanceof Error ? err.message : '');
+      }
+    }
     await service.from('ticket_holds').update({
       status: 'released'
     }).eq('id', b.hold_id).eq('status', 'active');
@@ -258,10 +278,50 @@ Deno.serve(async (req)=>{
       error: EXPIRED_CHECKOUT_LINE
     });
   }
-  const stripe = new Stripe(stripeKey, {
-    apiVersion: '2025-08-27.basil',
-    httpClient: Stripe.createFetchHttpClient()
-  });
+  // (g) REUSE, NEVER RE-CREATE: this order already carries a Stripe session,
+  // so hand that same one back instead of minting a second payable session.
+  if (priorSessionId) {
+    let prior: Awaited<ReturnType<typeof stripe.checkout.sessions.retrieve>>;
+    try {
+      prior = await stripe.checkout.sessions.retrieve(priorSessionId);
+    } catch (err) {
+      console.error('create-ticket-checkout: prior session unreadable', priorSessionId, err instanceof Error ? err.message : '');
+      return json(409, {
+        error: 'this checkout is still being set up. give it a moment and try again.'
+      });
+    }
+    if (prior.status === 'complete' || prior.payment_status === 'paid') {
+      // already paid: the drain settles it from the webhook. Creating a new
+      // session here IS the double charge, so refuse and let it confirm.
+      return json(409, {
+        error: 'this checkout already went through. give it a moment to confirm.'
+      });
+    }
+    if (prior.status === 'expired') {
+      await unwindPending();
+      return json(409, {
+        code: 'checkout_expired',
+        error: EXPIRED_CHECKOUT_LINE
+      });
+    }
+    if (prior.status === 'open' && typeof prior.url === 'string' && prior.amount_total === b.total_cents) {
+      return json(200, {
+        url: prior.url,
+        order_id: b.order_id,
+        reference_code: b.reference_code
+      });
+    }
+    // open but unusable (no url, or it does not price THIS order): expire it
+    // before its replacement exists, never leave two payable sessions alive.
+    try {
+      await stripe.checkout.sessions.expire(priorSessionId);
+    } catch (err) {
+      console.error('create-ticket-checkout: could not expire mismatched session', priorSessionId, err instanceof Error ? err.message : '');
+      return json(409, {
+        error: 'this checkout is still being set up. give it a moment and try again.'
+      });
+    }
+  }
   // doc 114: add-on money is FOLDED INTO face_cents by the RPC, so
   // unit_face_cents * qty no longer covers the face. The remainder is the
   // add-on total and MUST appear as its own line or Stripe undercharges by
