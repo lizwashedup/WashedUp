@@ -331,15 +331,15 @@ export default function EventDetailScreen() {
     queryFn: async (): Promise<Record<string, number>> => {
       const planIds = linkedPlans.map((p) => p.id);
       if (planIds.length === 0) return {};
+      // Adversarial-review fix (2026-08-13): same non-self-scoped-read issue
+      // as lib/fetchPlans.ts fetchRealMemberCounts, independently duplicated
+      // here. Swapped to the same batched anon+authenticated-safe RPC.
       const { data, error } = await supabase
-        .from('event_members')
-        .select('event_id')
-        .in('event_id', planIds)
-        .eq('status', 'joined');
+        .rpc('get_event_joined_counts', { p_event_ids: planIds });
       if (error) throw error;
       const counts: Record<string, number> = {};
-      (data ?? []).forEach((r: { event_id: string }) => {
-        counts[r.event_id] = (counts[r.event_id] ?? 0) + 1;
+      (data ?? []).forEach((r: { event_id: string; joined_count: number }) => {
+        counts[r.event_id] = r.joined_count;
       });
       return counts;
     },

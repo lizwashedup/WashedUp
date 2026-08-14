@@ -8,11 +8,16 @@ import { GROUPS_ENABLED } from '../constants/FeatureFlags';
  */
 export async function fetchRealMemberCounts(eventIds: string[]): Promise<Record<string, number>> {
   if (eventIds.length === 0) return {};
+  // Adversarial-review fix (2026-08-13): was a direct, non-self-scoped
+  // event_members table read. The new RLS policy in
+  // 20260813200000_event_members_anon_read_rls_fix.sql restricts that table
+  // to members/organizers only, which silently zeroed this out for every
+  // event the caller hasn't joined -- the main feed, interested-plans, and
+  // first-join candidates all call this for events the viewer has NOT
+  // joined. Swapped to the anon+authenticated-safe batched RPC the same
+  // migration adds.
   const { data, error } = await supabase
-    .from('event_members')
-    .select('event_id')
-    .in('event_id', eventIds)
-    .eq('status', 'joined');
+    .rpc('get_event_joined_counts', { p_event_ids: eventIds });
 
   if (error) {
     console.warn('[fetchRealMemberCounts]', error.message);
@@ -20,8 +25,8 @@ export async function fetchRealMemberCounts(eventIds: string[]): Promise<Record<
   }
 
   const counts: Record<string, number> = {};
-  (data ?? []).forEach((row: { event_id: string }) => {
-    counts[row.event_id] = (counts[row.event_id] ?? 0) + 1;
+  (data ?? []).forEach((row: { event_id: string; joined_count: number }) => {
+    counts[row.event_id] = row.joined_count;
   });
   return counts;
 }
