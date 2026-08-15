@@ -70,7 +70,7 @@ module.exports = {
       fallbackToCacheTimeout: 8000,
     },
     runtimeVersion: {
-      policy: 'appVersion',
+      policy: 'fingerprint',
     },
     ios: {
       ...appJson.expo.ios,

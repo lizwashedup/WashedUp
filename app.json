@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.washedup.app",
-      "buildNumber": "27",
+      "buildNumber": "28",
       "usesAppleSignIn": true,
       "associatedDomains": ["applinks:washedup.app"],
       "config": {},
@@ -50,7 +50,7 @@
     },
     "android": {
       "package": "com.washedup.app",
-      "versionCode": 12,
+      "versionCode": 13,
       "googleServicesFile": "./google-services.json",
       "icon": "./assets/images/android-icon.png",
       "adaptiveIcon": {
