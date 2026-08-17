@@ -52,3 +52,6 @@ GoogleService-Info.plist
 
 # local device-test scratch docs (never bundled; keeps OTA publishes pristine)
 docs/phone-canonical-device-test.md
+
+# local supabase CLI link artifact, no secrets, just this machine's project ref
+supabase/.temp/
