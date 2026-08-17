@@ -1,0 +1,109 @@
+{
+  "format": 3,
+  "migration_count": 197,
+  "inventory_sha256": "51c2d5fe425733eaccb490dfb47fa5fc39c7d3471de58293db7dbee3f22f0b40",
+  "side_effect_union_count": 57,
+  "approved_legacy_secret_literals": [
+    {
+      "file": "20260505000000_albums_processor_webhook.sql",
+      "sha256": "32f7d702ff3c189d2d416feb68f74deaae8c4793ef0c898d222a563fe683439d",
+      "occurrences": 1
+    }
+  ],
+  "classification_counts": {
+    "scheduler": 6,
+    "top_level_dml": 21,
+    "do_fixture_dml": 29,
+    "irreversible_ddl": 1,
+    "stateful_replacement": 8,
+    "default_privileges": 1
+  },
+  "classification_reasons": {
+    "scheduler": "Creates, alters, or removes scheduler state.",
+    "top_level_dml": "Contains top-level data mutation that depends on existing state.",
+    "do_fixture_dml": "Contains a DO block that mutates fixture, self-test, or existing state.",
+    "irreversible_ddl": "Drops an object with irreversible CASCADE behavior.",
+    "stateful_replacement": "Replaces a constraint without an existence guard.",
+    "default_privileges": "Changes the ACL defaults inherited by future functions."
+  },
+  "side_effect_migrations": {
+    "scheduler": [
+      "20260504220000_albums_v1_cron.sql",
+      "20260506100000_albums_morning_pt_timing.sql",
+      "20260516120000_albums_cover_and_archive.sql",
+      "20260518230000_waitlist_exceptions_expiry_cron.sql",
+      "20260707120000_event_chat_model.sql",
+      "20260814140100_schedule_release_expired_ticket_holds.sql"
+    ],
+    "top_level_dml": [
+      "20260323000000_launch_party_unlimited_capacity.sql",
+      "20260327000001_add_end_time_to_plans.sql",
+      "20260330000000_remove_symmetric_friend_rows.sql",
+      "20260401000000_fix_full_status_bugs.sql",
+      "20260406200000_plan_albums.sql",
+      "20260407000000_featured_events_and_official_host.sql",
+      "20260407100000_update_mark_descriptions_and_icons.sql",
+      "20260411000000_add_welcome_seen_to_profiles.sql",
+      "20260504210000_albums_v1_schema.sql",
+      "20260506130000_marketing_media_bucket.sql",
+      "20260525000000_chat_phase1_voice_messages.sql",
+      "20260611000400_circle_covers_bucket_limit.sql",
+      "20260705120000_community_media_bucket.sql",
+      "20260706100500_join_flow.sql",
+      "20260707120000_event_chat_model.sql",
+      "20260707200000_intro_blurb.sql",
+      "20260813104957_office_finance_seed_data.sql",
+      "20260813104958_office_tools_seed_data.sql",
+      "20260813231609_block_non_us_signups.sql",
+      "20260814130000_ticket_inbox_failed_state_and_event_ordering.sql",
+      "20260814151000_one_reaction_per_person_v2.sql"
+    ],
+    "do_fixture_dml": [
+      "20260608000100_decline_soft.sql",
+      "20260608000200_accept_block_check.sql",
+      "20260608000300_incoming_requests_context_line.sql",
+      "20260608000400_people_request_notif_copy.sql",
+      "20260608000500_notif_one_line.sql",
+      "20260608000600_decline_block_guard.sql",
+      "20260611000000_add_or_accept_person.sql",
+      "20260611000100_interest_signal_reshow_fix.sql",
+      "20260611000200_update_circle_clear_cover.sql",
+      "20260611000300_get_circle_detail_data.sql",
+      "20260611000500_plan_feedback_fine_and_upsert.sql",
+      "20260611000600_survey_plan_type_facts.sql",
+      "20260611000700_review_ask_eligibility.sql",
+      "20260611000800_survey_keep_state.sql",
+      "20260614000100_report_no_show_rpc.sql",
+      "20260702184012_communities_skeleton.sql",
+      "20260702190455_operator_applications.sql",
+      "20260706100500_join_flow.sql",
+      "20260706150000_mvp_batch.sql",
+      "20260707120000_event_chat_model.sql",
+      "20260707200000_intro_blurb.sql",
+      "20260708200000_templates_and_drafts.sql",
+      "20260708220000_open_composer.sql",
+      "20260712035429_fix_batch_28_s1_s2_s3_s5.sql",
+      "20260713224144_organizer_profile_proposal_36.sql",
+      "20260714052620_leader_card_proposal_41.sql",
+      "20260714223943_answers_withhold_proposal_42.sql",
+      "20260716000100_first_join_prompts_and_area_wishlists.sql",
+      "20260716233736_participation_notice_evidence_proposal_49.sql"
+    ],
+    "irreversible_ddl": [
+      "20260504200000_drop_album_v0.sql"
+    ],
+    "stateful_replacement": [
+      "20260430190000_messages_reply_fk_set_null.sql",
+      "20260430210000_admin_fks_set_null.sql",
+      "20260611000500_plan_feedback_fine_and_upsert.sql",
+      "20260702190455_operator_applications.sql",
+      "20260706100500_join_flow.sql",
+      "20260706150000_mvp_batch.sql",
+      "20260708220000_open_composer.sql",
+      "20260814120000_ticket_payouts_payout_id_shared_per_organizer.sql"
+    ],
+    "default_privileges": [
+      "20260816121000_revoke_unsafe_default_function_execute.sql"
+    ]
+  }
+}

@@ -455,7 +455,10 @@ export default function ProfileScreen() {
       console.error('[delete_own_account] failed:', err);
       setAlertInfo({
         title: 'Something went wrong',
-        message: 'We could not delete your account automatically.\n\nPlease email hello@washedup.app and we will delete it within 24 hours.',
+        message: friendlyError(
+          err,
+          'We could not delete your account automatically.\n\nPlease email hello@washedup.app and we will delete it within 24 hours.',
+        ),
       });
     }
   };

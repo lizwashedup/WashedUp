@@ -1,0 +1,190 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+DEFAULT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
+REPO_ROOT=${WASHEDUP_SOURCE_ROOT:-$DEFAULT_ROOT}
+CONTRACT_ROOT=${WASHEDUP_CONTRACT_ROOT:-$REPO_ROOT}
+CONTAINER="washedup-db-contracts-$$"
+CONTAINER_ID=
+IMAGE="postgres:17-alpine"
+DELETION_MIGRATION="$REPO_ROOT/supabase/migrations/20260815120000_user_deletion_fk_gap.sql"
+REFUND_MIGRATION="$REPO_ROOT/supabase/migrations/20260814000000_refund_claim_and_reconcile_v3.sql"
+VAULT_MIGRATION="$REPO_ROOT/supabase/migrations/20260815120100_notify_tokens_to_vault.sql"
+PAYOUT_CLAIM_MIGRATION="$REPO_ROOT/supabase/migrations/20260816120000_claim_ticket_payout_batch_atomic.sql"
+DEFAULT_PRIVILEGES_MIGRATION="$REPO_ROOT/supabase/migrations/20260816121000_revoke_unsafe_default_function_execute.sql"
+PEOPLE_DM_MIGRATION="$REPO_ROOT/supabase/migrations/20260816122000_require_accepted_relationship_for_dm.sql"
+CIRCLE_TRUST_MIGRATION="$REPO_ROOT/supabase/migrations/20260816123000_circle_member_vouching.sql"
+CHAT_SCALE_MIGRATION="$REPO_ROOT/supabase/migrations/20260816130000_r42_chat_scale_review_only.sql"
+PAYOUT_BLOCK_MIGRATION="$REPO_ROOT/supabase/migrations/20260817120000_block_delete_account_with_pending_payout.sql"
+CONTRACT_FILES="$CONTRACT_ROOT/supabase/tests/contracts"
+
+case "$CONTAINER" in
+  washedup-db-contracts-[0-9]*) ;;
+  *) echo "unsafe container name: $CONTAINER" >&2; exit 2 ;;
+esac
+
+for required_file in \
+  "$DELETION_MIGRATION" \
+  "$REFUND_MIGRATION" \
+  "$VAULT_MIGRATION" \
+  "$PAYOUT_CLAIM_MIGRATION" \
+  "$DEFAULT_PRIVILEGES_MIGRATION" \
+  "$PEOPLE_DM_MIGRATION" \
+  "$CIRCLE_TRUST_MIGRATION" \
+  "$CHAT_SCALE_MIGRATION" \
+  "$PAYOUT_BLOCK_MIGRATION" \
+  "$CONTRACT_FILES/00_account_deletion_fixture.sql" \
+  "$CONTRACT_FILES/01_account_deletion_contract.sql" \
+  "$CONTRACT_FILES/10_refund_fixture.sql" \
+  "$CONTRACT_FILES/11_refund_two_session_contract.sql" \
+  "$CONTRACT_FILES/20_vault_fixture.sql" \
+  "$CONTRACT_FILES/21_vault_contract.sql" \
+  "$CONTRACT_FILES/30_default_privileges_fixture.sql" \
+  "$CONTRACT_FILES/31_default_privileges_contract.sql" \
+  "$CONTRACT_FILES/40_payout_claim_fixture.sql" \
+  "$CONTRACT_FILES/41_payout_claim_contract.sql" \
+  "$CONTRACT_FILES/50_people_dm_fixture.sql" \
+  "$CONTRACT_FILES/51_people_dm_contract.sql" \
+  "$CONTRACT_FILES/52_circle_trust_fixture.sql" \
+  "$CONTRACT_FILES/53_circle_trust_contract.sql" \
+  "$CONTRACT_FILES/60_chat_scale_fixture.sql" \
+  "$CONTRACT_FILES/61_chat_scale_contract.sql" \
+  "$CONTRACT_FILES/70_payout_block_fixture.sql" \
+  "$CONTRACT_FILES/71_payout_block_contract.sql"
+do
+  if [ ! -f "$required_file" ]; then
+    echo "required private contract file is missing: $required_file" >&2
+    exit 2
+  fi
+done
+
+cleanup() {
+  if [ -z "$CONTAINER_ID" ]; then return; fi
+  invalid_id=$(printf '%s' "$CONTAINER_ID" | tr -d '0-9a-f')
+  if [ "${#CONTAINER_ID}" -ne 64 ] || [ -n "$invalid_id" ]; then
+    echo "refusing cleanup for invalid container id" >&2
+    return
+  fi
+  actual_id=$(docker inspect --format '{{.Id}}' "$CONTAINER_ID" 2>/dev/null || true)
+  if [ "$actual_id" = "$CONTAINER_ID" ]; then
+    docker rm -f "$CONTAINER_ID" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+static_status=0
+node "$REPO_ROOT/scripts/db-contracts/static-contracts.mjs" || static_status=$?
+
+docker image inspect "$IMAGE" >/dev/null
+CONTAINER_ID=$(docker run \
+  --detach \
+  --rm \
+  --pull never \
+  --network none \
+  --name "$CONTAINER" \
+  --env POSTGRES_PASSWORD=contract-only \
+  --volume "$DELETION_MIGRATION:/migrations/deletion.sql:ro" \
+  --volume "$REFUND_MIGRATION:/migrations/refund.sql:ro" \
+  --volume "$VAULT_MIGRATION:/migrations/vault.sql:ro" \
+  --volume "$PAYOUT_CLAIM_MIGRATION:/migrations/payout-claim.sql:ro" \
+  --volume "$DEFAULT_PRIVILEGES_MIGRATION:/migrations/default-privileges.sql:ro" \
+  --volume "$PEOPLE_DM_MIGRATION:/migrations/people-dm.sql:ro" \
+  --volume "$CIRCLE_TRUST_MIGRATION:/migrations/circle-trust.sql:ro" \
+  --volume "$CHAT_SCALE_MIGRATION:/migrations/chat-scale.sql:ro" \
+  --volume "$PAYOUT_BLOCK_MIGRATION:/migrations/payout-block.sql:ro" \
+  --volume "$CONTRACT_FILES:/contracts:ro" \
+  "$IMAGE")
+invalid_id=$(printf '%s' "$CONTAINER_ID" | tr -d '0-9a-f')
+if [ "${#CONTAINER_ID}" -ne 64 ] || [ -n "$invalid_id" ]; then
+  echo "docker returned an invalid container id" >&2
+  CONTAINER_ID=
+  exit 2
+fi
+
+ready=0
+attempt=0
+while [ "$attempt" -lt 30 ]; do
+  if docker exec "$CONTAINER_ID" pg_isready -U postgres >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  attempt=$((attempt + 1))
+  sleep 1
+done
+if [ "$ready" -ne 1 ]; then
+  echo "PostgreSQL did not become ready" >&2
+  exit 2
+fi
+
+psql_file() {
+  database=$1
+  file=$2
+  docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d "$database" -f "$file"
+}
+
+docker exec "$CONTAINER_ID" createdb -U postgres deletion_contract
+psql_file deletion_contract /contracts/00_account_deletion_fixture.sql
+psql_file deletion_contract /migrations/deletion.sql
+psql_file deletion_contract /contracts/01_account_deletion_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres refund_contract
+psql_file refund_contract /contracts/10_refund_fixture.sql
+awk '/fix 3: reconcile v3/{exit} {print}' \
+  "$REFUND_MIGRATION" \
+  | docker exec -i "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d refund_contract
+psql_file refund_contract /contracts/11_refund_two_session_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres vault_contract
+psql_file vault_contract /contracts/20_vault_fixture.sql
+set +e
+vault_missing_output=$(docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d vault_contract \
+  -f /migrations/vault.sql 2>&1)
+vault_missing_status=$?
+set -e
+if [ "$vault_missing_status" -eq 0 ]; then
+  echo "Vault precondition contract failed: migration accepted missing secrets" >&2
+  exit 1
+fi
+echo "$vault_missing_output" | grep -F "refusing to apply: vault secret(s)" >/dev/null
+docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d vault_contract -c \
+  "INSERT INTO vault.decrypted_secrets(name, decrypted_secret) VALUES ('notify_report_run_token','fixture-report-token'), ('notify_plan_posted_run_token','fixture-plan-token');"
+psql_file vault_contract /migrations/vault.sql
+psql_file vault_contract /contracts/21_vault_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres default_privileges_contract
+psql_file default_privileges_contract /contracts/30_default_privileges_fixture.sql
+psql_file default_privileges_contract /migrations/default-privileges.sql
+psql_file default_privileges_contract /contracts/31_default_privileges_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres payout_contract
+psql_file payout_contract /contracts/40_payout_claim_fixture.sql
+psql_file payout_contract /migrations/payout-claim.sql
+psql_file payout_contract /contracts/41_payout_claim_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres people_dm_contract
+psql_file people_dm_contract /contracts/50_people_dm_fixture.sql
+psql_file people_dm_contract /migrations/people-dm.sql
+psql_file people_dm_contract /contracts/51_people_dm_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres circle_trust_contract
+psql_file circle_trust_contract /contracts/52_circle_trust_fixture.sql
+psql_file circle_trust_contract /migrations/circle-trust.sql
+psql_file circle_trust_contract /contracts/53_circle_trust_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres chat_scale_contract
+psql_file chat_scale_contract /contracts/60_chat_scale_fixture.sql
+psql_file chat_scale_contract /migrations/chat-scale.sql
+psql_file chat_scale_contract /contracts/61_chat_scale_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres payout_block_contract
+psql_file payout_block_contract /contracts/70_payout_block_fixture.sql
+psql_file payout_block_contract /migrations/payout-block.sql
+psql_file payout_block_contract /contracts/71_payout_block_contract.sql
+
+echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, and pending-payout deletion block"
+if [ "$static_status" -ne 0 ]; then
+  echo "Release gate remains closed by static diagnostics"
+  exit "$static_status"
+fi
+echo "PASS: private database contract gate"

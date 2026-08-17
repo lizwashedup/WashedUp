@@ -36,6 +36,33 @@ Deno.serve(async (req: Request) => {
       { auth: { persistSession: false } }
     );
 
+    // Block on a pending organizer payout before ever reaching GoTrue.
+    // The BEFORE DELETE trigger on auth.users (see migration
+    // 20260817120000) enforces this regardless, but GoTrue wraps internal
+    // DB errors from admin.deleteUser() into a generic message, so this
+    // explicit pre-check is what actually gets the specific "pending
+    // payout" text back to the caller instead of an opaque failure.
+    const { data: hasPendingPayout, error: payoutCheckError } = await supabaseAdmin.rpc(
+      'organizer_has_pending_payout',
+      { p_organizer_user_id: user.id }
+    );
+    if (payoutCheckError) {
+      console.error('delete-user pending-payout check error:', payoutCheckError);
+      return new Response(
+        JSON.stringify({ error: 'Could not verify payout status. Please try again.' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    if (hasPendingPayout) {
+      return new Response(
+        JSON.stringify({
+          error: 'Your account has a pending payout that hasn\'t been paid out yet. It must be paid before your account can be deleted. Contact hello@washedup.app if you have questions.',
+          code: 'pending_organizer_payout',
+        }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(user.id);
     if (deleteError) {
       console.error('deleteUser error:', deleteError);

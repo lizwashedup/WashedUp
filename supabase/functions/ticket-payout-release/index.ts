@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@18';
+import { claimPayoutBatch } from '../_shared/payoutBatchClaim.ts';
 /**
  * ticket-payout-release — courier v3 for SQL-93 (receivable netting +
  * consumption; ticketing lane 2026-07-31). NOT DEPLOYED; local canonical.
@@ -30,11 +31,16 @@ import Stripe from 'npm:stripe@18';
  * share the payout id.
  *
  * FAILURE MODES (deliberate):
- *   - pre-payout bookkeeping error → any pending rows already written for
- *     this organizer are flipped to 'failed' so the next run retries; no
- *     Stripe call is made.
+ *   - pre-payout bookkeeping error → the atomic claim returns without a
+ *     partial organizer batch; no Stripe call is made.
  *   - Stripe payout error (e.g. the first-payout availability hold) → all
  *     this organizer's rows marked 'failed' with the reason; retried next run.
+ *   - idempotency key reused with different params (e.g. a refund shrank the
+ *     total between a proven stripeDecided rejection and its retry) → if
+ *     every row in the batch was already 'failed' from that proven rejection
+ *     and never reached Stripe under its old key, the retry folds the amount
+ *     into a fresh key and stays 'failed' (retried next run); any other
+ *     reuse stays 'pending', same as the case below.
  *   - post-payout bookkeeping error → rows stay 'pending' (money MOVED):
  *     pending suppresses re-selection, so the cron can never double-pay;
  *     the stuck rows are loud in the log and surface for manual settle.
@@ -45,7 +51,6 @@ import Stripe from 'npm:stripe@18';
  * live word (2026-07-31, PBC + EIN seller of record) a live key is accepted
  * alongside a test key; only a missing or malformed key is refused.
  */ const MAX_ORGANIZERS = 25;
-const UNIQUE_VIOLATION = '23505';
 function json(status, body) {
   return new Response(JSON.stringify(body), {
     status,
@@ -115,87 +120,46 @@ Deno.serve(async (req)=>{
   for (const row of (due ?? []).slice(0, MAX_ORGANIZERS)){
     const events = Array.isArray(row.events) ? row.events : [];
     if (events.length === 0 || row.total_due_cents <= 0) continue;
-    // THE CLAIM, atomic and all-or-nothing per organizer. This replaces an
-    // upsert with onConflict 'event_id', which UPDATEd on conflict and so
-    // provided zero mutual exclusion: the 6-hourly cron and a manual
-    // x-run-token run could both read the same due list and both pay.
-    // Now a plain INSERT wins the fresh case (the ticket_payouts_one_per_event
-    // unique index arbitrates; the loser gets 23505), and an existing row is
-    // taken only by a conditional update off 'failed', the house pattern from
-    // ticket-inbox-drain. Under READ COMMITTED the loser of that update
-    // re-evaluates the WHERE against the winner's committed row, sees
-    // status='pending' and matches nothing.
-    // ALL-OR-NOTHING is the money-critical half: row.total_due_cents is the
-    // WHOLE organizer's sum, so paying it while another run owns even one
-    // sibling event would pay that sibling twice. Losing any event releases
-    // every event already claimed and skips the organizer entirely.
-    const writtenEventIds = [];
-    let claimFailure = null;
-    for (const ev of events){
-      const { error: insErr } = await service.from('ticket_payouts').insert({
-        event_id: ev.event_id,
-        organizer_user_id: row.organizer_user_id,
-        stripe_account_id_snapshot: row.stripe_account_id,
-        amount_cents: ev.amount_cents,
-        status: 'pending',
-        failure_message: null
-      });
-      if (!insErr) {
-        writtenEventIds.push(ev.event_id);
-        continue;
-      }
-      if (insErr.code !== UNIQUE_VIOLATION) {
-        console.error('ticket-payout-release: pending insert failed', ev.event_id, insErr.message);
-        claimFailure = 'pre-payout bookkeeping failed';
-        break;
-      }
-      // a row already exists. Only a 'failed' one is ours to take: a
-      // payout.failed webhook or a prior errored run left it retryable, and
-      // list_ticket_payouts_due re-selects exactly those. pending/released/
-      // paid belong to another run in flight. Clearing stripe_payout_id and
-      // released_at is required, not cosmetic: a stale po_ id left on a
-      // reclaimed row would let a late payout.paid for the OLD payout stamp
-      // this new in-flight claim as paid.
-      const { data: reclaimed, error: reErr } = await service.from('ticket_payouts').update({
-        organizer_user_id: row.organizer_user_id,
-        stripe_account_id_snapshot: row.stripe_account_id,
-        amount_cents: ev.amount_cents,
-        status: 'pending',
-        failure_message: null,
-        stripe_payout_id: null,
-        released_at: null
-      }).eq('event_id', ev.event_id).eq('status', 'failed').select('event_id');
-      if (reErr) {
-        console.error('ticket-payout-release: claim update failed', ev.event_id, reErr.message);
-        claimFailure = 'pre-payout bookkeeping failed';
-        break;
-      }
-      if (!reclaimed || reclaimed.length === 0) {
-        console.error('ticket-payout-release: claim lost to a concurrent run', ev.event_id);
-        claimFailure = 'claim lost to a concurrent run';
-        break;
-      }
-      writtenEventIds.push(ev.event_id);
+    // Snapshot BEFORE the claim: reclaiming a 'failed' row unconditionally
+    // wipes status/failure_message/stripe_payout_id (see the migration's
+    // ON CONFLICT DO UPDATE), so this is the only point that can still see
+    // whether every event here was already 'failed' from THIS file's own
+    // proven stripeDecided rejection below (Stripe gave a real decision,
+    // e.g. balance_insufficient, and stripe_payout_id was never set because
+    // no payout was ever created under the old key) rather than some other
+    // route to 'failed', such as a webhook-driven post-payout failure
+    // (stripe_payout_id WOULD be set there, from when it was briefly
+    // 'released'). Only the former is a genuinely clean slate: a length
+    // mismatch (a brand-new event with no row yet) or any non-clean row
+    // leaves this false and the existing conservative path below unchanged.
+    const eventIdsForClaim = events.map((ev: { event_id: string })=>ev.event_id);
+    const { data: priorRows, error: priorErr } = await service.from('ticket_payouts').select('event_id, status, stripe_payout_id').in('event_id', eventIdsForClaim);
+    if (priorErr) {
+      console.error('ticket-payout-release: prior-state read failed', row.organizer_user_id, priorErr.message);
     }
-    if (claimFailure) {
-      // no money moved; release the whole claim back to 'failed' so the next
-      // run retries this organizer as one batch
-      if (writtenEventIds.length > 0) {
-        await service.from('ticket_payouts').update({
-          status: 'failed',
-          failure_message: claimFailure
-        }).in('event_id', writtenEventIds);
-      }
+    const provenCleanRetry = !priorErr && (priorRows ?? []).length === eventIdsForClaim.length && (priorRows ?? []).every((r)=>r.status === 'failed' && r.stripe_payout_id === null);
+    // One database RPC claims the complete organizer batch transactionally.
+    // A conflict on any sibling rolls back every row from this claim.
+    const batchClaim = await claimPayoutBatch(
+      (name, args)=>service.rpc(name, args),
+      row,
+      events
+    );
+    if (!batchClaim.claimed) {
+      console.error('ticket-payout-release: atomic batch claim failed', row.organizer_user_id, batchClaim.errorMessage ?? batchClaim.status);
       organizersFailed++;
       continue;
     }
+    const writtenEventIds = batchClaim.eventIds;
     // Deterministic across retries of the SAME batch: organizer + the sorted
     // event ids being paid. Without it, a create that timed out AFTER Stripe
     // made the payout was marked 'failed', re-selected by
     // list_ticket_payouts_due (which excludes only pending/released/paid) and
     // paid AGAIN on the next 6-hourly run. The amount is deliberately NOT in
-    // the key: if a refund moved the total, Stripe must refuse the retry
-    // rather than mint a second payout under a fresh key.
+    // this base key: if a refund moved the total, Stripe must refuse the
+    // retry rather than mint a second payout under a fresh key. That
+    // refusal is the intended backstop for any retry whose prior outcome
+    // isn't provably clean (see the catch block below).
     // ONE sorted list feeds BOTH the key and the metadata below. Stripe
     // compares every request param against the key, so a metadata string that
     // reordered between attempts would raise idempotency_error on a retry that
@@ -204,7 +168,18 @@ Deno.serve(async (req)=>{
     const paidEventIds = [
       ...writtenEventIds
     ].sort();
-    const idempotencyKey = `wu-payout-v1-${await sha256Hex(`${row.organizer_user_id}|${paidEventIds.join(',')}`)}`;
+    // provenCleanRetry (above) already proves no payout was ever created
+    // under the base key: excluding the amount there is exactly what
+    // permanently strands a legitimate smaller payout after a refund.
+    // Stripe correctly refuses the reused base key on the changed amount
+    // (idempotency_error), and with nothing to prove the money didn't move
+    // this time, that used to get stamped 'pending' forever. Folding
+    // total_due_cents into the key ONLY in this proven-clean case gives a
+    // key Stripe has never seen the instant the amount actually changed, so
+    // it evaluates fresh instead of refusing a reused key.
+    const idempotencyKey = provenCleanRetry
+      ? `wu-payout-v1-amt-${await sha256Hex(`${row.organizer_user_id}|${paidEventIds.join(',')}|${row.total_due_cents}`)}`
+      : `wu-payout-v1-${await sha256Hex(`${row.organizer_user_id}|${paidEventIds.join(',')}`)}`;
     try {
       // ONE manual payout of the organizer's summed due from their connected
       // balance (their account is payout_schedule=manual). Only reaches here
@@ -254,6 +229,24 @@ Deno.serve(async (req)=>{
       // never fires, which would silently disable this whole branch. Both
       // spellings are checked so an SDK rename cannot re-break it.
       if (err?.rawType === 'idempotency_error' || err?.type === 'StripeIdempotencyError') {
+        if (provenCleanRetry) {
+          // The key above already folds in total_due_cents for exactly this
+          // case, so reaching here means Stripe refused even the amount-
+          // scoped key; a plain amount change cannot explain that. Still
+          // not proof money moved: this row's ONLY prior state was a proven
+          // stripeDecided rejection that never created a payout under its
+          // key. Stay retryable instead of stranding it: 'failed', not
+          // 'pending'. list_ticket_payouts_due re-selects it, and the next
+          // run recomputes this same amount-scoped key fresh off whatever
+          // total is due then.
+          await service.from('ticket_payouts').update({
+            status: 'failed',
+            failure_message: `idempotency conflict after a proven-clean prior rejection, retrying: ${reason}`.slice(0, 1000)
+          }).in('event_id', writtenEventIds);
+          console.error('ticket-payout-release: IDEMPOTENCY CONFLICT AFTER PROVEN-CLEAN REJECTION, RETRYING NEXT RUN', row.organizer_user_id, idempotencyKey, reason);
+          organizersFailed++;
+          continue;
+        }
         // this exact batch already reached Stripe under this key with
         // DIFFERENT params, so the money very likely moved. It must not stay
         // retryable: Stripe releases an idempotency key after 24h, and a
