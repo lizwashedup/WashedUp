@@ -5,6 +5,14 @@ import { checkContent } from '../lib/contentFilter';
 import { logError } from '../lib/logger';
 import { useQueryClient } from '@tanstack/react-query';
 import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
+import {
+  CHAT_NEWEST_PAGE_SIZE,
+  mergeChatBurst,
+  olderChatFilter,
+  oldestChatCursor,
+  replaceNewestChatPage,
+  toChronologicalChatPage,
+} from '../lib/chatPaging';
 
 // Monotonic optimistic-message id. Date.now() alone collides when two sends
 // land in the same millisecond (rapid consecutive sends); the realtime dedup
@@ -107,6 +115,8 @@ export function useChat(key: ConversationKey) {
   const blockedIdsRef = useRef<Record<string, boolean>>({});
   const reactionInFlightRef = useRef<Set<string>>(new Set());
   const messagesRef = useRef<ChatMessage[]>([]);
+  const loadingOlderRef = useRef(false);
+  const hasOlderRef = useRef(false);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -126,6 +136,8 @@ export function useChat(key: ConversationKey) {
   useEffect(() => {
     if (!conversationId) return;
     cancelledRef.current = false;
+    hasOlderRef.current = false;
+    setMessages([]);
     fetchMessages().catch((err) => logError(err, 'useChat.fetchMessages'));
 
     // Event channel name kept byte-identical to before; circles use a distinct name.
@@ -167,12 +179,9 @@ export function useChat(key: ConversationKey) {
                 }
               }
               if (optIdx >= 0) {
-                // Swap in place so message order is preserved.
-                const next = prev.slice();
-                next[optIdx] = msg;
-                return next;
+                return mergeChatBurst(prev.filter((_, index) => index !== optIdx), [msg]);
               }
-              return [...prev, msg];
+              return mergeChatBurst(prev, [msg]);
             });
           }
         },
@@ -221,7 +230,9 @@ export function useChat(key: ConversationKey) {
           .from('messages')
           .select(selectCols)
           .eq(parentCol, conversationId)
-          .order('created_at', { ascending: true }),
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(CHAT_NEWEST_PAGE_SIZE),
         supabase.auth
           .getUser()
           .then(({ data: d }) => d.user)
@@ -231,8 +242,11 @@ export function useChat(key: ConversationKey) {
           }),
       ]);
       if (cancelledRef.current) return;
+      const page = toChronologicalChatPage((data ?? []) as unknown as ChatMessage[]);
+      const more = page.length === CHAT_NEWEST_PAGE_SIZE;
+      hasOlderRef.current = more;
       if (user) {
-        const msgIds = (data ?? []).map((m: any) => m.id);
+        const msgIds = page.map((m: any) => m.id);
         // Mark this conversation read. Plans and circles use different unique
         // keys on chat_reads, so the onConflict target differs.
         const readUpsert = kind === 'event'
@@ -279,7 +293,7 @@ export function useChat(key: ConversationKey) {
         (profile?.blocked_users ?? []).forEach((uid: string) => { blockedLookup[uid] = true; });
         blockedIdsRef.current = blockedLookup;
 
-        const filtered = (data ?? []).filter((msg: any) => !blockedLookup[msg.user_id]);
+        const filtered = page.filter((msg: any) => !blockedLookup[msg.user_id]);
         const enriched = await attachSenders(filtered);
         const withReactions = enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] }));
         // Resolve reply references from the same message array
@@ -292,22 +306,107 @@ export function useChat(key: ConversationKey) {
           }
           return m;
         });
-        if (!cancelledRef.current) setMessages(withReplies);
+        if (!cancelledRef.current) {
+          setMessages(prev => {
+            const optimistic = prev.filter(message => message.id.startsWith('optimistic-'));
+            return mergeChatBurst(
+              replaceNewestChatPage(
+                prev.filter(message => !message.id.startsWith('optimistic-')),
+                withReplies,
+              ),
+              optimistic,
+            );
+          });
+        }
       } else {
         if (data) {
           // No user: either signed out, or getUser() lost the auth-lock race.
           // Reuse the last known block list so a lock timeout can never surface
           // a blocked sender's messages.
           const blocked = blockedIdsRef.current;
-          const filtered = (data as any[]).filter((msg: any) => !blocked[msg.user_id]);
+          const filtered = page.filter((msg: any) => !blocked[msg.user_id]);
           const enriched = await attachSenders(filtered);
-          if (!cancelledRef.current) setMessages(enriched);
+          if (!cancelledRef.current) {
+            setMessages(prev => {
+              const optimistic = prev.filter(message => message.id.startsWith('optimistic-'));
+              return mergeChatBurst(
+                replaceNewestChatPage(
+                  prev.filter(message => !message.id.startsWith('optimistic-')),
+                  enriched,
+                ),
+                optimistic,
+              );
+            });
+          }
         }
       }
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
   }, [kind, conversationId]);
+
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current || !hasOlderRef.current) return;
+    const cursor = oldestChatCursor(
+      messagesRef.current.filter(message => !message.id.startsWith('optimistic-')),
+    );
+    if (!cursor) return;
+
+    loadingOlderRef.current = true;
+    try {
+      const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id${kind === 'circle' ? ', circle_id' : ''}`;
+      const { data, error } = await supabase
+        .from('messages')
+        .select(selectCols)
+        .eq(parentCol, conversationId)
+        .or(olderChatFilter(cursor))
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(CHAT_NEWEST_PAGE_SIZE);
+      if (error) throw error;
+      if (cancelledRef.current) return;
+
+      const page = toChronologicalChatPage((data ?? []) as unknown as ChatMessage[]);
+      const more = page.length === CHAT_NEWEST_PAGE_SIZE;
+      hasOlderRef.current = more;
+
+      const filtered = page.filter(message => !blockedIdsRef.current[message.user_id]);
+      const enriched = await attachSenders(filtered);
+      const msgIds = enriched.map(message => message.id);
+      const { data: reactionsData } = msgIds.length > 0
+        ? await supabase
+            .from('message_reactions')
+            .select('message_id, user_id, reaction')
+            .in('message_id', msgIds)
+        : { data: [] as any[] };
+      if (cancelledRef.current) return;
+
+      const reactionsByMsg: Record<string, MessageReaction[]> = {};
+      (reactionsData ?? []).forEach((reaction: any) => {
+        if (!reactionsByMsg[reaction.message_id]) reactionsByMsg[reaction.message_id] = [];
+        reactionsByMsg[reaction.message_id].push({ user_id: reaction.user_id, reaction: reaction.reaction });
+      });
+      const withReactions = enriched.map(message => ({
+        ...message,
+        reactions: reactionsByMsg[message.id] ?? [],
+      }));
+
+      setMessages(prev => {
+        const merged = mergeChatBurst(prev, withReactions);
+        const byId = new Map(merged.map(message => [message.id, message]));
+        return merged.map(message => {
+          const parent = message.reply_to_message_id ? byId.get(message.reply_to_message_id) : null;
+          return parent
+            ? { ...message, reply_to: { id: parent.id, content: parent.content, sender_name: parent.sender?.first_name ?? null } }
+            : message;
+        });
+      });
+    } catch (error) {
+      logError(error, 'useChat.loadOlder');
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  }, [kind, parentCol, conversationId]);
 
   const toggleReaction = useCallback(async (messageId: string, reaction = 'heart') => {
     const userId = currentUserIdRef.current;
@@ -558,5 +657,17 @@ export function useChat(key: ConversationKey) {
     }
   }, [fetchMessages]);
 
-  return { messages, loading, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, refetch: fetchMessages };
+  return {
+    messages,
+    loading,
+    currentUserId,
+    sendMessage,
+    sendLocation,
+    sendAudio,
+    deleteMessage,
+    editMessage,
+    toggleReaction,
+    loadOlder,
+    refetch: fetchMessages,
+  };
 }

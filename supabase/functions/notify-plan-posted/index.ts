@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { fetchWithTimeout } from '../_shared/fetchWithTimeout.ts';
+import { isAuthorizedRunToken } from '../_shared/runTokenAuth.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
 const EXTERNAL_FETCH_TIMEOUT_MS = 10_000;
@@ -23,15 +24,6 @@ interface PlanPayload {
     created_at: string;
     status: string;
   };
-}
-
-// Constant-time compare so a mistimed response can't leak the service role
-// key one byte at a time. Same idiom as ticket-inbox-drain / ticket-payout-release.
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
 }
 
 // HTML-escape any interpolated value before it lands in the email body.
@@ -64,8 +56,7 @@ Deno.serve(async (req) => {
   // Postgres setting that pattern needs turned out to be permanently
   // unsettable on this project (Supabase returns 42501 permission denied
   // even from the dashboard SQL editor as the postgres role).
-  const givenToken = req.headers.get('x-run-token') ?? '';
-  if (!RUN_TOKEN || !timingSafeEqual(givenToken, RUN_TOKEN)) {
+  if (!isAuthorizedRunToken(req.headers.get('x-run-token'), RUN_TOKEN)) {
     return new Response(JSON.stringify({ error: 'forbidden' }), {
       status: 403,
       headers: { 'Content-Type': 'application/json' },

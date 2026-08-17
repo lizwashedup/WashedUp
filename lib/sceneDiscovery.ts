@@ -36,6 +36,25 @@ function eventClockMs(e: Pick<SceneEvent, 'event_date' | 'start_time'> & { end_t
   return null;
 }
 
+export function applySceneFeedPolicy<T extends Pick<SceneEvent, 'event_date' | 'start_time' | 'end_time'>>(
+  rows: readonly T[],
+  nowMs = Date.now(),
+): T[] {
+  return rows
+    .filter((event) => {
+      const clock = eventClockMs(event);
+      return clock === null || clock > nowMs - ROLL_OFF_GRACE_MS;
+    })
+    .sort((a, b) => {
+      const aClock = eventClockMs(a);
+      const bClock = eventClockMs(b);
+      if (aClock === null && bClock === null) return 0;
+      if (aClock === null) return 1;
+      if (bClock === null) return -1;
+      return aClock - bClock;
+    });
+}
+
 export interface SceneEvent {
   id: string;
   title: string;
@@ -72,23 +91,10 @@ export async function getSceneEvents(): Promise<SceneEvent[]> {
     .eq('status', 'Live')
     .limit(60);
   if (error) throw error;
-  const now = Date.now();
   // Past events roll off (the server cron catches up hourly; the feed never
   // waits for it) and the soonest upcoming event leads. Dateless rows sink
   // to the end: they cannot be ranked.
-  const events = ((data ?? []) as SceneEvent[])
-    .filter((e) => {
-      const clock = eventClockMs(e);
-      return clock === null || clock > now - ROLL_OFF_GRACE_MS;
-    })
-    .sort((a, b) => {
-      const ca = eventClockMs(a);
-      const cb = eventClockMs(b);
-      if (ca === null && cb === null) return 0;
-      if (ca === null) return 1;
-      if (cb === null) return -1;
-      return ca - cb;
-    });
+  const events = applySceneFeedPolicy((data ?? []) as SceneEvent[]);
 
   // proposal 36: standalone listings with no public_name override front
   // with the host's organizer profile (name for the byline, logo for the

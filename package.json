@@ -13,7 +13,16 @@
     "ota:guard": "bash scripts/ota-guard.sh",
     "ota:ios": "bash scripts/publish-ota.sh ios",
     "ota:android": "bash scripts/publish-ota.sh android",
-    "test": "jest"
+    "test": "jest",
+    "typecheck": "tsc --noEmit --pretty false",
+    "qa": "npm run qa:all",
+    "qa:all": "npm run qa:traceability && npm run typecheck && npm run qa:test && npm run qa:notifications && npm run qa:payouts",
+    "qa:notifications": "deno test --no-remote --no-config supabase/functions/_tests/runTokenAuth_test.ts",
+    "qa:payouts": "deno test --no-remote --no-config supabase/functions/_tests/payoutReconciliation_test.ts supabase/functions/_tests/payoutBatchClaim_test.ts",
+    "qa:test": "jest --runInBand --ci",
+    "qa:traceability": "node qa/check-traceability.cjs",
+    "test:db:static": "node scripts/db-contracts/static-contracts.mjs",
+    "test:db:private": "sh scripts/db-contracts/run-private-sql-contracts.sh"
   },
   "jest": {
     "preset": "jest-expo",
@@ -22,6 +31,13 @@
     ],
     "testMatch": [
       "**/__tests__/**/*.test.[jt]s?(x)"
+    ],
+    "setupFilesAfterEnv": [
+      "./qa/jest.after-env.cjs"
+    ],
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(?:\\.deno|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base))",
+      "/node_modules/react-native-reanimated/plugin/"
     ]
   },
   "dependencies": {

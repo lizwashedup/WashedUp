@@ -1,4 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  applyPayoutReconciliationFilters,
+  planPayoutReconciliation,
+} from '../_shared/payoutReconciliation.ts';
 /**
  * ticket-inbox-drain — the inbox DRAIN (ticketing lane, 2026-07-21,
  * Cowork's sprint order; RE-CUT same day per Cowork's rejection verdict).
@@ -41,7 +45,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
  *      executor; business raise → TERMINAL per (a).
  *  - checkout.session.expired → pending order canceled; the hold released
  *      if still active, unconditionally attempted.
- *  - payout.paid / payout.failed → ticket_payouts by stripe_payout_id.
+ *  - payout.paid / payout.failed → ticket_payouts by payout id plus the
+ *    connected-account snapshot from the stored Stripe event.
  *  - charge.refund.updated → THE reconcile key (Cowork ruling 2026-07-27:
  *      the keyless drain cannot API-fetch, and this is the only refund event
  *      carrying the Refund id + amount; full-vs-partial is decided by the
@@ -450,24 +455,27 @@ Deno.serve(async (req)=>{
           }
         }
       } else if (row.type === 'payout.paid' || row.type === 'payout.failed') {
-        const payoutId = obj.id;
-        if (!payoutId?.startsWith('po_')) {
-          await stampProcessed('payout event without a po_ id');
-        } else {
-          const isPaid = row.type === 'payout.paid';
-          const { data: updated, error: poErr } = await service.from('ticket_payouts').update(isPaid ? {
-            status: 'paid',
-            paid_at: new Date().toISOString()
-          } : {
-            status: 'failed',
-            failure_message: obj.failure_message ?? obj.failure_code ?? 'payout failed'
-          }).eq('stripe_payout_id', payoutId).select('id');
-          if (poErr) {
-            await recordRetryable(`payout write failed: ${poErr.message}`);
-            continue;
-          }
-          await stampProcessed(updated && updated.length > 0 ? null : `no ledger row for ${payoutId}`);
+        const payoutPlan = planPayoutReconciliation(
+          row.type,
+          row.payload,
+          new Date().toISOString()
+        );
+        if (payoutPlan.kind === 'invalid') {
+          await stampFailed(payoutPlan.reason);
+          failed++;
+          continue;
         }
+        const payoutUpdate = applyPayoutReconciliationFilters(
+          service.from('ticket_payouts').update(payoutPlan.patch),
+          payoutPlan.filters
+        );
+        const { data: updated, error: poErr } = await payoutUpdate.select('id');
+        if (poErr) {
+          await recordRetryable(`payout write failed: ${poErr.message}`);
+          continue;
+        }
+        const payoutId = payoutPlan.filters[0][1];
+        await stampProcessed(updated && updated.length > 0 ? null : `no ledger row for ${payoutId}`);
       } else if (row.type === 'charge.refunded') {
         // superseded as reconcile trigger (Cowork 2026-07-27):
         // charge.refund.updated carries the refund id + amount and is the key

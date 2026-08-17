@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "schema_provenance": "incomplete",
+  "unresolved_versions": [
+    {
+      "version": "20260813200000",
+      "status": "unresolved",
+      "local_candidates": [
+        "20260813200000_event_members_anon_read_rls_fix.sql",
+        "20260813200000_notify_report_restore_auth_header.sql"
+      ],
+      "required_authorized_inspection": [
+        "supabase_migrations.schema_migrations row for version 20260813200000",
+        "event_members anonymous-read policy fingerprint",
+        "notify_report_alert function fingerprint"
+      ],
+      "resolution": null
+    }
+  ]
+}

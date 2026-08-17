@@ -811,7 +811,7 @@ function ChatThread(props: ChatThreadProps) {
       onPress({ x, y, width, height }),
     );
   }, [props.headerMenu]);
-  const { messages, loading, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, refetch } = useChat({ kind: props.kind, id });
+  const { messages, loading, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch } = useChat({ kind: props.kind, id });
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
   const [membersExpanded, setMembersExpanded] = useState(false);
@@ -1885,6 +1885,8 @@ function ChatThread(props: ChatThreadProps) {
             maxToRenderPerBatch={15}
             maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
             onScroll={handleListScroll}
+            onEndReached={() => { void loadOlder(); }}
+            onEndReachedThreshold={0.2}
             scrollEventThrottle={16}
             // Inverted list: the header renders at the visual bottom (newest
             // side), so the typing dots sit just above the input bar.
