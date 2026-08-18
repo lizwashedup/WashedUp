@@ -1,5 +1,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@18';
+import {
+  stripeKeyIsTest,
+  stripeKeyIsLive,
+  resolveClientCheckoutKey,
+  namespaceIdempotencyKey,
+  isHoldTooStaleForSession,
+  applicationFeeCents,
+  planAddonLineItems,
+  planPriorSessionReuse,
+} from '../_shared/ticketCheckout.ts';
 /**
  * create-ticket-checkout — the buyer's pay door (money loop step 1,
  * ticketing lane 2026-07-25; v8 rework 2026-07-27 against 87 v3's returns).
@@ -75,9 +85,6 @@ const ALLOWED_ORIGINS = [
 // closer than floor + buffer is treated as an expired checkout up front.
 const STRIPE_SESSION_FLOOR_SEC = 30 * 60;
 const FLOOR_SKEW_BUFFER_SEC = 60;
-// client-supplied checkout_key shape: what crypto.randomUUID()-style client
-// keys look like; anything else is ignored rather than rejected
-const CHECKOUT_KEY_SHAPE = /^[A-Za-z0-9_-]{8,64}$/;
 // LIZ COPY (approved 2026-07-27): shown when a stale reused checkout
 // can no longer make Stripe's session window.
 const EXPIRED_CHECKOUT_LINE = 'this checkout took too long and expired. head back and pick your tickets again.';
@@ -90,14 +97,8 @@ function json(status, body) {
     }
   });
 }
-function stripeKeyIsTest(key) {
-  return key.startsWith('sk_test_') || key.startsWith('rk_test_');
-}
 // LIVE FLIP (Liz's live word 2026-07-31, PBC + EIN seller of record): the
 // secret's VALUE decides the mode — a live key is now accepted alongside test.
-function stripeKeyIsLive(key) {
-  return key.startsWith('sk_live_') || key.startsWith('rk_live_');
-}
 Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: CORS
@@ -142,8 +143,8 @@ Deno.serve(async (req)=>{
   // (a) the stable per-checkout-action key, namespaced to the buyer so keys
   // can never collide or be squatted across users. No client key → random
   // per-invocation key (inert but safe).
-  const clientKey = typeof body?.checkout_key === 'string' && CHECKOUT_KEY_SHAPE.test(body.checkout_key.trim()) ? body.checkout_key.trim() : crypto.randomUUID();
-  const idempotencyKey = `ctc:${buyer.id}:${clientKey}`;
+  const clientKey = resolveClientCheckoutKey(body?.checkout_key) ?? crypto.randomUUID();
+  const idempotencyKey = namespaceIdempotencyKey(buyer.id, clientKey);
   // doc 113 / doc 114: the promo code and the add-on list are forwarded as-is.
   // Every rule (existence, window, cap, stock, per-order max, duplicates) is
   // the RPC's to enforce inside the transaction, so nothing here re-decides
@@ -268,10 +269,9 @@ Deno.serve(async (req)=>{
   }
   // (b) pin the session to the hold's real expiry (35-min TTL from 87 v3)
   const holdExpiresSec = Math.floor(new Date(b.hold_expires_at).getTime() / 1000);
-  const nowSec = Math.floor(Date.now() / 1000);
   // (c) a stale reused checkout whose hold can no longer make Stripe's
   // 30-min session floor is expired NOW, before Stripe sees it
-  if (!Number.isFinite(holdExpiresSec) || holdExpiresSec - nowSec < STRIPE_SESSION_FLOOR_SEC + FLOOR_SKEW_BUFFER_SEC) {
+  if (isHoldTooStaleForSession(b.hold_expires_at, Date.now(), STRIPE_SESSION_FLOOR_SEC, FLOOR_SKEW_BUFFER_SEC)) {
     await unwindPending();
     return json(409, {
       code: 'checkout_expired',
@@ -290,29 +290,31 @@ Deno.serve(async (req)=>{
         error: 'this checkout is still being set up. give it a moment and try again.'
       });
     }
-    if (prior.status === 'complete' || prior.payment_status === 'paid') {
+    const priorAction = planPriorSessionReuse(prior, b.total_cents);
+    if (priorAction === 'already_paid') {
       // already paid: the drain settles it from the webhook. Creating a new
       // session here IS the double charge, so refuse and let it confirm.
       return json(409, {
         error: 'this checkout already went through. give it a moment to confirm.'
       });
     }
-    if (prior.status === 'expired') {
+    if (priorAction === 'expired') {
       await unwindPending();
       return json(409, {
         code: 'checkout_expired',
         error: EXPIRED_CHECKOUT_LINE
       });
     }
-    if (prior.status === 'open' && typeof prior.url === 'string' && prior.amount_total === b.total_cents) {
+    if (priorAction === 'reusable') {
       return json(200, {
         url: prior.url,
         order_id: b.order_id,
         reference_code: b.reference_code
       });
     }
-    // open but unusable (no url, or it does not price THIS order): expire it
-    // before its replacement exists, never leave two payable sessions alive.
+    // 'replace': open but unusable (no url, or it does not price THIS
+    // order) — expire it before its replacement exists, never leave two
+    // payable sessions alive.
     try {
       await stripe.checkout.sessions.expire(priorSessionId);
     } catch (err) {
@@ -328,39 +330,17 @@ Deno.serve(async (req)=>{
   // exactly that amount. It is derived from the RPC's own numbers, never from
   // what the client asked for.
   const addonTotal = b.face_cents - b.unit_face_cents * qty;
-  const addonLines = [];
+  let addonLines = [];
   if (addonTotal > 0) {
     const { data: lines } = await service.from('order_add_ons').select('qty, unit_price_cents, name_snapshot').eq('order_id', b.order_id);
-    const itemized = (lines ?? []).map((l)=>({
-        quantity: l.qty,
-        price_data: {
-          currency: 'usd',
-          unit_amount: l.unit_price_cents,
-          product_data: {
-            name: l.name_snapshot
-          }
-        }
-      }));
-    const itemizedSum = (lines ?? []).reduce((s, l)=>s + l.qty * l.unit_price_cents, 0);
-    if (itemized.length > 0 && itemizedSum === addonTotal) {
-      // the nice receipt: one Stripe line per extra, by name
-      addonLines.push(...itemized);
-    } else {
+    const planned = planAddonLineItems(addonTotal, lines ?? []);
+    if (planned.usedFallback) {
       // the breakdown could not be read back or did not sum to the folded
       // remainder; charge the exact remainder as one line rather than let a
       // read failure become an undercharge
-      console.error('create-ticket-checkout: add-on breakdown unusable', b.order_id, itemizedSum, addonTotal);
-      addonLines.push({
-        quantity: 1,
-        price_data: {
-          currency: 'usd',
-          unit_amount: addonTotal,
-          product_data: {
-            name: 'extras'
-          }
-        }
-      });
+      console.error('create-ticket-checkout: add-on breakdown unusable', b.order_id, addonTotal);
     }
+    addonLines = planned.lines;
   }
   let session;
   try {
@@ -392,7 +372,7 @@ Deno.serve(async (req)=>{
       payment_intent_data: {
         // commission + processing: the platform keeps this, pays Stripe's
         // ~processing fee, nets the 4%; the organizer receives face − 4%
-        application_fee_amount: b.commission_cents + b.processing_cents,
+        application_fee_amount: applicationFeeCents(b.commission_cents, b.processing_cents),
         on_behalf_of: b.organizer_stripe_account_id,
         transfer_data: {
           destination: b.organizer_stripe_account_id

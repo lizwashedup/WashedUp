@@ -8,19 +8,27 @@
  * seat shows, as a QR the door scanner reads plus the same code in text for the
  * type-a-code path. A voided seat (partial refund) keeps its place in the list
  * but loses its QR, so nobody walks up with a dead code.
+ *
+ * Scene design spec item 05 (creator-branded ticketing, launch priority per
+ * Liz): every card carries the event's own image + creator byline ("put on
+ * by X"), and the empty state is a real invitation with a CTA rather than a
+ * bare sentence - this repo's own CLAUDE.md already bans a bare "no X yet"
+ * with nothing tappable, and the old copy here was exactly that.
  */
 
 import React from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'react-native-qrcode-svg';
-import { ArrowLeft, Ticket } from 'lucide-react-native';
+import { ArrowLeft, Ticket, Compass } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { formatEventDateLA } from '../../lib/laDate';
+import { getOrganizerProfiles } from '../../lib/organizerProfile';
 import {
   REFUND_DISCLOSURE, executeRefund, formatCents, getConfirmationMessage,
   getMyOrders, previewRefund,
@@ -162,12 +170,59 @@ function OrderRefund({ order }: { order: MyOrder }) {
   );
 }
 
+/** Scene spec 05: no bare "no tickets yet" - an invitation with a CTA,
+ *  matching this repo's own documented empty-state rule (and the exact
+ *  shape components/yours/circles/CirclesEmptyState.tsx already uses). */
+function TicketsEmptyState() {
+  return (
+    <View style={styles.emptyWrap}>
+      <View style={styles.emptyIconBubble}>
+        <Compass size={28} color={Colors.terracotta} strokeWidth={1.5} />
+      </View>
+      {/* copy to the taste gate */}
+      <Text style={styles.emptyTitle}>no tickets yet</Text>
+      {/* copy to the taste gate */}
+      <Text style={styles.emptySub}>when you get one, it lives here. see what's happening tonight.</Text>
+      <TouchableOpacity
+        style={styles.emptyCta}
+        onPress={() => router.push('/(tabs)/explore' as never)}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+      >
+        {/* copy to the taste gate: 2 words, won't wrap (button-label rule) */}
+        <Text style={styles.emptyCtaText}>find plans</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function YourTicketsScreen() {
   const { data: orders, isLoading } = useQuery({
     queryKey: ['my-ticket-orders'],
     queryFn: getMyOrders,
     staleTime: 15_000,
   });
+
+  // Scene spec 05: creator identity per card. Batch-resolved ONCE for the
+  // whole list (one query, not one per card) via the same public_name-wins,
+  // else-organizer-profile rule the confirmation screen uses. Deliberately
+  // not the event page's fuller community-leader-face branch - see the
+  // scratchpad plan for why that's a named scope cut, not a silent guess.
+  const hostIds = [...new Set((orders ?? [])
+    .filter((o) => !o.event_public_name && !!o.event_host_user_id)
+    .map((o) => o.event_host_user_id as string))];
+  const { data: organizerProfiles } = useQuery({
+    queryKey: ['organizer-profiles-wallet', hostIds.join(',')],
+    queryFn: () => getOrganizerProfiles(hostIds),
+    enabled: hostIds.length > 0,
+    staleTime: 60_000,
+  });
+
+  const bylineFor = (o: MyOrder): { name: string | null; logo: string | null } => {
+    if (o.event_public_name) return { name: o.event_public_name, logo: null };
+    const p = o.event_host_user_id ? organizerProfiles?.get(o.event_host_user_id) : undefined;
+    return { name: p?.display_name ?? null, logo: p?.logo_url ?? null };
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -184,32 +239,47 @@ export default function YourTicketsScreen() {
         {isLoading ? (
           <ActivityIndicator size="small" color={EventAction.primary} style={styles.loading} />
         ) : !orders || orders.length === 0 ? (
-          /* copy to the taste gate: the empty-state invitation */
-          <Text style={styles.empty}>no tickets yet. when you get one, it lives here.</Text>
+          <TicketsEmptyState />
         ) : (
-          orders.map((o) => (
-            <View key={o.id} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardIcon}>
-                  <Ticket size={20} color={EventAction.primary} strokeWidth={2} />
-                </View>
-                <View style={styles.cardBody}>
-                  <Text style={styles.cardTitle} numberOfLines={1}>{o.event_title ?? 'your event'}</Text>
-                  {!!o.event_date && (
-                    <Text style={styles.cardMeta}>{formatEventDateLA(o.event_date)}</Text>
+          orders.map((o) => {
+            const byline = bylineFor(o);
+            return (
+              <View key={o.id} style={styles.card}>
+                <View style={styles.cardHeader}>
+                  {o.event_image ? (
+                    <Image source={{ uri: o.event_image }} style={styles.cardImage} contentFit="cover" />
+                  ) : (
+                    <View style={styles.cardIcon}>
+                      <Ticket size={20} color={EventAction.primary} strokeWidth={2} />
+                    </View>
                   )}
-                  <Text style={styles.cardMeta}>
-                    {o.qty} {o.qty === 1 ? 'ticket' : 'tickets'} · {o.total_cents === 0 ? 'free' : formatCents(o.total_cents)}
-                  </Text>
+                  <View style={styles.cardBody}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{o.event_title ?? 'your event'}</Text>
+                    {!!o.event_date && (
+                      <Text style={styles.cardMeta}>{formatEventDateLA(o.event_date)}</Text>
+                    )}
+                    <Text style={styles.cardMeta}>
+                      {o.qty} {o.qty === 1 ? 'ticket' : 'tickets'} · {o.total_cents === 0 ? 'free' : formatCents(o.total_cents)}
+                    </Text>
+                    {!!byline.name && (
+                      <View style={styles.cardCreatorRow}>
+                        {!!byline.logo && (
+                          <Image source={{ uri: byline.logo }} style={styles.cardCreatorAvatar} contentFit="cover" />
+                        )}
+                        {/* LIZ COPY (decision 16): bylines say put on by, never hosted by */}
+                        <Text style={styles.cardCreatorText} numberOfLines={1}>put on by {byline.name}</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
+                <OrganizerNote eventId={o.event_id} />
+                {o.seats.map((seat) => (
+                  <SeatTicket key={seat.id} seat={seat} qty={o.qty} />
+                ))}
+                <OrderRefund order={o} />
               </View>
-              <OrganizerNote eventId={o.event_id} />
-              {o.seats.map((seat) => (
-                <SeatTicket key={seat.id} seat={seat} qty={o.qty} />
-              ))}
-              <OrderRefund order={o} />
-            </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </SafeAreaView>
@@ -221,21 +291,40 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12 },
   headerTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   headerSpacer: { flex: 1 },
-  content: { padding: 20, gap: EventSpacing.md },
+  content: { padding: 20, gap: EventSpacing.md, flexGrow: 1 },
   loading: { marginTop: EventSpacing.xl },
-  empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginTop: EventSpacing.xl, textAlign: 'center' },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 40 },
+  emptyIconBubble: {
+    width: 64, height: 64, borderRadius: 32, backgroundColor: Colors.emptyIconBg,
+    alignItems: 'center', justifyContent: 'center', marginBottom: EventSpacing.md,
+  },
+  emptyTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displaySM, color: Colors.darkWarm, textAlign: 'center' },
+  emptySub: {
+    fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary,
+    textAlign: 'center', marginTop: 8, marginBottom: EventSpacing.lg,
+  },
+  emptyCta: {
+    minHeight: 44, paddingHorizontal: 24, borderRadius: 999, backgroundColor: Colors.terracotta,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
+  },
+  emptyCtaText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   card: {
     backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
     padding: 14, gap: EventSpacing.md,
   },
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   cardIcon: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.brandSoft,
+    width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.brandSoft,
     alignItems: 'center', justifyContent: 'center',
   },
+  cardImage: { width: 44, height: 44, borderRadius: 12 },
   cardBody: { flex: 1, gap: 2 },
   cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  cardCreatorRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+  cardCreatorAvatar: { width: 14, height: 14, borderRadius: 7 },
+  cardCreatorText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary },
   seat: {
     alignItems: 'center', gap: EventSpacing.xs,
     borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: EventSpacing.md,

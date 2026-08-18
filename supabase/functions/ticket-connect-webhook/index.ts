@@ -1,4 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  timingSafeEqual,
+  hmacSha256Hex,
+  parseStripeSignatureHeader,
+  isTimestampWithinTolerance,
+  isValidStripeEventShape,
+  hasValidLivemode,
+  livemodeMatchesSecret,
+} from '../_shared/webhookVerification.ts';
 /**
  * ticket-connect-webhook — the Stripe Connect webhook RECEIVER (ticketing
  * lane, 2026-07-21, Cowork's sprint order; nits folded same day per
@@ -107,22 +116,6 @@ function json(status, body) {
     }
   });
 }
-function timingSafeEqual(a, b) {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for(let i = 0; i < a.length; i++)out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
-}
-async function hmacSha256Hex(secret, message) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), {
-    name: 'HMAC',
-    hash: 'SHA-256'
-  }, false, [
-    'sign'
-  ]);
-  const sig = await crypto.subtle.sign('HMAC', key, message);
-  return Array.from(new Uint8Array(sig)).map((b)=>b.toString(16).padStart(2, '0')).join('');
-}
 Deno.serve(async (req)=>{
   if (req.method !== 'POST') return json(405, {
     error: 'method not allowed'
@@ -149,23 +142,14 @@ Deno.serve(async (req)=>{
   });
   // Stripe-Signature: t=<ts>,v1=<hex>[,v1=<hex>...] — keep t's RAW token
   const sigHeader = req.headers.get('Stripe-Signature') ?? '';
-  const parts = new Map();
-  for (const piece of sigHeader.split(',')){
-    const [k, v] = piece.split('=', 2);
-    if (!k || !v) continue;
-    const arr = parts.get(k.trim()) ?? [];
-    arr.push(v.trim());
-    parts.set(k.trim(), arr);
-  }
-  const rawTs = parts.get('t')?.[0] ?? '';
-  const v1s = parts.get('v1') ?? [];
-  const ts = Number(rawTs);
-  if (!rawTs || !Number.isFinite(ts) || v1s.length === 0) {
+  const parsedSig = parseStripeSignatureHeader(sigHeader);
+  if (!parsedSig) {
     return json(400, {
       error: 'bad signature header'
     });
   }
-  if (Math.abs(Date.now() / 1000 - ts) > SIGNATURE_TOLERANCE_SECONDS) {
+  const { rawTs, ts, v1s } = parsedSig;
+  if (!isTimestampWithinTolerance(ts, Date.now() / 1000, SIGNATURE_TOLERANCE_SECONDS)) {
     return json(400, {
       error: 'timestamp outside tolerance'
     });
@@ -208,17 +192,17 @@ Deno.serve(async (req)=>{
       error: 'not json'
     });
   }
-  const eventId = event.id;
-  const eventType = event.type;
-  if (typeof eventId !== 'string' || !eventId.startsWith('evt_') || typeof eventType !== 'string') {
+  if (!isValidStripeEventShape(event)) {
     return json(400, {
       error: 'not a stripe event'
     });
   }
+  const eventId = event.id;
+  const eventType = event.type;
   // MODE BINDING. Fail CLOSED on a missing livemode: every Stripe snapshot
   // event carries it (all 93 rows in ticket_webhook_events do, checked
   // 2026-08-14), so its absence means malformed or forged, never legitimate.
-  if (typeof event.livemode !== 'boolean') {
+  if (!hasValidLivemode(event)) {
     console.error(`ticket-connect-webhook rejected evt=${eventId} type=${eventType}: no boolean livemode`);
     return json(400, {
       error: 'event livemode missing'
@@ -226,7 +210,7 @@ Deno.serve(async (req)=>{
   }
   // the actual fix: an event is only accepted under a secret of its OWN mode,
   // in both directions (a live secret cannot sign a test event either).
-  if (event.livemode !== matched.livemode) {
+  if (!livemodeMatchesSecret(event.livemode, matched.livemode)) {
     console.error(`ticket-connect-webhook MODE MISMATCH evt=${eventId} type=${eventType} livemode=${event.livemode} signed-by=${matched.name}`);
     return json(401, {
       error: 'event mode does not match its signing secret'

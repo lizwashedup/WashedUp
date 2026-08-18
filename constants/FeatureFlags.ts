@@ -157,6 +157,30 @@ export const JOIN_GATE_ENABLED = process.env.EXPO_PUBLIC_JOIN_GATE_ENABLED === '
 export const CHAT_DELETE_ENABLED = process.env.EXPO_PUBLIC_CHAT_DELETE_ENABLED === 'true';
 
 /**
+ * Co-creator invites (R21, qa/requirements.json: "Co-creators and multiple
+ * admins" -- foundation and test only, scopeClass yellow, releaseGate
+ * block_b).
+ *
+ * When false (default): nothing changes anywhere. No "co-creators" entry on
+ * the members screen, the /creator/co-creators and /invite/co-creator/[token]
+ * routes are unreachable through any in-app affordance (a direct deep link
+ * still resolves the route, but the screen itself checks this flag too and
+ * renders nothing when it is off).
+ *
+ * When true: the members screen gets a "co-creators" entry; the primary
+ * leader can search an existing profile or invite by email/phone, set the
+ * co_leader role at invite time, and manage/revoke pending invites. Backed
+ * by supabase/migrations/20260817180000_community_co_creator_invites.sql
+ * (create_/preview_/accept_/revoke_co_creator_invite RPCs) -- do not flip on
+ * for a real build until that migration is applied to prod.
+ *
+ * Local dev: set EXPO_PUBLIC_CO_CREATOR_INVITES_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const CO_CREATOR_INVITES_ENABLED = process.env.EXPO_PUBLIC_CO_CREATOR_INVITES_ENABLED === 'true';
+
+/**
  * Member state on the event page's put-on-by card (doc 121 T9).
  *
  * When false (default): today's behavior. Joining a community auto-follows

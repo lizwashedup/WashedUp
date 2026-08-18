@@ -8,6 +8,13 @@
  *
  * TEST MODE until Liz's live word; the edge fn refuses a non-test key and
  * this surfaces that as a plain note rather than a dead button.
+ *
+ * Scene design spec item 05 (creator-branded checkout, launch priority per
+ * Liz): the compressed warm-dark event band up top carries the event's
+ * image, title, and byline through the money screen (the creator's
+ * identity never disappears at checkout); the price section below is a
+ * real itemized breakdown, not a single collapsed number; the primary
+ * action is pinned outside the scroll so it is always reachable.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -22,15 +29,18 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Minus, Plus, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { EventAction, EventSpacing } from '../../constants/EventDesign';
+import { EventAction, EventSpacing, EventSurface } from '../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { openUrl } from '../../lib/url';
 import { stashPendingCheckout } from '../../lib/pendingLink';
 import { supabase } from '../../lib/supabase';
 import {
+  buildCheckoutBreakdown,
   computeFeePreview,
   formatCents,
   getQuestions,
@@ -82,6 +92,11 @@ function tierMin(t: TicketTier): number {
 const CHECKOUT_REFUND_DISCLOSURE =
   "refunds follow this event's policy. if you get one, the ticket price comes back to you, not the card processing. if the organizer cancels or makes a big change, you get all of it back.";
 
+// Scene spec 05: the compressed warm-dark event band. Deliberately shorter
+// than the full event-page hero (280) - this is a money screen, not the
+// event's own page, so imagery earns a strip, not the fold.
+const BAND_HEIGHT = 112;
+
 async function loadSellableTiers(eventId: string): Promise<SellableTier[]> {
   const all = await getTiers(eventId);
   const onSale = all.filter((t) => t.status === 'on_sale' && t.visibility !== 'hidden');
@@ -103,9 +118,31 @@ interface TicketCheckoutSheetProps {
   onClose: () => void;
   /** a free ticket confirms in-session -> the caller opens order-complete */
   onFreeConfirmed: (orderId: string) => void;
+  /** Scene spec 05: the event band. The caller already has every one of
+   *  these loaded for its own hero + byline, so the sheet asks for none of
+   *  it again - one query for tiers/addons/questions is enough. */
+  eventTitle: string;
+  eventImage: string | null;
+  /** pre-formatted (formatFullDate on the caller's side): "Saturday, August
+   *  22 at 7:00 PM". Kept as a caller-formatted string so date/time zone
+   *  logic lives in exactly the one place the event page already has it. */
+  eventDateLabel: string | null;
+  eventVenue: string | null;
+  /** the byline grammar (event/[id].tsx): public_name override, else the
+   *  community name, else the organizer's own display name. Null when none
+   *  resolved (COMMUNITIES_ENABLED off and no public_name) - the band still
+   *  carries the event's own image/title/context either way. */
+  creatorName: string | null;
+  /** bylineFace (community leader) or bylineLogo (standalone organizer) -
+   *  whichever the caller resolved; person = face, business = logo, never
+   *  both (same rule as the event page). */
+  creatorAvatar: string | null;
 }
 
-export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed }: TicketCheckoutSheetProps) {
+export function TicketCheckoutSheet({
+  visible, eventId, onClose, onFreeConfirmed,
+  eventTitle, eventImage, eventDateLabel, eventVenue, creatorName, creatorAvatar,
+}: TicketCheckoutSheetProps) {
   const [tiers, setTiers] = useState<SellableTier[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
@@ -201,6 +238,14 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
     : selected
       ? computeFeePreview(selected.price_cents * qty + addonsFaceCents, 0).buyerTotalCents
       : 0;
+  // Scene spec 05: the itemized breakdown that used to collapse straight to
+  // `allIn`. Same numbers, just not hidden inside one line anymore.
+  const breakdown = !isFree && selected
+    ? buildCheckoutBreakdown({
+        tierName: selected.name, qty, tierPriceCents: selected.price_cents,
+        addonTotalCents: addonsFaceCents, quote,
+      })
+    : null;
 
   // doc 118. The questions ride PAID and FREE checkouts alike: an organizer's
   // consent or dietary question matters just as much on a free seat.
@@ -278,16 +323,55 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
     onClose();
   };
 
+  const showFooter = tiers !== null && tiers.length > 0;
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.headerRow}>
-            {/* copy to the taste gate */}
-            <Text style={styles.title}>get tickets</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={12}>
-              <X size={22} color={Colors.textMedium} strokeWidth={2} />
+          {/* Scene spec 05: the compressed warm-dark event band. Carries the
+              event's own image, title, date/venue, and byline through the
+              money screen - the creator's identity never disappears here. */}
+          <View style={styles.band}>
+            {eventImage ? (
+              <Image source={{ uri: eventImage }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            ) : null}
+            {/* the vignette only earns its keep over real photography; a flat
+                dark ground is already legible without one (doc 80 section A) */}
+            {eventImage && (
+              <LinearGradient
+                colors={['transparent', EventSurface.mediaVignette]}
+                locations={[0.35, 1]}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+            )}
+            <TouchableOpacity
+              style={styles.bandClose}
+              onPress={onClose}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="close"
+            >
+              <X size={18} color={Colors.darkWarm} strokeWidth={2.5} />
             </TouchableOpacity>
+            <View style={styles.bandContent}>
+              <Text style={styles.bandTitle} numberOfLines={1}>{eventTitle}</Text>
+              {(!!eventDateLabel || !!eventVenue) && (
+                <Text style={styles.bandMeta} numberOfLines={1}>
+                  {[eventDateLabel, eventVenue].filter(Boolean).join(' · ')}
+                </Text>
+              )}
+              {!!creatorName && (
+                <View style={styles.bandCreatorRow}>
+                  {!!creatorAvatar && (
+                    <Image source={{ uri: creatorAvatar }} style={styles.bandCreatorAvatar} contentFit="cover" />
+                  )}
+                  {/* LIZ COPY (decision 16): bylines say put on by, never hosted by */}
+                  <Text style={styles.bandCreatorText} numberOfLines={1}>put on by {creatorName}</Text>
+                </View>
+              )}
+            </View>
           </View>
 
           {tiers === null ? (
@@ -296,7 +380,8 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
             /* copy to the taste gate */
             <Text style={styles.empty}>tickets are not on sale right now.</Text>
           ) : (
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+              <Text style={styles.kicker}>tickets</Text>
               {tiers.map(({ tier, soldOut, underMinimum }) => {
                 const active = tier.id === selectedId;
                 const blocked = soldOut || underMinimum;
@@ -349,6 +434,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                       onPress={() => { hapticLight(); setQty((q) => Math.max(qtyMin, q - 1)); clearQuote(); }}
                       hitSlop={8}
                       style={styles.stepBtn}
+                      accessibilityLabel="fewer tickets"
                     >
                       <Minus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
                     </TouchableOpacity>
@@ -357,6 +443,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                       onPress={() => { hapticLight(); setQty((q) => Math.min(qtyMax, q + 1)); clearQuote(); }}
                       hitSlop={8}
                       style={styles.stepBtn}
+                      accessibilityLabel="more tickets"
                     >
                       <Plus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
                     </TouchableOpacity>
@@ -368,8 +455,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                   pay; invisible until the table lands */}
               {showExtras && (
                 <View style={styles.extras}>
-                  {/* copy to the taste gate */}
-                  <Text style={styles.extrasHeader}>extras</Text>
+                  <Text style={styles.kicker}>extras</Text>
                   {addonsList.map((a) => {
                     const n = addonQty[a.id] ?? 0;
                     const left = addonRemaining(a);
@@ -477,6 +563,29 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                 </View>
               )}
 
+              {/* Scene spec 05: the itemized breakdown - ticket face, extras,
+                  discount, processing fee, total. Replaces the old single
+                  collapsed number; law 9 (fees never surprise) applied all
+                  the way down, not just at the button. */}
+              {!!breakdown && (
+                <View style={styles.breakdown}>
+                  <Text style={styles.kicker}>price</Text>
+                  {breakdown.map((line) => (
+                    <View
+                      key={line.key}
+                      style={[styles.breakdownRow, line.emphasis === 'total' && styles.breakdownRowTotal]}
+                    >
+                      <Text style={[styles.breakdownLabel, line.emphasis === 'total' && styles.breakdownLabelTotal]}>
+                        {line.label}
+                      </Text>
+                      <Text style={[styles.breakdownValue, line.emphasis === 'total' && styles.breakdownValueTotal]}>
+                        {line.emphasis === 'discount' ? `−${formatCents(line.cents)}` : formatCents(line.cents)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
               {!!problem && <Text style={styles.problem}>{problem}</Text>}
 
               {/* courtesy only: the server enforces required-ness. Name what is
@@ -487,12 +596,20 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                   still needed: {missingRequired.join(', ')}
                 </Text>
               )}
+            </ScrollView>
+          )}
 
+          {/* Scene spec 05: "a persistent commitment action" - pinned outside
+              the scroll so the buyer never has to hunt for it, whatever the
+              tier list, extras, or questions grow to. */}
+          {showFooter && (
+            <View style={styles.footer}>
               <TouchableOpacity
                 style={[styles.cta, (!selected || busy || missingRequired.length > 0) && styles.ctaDisabled]}
                 onPress={handleGo}
                 disabled={!selected || busy || missingRequired.length > 0}
                 activeOpacity={0.85}
+                accessibilityRole="button"
               >
                 {busy ? (
                   <ActivityIndicator size="small" color={EventAction.onPrimary} />
@@ -512,7 +629,7 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
                   <Text style={styles.refundNote}>{CHECKOUT_REFUND_DISCLOSURE}</Text>
                 </>
               )}
-            </ScrollView>
+            </View>
           )}
         </Pressable>
       </Pressable>
@@ -523,17 +640,49 @@ export function TicketCheckoutSheet({ visible, eventId, onClose, onFreeConfirmed
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: Colors.overlayDark, justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: Colors.parchment,
+    backgroundColor: Colors.cream,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 34,
     maxHeight: '85%',
+    overflow: 'hidden',
   },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: EventSpacing.md },
-  title: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
-  loading: { marginVertical: EventSpacing.lg },
-  empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, marginVertical: EventSpacing.md },
+  band: {
+    height: BAND_HEIGHT,
+    backgroundColor: EventSurface.media,
+    justifyContent: 'flex-end',
+  },
+  bandClose: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: EventSurface.mediaControl,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bandContent: { paddingHorizontal: 16, paddingBottom: 12, paddingRight: 52, gap: 2 },
+  bandTitle: {
+    fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: EventSurface.onMedia,
+    textShadowColor: EventSurface.mediaTextShadow, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
+  },
+  bandMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: EventSurface.onMediaMuted },
+  bandCreatorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  bandCreatorAvatar: { width: 18, height: 18, borderRadius: 9 },
+  bandCreatorText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: EventSurface.onMediaLabel },
+  // flex:1 is load-bearing: without it the ScrollView sizes to its own
+  // content instead of filling the space between the fixed-height band
+  // and the sticky footer, so the sheet just grows (clipped by the sheet's
+  // own overflow:hidden) instead of scrolling internally.
+  scroll: { flex: 1 },
+  scrollContent: { padding: 20, paddingBottom: 24 },
+  kicker: {
+    fontFamily: Fonts.sansSemibold, fontSize: 11, color: Colors.terracotta,
+    letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8,
+  },
+  loading: { marginVertical: EventSpacing.lg, alignSelf: 'center' },
+  empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, margin: 20, textAlign: 'center' },
   tier: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -555,7 +704,7 @@ const styles = StyleSheet.create({
   tierName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   tierDesc: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierPrice: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  qtyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: EventSpacing.sm, marginBottom: EventSpacing.sm },
+  qtyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: EventSpacing.xs, marginBottom: EventSpacing.sm },
   qtyLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   stepBtn: {
@@ -569,8 +718,7 @@ const styles = StyleSheet.create({
   },
   qtyValue: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, minWidth: 20, textAlign: 'center' },
   problem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error, marginTop: EventSpacing.sm },
-  extras: { marginTop: EventSpacing.sm, gap: EventSpacing.sm },
-  extrasHeader: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  extras: { marginTop: EventSpacing.md, gap: EventSpacing.sm },
   addonRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
@@ -580,7 +728,7 @@ const styles = StyleSheet.create({
   addonName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   addonPrice: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   addonDesc: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
-  promoBlock: { marginTop: EventSpacing.sm, gap: 6 },
+  promoBlock: { marginTop: EventSpacing.md, gap: 6 },
   promoLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textDecorationLine: 'underline' },
   promoRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   promoInput: {
@@ -596,16 +744,40 @@ const styles = StyleSheet.create({
   promoApplied: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   promoRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium, textDecorationLine: 'underline' },
   promoMiss: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error },
-  questions: { marginTop: EventSpacing.md, gap: EventSpacing.lg },
+  questions: { marginTop: EventSpacing.lg, gap: EventSpacing.lg },
   questionsHeader: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  breakdown: {
+    marginTop: EventSpacing.lg, backgroundColor: Colors.white, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border, padding: 14, gap: 6,
+  },
+  breakdownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  breakdownRowTotal: { marginTop: 4, paddingTop: 10, borderTopWidth: 1, borderTopColor: Colors.border },
+  breakdownLabel: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  breakdownLabelTotal: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  breakdownValue: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
+  breakdownValueTotal: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 34,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.cream,
+  },
   cta: {
     backgroundColor: EventAction.primary,
     borderRadius: 999,
-    paddingVertical: 15,
+    minHeight: 48,
+    paddingVertical: 14,
     alignItems: 'center',
-    marginTop: EventSpacing.md,
+    justifyContent: 'center',
+    shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  ctaDisabled: { opacity: 0.4 },
+  ctaDisabled: { opacity: 0.4, shadowOpacity: 0 },
   ctaText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: EventAction.onPrimary },
   feesNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, textAlign: 'center', marginTop: EventSpacing.sm },
   refundNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, textAlign: 'center', marginTop: EventSpacing.xs },

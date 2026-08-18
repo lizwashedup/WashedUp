@@ -20,6 +20,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import ProfileButton from '../ProfileButton';
@@ -126,7 +127,17 @@ export function SceneDiscovery() {
         <Text style={styles.headerTitle}>
           The <Text style={styles.headerTitleItalic}>Scene</Text>
         </Text>
-        <ProfileButton />
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={() => router.push('/communities' as never)}
+            accessibilityLabel="Browse communities"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.communitiesBtn}
+          >
+            <Ionicons name="people-outline" size={22} color={Colors.darkWarm} />
+          </TouchableOpacity>
+          <ProfileButton />
+        </View>
       </View>
 
       <ScrollView
@@ -202,6 +213,8 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontFamily: Fonts.display, fontSize: FontSizes.displayLG, color: Colors.darkWarm },
   headerTitleItalic: { fontFamily: Fonts.display },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  communitiesBtn: { padding: 4 },
   content: { padding: 20, paddingBottom: 60 },
   sectionLabel: {
     fontFamily: Fonts.sansBold,

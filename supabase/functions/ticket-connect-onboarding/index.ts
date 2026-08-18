@@ -1,4 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  FOUNDING_PARTNER_BPS,
+  hasApprovedOrganizerGrant,
+  buildExpressAccountParams,
+  planAccountRowInsert,
+} from '../_shared/organizerOnboarding.ts';
 /**
  * ticket-connect-onboarding — Express onboarding entry (ticketing lane,
  * 2026-07-21, Cowork's sprint order on Liz's word; notes folded same day
@@ -37,11 +43,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
  */ const STRIPE_API = 'https://api.stripe.com/v1';
 const RETURN_URL = 'https://washedup.app/creator/payouts/return';
 const REFRESH_URL = 'https://washedup.app/creator/payouts/refresh';
-// every approved grant today is a founding partner; a non-founding rate is
-// a reviewed change — and the per-organizer lock in the table governs.
-const FOUNDING_PARTNER_BPS = 400;
 const STRIPE_TIMEOUT_MS = 15_000;
-const UNIQUE_VIOLATION = '23505';
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -128,7 +130,7 @@ Deno.serve(async (req)=>{
   if (grantErr) return json(500, {
     error: 'grant check failed'
   });
-  if (!grants || grants.length === 0) {
+  if (!hasApprovedOrganizerGrant(grants)) {
     return json(403, {
       error: 'no approved organizer grant'
     });
@@ -145,17 +147,7 @@ Deno.serve(async (req)=>{
     // losses.payments=application, requirement_collection=stripe,
     // express dashboard, MANUAL payouts from birth (lean 3 — no code path
     // can pay out before the release cron says so).
-    const created = await stripePost(stripeKey, '/accounts', {
-      country: 'US',
-      'controller[fees][payer]': 'application',
-      'controller[losses][payments]': 'application',
-      'controller[requirement_collection]': 'stripe',
-      'controller[stripe_dashboard][type]': 'express',
-      'capabilities[card_payments][requested]': 'true',
-      'capabilities[transfers][requested]': 'true',
-      'settings[payouts][schedule][interval]': 'manual',
-      'metadata[washedup_user_id]': userId
-    });
+    const created = await stripePost(stripeKey, '/accounts', buildExpressAccountParams(userId));
     if (!created.ok || typeof created.body.id !== 'string') {
       return json(502, {
         error: 'stripe account creation failed',
@@ -168,28 +160,27 @@ Deno.serve(async (req)=>{
       stripe_account_id: accountId,
       commission_bps: FOUNDING_PARTNER_BPS
     });
-    if (insertErr) {
-      if (insertErr.code === UNIQUE_VIOLATION) {
-        // the concurrent-create race: another request won the row while we
-        // were at Stripe. Adopt the winner's account and carry on to the
-        // link step; OUR just-created account becomes an inert orphan —
-        // no row, nothing ever routes to it (accepted by the 7-21 verdict).
-        const { data: winner, error: winErr } = await service.from('organizer_stripe_accounts').select('stripe_account_id').eq('user_id', userId).maybeSingle();
-        if (winErr || !winner?.stripe_account_id) {
-          return json(500, {
-            error: 'race recovery failed — report this'
-          });
-        }
-        accountId = winner.stripe_account_id;
-      } else {
-        // the account exists at Stripe but the lock row failed — surface
-        // loudly; a retry reuses nothing (no row) and would double-create,
-        // so this is the one path that needs a human eye.
+    const insertOutcome = planAccountRowInsert(insertErr);
+    if (insertOutcome === 'race_recovered') {
+      // the concurrent-create race: another request won the row while we
+      // were at Stripe. Adopt the winner's account and carry on to the
+      // link step; OUR just-created account becomes an inert orphan —
+      // no row, nothing ever routes to it (accepted by the 7-21 verdict).
+      const { data: winner, error: winErr } = await service.from('organizer_stripe_accounts').select('stripe_account_id').eq('user_id', userId).maybeSingle();
+      if (winErr || !winner?.stripe_account_id) {
         return json(500, {
-          error: 'account created but not recorded — do not retry, report this',
-          stripe_account_id: accountId
+          error: 'race recovery failed — report this'
         });
       }
+      accountId = winner.stripe_account_id;
+    } else if (insertOutcome === 'needs_human') {
+      // the account exists at Stripe but the lock row failed — surface
+      // loudly; a retry reuses nothing (no row) and would double-create,
+      // so this is the one path that needs a human eye.
+      return json(500, {
+        error: 'account created but not recorded — do not retry, report this',
+        stripe_account_id: accountId
+      });
     }
   }
   const link = await stripePost(stripeKey, '/account_links', {

@@ -7,12 +7,13 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { Check, X } from 'lucide-react-native';
+import { Check, X, ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { CO_CREATOR_INVITES_ENABLED } from '../../constants/FeatureFlags';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
@@ -30,6 +31,7 @@ import {
 } from '../../lib/creatorMode';
 
 export default function CreatorMembersScreen() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [actingId, setActingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -112,6 +114,20 @@ export default function CreatorMembersScreen() {
         >
           <Text style={styles.title}>members</Text>
           <CommunitySwitcher access={access} />
+
+          {CO_CREATOR_INVITES_ENABLED && (
+            <TouchableOpacity
+              style={styles.coCreatorsCard}
+              onPress={() => router.push('/creator/co-creators')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.coCreatorsCardText}>
+                <Text style={styles.coCreatorsCardTitle}>Co-creators</Text>
+                <Text style={styles.coCreatorsCardHint}>Invite someone to help run this community.</Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
+          )}
 
           {pending.length > 0 && (
             <>
@@ -297,4 +313,18 @@ const styles = StyleSheet.create({
   declineBtn: { backgroundColor: Colors.inputBg },
   removeLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary },
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, marginTop: 12 },
+  coCreatorsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 14,
+    gap: 10,
+    marginBottom: 16,
+  },
+  coCreatorsCardText: { flex: 1, gap: 2 },
+  coCreatorsCardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  coCreatorsCardHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
 });

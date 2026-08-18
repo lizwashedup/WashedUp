@@ -12,6 +12,7 @@
 
 import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
+import type { PriceQuote } from './ticketPromosAddons';
 
 /** PostgREST "relation does not exist": the proposal is not applied. */
 function isMissingSchema(code: string | undefined): boolean {
@@ -53,6 +54,59 @@ export function computeFeePreview(faceCents: number, commissionBps: number): Fee
 
 export function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
+}
+
+// ─── Scene design spec 05: checkout price breakdown ───────────────────────
+
+/** One row of the buyer-facing itemized breakdown, in display order. */
+export interface CheckoutBreakdownLine {
+  key: 'tickets' | 'extras' | 'discount' | 'processing' | 'total';
+  /* copy to the taste gate */
+  label: string;
+  cents: number;
+  /** 'total' renders bold/emphasized; 'discount' renders as a negative amount. */
+  emphasis: 'line' | 'discount' | 'total';
+}
+
+/**
+ * The itemized breakdown for the checkout sheet's price section (doc: Scene
+ * spec item 05, "clear price breakdown"). Reuses the SAME numbers the sheet
+ * already computes for its single-line total - this never invents new math.
+ *
+ * With a server quote (a promo was applied and validated), every cent comes
+ * from quote_ticket_checkout, the one place a discounted price is allowed to
+ * come from. Without one, the ticket face + processing fee come from
+ * computeFeePreview, the same client preview already used for the tier row's
+ * "each" price and the undiscounted total.
+ */
+export function buildCheckoutBreakdown(input: {
+  tierName: string;
+  qty: number;
+  tierPriceCents: number;
+  addonTotalCents: number;
+  quote: PriceQuote | null;
+}): CheckoutBreakdownLine[] {
+  const { tierName, qty, tierPriceCents, addonTotalCents, quote } = input;
+  const lines: CheckoutBreakdownLine[] = [];
+  /* copy to the taste gate */
+  lines.push({ key: 'tickets', label: `${tierName} × ${qty}`, cents: quote?.faceCents ?? tierPriceCents * qty, emphasis: 'line' });
+  const addons = quote?.addonTotalCents ?? addonTotalCents;
+  if (addons > 0) {
+    /* copy to the taste gate */
+    lines.push({ key: 'extras', label: 'extras', cents: addons, emphasis: 'line' });
+  }
+  if (quote && quote.discountCents > 0) {
+    /* copy to the taste gate */
+    lines.push({ key: 'discount', label: 'discount', cents: quote.discountCents, emphasis: 'discount' });
+  }
+  const preview = computeFeePreview((quote?.faceCents ?? tierPriceCents * qty) + addons, 0);
+  const processingCents = quote ? quote.processingCents : preview.processingCents;
+  /* copy to the taste gate */
+  lines.push({ key: 'processing', label: 'processing fee', cents: processingCents, emphasis: 'line' });
+  const totalCents = quote ? quote.totalCents : preview.buyerTotalCents;
+  /* copy to the taste gate */
+  lines.push({ key: 'total', label: 'total', cents: totalCents, emphasis: 'total' });
+  return lines;
 }
 
 // 65's CHECK constraints, mirrored so the form can explain them
@@ -682,12 +736,29 @@ export interface MyOrder {
   created_at: string;
   event_title: string | null;
   event_date: string | null;
+  /** Scene spec 05: carries creator branding through confirmation + wallet. */
+  event_image: string | null;
+  event_venue: string | null;
+  /** public_name override wins over the creator's own profile (byline law). */
+  event_public_name: string | null;
+  event_host_user_id: string | null;
   seats: MySeat[];
 }
 
 const ORDER_SELECT =
-  'id, event_id, qty, total_cents, status, created_at, explore_events(title, event_date), ' +
+  'id, event_id, qty, total_cents, status, created_at, ' +
+  'explore_events(title, event_date, venue, image_url, public_name, host_user_id), ' +
   'ticket_order_positions(id, position_index, reference_code, voided_at)';
+
+/** the embedded explore_events row shape ORDER_SELECT actually asks for. */
+interface EmbeddedEvent {
+  title?: string;
+  event_date?: string;
+  venue?: string | null;
+  image_url?: string | null;
+  public_name?: string | null;
+  host_user_id?: string | null;
+}
 
 function mapSeats(o: Record<string, unknown>): MySeat[] {
   const rows = (o.ticket_order_positions as {
@@ -720,7 +791,7 @@ export async function getMyOrders(): Promise<MyOrder[]> {
   // supabase-js cannot infer the multi-embed row shape, so it widens to its
   // error type; the query is valid, so read the rows as untyped records
   return ((data ?? []) as unknown as Record<string, unknown>[]).map((o) => {
-    const ev = o.explore_events as { title?: string; event_date?: string } | null;
+    const ev = o.explore_events as EmbeddedEvent | null;
     return {
       id: o.id as string,
       event_id: o.event_id as string,
@@ -730,6 +801,10 @@ export async function getMyOrders(): Promise<MyOrder[]> {
       created_at: o.created_at as string,
       event_title: ev?.title ?? null,
       event_date: ev?.event_date ?? null,
+      event_image: ev?.image_url ?? null,
+      event_venue: ev?.venue ?? null,
+      event_public_name: ev?.public_name ?? null,
+      event_host_user_id: ev?.host_user_id ?? null,
       seats: mapSeats(o),
     };
   });
@@ -744,14 +819,52 @@ export async function getOrder(orderId: string): Promise<MyOrder | null> {
   if (error || !data) return null;
   // same multi-embed widening as getMyOrders: read the row as an untyped record
   const row = data as unknown as Record<string, unknown>;
-  const ev = row.explore_events as { title?: string; event_date?: string } | null;
+  const ev = row.explore_events as EmbeddedEvent | null;
   return {
     id: row.id as string, event_id: row.event_id as string,
     qty: row.qty as number, total_cents: row.total_cents as number,
     status: row.status as string, created_at: row.created_at as string,
     event_title: ev?.title ?? null, event_date: ev?.event_date ?? null,
+    event_image: ev?.image_url ?? null, event_venue: ev?.venue ?? null,
+    event_public_name: ev?.public_name ?? null, event_host_user_id: ev?.host_user_id ?? null,
     seats: mapSeats(row),
   };
+}
+
+// ─── Scene design spec 05: confirmation/wallet view state ─────────────────
+
+/**
+ * What the confirmation screen (order-complete) actually shows, resolved
+ * from the ONE authoritative field (order.status; the CHECK constraint is
+ * pending/paid/canceled/refunded) rather than inferred ad hoc from seats.
+ * 'settling' is the one paid-but-not-yet-seated race: settle_ticket_hold
+ * creates seats a beat after Stripe confirms, so a freshly paid order can
+ * briefly have none.
+ *
+ * A buyer can land on this screen with ANY status, not just a fresh 'paid':
+ * app/(tabs)/_layout.tsx routes here unconditionally off a stashed
+ * pending-checkout id on app resume, whether the Stripe visit finished,
+ * was abandoned, or the webhook is still catching up.
+ */
+export type OrderViewState =
+  | { kind: 'loading' }
+  | { kind: 'not_found' }
+  | { kind: 'canceled' }
+  | { kind: 'refunded' }
+  | { kind: 'pending' }
+  | { kind: 'settling' }
+  | { kind: 'ready' };
+
+export function resolveOrderViewState(
+  order: MyOrder | null | undefined,
+  isLoading: boolean,
+): OrderViewState {
+  if (!order) return isLoading ? { kind: 'loading' } : { kind: 'not_found' };
+  if (order.status === 'canceled') return { kind: 'canceled' };
+  if (order.status === 'refunded') return { kind: 'refunded' };
+  if (order.status === 'pending') return { kind: 'pending' };
+  const hasActiveSeat = order.seats.some((s) => !s.voided);
+  return hasActiveSeat ? { kind: 'ready' } : { kind: 'settling' };
 }
 
 // ─── doc 111: the organizer's "after they buy" message ───────────────────

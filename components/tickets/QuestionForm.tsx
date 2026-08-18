@@ -244,11 +244,15 @@ export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFo
     <>
       {questions.map((q) => (
         <View key={q.id} style={styles.qGroup}>
-          <Text style={styles.qPrompt}>
-            {q.prompt}
+          {/* Scene spec 05: explicit required/optional state on every
+              question, not an implicit "no tag = required" reading. */}
+          <View style={styles.qPromptRow}>
+            <Text style={styles.qPrompt}>{q.prompt}</Text>
             {/* copy to the taste gate */}
-            {q.required ? '' : '  (optional)'}
-          </Text>
+            <Text style={[styles.qStateTag, q.required && styles.qStateTagRequired]}>
+              {q.required ? 'required' : 'optional'}
+            </Text>
+          </View>
           {seatsForQuestion(q, qty).map((seat) => (
             <View key={cellKey(q.id, seat)} style={styles.qCell}>
               {seat !== null && (
@@ -266,7 +270,13 @@ export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFo
 
 const styles = StyleSheet.create({
   qGroup: { gap: EventSpacing.sm },
-  qPrompt: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  qPromptRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  qPrompt: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt, flexShrink: 1 },
+  qStateTag: {
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.tertiary,
+    letterSpacing: 0.5, textTransform: 'uppercase',
+  },
+  qStateTagRequired: { color: Colors.secondary },
   qCell: { gap: EventSpacing.xs },
   seatLabel: {
     fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary,

@@ -28,17 +28,19 @@ export async function getMyRsvp(eventId: string): Promise<RsvpStatus> {
 export async function setRsvp(eventId: string, going: boolean): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
-  const { error } = await supabase
-    .from('explore_event_rsvps')
-    .upsert(
-      {
-        explore_event_id: eventId,
-        user_id: user.id,
-        status: going ? 'going' : 'cancelled',
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'explore_event_id,user_id' },
-    );
+  // Capacity is creator-configured (explore_events.ticket_capacity, NULL =
+  // unlimited) and has to be enforced atomically: a raw upsert can't do
+  // that on its own, since two concurrent upserts against the last open
+  // spot could both pass an app-level "is there room" check before either
+  // one writes. set_event_rsvp_atomic locks the parent event row and
+  // recounts inside the same transaction (same shape as this repo's
+  // join_event_atomic for Plans) so the second caller in a race always
+  // sees the first caller's committed write before it decides.
+  // See supabase/migrations/20260817130000_explore_event_rsvp_capacity.sql.
+  const { error } = await supabase.rpc('set_event_rsvp_atomic', {
+    p_event_id: eventId,
+    p_going: going,
+  });
   if (error) throw error;
 }
 

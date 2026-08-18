@@ -1266,6 +1266,14 @@ export default function EventDetailScreen() {
           // C2/C3: the order-complete + your-tickets surfaces
           router.push(`/tickets/order/${orderId}` as never);
         }}
+        // Scene spec 05: carry the same event band + byline this page
+        // already resolved for its own hero, straight into checkout.
+        eventTitle={event.title}
+        eventImage={event.image_url}
+        eventDateLabel={event.event_date ? formatFullDate(event.event_date, event.start_time) : null}
+        eventVenue={event.venue}
+        creatorName={bylineName}
+        creatorAvatar={bylineFace ?? bylineLogo}
       />
     </View>
   );

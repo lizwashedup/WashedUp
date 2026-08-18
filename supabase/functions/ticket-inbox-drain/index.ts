@@ -3,6 +3,12 @@ import {
   applyPayoutReconciliationFilters,
   planPayoutReconciliation,
 } from '../_shared/payoutReconciliation.ts';
+import { fetchWithTimeout } from '../_shared/fetchWithTimeout.ts';
+import {
+  CONFIRMATION_SEND_ATTEMPTS,
+  confirmationBackoffMs,
+  isImmediatelyRetryableStatus,
+} from '../_shared/confirmationRetry.ts';
 /**
  * ticket-inbox-drain — the inbox DRAIN (ticketing lane, 2026-07-21,
  * Cowork's sprint order; RE-CUT same day per Cowork's rejection verdict).
@@ -36,13 +42,27 @@ import {
  *  - account.updated       → flags + requirements onto
  *                            organizer_stripe_accounts by stripe_account_id.
  *  - checkout.session.completed → settle_ticket_hold(metadata.hold_id, pi):
- *      TRUE → done + the doc-112 BUYER CONFIRMATION EMAIL (Resend, fire-and-
- *      log: the address is read from session.customer_details.email in THIS
- *      payload and never persisted; the confirmation_email_sent_at claim on
- *      ticket_orders makes redeliveries send nothing; any failure clears the
- *      claim, logs, and NEVER blocks the settle — the money always wins);
+ *      TRUE → done + the doc-112 BUYER CONFIRMATION EMAIL (Resend, bounded
+ *      in-call retry then a durable retry row on failure — see doc 112 +
+ *      the 2026-08-17 retry/observability fix below): the address is read
+ *      from session.customer_details.email in THIS payload and never
+ *      persisted onto ticket_orders; the confirmation_email_sent_at claim
+ *      makes redeliveries send nothing; a retryable send failure hands the
+ *      SAME captured payload to a new ticket_webhook_events row so the
+ *      drain's own claim/attempts/poison-cap machinery retries it on later
+ *      runs; a terminal failure (payload never had an email/order id) or an
+ *      exhausted retry alerts via alert_state='open', same as every other
+ *      real failure in this table; sending NEVER blocks the settle — the
+ *      money always wins;
  *      FALSE → 'refund owed' stamped VISIBLE for the §6
  *      executor; business raise → TERMINAL per (a).
+ *  - confirmation_email_retry (added 2026-08-17, synthetic — never a real
+ *      Stripe event type) → a durable retry of sendBuyerConfirmation against
+ *      the SAME buyer email/order id captured at settle time. Same
+ *      claim/attempts/MAX_ATTEMPTS poison-cap as every other row; success
+ *      stamps processed, an exhausted or terminal failure stamps
+ *      alert_state='open' so run_ticket_inbox_watchdog already alerts on it
+ *      with zero changes on its side.
  *  - checkout.session.expired → pending order canceled; the hold released
  *      if still active, unconditionally attempted.
  *  - payout.paid / payout.failed → ticket_payouts by payout id plus the
@@ -82,7 +102,10 @@ import {
 // still fires at minute 10 on a row that is still retrying, so a long
 // budget means "keep trying while a human is already alerted", never "stay
 // silent for an hour". A row that finally exhausts it is stamped
-// alert_state 'open' and alerted on (see stampFailed below).
+// alert_state 'open' and alerted on (see stampFailed below). Reused as-is
+// (2026-08-17) as the durable poison cap for confirmation_email_retry rows
+// too — same reasoning applies unchanged, so there is no reason for a
+// second tunable.
 const MAX_ATTEMPTS = 60;
 const TERMINAL_RAISE_MARKERS = [
   'cannot settle',
@@ -109,8 +132,21 @@ function timingSafeEqual(a, b) {
   for(let i = 0; i < a.length; i++)out |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return out === 0;
 }
+function sleep(ms) {
+  return new Promise((resolve)=>setTimeout(resolve, ms));
+}
 // doc 112: one branded confirmation to the buyer's checkout email, sent by
-// the platform after a successful settle. Never throws; never blocks settle.
+// the platform after a successful settle. Never throws; never blocks
+// settle. RETURNS a result instead of silently swallowing every outcome —
+// the original bug (confirmed against real production data, 2026-08-17): a
+// caught failure was only console.error'd, confirmation_email_sent_at
+// stayed null forever, nothing else in the system ever revisited it, and
+// there was no queryable record a human could find. The caller decides what
+// to do with a failure: `retryable: true` hands the SAME captured
+// email/order id to a durable retry row (see enqueueConfirmationRetry
+// below); `retryable: false` is the one truly terminal case — the session
+// payload never had a buyer email or order id, so no retry, in-call or
+// durable, can ever recover it — and alerts immediately instead.
 async function sendBuyerConfirmation(// deno-lint-ignore no-explicit-any
 service, obj) {
   // held ACROSS the try/catch on purpose: the claim below stamps the order
@@ -121,7 +157,10 @@ service, obj) {
     const resendKey = Deno.env.get('RESEND_API_KEY') ?? '';
     if (!resendKey) {
       console.error('confirmation email: RESEND_API_KEY missing');
-      return;
+      // retryable, not terminal: a later run may see a fixed env var. This
+      // is systemic (every send fails, not just this order) so it is worth
+      // a durable retry rather than a dead end, same as any other outage.
+      return { sent: false, retryable: true, reason: 'RESEND_API_KEY missing' };
     }
     const details = obj.customer_details;
     const email = typeof details?.email === 'string' ? details.email : null;
@@ -129,7 +168,17 @@ service, obj) {
     const orderId = meta.order_id;
     if (!email || !orderId) {
       console.error('confirmation email: session missing buyer email or order id');
-      return;
+      // TERMINAL: this exact payload is everything any future attempt will
+      // ever have to work with (the buyer email is deliberately never
+      // persisted onto ticket_orders — doc 112). If it is not here now, no
+      // in-call retry and no durable retry row built from this same `obj`
+      // can ever recover it, so this alerts immediately rather than
+      // spending a retry budget on a guaranteed-forever failure.
+      return {
+        sent: false,
+        retryable: false,
+        reason: `session missing buyer ${!email ? 'email' : 'order id'}`,
+      };
     }
     // the claim wins exactly once; a webhook redelivery matches nothing and
     // sends nothing (the doc-112 idempotency law, probed in the SQL half)
@@ -138,9 +187,9 @@ service, obj) {
     }).eq('id', orderId).is('confirmation_email_sent_at', null).select('id, reference_code, qty, total_cents, event_id');
     if (claimErr) {
       console.error('confirmation email: claim failed', claimErr.message);
-      return;
+      return { sent: false, retryable: true, reason: `claim write failed: ${claimErr.message}` };
     }
-    if (!claimed || claimed.length === 0) return; // already sent
+    if (!claimed || claimed.length === 0) return { sent: true }; // already sent, nothing to do
     claimedOrderId = orderId;
     const order = claimed[0];
     const { data: event } = await service.from('explore_events').select('title, event_date, venue, confirmation_message').eq('id', order.event_id).maybeSingle();
@@ -194,10 +243,32 @@ service, obj) {
         confirmation_email_id: null
       }).eq('id', orderId);
     };
-    let res;
-    try {
-      res = await fetch('https://api.resend.com/emails', {
+    // IN-CALL bounded retry (2026-08-17): up to CONFIRMATION_SEND_ATTEMPTS
+    // total tries against Resend within this SAME invocation, short backoff
+    // between them (confirmationBackoffMs), only looping again while the
+    // failure looks transient (isImmediatelyRetryableStatus — a thrown/
+    // timed-out fetch, or 408/429/5xx). A deterministic 4xx stops this loop
+    // immediately rather than retrying an identical rejection back-to-back
+    // for nothing; every exit from this loop without a 2xx still gets a
+    // durable retry from the caller (see below), because the underlying
+    // cause might be fixed by the time that runs (e.g. a rotated key).
+    //
+    // fetchWithTimeout replaces the old bare fetch(): the original had NO
+    // timeout at all, so a hung connection could stall this row (and this
+    // whole batch) indefinitely instead of failing fast into the retry
+    // path. The trade: fetchWithTimeout resolves to null on BOTH a thrown
+    // fetch (DNS/TLS/connect) and a real timeout, so the specific
+    // underlying error string is no longer available to log — an accepted,
+    // disclosed trade for actually bounding the call, and it is the same
+    // shared convention already used elsewhere in this codebase.
+    let res = null;
+    let lastStatus = null;
+    let lastWasNetworkFailure = false;
+    for(let attempt = 0; attempt < CONFIRMATION_SEND_ATTEMPTS; attempt++){
+      if (attempt > 0) await sleep(confirmationBackoffMs(attempt - 1));
+      const r = await fetchWithTimeout('https://api.resend.com/emails', {
         method: 'POST',
+        timeoutMs: 10_000,
         headers: {
           Authorization: `Bearer ${resendKey}`,
           'Content-Type': 'application/json'
@@ -212,21 +283,34 @@ service, obj) {
           text
         })
       });
-    } catch (netErr) {
-      // A THROWN fetch (DNS, TLS, connect timeout) has the SAME outcome as a
-      // refusal: nothing was sent. It used to fall through to the outer catch,
-      // which never released the claim, so the order stayed stamped "sent"
-      // forever with no email ever sent, and the claim blocked every future
-      // attempt. Treated as a refusal now.
-      console.error('confirmation email: resend unreachable', netErr instanceof Error ? netErr.message : 'unknown');
-      await releaseClaim();
-      return;
+      if (r === null) {
+        lastWasNetworkFailure = true;
+        lastStatus = null;
+        if (attempt < CONFIRMATION_SEND_ATTEMPTS - 1 && isImmediatelyRetryableStatus(null)) continue;
+        break;
+      }
+      lastWasNetworkFailure = false;
+      lastStatus = r.status;
+      if (r.ok) {
+        res = r;
+        break;
+      }
+      if (attempt < CONFIRMATION_SEND_ATTEMPTS - 1 && isImmediatelyRetryableStatus(r.status)) continue;
+      break;
     }
-    if (!res.ok) {
+    if (!res) {
       // clear the claim so the miss stays findable; log loudly; settle stands
-      console.error('confirmation email: resend refused', res.status);
+      const reason = lastWasNetworkFailure
+        ? 'resend unreachable (network/timeout)'
+        : `resend refused: ${lastStatus}`;
+      console.error(`confirmation email: ${reason}`);
       await releaseClaim();
-      return;
+      // Every send-side failure reaching here is durably retryable: the
+      // buyer's captured email/order id (this same `obj`) rides into a new
+      // ticket_webhook_events row (enqueueConfirmationRetry, called by the
+      // caller), which gets its own claim/attempts/poison-cap budget on top
+      // of the in-call attempts already spent here.
+      return { sent: false, retryable: true, reason };
     }
     // sent for real: the claim is now TRUE and must stand, so nothing below
     // (including the outer catch) may release it
@@ -238,12 +322,15 @@ service, obj) {
         confirmation_email_id: emailId
       }).eq('id', orderId);
     }
+    return { sent: true };
   } catch (e) {
-    console.error('confirmation email: failed', e instanceof Error ? e.message : 'unknown');
+    const msg = e instanceof Error ? e.message : 'unknown';
+    console.error('confirmation email: failed', msg);
     // Anything that threw AFTER the claim but BEFORE a confirmed send (the
     // event/seat lookups, the body build) left the order permanently stamped
     // "sent" with nothing sent. Nothing in this system ever retries a
-    // confirmation, so that claim was a silent, permanent loss. Give it back.
+    // confirmation on its own, so that claim was a silent, permanent loss.
+    // Give it back.
     if (claimedOrderId) {
       try {
         await service.from('ticket_orders').update({
@@ -254,6 +341,46 @@ service, obj) {
         console.error('confirmation email: could not release claim', releaseErr instanceof Error ? releaseErr.message : 'unknown');
       }
     }
+    return { sent: false, retryable: true, reason: `unexpected error: ${msg}` };
+  }
+}
+// A confirmation send still failing after its in-call retries is handed to
+// the SAME drain as a new row — never a second bespoke retry system.
+// claim-before-work, the MAX_ATTEMPTS poison cap, and stampFailed's
+// alert_state='open' all apply to it exactly as they do to every other row
+// in ticket_webhook_events, and run_ticket_inbox_watchdog already alerts on
+// alert_state with ZERO change on its side. stripe_event_id only has to be
+// UNIQUE — it is a dedupe key for real Stripe redeliveries, never looked up
+// by value here, and a real Stripe id is always 'evt_...' so this can never
+// collide with one. The payload mirrors the minimal shape
+// sendBuyerConfirmation reads (customer_details.email, metadata.order_id) —
+// the exact same shape a real checkout.session.completed event carries at
+// that path, so no new parsing branch is needed for it.
+async function enqueueConfirmationRetry(// deno-lint-ignore no-explicit-any
+service, obj, reason) {
+  const email = obj?.customer_details?.email ?? null;
+  const orderId = obj?.metadata?.order_id ?? null;
+  const { error } = await service.from('ticket_webhook_events').insert({
+    stripe_event_id: `confirmation_retry_${orderId}_${crypto.randomUUID()}`,
+    type: 'confirmation_email_retry',
+    payload: {
+      data: {
+        object: {
+          customer_details: {
+            email
+          },
+          metadata: {
+            order_id: orderId
+          }
+        }
+      }
+    }
+  });
+  if (error) {
+    // The backstop itself failing has nothing left to hand off to. Loud,
+    // not silent: this is the one path in the confirmation flow where
+    // console.error really is the last line of defense.
+    console.error('confirmation email: could not enqueue durable retry', error.message, '— original failure:', reason);
   }
 }
 function escapeHtml(s) {
@@ -400,13 +527,49 @@ Deno.serve(async (req)=>{
             }
           } else if (settled === true) {
             await stampProcessed(null);
-            // doc 112: the money is settled; the email rides after, fire-and-log
-            await sendBuyerConfirmation(service, obj);
+            // doc 112: the money is settled; the email rides after. Never
+            // blocks settle. A retryable miss (after its own in-call
+            // retries) is handed to the SAME drain as a new row so it gets
+            // the SAME claim/attempts/poison-cap/alert machinery already
+            // proven above — never a second bespoke retry system. A
+            // terminal miss (no email/order id in the payload — data that
+            // will never appear later) alerts on THIS row immediately
+            // instead of manufacturing a retry that can only ever fail the
+            // same way.
+            const emailResult = await sendBuyerConfirmation(service, obj);
+            if (!emailResult.sent) {
+              if (emailResult.retryable) {
+                await enqueueConfirmationRetry(service, obj, emailResult.reason ?? 'unknown');
+              } else {
+                await stampFailed(`confirmation email: ${emailResult.reason ?? 'unknown'} — tickets issued, buyer never notified`);
+              }
+            }
           } else {
             // money captured, quota gone, nothing delivered: a human owes this
             // buyer a refund and nothing else in the system will say so
             await stampFailed('settle refused (late webhook, no quota): refund owed');
           }
+        }
+      } else if (row.type === 'confirmation_email_retry') {
+        // 2026-08-17: the durable half of the confirmation-email fix. This
+        // row's payload carries exactly the buyer email + order id captured
+        // at settle time (enqueueConfirmationRetry), so sendBuyerConfirmation
+        // runs the identical send path — same idempotent DB claim, same
+        // in-call bounded retry against Resend.
+        const result = await sendBuyerConfirmation(service, obj);
+        if (result.sent) {
+          await stampProcessed(null);
+        } else if (result.retryable) {
+          await recordRetryable(`confirmation email retry: ${result.reason}`);
+          continue;
+        } else {
+          // defensive: sendBuyerConfirmation's only non-retryable outcome is
+          // a missing email/order id, which THIS row's own payload was built
+          // from (see enqueueConfirmationRetry) and should not newly go
+          // missing. If it somehow does, looping for MAX_ATTEMPTS drain
+          // cycles on a guaranteed-forever failure is worse than alerting
+          // now.
+          await stampFailed(`confirmation email retry exhausted (terminal): ${result.reason}`);
         }
       } else if (row.type === 'checkout.session.expired') {
         const sessionId = obj.id;
