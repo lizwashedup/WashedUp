@@ -42,6 +42,7 @@ import {
   type FollowTarget,
 } from '../../lib/organizerFollows';
 import { eventKickerLabel } from '../../lib/sceneDiscovery';
+import { buildPlanPrefillFromEvent, canFindPeopleForEvent, getOpenLinkedPlans } from '../../lib/eventPlanHandoff';
 import { getLeaderCards } from '../../lib/communityLeader';
 import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
@@ -543,20 +544,13 @@ export default function EventDetailScreen() {
   });
 
   const goFindPeople = useCallback(() => {
-    if (!event) return;
+    // item 07 is organization-event only; the chat law (item 04) keeps a
+    // community event's RSVP opening its own event-room chat instead.
+    if (!event || !canFindPeopleForEvent(event)) return;
     hapticMedium();
     router.push({
       pathname: '/(tabs)/post',
-      params: {
-        prefillTitle: event.title,
-        prefillExploreEventId: event.id,
-        prefillStartTime: event.start_time ?? '',
-        prefillEventDate: event.event_date ?? '',
-        prefillDescription: event.description ?? '',
-        prefillImageUrl: event.image_url ?? '',
-        prefillLocation: event.venue_address ?? event.venue ?? '',
-        prefillCategory: event.category ?? '',
-      },
+      params: buildPlanPrefillFromEvent(event),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event]);
@@ -582,10 +576,13 @@ export default function EventDetailScreen() {
       // the event chat the rsvp just enrolled them in, not a plan.
       if (!isCommunityEvent && !(await wasNudged(id))) {
         await markNudged(id);
-        const openPlans = linkedPlans.filter((p) => {
-          const actualCount = memberCountsMap[p.id] ?? p.member_count;
-          return capDisplayCount(actualCount) < Math.min((p.max_invites ?? 7) + 1, MAX_GROUP);
-        });
+        const openPlans = getOpenLinkedPlans(
+          linkedPlans.map((p) => ({
+            id: p.id,
+            memberCount: memberCountsMap[p.id] ?? p.member_count,
+            maxInvites: p.max_invites,
+          })),
+        ).map((p) => linkedPlans.find((lp) => lp.id === p.id)!);
         if (openPlans.length > 0) {
           // LIZ COPY
           setAlertInfo({

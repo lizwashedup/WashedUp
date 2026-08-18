@@ -4,8 +4,11 @@
  * switch; exits via menu -> switch back.
  *
  * Community Leaders (or anyone actively leading a community) get all five
- * tabs. Event Host grant alone gets the smaller shell: events + menu only,
- * enforced here AND by RLS server-side.
+ * community tabs. An event-host-only grant gets its own purpose-built
+ * organizer shell instead (CTO scope item 06; design spec item 04
+ * "distinct... workspace shells"; inventory O-01): organizer-home + events +
+ * menu, never the leader's cut-down five-tab set. Enforced here AND by RLS
+ * server-side.
  *
  * Screens are functionally minimal per decision 15a: logic before design.
  */
@@ -79,6 +82,16 @@ export default function CreatorLayout() {
         options={{
           title: 'Today',
           href: leader ? undefined : null,
+          tabBarIcon: ({ color }) => <Sun size={22} color={color} strokeWidth={2} />,
+        }}
+      />
+      <Tabs.Screen
+        name="organizer-home"
+        options={{
+          // O-01's own nav naming ("Today / Events / Attendees / More"); the
+          // leader's "Today" and this are mutually exclusive, never both shown
+          title: 'Today',
+          href: leader ? null : undefined,
           tabBarIcon: ({ color }) => <Sun size={22} color={color} strokeWidth={2} />,
         }}
       />

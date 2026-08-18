@@ -295,6 +295,10 @@ export const COPY = {
   // proactively; reactance fix). Opens the people picker.
   inviteAddFromPeople: '+ Add from your people',
   peoplePickerTitle: 'Add from your people',
+  // Only shown above people you've actually done things with before (real
+  // shared-plan count > 0) — never an arbitrary subset, so it never implies
+  // signal that isn't there.
+  peoplePickerSuggestedLabel: 'Suggested',
   peoplePickerConfirm: (n: number) => (n === 1 ? 'Add 1 person' : `Add ${n} people`),
   peoplePickerEmptyTitle: 'No people to add.',
   peoplePickerEmptySub: 'Everyone you know is already on this plan.',

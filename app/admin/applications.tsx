@@ -40,8 +40,11 @@ interface ApplicationRow {
   applicant_name?: string;
 }
 
+// "event_host" is the RPC/DB track value (never renamed); the reviewer-facing
+// label must stay off the forbidden "host" word, so it reads as the CTO
+// spec's own naming for this application (item 06: Organization/Producer).
 const TRACK_LABEL: Record<OperatorTrack, string> = {
-  event_host: 'Event Host',
+  event_host: 'Organizer / Producer',
   community_leader: 'Community Leader',
 };
 

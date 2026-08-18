@@ -1,10 +1,27 @@
 /**
- * Scene discovery (doc 10 phase 5): Event Discovery + Communities, the
- * public half of the app. Events read as LISTINGS, poster first, marquee
- * title in the display face, deliberately not the warm Plans card (locked
- * decision 12); the full design pass sharpens this later per 15a. The
- * communities rail renders only when a community exists (Liz: no empty
- * state). Behind COMMUNITIES_ENABLED via the ScenePage export.
+ * Scene discovery (doc 10 phase 5, restructured for CTO scope item 01 /
+ * design-spec item 02, 2026-08-17): two distinct destinations — Events and
+ * Communities — sharing one header and a full-width underline-tab shell
+ * (SC-01, the house tab pattern also used in app/(creator)/events.tsx and
+ * app/(tabs)/chats/index.tsx). They no longer blend into one feed: the
+ * combined rail-on-top-of-feed layout this replaces is gone.
+ *
+ * Events read as LISTINGS, poster first, marquee title in the display face
+ * (locked decision 12); a community event keeps its "community" label
+ * wherever it surfaces (SC-02, via eventKickerLabel). Communities is a full
+ * vertical browse (SC-03), not a rail teaser — it supersedes the old
+ * app/communities "see all" screen as the real browse surface; that route
+ * is left in place as a harmless standalone deep link, nothing links to it
+ * from here anymore.
+ *
+ * Exact information architecture / search / filter behavior beyond the
+ * existing category chips is explicitly an open question in spec item 01
+ * ("OPEN_QUESTIONS: Exact information architecture, search/filter
+ * behavior...") and the atmosphere-led hero + time-filter treatment in
+ * SC-02 is design-pass work under item 10, deferred to Liz's next design
+ * pass per that item's own OPEN_QUESTIONS. Not invented here.
+ *
+ * Behind COMMUNITIES_ENABLED via the ScenePage export.
  */
 
 import React, { useState } from 'react';
@@ -20,7 +37,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Ionicons } from '@expo/vector-icons';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import ProfileButton from '../ProfileButton';
@@ -35,12 +51,67 @@ import {
 } from '../../lib/sceneDiscovery';
 import { getLeaderCards } from '../../lib/communityLeader';
 
-const RAIL_CARD_WIDTH = 260;
-const RAIL_COVER_HEIGHT = 110;
+type SceneDestination = 'events' | 'communities';
+
+const DESTINATIONS: ReadonlyArray<readonly [SceneDestination, string]> = [
+  ['events', 'events'],
+  ['communities', 'communities'],
+];
+
 // size follows importance: this many lead events render full-size
 const FULL_SIZE_COUNT = 3;
 
 export function SceneDiscovery() {
+  // SC-01: one shared shell, two destination states, retained selection —
+  // plain component state is enough (the tab navigator keeps Scene mounted
+  // across a bottom-tab switch); Events leads by default (item 04/07: "join
+  // event is primary" is the general framing throughout the CTO scope).
+  const [destination, setDestination] = useState<SceneDestination>('events');
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>
+          The <Text style={styles.headerTitleItalic}>Scene</Text>
+        </Text>
+        <ProfileButton />
+      </View>
+
+      {/* the house underline-tab pattern, full width, two-way split.
+          Loading/empty/error inside either destination preserve this shell
+          (SC-01). */}
+      <View style={styles.destinationRow}>
+        {DESTINATIONS.map(([key, label]) => {
+          const on = destination === key;
+          return (
+            <TouchableOpacity
+              key={key}
+              style={styles.destinationTab}
+              onPress={() => {
+                if (!on) { hapticLight(); setDestination(key); }
+              }}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={label}
+              activeOpacity={0.7}
+            >
+              {/* selected destination reads terracotta (SC-02); other
+                  actions stay warm dark / tertiary */}
+              <Text style={[styles.destinationText, on && styles.destinationTextOn]}>{label}</Text>
+              <View style={[styles.destinationUnderline, on && styles.destinationUnderlineOn]} />
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {destination === 'events' ? <EventsDestination /> : <CommunitiesDestination />}
+    </SafeAreaView>
+  );
+}
+
+// ─── Events destination (SC-02) ──────────────────────────────────────────
+
+function EventsDestination() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const [category, setCategory] = useState<string | null>(null);
@@ -48,20 +119,6 @@ export function SceneDiscovery() {
   const { data: events = [], refetch, isRefetching } = useQuery({
     queryKey: ['scene-events'],
     queryFn: getSceneEvents,
-  });
-  const { data: communities = [], refetch: refetchCommunities } = useQuery({
-    queryKey: ['scene-communities'],
-    queryFn: getDiscoverableCommunities,
-  });
-
-  // the people-first pack (decision 15 made visible): community cards lead
-  // with the leader's face, live-resolved from her profile. Pre-apply (or on
-  // any error) the map is empty and cards simply show no face.
-  const communityIdsKey = communities.map((c) => c.id).sort().join(',');
-  const { data: leaderCards = new Map() } = useQuery({
-    queryKey: ['leader-cards', communityIdsKey],
-    queryFn: () => getLeaderCards(communities.map((c) => c.id)),
-    enabled: communities.length > 0,
   });
 
   // pilot-era rows carry capitalized categories ('Community'); compare and
@@ -86,124 +143,121 @@ export function SceneDiscovery() {
     />
   );
 
-  // Liz's second pass (doc 37 amended): the rail lives at the TOP of the
-  // feed, directly under the filter row — reference placement — with the
-  // reference card anatomy (cover, overlapping face chip, by-line, member
-  // threshold, the creator's one-line message).
-  //
-  // THE EMPTY-STATE RULE (Liz, 2026-07-15): zero ACTIVE communities means
-  // this entire block — header, rail, see-all — disappears; the invite
-  // card below the feed survives regardless (it is the recruiting
-  // surface). A furnishing community never shows here because the
-  // discovery read is active-only by construction, so the shelf never
-  // reads as a ghost town: launch day is events + the invite card until
-  // the first community flips active.
-  const communitiesRail = communities.length > 0 && (
-    <>
-      <View style={styles.railHeader}>
-        <Text style={styles.sectionLabel}>communities</Text>
-        <TouchableOpacity onPress={() => router.push('/communities' as never)} hitSlop={8}>
-          {/* LIZ COPY */}
-          <Text style={styles.seeAll}>see all</Text>
-        </TouchableOpacity>
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
-        {communities.map((c) => (
-          <CommunityCard
-            key={c.id}
-            community={c}
-            leaderCard={leaderCards.get(c.id) ?? null}
-            width={RAIL_CARD_WIDTH}
-            onPress={() => router.push(`/community/${c.id}` as never)}
-          />
-        ))}
-      </ScrollView>
-    </>
-  );
-
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>
-          The <Text style={styles.headerTitleItalic}>Scene</Text>
+    <ScrollView
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={Colors.terracotta} />
+      }
+    >
+      {/* the category axis only — community-vs-standalone lives on each
+          card's own kicker label (eventKickerLabel), never here */}
+      {usedCategories.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          {[null, ...usedCategories].map((c) => (
+            <TouchableOpacity
+              key={c ?? 'all'}
+              style={[styles.chip, category === c && styles.chipOn]}
+              onPress={() => { hapticLight(); setCategory(c); }}
+            >
+              <Text style={[styles.chipText, category === c && styles.chipTextOn]}>{c ?? 'all'}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
+      <Text style={styles.sectionLabel}>happening in LA</Text>
+      {filtered.length === 0 ? (
+        <Text style={styles.emptyLine}>
+          the calendar is filling up. check back in a beat.
         </Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            onPress={() => router.push('/communities' as never)}
-            accessibilityLabel="Browse communities"
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            style={styles.communitiesBtn}
-          >
-            <Ionicons name="people-outline" size={22} color={Colors.darkWarm} />
-          </TouchableOpacity>
-          <ProfileButton />
-        </View>
-      </View>
+      ) : (
+        <>
+          {/* size follows importance, never source (standing rule): the
+              first few events render full-size whatever put them on;
+              compact is the deeper-feed rhythm. Attribution, not size,
+              marks the source (byline + corner chip / community kicker). */}
+          {filtered.slice(0, FULL_SIZE_COUNT).map(renderFeatured)}
+          {filtered.slice(FULL_SIZE_COUNT).map(renderCompact)}
+        </>
+      )}
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => { refetch(); refetchCommunities(); }}
-            tintColor={Colors.terracotta}
-          />
-        }
-      >
-        {/* the IA fix (doc 37): this row is the CATEGORY axis only —
-            source (community vs standalone) lives on each card's byline */}
-        {usedCategories.length > 1 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {[null, ...usedCategories].map((c) => (
-              <TouchableOpacity
-                key={c ?? 'all'}
-                style={[styles.chip, category === c && styles.chipOn]}
-                onPress={() => { hapticLight(); setCategory(c); }}
-              >
-                <Text style={[styles.chipText, category === c && styles.chipTextOn]}>{c ?? 'all'}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-
-        {communitiesRail}
-
-        <Text style={[styles.sectionLabel, communities.length > 0 ? styles.sectionGap : undefined]}>happening in LA</Text>
-        {filtered.length === 0 ? (
-          <Text style={styles.emptyLine}>
-            the calendar is filling up. check back in a beat.
-          </Text>
-        ) : (
-          <>
-            {/* size follows importance, never source (standing rule): the
-                first few events render full-size whatever put them on;
-                compact is the deeper-feed rhythm. Attribution, not size,
-                marks the source (byline + corner chip). */}
-            {filtered.slice(0, FULL_SIZE_COUNT).map(renderFeatured)}
-            {filtered.slice(FULL_SIZE_COUNT).map(renderCompact)}
-          </>
-        )}
-
-        {/* the supply funnel: every browser is a possible creator. quiet,
-            visible, never shouting. LIZ COPY */}
-        <View style={styles.creatorCard}>
-          <Text style={styles.creatorText}>
-            run a community or throw events? bring it to washedup.
-          </Text>
-          <TouchableOpacity
-            style={styles.creatorBtn}
-            onPress={() => router.push('/creator/apply' as never)}
-          >
-            <Text style={styles.creatorBtnText}>tell us about it</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+      <CreatorRecruitCard />
+    </ScrollView>
   );
 }
 
+// ─── Communities destination (SC-03) ─────────────────────────────────────
+
+function CommunitiesDestination() {
+  const router = useRouter();
+  const { width } = useWindowDimensions();
+
+  const { data: communities = [], refetch, isRefetching } = useQuery({
+    queryKey: ['scene-communities'],
+    queryFn: getDiscoverableCommunities,
+  });
+  const communityIdsKey = communities.map((c) => c.id).sort().join(',');
+  const { data: leaderCards = new Map() } = useQuery({
+    queryKey: ['leader-cards', communityIdsKey],
+    queryFn: () => getLeaderCards(communities.map((c) => c.id)),
+    enabled: communities.length > 0,
+  });
+
+  return (
+    <ScrollView
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={Colors.terracotta} />
+      }
+    >
+      {communities.length > 0 && (
+        <View style={styles.communitiesList}>
+          {communities.map((c) => (
+            <CommunityCard
+              key={c.id}
+              community={c}
+              leaderCard={leaderCards.get(c.id) ?? null}
+              width={width - 40}
+              onPress={() => router.push(`/community/${c.id}` as never)}
+            />
+          ))}
+        </View>
+      )}
+
+      {/* THE EMPTY-STATE RULE (Liz, 2026-07-15, carried over from the old
+          combined feed): zero ACTIVE communities never shows a bare "no
+          communities" line — the recruiting card below is the invitation
+          and it always renders, so the destination is never a dead end. */}
+      <CreatorRecruitCard />
+    </ScrollView>
+  );
+}
+
+// ─── Shared: the supply funnel (every browser is a possible creator) ─────
+
+function CreatorRecruitCard() {
+  const router = useRouter();
+  return (
+    <View style={styles.creatorCard}>
+      <Text style={styles.creatorText}>
+        run a community or throw events? bring it to washedup.
+      </Text>
+      <TouchableOpacity
+        style={styles.creatorBtn}
+        onPress={() => router.push('/creator/apply' as never)}
+      >
+        <Text style={styles.creatorBtnText}>tell us about it</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const UNDERLINE_HEIGHT = 2.5;
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
+  // Q2 token set (new Scene/Block-B screen): cream, not the legacy parchment
+  container: { flex: 1, backgroundColor: Colors.cream },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -213,8 +267,22 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontFamily: Fonts.display, fontSize: FontSizes.displayLG, color: Colors.darkWarm },
   headerTitleItalic: { fontFamily: Fonts.display },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  communitiesBtn: { padding: 4 },
+
+  // ── SC-01 destination shell: full-width underline tabs, never pill
+  //    bubbles (repo tabs law) ──
+  destinationRow: { flexDirection: 'row', paddingHorizontal: 20 },
+  destinationTab: { flex: 1, alignItems: 'center', paddingVertical: 8 },
+  destinationText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.tertiary },
+  destinationTextOn: { color: Colors.darkWarm, fontFamily: Fonts.sansBold },
+  destinationUnderline: {
+    height: UNDERLINE_HEIGHT,
+    alignSelf: 'stretch',
+    marginTop: 6,
+    borderRadius: 2,
+    backgroundColor: 'transparent',
+  },
+  destinationUnderlineOn: { backgroundColor: Colors.terracotta },
+
   content: { padding: 20, paddingBottom: 60 },
   sectionLabel: {
     fontFamily: Fonts.sansBold,
@@ -223,10 +291,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginBottom: 10,
   },
-  sectionGap: { marginTop: 24 },
-  railHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  seeAll: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta, marginBottom: 10 },
-  rail: { gap: 12 },
+  communitiesList: { gap: 14, marginBottom: 4 },
   chipRow: { gap: 8, marginBottom: 14 },
   chip: {
     borderRadius: 999,
@@ -263,7 +328,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   creatorBtn: {
-    borderRadius: 999,
+    // 10px action radius, no pill-shaped buttons (Figma-ready spec,
+    // supersedes the older pill guidance)
+    borderRadius: 10,
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
     paddingHorizontal: 18,

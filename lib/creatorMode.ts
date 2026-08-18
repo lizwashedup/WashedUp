@@ -46,9 +46,16 @@ export function isLeaderAccess(a: CreatorAccess | undefined | null): boolean {
   return a.ledCommunities.length > 0 || a.hasLeaderGrant;
 }
 
-/** Where the creator switch (and any guard bounce) lands this user. */
-export function creatorLandingRoute(a: CreatorAccess | undefined | null): '/(creator)/today' | '/(creator)/events' {
-  return isLeaderAccess(a) ? '/(creator)/today' : '/(creator)/events';
+/**
+ * Where the creator switch (and any guard bounce) lands this user. A leader
+ * lands on the community's persistent Today feed; an event-host-only grant
+ * lands on its own purpose-built home (organizer-home.tsx, O-01), never the
+ * community concept it does not have.
+ */
+export function creatorLandingRoute(
+  a: CreatorAccess | undefined | null,
+): '/(creator)/today' | '/(creator)/organizer-home' {
+  return isLeaderAccess(a) ? '/(creator)/today' : '/(creator)/organizer-home';
 }
 
 export async function getCreatorAccess(): Promise<CreatorAccess> {

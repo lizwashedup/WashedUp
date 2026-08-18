@@ -221,7 +221,7 @@ export default function CreatorMenuScreen() {
               setViewAsEventHost(true);
               queryClient.invalidateQueries({ queryKey: ['creator-access'] });
               // land exactly where a real event host lands
-              router.replace('/(creator)/events');
+              router.replace('/(creator)/organizer-home');
             }}
             hitSlop={8}
           >

@@ -34,6 +34,10 @@
     "testMatch": [
       "**/__tests__/**/*.test.[jt]s?(x)"
     ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/\\.claude/worktrees/"
+    ],
     "setupFilesAfterEnv": [
       "./qa/jest.after-env.cjs"
     ],

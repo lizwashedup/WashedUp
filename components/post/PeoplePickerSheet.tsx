@@ -7,7 +7,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import {
-  View, Text, Modal, Pressable, FlatList, ActivityIndicator, StyleSheet,
+  View, Text, Modal, Pressable, SectionList, ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +21,10 @@ import { useYoursGrid } from '../../hooks/useYoursGrid';
 import { usePickerFilter } from '../../hooks/usePickerFilter';
 import PeopleSearchBar from '../yours/search/PeopleSearchBar';
 import type { YoursGridPerson } from '../../lib/yours/types';
+import { buildSmartShortlist } from '../../lib/invites/smartShortlist';
+
+const NO_IDS: ReadonlySet<string> = new Set();
+const SUGGESTED_MAX = 5;
 
 export interface PickedPerson {
   user_id: string;
@@ -77,12 +81,54 @@ export default function PeoplePickerSheet({
     return people.filter((p) => !present.has(p.user_id));
   }, [people, excludeIds]);
 
+  // Suggested = ranked purely by real shared-plan count against people you're
+  // already connected to (the same set `pickable` already authorizes — this
+  // sheet has no separate opt-in concept to check). matchingCategoryActivityCount
+  // and activityRecency aren't computed anywhere yet, so they're passed as 0
+  // rather than invented; only sharedActivityCount drives the ranking today.
+  // Anyone with zero shared plans is excluded from the section entirely so it
+  // never implies a signal that isn't real.
+  const suggestedIds = useMemo(() => {
+    const allowed = new Set(pickable.map((p) => p.user_id));
+    const ranked = buildSmartShortlist(
+      pickable.map((p) => ({
+        personId: p.user_id,
+        sharedActivityCount: p.shared_count,
+        matchingCategoryActivityCount: 0,
+        activityRecency: 0,
+        payload: p,
+      })),
+      { allowedPersonIds: allowed, blockedPersonIds: NO_IDS, dismissedPersonIds: NO_IDS, alreadyInvitedPersonIds: NO_IDS },
+      { sharedActivityCount: 1, matchingCategoryActivityCount: 0, activityRecency: 0 },
+    );
+    return ranked
+      .filter((entry) => entry.candidate.sharedActivityCount > 0)
+      .slice(0, SUGGESTED_MAX)
+      .map((entry) => entry.candidate.personId);
+  }, [pickable]);
+
   // Search appears only past the threshold; selected people stay visible even
   // when they fall outside the current query.
   const { query, setQuery, showSearch, filtered } = usePickerFilter(
     pickable,
     (p) => selected.has(p.user_id),
   );
+
+  // The Suggested group only makes sense against the unfiltered list — once
+  // someone is actively searching, show one flat, unlabeled set of matches.
+  const sections = useMemo(() => {
+    if (query.trim() || suggestedIds.length === 0) {
+      return [{ title: null as string | null, data: filtered }];
+    }
+    const suggestedSet = new Set(suggestedIds);
+    const byId = new Map(filtered.map((p) => [p.user_id, p]));
+    const suggested = suggestedIds.map((id) => byId.get(id)).filter((p): p is YoursGridPerson => !!p);
+    const rest = filtered.filter((p) => !suggestedSet.has(p.user_id));
+    const out: { title: string | null; data: YoursGridPerson[] }[] = [];
+    if (suggested.length > 0) out.push({ title: COPY.peoplePickerSuggestedLabel, data: suggested });
+    out.push({ title: null, data: rest });
+    return out;
+  }, [filtered, suggestedIds, query]);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -128,12 +174,16 @@ export default function PeoplePickerSheet({
           ) : (
             <>
               {showSearch && <PeopleSearchBar value={query} onChange={setQuery} />}
-              <FlatList
-                data={filtered}
+              <SectionList
+                sections={sections}
                 keyExtractor={(p) => p.user_id}
                 renderItem={({ item }) => (
                   <PickRow person={item} selected={selected.has(item.user_id)} onToggle={() => toggle(item.user_id)} />
                 )}
+                renderSectionHeader={({ section }) =>
+                  section.title ? <Text style={styles.sectionLabel}>{section.title}</Text> : null
+                }
+                stickySectionHeadersEnabled={false}
                 style={styles.list}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
@@ -171,6 +221,16 @@ const styles = StyleSheet.create({
   emptySub: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.secondary, textAlign: 'center', marginTop: 8 },
   list: { flexGrow: 0 },
   listContent: { paddingBottom: 12 },
+  sectionLabel: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 10, gap: 14 },
   avatar: { width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2, backgroundColor: Colors.inputBg },
   avatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.brandSoft },
