@@ -18,6 +18,11 @@ const RAW_DB_ERROR_PATTERNS = [
   /^postgrest/i,
   /null value in column/i,
   /invalid input syntax/i,
+  // Internal auth-plumbing exceptions (e.g. join_event_atomic's own guards)
+  // are meant for server logs, not users -- a stale/desynced session should
+  // read as a generic retry-able failure, not leak the raw check that failed.
+  /not authenticated/i,
+  /can only join as yourself/i,
 ];
 
 function looksLikeRawDbError(message: string): boolean {

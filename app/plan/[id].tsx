@@ -1775,11 +1775,17 @@ export default function PlanDetailScreen() {
 
         {/* F. Who's Going */}
         <Text style={styles.whoGoingTitle}>Who's going</Text>
-        <View style={styles.memberAvatarRow}>
-          {members.map((member) => (
-            <MemberAvatar key={member.id} member={member} onPress={() => setMiniProfileUserId(member.user_id)} />
-          ))}
-        </View>
+        {members.length === 0 && (plan?.member_count ?? 0) > 0 ? (
+          <Text style={styles.whoGoingFallback}>
+            {plan?.member_count} {plan?.member_count === 1 ? 'person is' : 'people are'} going
+          </Text>
+        ) : (
+          <View style={styles.memberAvatarRow}>
+            {members.map((member) => (
+              <MemberAvatar key={member.id} member={member} onPress={() => setMiniProfileUserId(member.user_id)} />
+            ))}
+          </View>
+        )}
 
         {/* F-2. Next Time! — interest signal button (non-creator, non-member, plan still upcoming) */}
         {canShowInterestButton && (
@@ -3136,6 +3142,12 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
     marginBottom: 12,
+  },
+  whoGoingFallback: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.textMedium,
+    marginBottom: 24,
   },
   memberAvatarRow: {
     flexDirection: 'row',
