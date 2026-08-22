@@ -50,7 +50,7 @@ export interface CommunityChatCard {
   handle: string;
   name: string;
   accent_color: string | null;
-  role: 'leader' | 'co_leader' | 'member';
+  role: 'leader' | 'co_leader' | 'admin' | 'events' | 'member_care' | 'finance' | 'member';
   latest_broadcast: { id: string; body: string; created_at: string; sender_id: string | null } | null;
   unread_broadcasts: number;
   topics: ChatCardTopic[];
@@ -484,16 +484,65 @@ export interface TopicMeta {
   archived: boolean;
   community_id: string;
   explore_event_id: string | null;
+  /**
+   * Live bug fix (2026-08-19): a cancelled event and one that simply ended
+   * both just archive the topic, with nothing recording which reason it
+   * was. explore_events.status already carries that distinction at the
+   * event level, so it's pulled in here (embedded select via the FK) so the
+   * closed-room copy can tell them apart. Null for persistent community
+   * rooms, which have no linked event.
+   */
+  /**
+   * SC-09/C-24 (2026-08-19): host_user_id rides the same embed so the
+   * welcome-message banner can tell "the creator's own first message" apart
+   * from a member happening to type first. Same null-for-persistent-rooms
+   * shape as status above.
+   */
+  /**
+   * SC-08 (2026-08-19): event_date/start_time/venue ride the same embed so
+   * the room header can show a real logistics recap and a real expiry
+   * timestamp instead of neither. Null for persistent community rooms.
+   */
+  explore_events: {
+    status: string | null;
+    host_user_id: string | null;
+    event_date: string | null;
+    start_time: string | null;
+    venue: string | null;
+  } | null;
 }
 
 export async function getTopicMeta(topicId: string): Promise<TopicMeta | null> {
   const { data, error } = await supabase
     .from('community_topics')
-    .select('id, name, archived, community_id, explore_event_id')
+    .select(
+      'id, name, archived, community_id, explore_event_id, explore_events(status, host_user_id, event_date, start_time, venue)',
+    )
     .eq('id', topicId)
     .maybeSingle();
   if (error || !data) return null;
-  return data as TopicMeta;
+  return data as unknown as TopicMeta;
+}
+
+/**
+ * SC-08: the room's real close time, computed the same way the live cron
+ * actually computes it right now (id 29, archive-community-event-topics:
+ * coalesce(start_time, event_date) + 48h -- keyed off the event START, a
+ * known bug, fix written but unapplied in
+ * 20260819030000_fix_event_chat_archive_timer.sql). This intentionally
+ * mirrors today's REAL behavior, not the fixed behavior, so the timestamp
+ * shown is never wrong about what will actually happen until that migration
+ * is applied. Null when there is nothing to key off (persistent room, or a
+ * linked event with neither field set).
+ */
+export function computeEventRoomExpiry(meta: Pick<TopicMeta, 'explore_events'>): Date | null {
+  const ev = meta.explore_events;
+  if (!ev) return null;
+  const base = ev.start_time ?? (ev.event_date ? `${ev.event_date}T00:00:00` : null);
+  if (!base) return null;
+  const d = new Date(base);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Date(d.getTime() + 48 * 60 * 60 * 1000);
 }
 
 export async function getTopicMessages(topicId: string): Promise<TopicMessage[]> {
@@ -513,6 +562,19 @@ export async function sendTopicMessage(topicId: string, body: string): Promise<v
   const { error } = await supabase
     .from('community_topic_messages')
     .insert({ topic_id: topicId, sender_id: user.id, body: body.trim() });
+  if (error) throw error;
+}
+
+/**
+ * Creator moderation, distinct from the existing report/block (inventory
+ * C-14): remove a message from the room for everyone, not just the caller's
+ * own view. RLS-gated (community_topic_messages_delete already allows the
+ * message's sender OR the topic's community leader OR an admin) -- this is
+ * a raw delete, same pattern as removeMember() in creatorMode.ts, no new
+ * RPC needed since the policy already covers it.
+ */
+export async function deleteTopicMessage(messageId: string): Promise<void> {
+  const { error } = await supabase.from('community_topic_messages').delete().eq('id', messageId);
   if (error) throw error;
 }
 
