@@ -30,8 +30,10 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { ReportModal } from '../../components/modals/ReportModal';
 import { useBlock } from '../../hooks/useBlock';
 import { BroadcastCard } from '../../components/communities/BroadcastCard';
+import { OfflineBanner, PermissionState } from '../../components/state/StateViews';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import {
   getCommunityBroadcasts,
   getCommunityChatPayload,
@@ -42,7 +44,7 @@ import {
   setBroadcastMute,
   type CommunityBroadcast,
 } from '../../lib/communityChat';
-import { getJoinGate } from '../../lib/communityJoin';
+import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
 import { formatEventDateLA } from '../../lib/laDate';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { supabase } from '../../lib/supabase';
@@ -78,6 +80,20 @@ export default function CommunityThreadScreen() {
       ],
     });
   };
+
+  // SC-07 (2026-08-19): the persistent room had no removed/banned state and
+  // no offline state at all -- both existed already on the neighboring
+  // event/topic room, never here. Same shape as the topic room's own fix: a
+  // failed/unknown membership read is treated as still-a-member, the server
+  // RLS is the real gate either way.
+  const { data: myMembership } = useQuery({
+    queryKey: ['community-my-membership', id],
+    queryFn: () => getMyMembership(id!),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+  const removedFromCommunity = myMembership?.status === 'removed' || myMembership?.status === 'banned';
+  const { online } = useNetworkStatus();
 
   const { data: payload } = useQuery({
     queryKey: ['community-chat-cards'],
@@ -279,29 +295,37 @@ export default function CommunityThreadScreen() {
         />
       )}
 
-      <View style={styles.composer}>
-        <TextInput
-          style={styles.input}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="say something"
-          placeholderTextColor={Colors.inkSoft}
-          multiline
-          maxLength={4000}
-          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-        />
-        <TouchableOpacity
-          style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnOff]}
-          onPress={handleSend}
-          disabled={!draft.trim() || sending}
-        >
-          {sending ? (
-            <ActivityIndicator size="small" color={Colors.white} />
-          ) : (
-            <Text style={styles.sendBtnText}>send</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+      {removedFromCommunity ? (
+        /* SC-07: a real reason, not a silently-broken composer. */
+        <PermissionState message="you were removed from this community." />
+      ) : (
+        <>
+          {!online && <OfflineBanner label="you're offline. messages will send once you're back." />}
+          <View style={styles.composer}>
+            <TextInput
+              style={styles.input}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="say something"
+              placeholderTextColor={Colors.inkSoft}
+              multiline
+              maxLength={4000}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
+            <TouchableOpacity
+              style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnOff]}
+              onPress={handleSend}
+              disabled={!draft.trim() || sending}
+            >
+              {sending ? (
+                <ActivityIndicator size="small" color={Colors.white} />
+              ) : (
+                <Text style={styles.sendBtnText}>send</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
 
       </KeyboardAvoidingView>
       <BrandedAlert

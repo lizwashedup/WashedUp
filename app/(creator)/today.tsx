@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router } from 'expo-router';
 import { Image } from 'expo-image';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Calendar } from 'lucide-react-native';
+import { ChevronRight, Calendar, Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import {
@@ -18,11 +18,17 @@ import {
   getBroadcasts,
   getCreatorEvents,
   isLeaderAccess,
+  creatorLandingRoute,
 } from '../../lib/creatorMode';
+import { getCommunityRooms } from '../../lib/communityChat';
 import { formatEventDateLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import { supabase } from '../../lib/supabase';
+import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
+import { getRsvpCount } from '../../lib/eventRsvp';
+import { OfflineBanner } from '../../components/state/StateViews';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 
 export default function CreatorTodayScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
@@ -47,16 +53,46 @@ export default function CreatorTodayScreen() {
     },
     enabled: access != null,
   });
+  // inventory C-02: a real link into the persistent room, not a fabricated
+  // "pulse" metric -- room count is genuinely available (community.tsx
+  // already fetches this the same way), so the home card can be honest.
+  const { data: rooms = [] } = useQuery({
+    queryKey: ['creator-rooms', community?.id],
+    queryFn: () => getCommunityRooms(community!.id),
+    enabled: !!community,
+  });
 
   const pending = members.filter((m) => m.status === 'pending');
   const activeCount = members.filter((m) => m.status === 'active').length;
   const nextEvent = events[0] ?? null;
   const latestBroadcast = broadcasts[0] ?? null;
 
+  const { online } = useNetworkStatus();
+
+  // C-02: ticket sales take precedence over a free RSVP count when both
+  // exist -- same precedence lib/creatorMode.ts's getMemberEventHistory
+  // already uses per-member.
+  const { data: attendees = [] } = useQuery({
+    queryKey: ['creator-today-attendees', nextEvent?.id],
+    queryFn: () => getEventAttendees(nextEvent!.id),
+    enabled: !!nextEvent,
+  });
+  const counts = countAttendees(attendees);
+  const { data: rsvpCount = null } = useQuery({
+    queryKey: ['creator-today-rsvp-count', nextEvent?.id],
+    queryFn: () => getRsvpCount(nextEvent!.id),
+    enabled: !!nextEvent,
+  });
+  const attendanceLabel = !nextEvent
+    ? null
+    : counts.sold > 0 || !rsvpCount
+      ? `${counts.sold} sold · ${counts.checkedIn} checked in`
+      : `${rsvpCount} going`;
+
   // today is a leader screen: an event-host-only grant never sees it
   // (doc 34 §1.2). The layout already hides the tab; this covers the
   // landing route, stale pushes, and deep links.
-  if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
+  if (access && !isLeaderAccess(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   // stage 2 entry state: an approved leader who has not started their
   // community yet gets the one door (setup-community -> create_community),
@@ -96,6 +132,7 @@ export default function CreatorTodayScreen() {
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>{community ? community.name.toLowerCase() : 'today'}</Text>
         <CommunitySwitcher access={access} />
+        {!online && <OfflineBanner />}
 
         {/* the one thing that needs attention first */}
         <TouchableOpacity
@@ -136,8 +173,22 @@ export default function CreatorTodayScreen() {
                     .join(' · ')
                 : 'event posting lands with discovery'}
             </Text>
+            {attendanceLabel && (
+              <Text style={styles.cardCounts} numberOfLines={1}>{attendanceLabel}</Text>
+            )}
           </View>
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.postBtn}
+          onPress={() => router.push('/creator/event-form')}
+          accessibilityRole="button"
+          accessibilityLabel="Put on an event"
+          activeOpacity={0.85}
+        >
+          <Plus size={16} color={Colors.white} strokeWidth={2.5} />
+          <Text style={styles.postBtnText}>put on an event</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.card} onPress={() => router.push('/(creator)/community')} activeOpacity={0.8}>
@@ -151,6 +202,24 @@ export default function CreatorTodayScreen() {
           </View>
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
         </TouchableOpacity>
+
+        {community && rooms.length > 0 && (
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => router.push(`/community-topic/${rooms[0].id}` as never)}
+            activeOpacity={0.8}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>
+                {rooms.length === 1 ? rooms[0].name : `${rooms.length} rooms open`}
+              </Text>
+              <Text style={styles.cardMeta} numberOfLines={1}>
+                the chat spaces members join. tap to open{rooms.length > 1 ? ' the first one' : ''}.
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -201,6 +270,17 @@ const styles = StyleSheet.create({
   cardEyebrow: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.terracotta, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
   cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
   cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  cardCounts: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, marginTop: 2 },
+  postBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 12,
+  },
+  postBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   cardThumb: { width: 48, height: 48, borderRadius: 10, backgroundColor: Colors.inputBg },
   cardThumbFallback: { alignItems: 'center', justifyContent: 'center' },
 });
