@@ -1,10 +1,19 @@
+jest.mock('../supabase', () => ({
+  supabase: { rpc: jest.fn() },
+}));
+
+import { supabase } from '../supabase';
 import {
   buildCheckoutBreakdown,
   computeFeePreview,
+  getTierAvailability,
+  isLowInventory,
   resolveOrderViewState,
   type MyOrder,
 } from '../ticketing';
 import type { PriceQuote } from '../ticketPromosAddons';
+
+const mockRpc = supabase.rpc as jest.Mock;
 
 // ─── buildCheckoutBreakdown (Scene design spec 05: itemized price) ────────
 
@@ -120,7 +129,7 @@ describe('resolveOrderViewState', () => {
   it('reads a paid order with no active seat yet as settling, not ready', () => {
     const settling = order({
       status: 'paid',
-      seats: [{ id: 's1', position_index: 1, reference_code: 'ABC123', voided: true }],
+      seats: [{ id: 's1', position_index: 1, reference_code: 'ABC123', voided: true, checkedIn: false }],
     });
     expect(resolveOrderViewState(settling, false)).toEqual({ kind: 'settling' });
   });
@@ -129,8 +138,8 @@ describe('resolveOrderViewState', () => {
     const ready = order({
       status: 'paid',
       seats: [
-        { id: 's1', position_index: 1, reference_code: 'ABC123', voided: true },
-        { id: 's2', position_index: 2, reference_code: 'DEF456', voided: false },
+        { id: 's1', position_index: 1, reference_code: 'ABC123', voided: true, checkedIn: false },
+        { id: 's2', position_index: 2, reference_code: 'DEF456', voided: false, checkedIn: false },
       ],
     });
     expect(resolveOrderViewState(ready, false)).toEqual({ kind: 'ready' });
@@ -139,7 +148,58 @@ describe('resolveOrderViewState', () => {
   it('prefers the fresh order over a stale isLoading flag from the previous query', () => {
     // react-query can hand back cached data while a background refetch is
     // still in flight; a real order in hand must never be shown as "loading".
-    expect(resolveOrderViewState(order({ status: 'paid', seats: [{ id: 's1', position_index: 1, reference_code: 'X', voided: false }] }), true))
+    expect(resolveOrderViewState(order({ status: 'paid', seats: [{ id: 's1', position_index: 1, reference_code: 'X', voided: false, checkedIn: false }] }), true))
       .toEqual({ kind: 'ready' });
+  });
+});
+
+// ─── isLowInventory / getTierAvailability (C-19/TK-07) ────────────────────
+
+describe('isLowInventory', () => {
+  it('is never low once nothing is left -- that is sold out, a different state', () => {
+    expect(isLowInventory(0, 10)).toBe(false);
+  });
+
+  it('is never low on an uncapped tier (cap <= 0)', () => {
+    expect(isLowInventory(5, 0)).toBe(false);
+  });
+
+  it('uses the 3-seat floor on a small cap', () => {
+    // 20% of 10 is 2, but the floor is 3
+    expect(isLowInventory(3, 10)).toBe(true);
+    expect(isLowInventory(4, 10)).toBe(false);
+  });
+
+  it('scales past the floor on a large cap', () => {
+    // 20% of 100 is 20
+    expect(isLowInventory(20, 100)).toBe(true);
+    expect(isLowInventory(21, 100)).toBe(false);
+  });
+});
+
+describe('getTierAvailability', () => {
+  beforeEach(() => mockRpc.mockReset());
+
+  it('returns an empty map without calling the RPC for an empty tier list', async () => {
+    const result = await getTierAvailability([]);
+    expect(result.size).toBe(0);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('keys the result by tier id, one RPC call per tier', async () => {
+    mockRpc.mockResolvedValueOnce({ data: 3, error: null });
+    mockRpc.mockResolvedValueOnce({ data: 12, error: null });
+    const result = await getTierAvailability(['tier-a', 'tier-b']);
+    expect(result.get('tier-a')).toBe(3);
+    expect(result.get('tier-b')).toBe(12);
+    expect(mockRpc).toHaveBeenCalledTimes(2);
+    expect(mockRpc).toHaveBeenNthCalledWith(1, 'get_ticket_tier_availability', { p_tier_id: 'tier-a' });
+    expect(mockRpc).toHaveBeenNthCalledWith(2, 'get_ticket_tier_availability', { p_tier_id: 'tier-b' });
+  });
+
+  it('omits a tier whose RPC call fails, rather than guessing a count', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: new Error('boom') });
+    const result = await getTierAvailability(['tier-a']);
+    expect(result.has('tier-a')).toBe(false);
   });
 });

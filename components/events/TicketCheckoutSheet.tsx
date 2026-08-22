@@ -31,7 +31,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Minus, Plus, X } from 'lucide-react-native';
+import { Minus, Plus, X, Check } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing, EventSurface } from '../../constants/EventDesign';
@@ -60,9 +60,11 @@ import {
 } from '../tickets/QuestionForm';
 import {
   addonRemaining,
+  getAddonVariationsMap,
   listBuyerAddons,
   quoteCheckout,
   type AddonSelection,
+  type AddonVariation,
   type EventAddon,
   type PriceQuote,
 } from '../../lib/ticketPromosAddons';
@@ -154,6 +156,11 @@ export function TicketCheckoutSheet({
   // price and the code rides to checkout, which prices it for real.
   const [addonsList, setAddonsList] = useState<EventAddon[]>([]);
   const [addonQty, setAddonQty] = useState<Record<string, number>>({});
+  // TK-02: label-only size/flavor/option sub-picks. Isolated fetch (never
+  // touches the core addonsList read), so a pre-migration prod just shows
+  // no options anywhere, same as today.
+  const [addonVariations, setAddonVariations] = useState<Map<string, AddonVariation[]>>(new Map());
+  const [addonVariationPick, setAddonVariationPick] = useState<Record<string, string>>({});
   const [codeFieldOpen, setCodeFieldOpen] = useState(false);
   const [codeText, setCodeText] = useState('');
   /** the code that rides to checkout (verified, or unverifiable-but-typed) */
@@ -161,10 +168,11 @@ export function TicketCheckoutSheet({
   const [quote, setQuote] = useState<PriceQuote | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [codeNote, setCodeNote] = useState<string | null>(null);
-  // doc 118: the organizer's buyer questions, asked BEFORE payment. Until
-  // SQL-99 widens the read, ticket_questions only answers a buyer who
-  // already has an order for this event, so this comes back empty and the
-  // whole step stays invisible. Same self-flipping shape as doc 111.
+  // doc 118: the organizer's buyer questions, asked BEFORE payment. SQL-99
+  // verified live 2026-08-19: ticket_questions_select_public (anon+
+  // authenticated, no order required) already widened the read, so this
+  // step now populates for real. Same self-flipping shape as doc 111. Not
+  // yet seen end-to-end: no Live event currently has an active question.
   const [questions, setQuestions] = useState<TicketQuestion[]>([]);
   const [answers, setAnswers] = useState<AnswerDraft>({});
 
@@ -172,6 +180,7 @@ export function TicketCheckoutSheet({
     if (!visible) return;
     setProblem(null);
     setAddonQty({});
+    setAddonVariationPick({});
     setAnswers({});
     setCodeFieldOpen(false);
     setCodeText('');
@@ -185,7 +194,10 @@ export function TicketCheckoutSheet({
       setSelectedId(first?.tier.id ?? null);
       setQty(first ? tierMin(first.tier) : 1);
     });
-    listBuyerAddons(eventId).then(setAddonsList);
+    listBuyerAddons(eventId).then((rows) => {
+      setAddonsList(rows);
+      getAddonVariationsMap(rows.map((a) => a.id)).then(setAddonVariations);
+    });
     getQuestions(eventId).then(setQuestions).catch(() => setQuestions([]));
   }, [visible, eventId]);
 
@@ -402,7 +414,12 @@ export function TicketCheckoutSheet({
                     activeOpacity={0.85}
                   >
                     <View style={styles.tierBody}>
-                      <Text style={[styles.tierName, blocked && styles.tierTextBlocked]}>{tier.name}</Text>
+                      <View style={styles.tierNameRow}>
+                        {/* TK-01: the selected tier can't be color-only (border tint alone
+                            fails the no-color-alone rule) -- mirrors web's checkmark. */}
+                        {active && <Check size={15} color={EventAction.primary} strokeWidth={2.75} />}
+                        <Text style={[styles.tierName, blocked && styles.tierTextBlocked]}>{tier.name}</Text>
+                      </View>
                       {!!tier.description && !blocked && <Text style={styles.tierDesc}>{tier.description}</Text>}
                       {/* doc 109: a real minimum names itself on the card */}
                       {min > 1 && !blocked && (
@@ -462,6 +479,11 @@ export function TicketCheckoutSheet({
                     const aMax = Math.min(a.per_order_max ?? 10, left ?? Number.MAX_SAFE_INTEGER);
                     return (
                       <View key={a.id} style={styles.addonRow}>
+                        {/* TK-02: creators already capture this image (AddonEditorSheet),
+                            it just never reached the buyer. */}
+                        {!!a.image_url && (
+                          <Image source={{ uri: a.image_url }} style={styles.addonImage} contentFit="cover" />
+                        )}
                         <View style={styles.addonBody}>
                           <Text style={styles.addonName}>{a.name}</Text>
                           <Text style={styles.addonPrice}>{a.price_cents === 0 ? 'free' : formatCents(a.price_cents)}</Text>
@@ -548,8 +570,8 @@ export function TicketCheckoutSheet({
                 </View>
               )}
 
-              {/* doc 118: the organizer's questions, before the money. Stays
-                  invisible until SQL-99 lets a buyer read them. */}
+              {/* doc 118: the organizer's questions, before the money.
+                  SQL-99's read already opened live (verified 2026-08-19). */}
               {showQuestions && (
                 <View style={styles.questions}>
                   {/* copy to the taste gate */}
@@ -701,6 +723,7 @@ const styles = StyleSheet.create({
   tierMinNote: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierBlockedNote: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierBody: { flex: 1, gap: 2 },
+  tierNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   tierName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   tierDesc: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierPrice: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
@@ -724,6 +747,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
     padding: 12,
   },
+  addonImage: { width: 44, height: 44, borderRadius: 8, backgroundColor: Colors.inputBg },
   addonBody: { flex: 1, gap: 2 },
   addonName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   addonPrice: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.asphalt },

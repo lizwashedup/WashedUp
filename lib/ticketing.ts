@@ -13,6 +13,7 @@
 import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
 import type { PriceQuote } from './ticketPromosAddons';
+import { getEventAttendees, isLiveSeat } from './ticketAttendees';
 
 /** PostgREST "relation does not exist": the proposal is not applied. */
 function isMissingSchema(code: string | undefined): boolean {
@@ -286,6 +287,67 @@ export function isPayoutReady(p: PayoutState | null | undefined): boolean {
   return !!p && p.chargesEnabled && p.payoutsEnabled;
 }
 
+export interface PayoutSummary {
+  eventsCount: number;
+  ticketsSold: number;
+  grossFaceCents: number;
+  processingCents: number;
+  commissionCents: number;
+  refundedCents: number;
+  netToYouCents: number;
+}
+
+const EMPTY_PAYOUT_SUMMARY: PayoutSummary = {
+  eventsCount: 0, ticketsSold: 0, grossFaceCents: 0, processingCents: 0, commissionCents: 0,
+  refundedCents: 0, netToYouCents: 0,
+};
+
+/**
+ * Aggregate net-to-you across every event this organizer runs (their own
+ * standalone events plus every community they lead — the same event set
+ * getCreatorEvents() lists) -- the standalone "getting paid" screen's real
+ * total, not a per-event slice. Same money math as the web equivalent and
+ * the per-event attendee-money query: face minus our 4% minus refunds.
+ */
+export async function getPayoutSummary(communityIds: string[], userId: string): Promise<PayoutSummary> {
+  const ors: string[] = [`host_user_id.eq.${userId}`];
+  if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
+  const { data: eventRows } = await supabase.from('explore_events').select('id').or(ors.join(','));
+  const eventIds = ((eventRows ?? []) as { id: string }[]).map((e) => e.id);
+  if (eventIds.length === 0) return EMPTY_PAYOUT_SUMMARY;
+
+  const { data: orderRows } = await supabase
+    .from('ticket_orders')
+    .select('id, face_cents, processing_cents, commission_cents')
+    .in('event_id', eventIds)
+    .eq('status', 'paid');
+  const orders = (orderRows ?? []) as { id: string; face_cents: number; processing_cents: number; commission_cents: number }[];
+  if (orders.length === 0) return { ...EMPTY_PAYOUT_SUMMARY, eventsCount: eventIds.length };
+
+  const orderIds = orders.map((o) => o.id);
+  const { data: positionRows } = await supabase
+    .from('ticket_order_positions')
+    .select('order_id, refunded_cents, voided_at')
+    .in('order_id', orderIds);
+  const positions = (positionRows ?? []) as { order_id: string; refunded_cents: number; voided_at: string | null }[];
+
+  const grossFaceCents = orders.reduce((s, o) => s + (o.face_cents ?? 0), 0);
+  const processingCents = orders.reduce((s, o) => s + (o.processing_cents ?? 0), 0);
+  const commissionCents = orders.reduce((s, o) => s + (o.commission_cents ?? 0), 0);
+  const refundedCents = positions.reduce((s, p) => s + (p.refunded_cents ?? 0), 0);
+  const ticketsSold = positions.filter((p) => p.voided_at == null).length;
+
+  return {
+    eventsCount: eventIds.length,
+    ticketsSold,
+    grossFaceCents,
+    processingCents,
+    commissionCents,
+    refundedCents,
+    netToYouCents: grossFaceCents - commissionCents - refundedCents,
+  };
+}
+
 /**
  * True when the event has at least one paid tier, the publish-gate input.
  * THROWS on a failed read rather than guessing: the gate fails closed
@@ -455,6 +517,27 @@ export async function getQuestions(eventId: string): Promise<TicketQuestion[]> {
     .order('sort_order', { ascending: true });
   if (error) return [];
   return (data ?? []) as TicketQuestion[];
+}
+
+/* TK-03: which (question, seat) slots this order already answered, so the
+   post-payment screen never re-asks a question it already has every answer
+   for. Keyed by question_id -> the set of attendee_index values on file
+   (null = the one per_order answer). Mirror of web's getAnsweredKeys, same
+   table/columns, grouped per-question since the caller only needs to know
+   whether a whole question still has an unanswered seat. */
+export async function getAnsweredQuestionIds(orderId: string): Promise<Map<string, Set<number | null>>> {
+  const { data, error } = await supabase
+    .from('ticket_answers')
+    .select('question_id, attendee_index')
+    .eq('order_id', orderId);
+  if (error || !data) return new Map();
+  const map = new Map<string, Set<number | null>>();
+  for (const row of data as { question_id: string; attendee_index: number | null }[]) {
+    const seats = map.get(row.question_id) ?? new Set<number | null>();
+    seats.add(row.attendee_index);
+    map.set(row.question_id, seats);
+  }
+  return map;
 }
 
 export async function createQuestion(
@@ -632,6 +715,47 @@ export async function getPublicTicketSummary(eventId: string): Promise<PublicTic
   return { onSale: true, fromCents, allSoldOut: false, scarcity };
 }
 
+// ─── TK-07: low inventory as a distinct labeled state ─────────────────────
+
+/**
+ * "Low inventory" as its own honest state, not just a raw count (inventory
+ * mapping pass 2026-08-19: getPublicTicketSummary computed real scarcity but
+ * nothing rendered it as a DISTINCT state, only ever the plain "X of Y left"
+ * line). Threshold mirrors the app's own existing urgency convention
+ * (components/plans/PlanCard.tsx showSpotsLeftBadge: capped at 2 for a small
+ * RSVP cap) but scales for ticket tiers, which can run into the hundreds: 20%
+ * of cap or 3 seats, whichever is more forgiving, floor of 1 (0 is "sold
+ * out", a different state entirely). LIZ COPY/threshold: proposed, not a
+ * founder-gate item — same taste-gate convention as every other number and
+ * string in this file.
+ */
+export function isLowInventory(left: number, cap: number): boolean {
+  if (left <= 0 || cap <= 0) return false;
+  return left <= Math.max(3, Math.ceil(cap * 0.2));
+}
+
+/**
+ * C-19: real per-tier remaining counts for the CREATOR's own tier list (not
+ * just the public buyer summary above). Same get_ticket_tier_availability
+ * RPC as getPublicTicketSummary, batched with Promise.all the same way --
+ * this file's own established pattern, not a new one. Uncapped tiers are
+ * never "low", so callers should only pass capped tier ids in.
+ */
+export async function getTierAvailability(tierIds: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (tierIds.length === 0) return map;
+  const entries = await Promise.all(
+    tierIds.map(async (tierId) => {
+      const { data: left } = await supabase.rpc('get_ticket_tier_availability', { p_tier_id: tierId });
+      return [tierId, typeof left === 'number' ? left : null] as const;
+    }),
+  );
+  for (const [tierId, left] of entries) {
+    if (left !== null) map.set(tierId, left);
+  }
+  return map;
+}
+
 // ─── C1: the buyer's checkout handoff (mirror of web; contract = the ────
 //        create-ticket-checkout edge function, the source of truth) ──────
 
@@ -725,6 +849,14 @@ export interface MySeat {
   position_index: number;
   reference_code: string;
   voided: boolean;
+  /**
+   * TK-07 (2026-08-19): the door's own record, not a guess. Live-verified:
+   * record_ticket_checkin() (SECURITY DEFINER, not in this repo's migration
+   * history) inserts into ticket_checkins(position_id, result) rather than
+   * writing a column on the position itself. "admitted" is the only
+   * passing result; a voided or duplicate scan is never a real check-in.
+   */
+  checkedIn: boolean;
 }
 
 export interface MyOrder {
@@ -748,7 +880,7 @@ export interface MyOrder {
 const ORDER_SELECT =
   'id, event_id, qty, total_cents, status, created_at, ' +
   'explore_events(title, event_date, venue, image_url, public_name, host_user_id), ' +
-  'ticket_order_positions(id, position_index, reference_code, voided_at)';
+  'ticket_order_positions(id, position_index, reference_code, voided_at, ticket_checkins(result))';
 
 /** the embedded explore_events row shape ORDER_SELECT actually asks for. */
 interface EmbeddedEvent {
@@ -763,6 +895,9 @@ interface EmbeddedEvent {
 function mapSeats(o: Record<string, unknown>): MySeat[] {
   const rows = (o.ticket_order_positions as {
     id: string; position_index: number; reference_code: string; voided_at: string | null;
+    // one row per scan attempt, including duplicates -- "admitted" is the
+    // only one that means the seat actually got in
+    ticket_checkins: { result: string }[] | null;
   }[] | null) ?? [];
   return rows
     .map((p) => ({
@@ -770,6 +905,7 @@ function mapSeats(o: Record<string, unknown>): MySeat[] {
       position_index: p.position_index,
       reference_code: p.reference_code,
       voided: p.voided_at != null,
+      checkedIn: (p.ticket_checkins ?? []).some((c) => c.result === 'admitted'),
     }))
     .sort((a, b) => a.position_index - b.position_index);
 }
@@ -923,8 +1059,11 @@ function humanRefundError(raw: string | null | undefined): string {
 }
 
 export type RefundTarget = {
-  /** organizer callers only; buyers omit (the server forces buyer_request) */
-  kind?: 'buyer_request';
+  /** organizer callers only; buyers omit (the server forces buyer_request).
+   *  'organizer_cancel' is the §4 whole-event-cancellation slice (TK-08):
+   *  live server-side in ticket-refund since 7-27, wired client-side from
+   *  the event cancel flow (app/creator/event-form.tsx handleStatus). */
+  kind?: 'buyer_request' | 'organizer_cancel';
   /** 1-based seat subset (organizer); null/omitted = all remaining seats */
   positionIndexes?: number[] | null;
 };
@@ -994,6 +1133,27 @@ export async function executeRefund(
   return { ok: false, message: humanRefundError(raw) };
 }
 
+export interface CancelRefundSummary { refundedCount: number; failedCount: number; }
+
+/**
+ * TK-08: bulk organizer_cancel refund when an organizer cancels an event
+ * with live paid orders. Mirrors REFUND_PRESETS' 'final' promise ("if we
+ * cancel, you are refunded in full"). Best effort per order; safe to retry
+ * (ticket-refund's claim key makes a repeat call on an already-refunded
+ * order a no-op, not a double refund).
+ */
+export async function refundLiveOrdersOnCancel(eventId: string): Promise<CancelRefundSummary> {
+  const attendees = await getEventAttendees(eventId);
+  const orderIds = Array.from(new Set(attendees.filter(isLiveSeat).map((a) => a.orderId)));
+  let refundedCount = 0;
+  let failedCount = 0;
+  for (const orderId of orderIds) {
+    const outcome = await executeRefund(orderId, { kind: 'organizer_cancel' });
+    if (outcome.ok) refundedCount += 1; else failedCount += 1;
+  }
+  return { refundedCount, failedCount };
+}
+
 /**
  * The canonical buyer-answer value shapes (set by Cowork 2026-07-26). Web's
  * organizer reader + CSV export read the SAME rows, so these must not drift:
@@ -1049,4 +1209,45 @@ export async function recordAnswer(
     value,
   });
   return { ok: !error, message: error?.message ?? null };
+}
+
+// ─── TK-05: "email my receipt", the real half of "email/wallet action" ───
+//
+// A real Apple/Google Wallet PASS is not buildable tonight: it needs a
+// signed Apple Developer pass-type-id + certs and/or a Google Wallet issuer
+// account, both real external enrollments nobody has done yet -- not
+// something any code change here can stand up. lib/ticketWalletDelivery.ts
+// (eligibility-logic scaffolding only, no PKPass/Wallet generator) already
+// reflects that. What genuinely IS buildable: a real resend of the buyer's
+// own confirmation email, on demand, from the confirmation screen.
+//
+// The original automatic send (ticket-inbox-drain's sendBuyerConfirmation)
+// is a ONE-TIME claim keyed on ticket_orders.confirmation_email_sent_at IS
+// NULL (doc 112's idempotency law) -- it can never resend by design, and the
+// buyer's checkout email is deliberately never persisted onto ticket_orders
+// in the first place (doc 112). So this is a NEW, separate, buyer-triggered
+// send: the new ticket-resend-receipt edge function reads the CALLER's own
+// verified auth email (not any stored checkout email) and sends the same
+// branded template to it. Scope cut, not a silent guess: no durable
+// per-order cooldown column was added tonight -- the button just goes to a
+// disabled "sent" state for the rest of this screen visit, which is honest
+// and sufficient for a buyer re-requesting their own receipt; a persistent
+// server-side cooldown is a reasonable later hardening, not a launch
+// blocker.
+export async function resendReceipt(orderId: string): Promise<{ ok: boolean; message: string | null }> {
+  const { data, error } = await supabase.functions.invoke('ticket-resend-receipt', {
+    body: { order_id: orderId },
+  });
+  if (error) {
+    let raw: string | null = null;
+    try {
+      const ctx = (error as { context?: { body?: unknown } }).context;
+      const parsed = typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
+      if (parsed && typeof (parsed as { error?: string }).error === 'string') {
+        raw = (parsed as { error: string }).error;
+      }
+    } catch { /* raw stays null */ }
+    return { ok: false, message: raw ?? 'that did not send. give it another try.' };
+  }
+  return { ok: (data as { ok?: boolean } | null)?.ok === true, message: null };
 }

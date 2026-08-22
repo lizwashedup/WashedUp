@@ -48,6 +48,8 @@ import { logError } from '../../../lib/logger';
 import { formatEventDateLA } from '../../../lib/laDate';
 import { getOrganizerProfiles } from '../../../lib/organizerProfile';
 import {
+  formatCents,
+  getAnsweredQuestionIds,
   getConfirmationMessage,
   getOrder,
   getQuestions,
@@ -243,6 +245,13 @@ export default function OrderCompleteScreen() {
     queryFn: () => getQuestions(order!.event_id),
     enabled: !!order?.event_id,
   });
+  // TK-03: which slots this order already answered, so a re-visit of this
+  // screen never re-asks a question it already has every answer for.
+  const { data: answeredByQuestion } = useQuery({
+    queryKey: ['order-answered', order?.id],
+    queryFn: () => getAnsweredQuestionIds(order!.id),
+    enabled: !!order?.id,
+  });
   // doc 111: the organizer's "after they buy" note; null until SQL-96 lands
   const { data: organizerNote } = useQuery({
     queryKey: ['confirmation-message', order?.event_id],
@@ -267,6 +276,21 @@ export default function OrderCompleteScreen() {
 
   const qty = order?.qty ?? 1;
 
+  // TK-03: drop a question once every seat it's asked for already has a
+  // saved answer. A per_attendee question with only SOME seats answered
+  // still shows (so the remaining seat isn't skipped) -- it just won't
+  // pre-fill the seats already on file, same as the checkout-time form.
+  const unansweredQuestions = useMemo(() => {
+    if (!answeredByQuestion) return questions;
+    return questions.filter((q) => {
+      const seats = answeredByQuestion.get(q.id);
+      if (!seats) return true;
+      if (q.scope !== 'per_attendee') return !seats.has(null);
+      for (let i = 1; i <= qty; i++) if (!seats.has(i)) return true;
+      return false;
+    });
+  }, [questions, answeredByQuestion, qty]);
+
   const setCell = useCallback((questionId: string, seat: Seat, patch: AnswerRaw) => {
     const key = cellKey(questionId, seat);
     setAnswers((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
@@ -274,8 +298,8 @@ export default function OrderCompleteScreen() {
 
   // every (question, seat) pair that carries a real value
   const filledCells = useMemo(
-    () => collectCells(questions, answers, qty),
-    [questions, answers, qty],
+    () => collectCells(unansweredQuestions, answers, qty),
+    [unansweredQuestions, answers, qty],
   );
 
   const submit = useCallback(async () => {
@@ -391,17 +415,18 @@ export default function OrderCompleteScreen() {
         {view.kind === 'ready' && (
           <>
             <ConfirmBadge reduceMotion={reduceMotion} />
-            {/* copy to the taste gate: arrival, not a receipt */}
+            {/* copy to the taste gate: arrival, not a receipt. TK-05
+                (2026-08-19): gold is this system's documented arrival/
+                confirmed color (CLAUDE.md, Colors.gold) — this screen IS
+                that state, not just the badge behind it, so the headline
+                itself now carries it too (new documented exception, see
+                CLAUDE.md "Documented exceptions"). */}
             <Text style={styles.title}>you're in</Text>
-
-            {/* the door checks each seat's reference_code, so those are the only
-                codes worth printing; the order id is not a ticket. */}
-            {order!.seats.filter((s) => !s.voided).map((s) => (
-              <Text key={s.id} style={styles.ref}>
-                {/* copy to the taste gate: per-seat label */}
-                {order!.qty > 1 ? `ticket ${s.position_index} · ` : ''}{s.reference_code}
-              </Text>
-            ))}
+            {/* TK-05: free and paid read identically without this —
+                total_cents was never rendered here. */}
+            <Text style={styles.amountLine}>
+              {order!.total_cents === 0 ? 'free' : `you paid ${formatCents(order!.total_cents)}`}
+            </Text>
 
             {/* doc 111: the organizer speaking, quiet card, the documented
                 gold-border quote treatment (no new accents) */}
@@ -413,12 +438,48 @@ export default function OrderCompleteScreen() {
               </View>
             )}
 
-            {!done && questions.length > 0 && (
+            {/* TK-05: a real email action — opens the buyer's own mail app,
+                prefilled with the order's real reference codes, not a stub.
+                add-to-wallet (Apple/Google Wallet passes) needs real signing
+                infrastructure this repo does not have (a Pass Type ID +
+                certificate, a Google Wallet service account) — scoped out
+                rather than faked; this is the achievable real half. */}
+            <TouchableOpacity
+              onPress={() => {
+                hapticLight();
+                const liveSeats = order!.seats.filter((s) => !s.voided);
+                const seatLines = liveSeats
+                  .map((s) => (order!.qty > 1 ? `ticket ${s.position_index}: ${s.reference_code}` : s.reference_code))
+                  .join('\n');
+                const when = order!.event_date ? formatEventDateLA(order!.event_date) : '';
+                const body = [order!.event_title ?? 'your event', when, '', seatLines].filter(Boolean).join('\n');
+                const subject = `your ticket${order!.qty > 1 ? 's' : ''} for ${order!.event_title ?? 'your event'}`;
+                Linking.openURL(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
+                  .catch((e) => logError(e, 'orderComplete.emailReceipt'));
+              }}
+              hitSlop={8}
+              style={styles.emailAction}
+              accessibilityRole="button"
+            >
+              {/* copy to the taste gate */}
+              <Text style={styles.emailActionText}>email me this receipt</Text>
+            </TouchableOpacity>
+
+            {/* the door checks each seat's reference_code, so those are the only
+                codes worth printing; the order id is not a ticket. */}
+            {order!.seats.filter((s) => !s.voided).map((s) => (
+              <Text key={s.id} style={styles.ref}>
+                {/* copy to the taste gate: per-seat label */}
+                {order!.qty > 1 ? `ticket ${s.position_index} · ` : ''}{s.reference_code}
+              </Text>
+            ))}
+
+            {!done && unansweredQuestions.length > 0 && (
               <View style={styles.questions}>
                 {/* copy to the taste gate */}
                 <Text style={styles.qHeader}>a couple of quick things from the organizer</Text>
                 <QuestionForm
-                  questions={questions}
+                  questions={unansweredQuestions}
                   qty={qty}
                   draft={answers}
                   onCellChange={setCell}
@@ -447,7 +508,7 @@ export default function OrderCompleteScreen() {
               </View>
             )}
 
-            {(done || questions.length === 0) && (
+            {(done || unansweredQuestions.length === 0) && (
               <TouchableOpacity
                 style={styles.cta}
                 onPress={() => router.replace('/tickets' as never)}
@@ -508,6 +569,10 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   title: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayLG, color: Colors.asphalt },
+  amountLine: {
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textMedium,
+    textAlign: 'center', marginTop: 4,
+  },
   ref: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginTop: EventSpacing.sm, letterSpacing: 1 },
   settlingNote: {
     fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium,
@@ -524,6 +589,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5, textTransform: 'uppercase',
   },
   organizerNoteText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.quoteText, lineHeight: 20 },
+  emailAction: { alignItems: 'center', marginTop: EventSpacing.lg },
+  emailActionText: {
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textDecorationLine: 'underline',
+  },
   questions: { alignSelf: 'stretch', marginTop: EventSpacing.xl, gap: EventSpacing.lg },
   qHeader: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   errorText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventAction.error },

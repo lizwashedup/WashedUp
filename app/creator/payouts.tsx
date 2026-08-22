@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, Redirect } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -19,8 +19,10 @@ import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
-import { getMyPayoutState, requestOnboardingLink } from '../../lib/ticketing';
+import { getMyPayoutState, getPayoutSummary, requestOnboardingLink } from '../../lib/ticketing';
+import { getCreatorAccess, canManageFinance, creatorLandingRoute } from '../../lib/creatorMode';
 import { PayoutsCard } from '../../components/creator/PayoutsCard';
+import { EarningsSummaryCard } from '../../components/creator/EarningsSummaryCard';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 export default function GettingPaidScreen() {
@@ -36,6 +38,15 @@ export default function GettingPaidScreen() {
     queryKey: ['payout-state', userId],
     queryFn: () => getMyPayoutState(userId!),
     enabled: !!userId,
+    staleTime: 30_000,
+  });
+
+  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
+
+  const { data: summary } = useQuery({
+    queryKey: ['payout-summary', userId, access?.ledCommunities.map((c) => c.id).join(',')],
+    queryFn: () => getPayoutSummary((access?.ledCommunities ?? []).map((c) => c.id), userId!),
+    enabled: !!userId && access != null,
     staleTime: 30_000,
   });
 
@@ -65,6 +76,10 @@ export default function GettingPaidScreen() {
   const handleOnboardRef = useRef<(() => void) | null>(null);
   handleOnboardRef.current = handleOnboard;
 
+  if (access && !access.hasEventHostGrant && !canManageFinance(access)) {
+    return <Redirect href={creatorLandingRoute(access)} />;
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.headerRow}>
@@ -78,6 +93,8 @@ export default function GettingPaidScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <PayoutsCard payout={payout} onboardBusy={onboardBusy} onOnboard={handleOnboard} />
+
+        {summary && <EarningsSummaryCard summary={summary} />}
 
         {/* the release rhythm, stated plainly (doc 61 §3: payouts release
             after the event ends, never before). copy to the taste gate */}

@@ -16,13 +16,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, Redirect } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Plus, Ticket } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
+import { getCreatorAccess, canManageEvents, creatorLandingRoute } from '../../lib/creatorMode';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import {
@@ -32,10 +33,13 @@ import {
   FAQ_ANSWER_MAX,
   FAQ_QUESTION_MAX,
   formatCents,
+  getConfirmationMessage,
   getEventFaqs,
   getMyPayoutState,
   getQuestions,
+  getTierAvailability,
   getTiers,
+  isLowInventory,
   isPayoutReady,
   createQuestion,
   updateQuestion,
@@ -95,6 +99,8 @@ export default function TicketSetupScreen() {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)).catch(() => {});
   }, []);
 
+  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
+
   const { data: event } = useQuery({
     queryKey: ['ticket-setup-event', id],
     queryFn: async () => {
@@ -147,6 +153,27 @@ export default function TicketSetupScreen() {
     queryKey: ['event-add-ons', id],
     queryFn: () => listAddons(id!),
     enabled: !!id,
+    staleTime: 15_000,
+  });
+
+  // C-19: read-only preview of what buyers see on the confirmation screen
+  // (doc 111's note). The message itself is set on the event details form,
+  // never here.
+  const { data: confirmationMessage = null } = useQuery({
+    queryKey: ['ticket-setup-confirmation', id],
+    queryFn: () => getConfirmationMessage(id!),
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+
+  // C-19/TK-07: real per-tier remaining counts, capped tiers only (an
+  // uncapped tier can never be "low"). Refetches whenever the tier list's
+  // own id set changes, same as every other tier-derived query here.
+  const cappedTierIds = tiers.filter((t) => t.quantity_cap !== null).map((t) => t.id);
+  const { data: availability = new Map<string, number>() } = useQuery({
+    queryKey: ['ticket-tier-availability', cappedTierIds.join(',')],
+    queryFn: () => getTierAvailability(cappedTierIds),
+    enabled: cappedTierIds.length > 0,
     staleTime: 15_000,
   });
 
@@ -444,6 +471,11 @@ export default function TicketSetupScreen() {
   // law 11: three or four, one of them recommended
   const recommendedId = recommendedTierId(tiers);
   const tiersFull = tiers.length >= TIER_COUNT_MAX;
+  // C-19: the confirmation preview's price line -- the cheapest tier
+  // currently set up, regardless of on-sale state (this is the organizer's
+  // own setup view, not the public buyer page).
+  const cheapestTier = tiers.length > 0 ? tiers.reduce((lo, t) => (t.price_cents < lo.price_cents ? t : lo)) : null;
+  const cheapestPriceLabel = cheapestTier ? (cheapestTier.price_cents === 0 ? 'free' : formatCents(cheapestTier.price_cents)) : null;
   // §3.8 house rule (also trigger-enforced): at most 11 active questions
   const questionsFull = questions.length >= QUESTIONS_MAX;
   const questionMeta = (q: TicketQuestion): string => {
@@ -451,6 +483,10 @@ export default function TicketSetupScreen() {
     parts.push(q.scope === 'per_attendee' ? 'each ticket' : 'per order');
     return parts.join(' · ');
   };
+
+  if (access && !access.hasEventHostGrant && !canManageEvents(access)) {
+    return <Redirect href={creatorLandingRoute(access)} />;
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -502,6 +538,12 @@ export default function TicketSetupScreen() {
                       {/* copy to the taste gate (law 11) */}
                       <Text style={styles.popularBadgeText}>most popular</Text>
                     </View>
+                  )}
+                  {tier.quantity_cap !== null && availability.has(tier.id) &&
+                    isLowInventory(availability.get(tier.id)!, tier.quantity_cap) && (
+                      <View style={styles.lowInventoryBadge}>
+                        <Text style={styles.lowInventoryBadgeText}>{availability.get(tier.id)} left</Text>
+                      </View>
                   )}
                 </View>
                 <Text style={styles.tierMeta}>
@@ -773,6 +815,29 @@ export default function TicketSetupScreen() {
           /* copy to the taste gate: the 11 house rule, framed as taste */
           <Text style={styles.emptyText}>eleven is the most. the shorter the list, the more people finish it.</Text>
         )}
+
+        {/* C-19: read-only preview of doc 111's confirmation screen (the
+            SAME organizerNote card app/tickets/order/[id].tsx renders). The
+            message is set on the event details form, not here -- this
+            section never collects new input. */}
+        <View style={styles.sectionHeader}>
+          {/* copy to the taste gate */}
+          <Text style={styles.sectionTitle}>what buyers see after they pay</Text>
+        </View>
+        {!!cheapestPriceLabel && (
+          /* copy to the taste gate */
+          <Text style={styles.emptyText}>tickets from {cheapestPriceLabel}</Text>
+        )}
+        {confirmationMessage ? (
+          <View style={styles.organizerNote}>
+            {/* copy to the taste gate */}
+            <Text style={styles.organizerNoteLabel}>from the organizer</Text>
+            <Text style={styles.organizerNoteText}>{confirmationMessage}</Text>
+          </View>
+        ) : (
+          /* copy to the taste gate (empty-state invitation rule) */
+          <Text style={styles.emptyText}>nothing set yet. add a note in your event details and buyers will see it here.</Text>
+        )}
       </ScrollView>
 
       <TierEditorSheet
@@ -860,6 +925,19 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   popularBadgeText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.brandDeep },
+  // C-19/TK-07: same terracotta urgency pill as PlanCard's spotsLeftBadge
+  lowInventoryBadge: {
+    backgroundColor: Colors.terracotta,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  lowInventoryBadgeText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: Colors.white,
+    lineHeight: 14,
+  },
   addBtnDisabled: { opacity: 0.4 },
   tierMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   tierRemove: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventAction.error },
@@ -909,4 +987,18 @@ const styles = StyleSheet.create({
   },
   faqAddBtnDisabled: { opacity: 0.4 },
   faqAddBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  // C-19: same organizerNote card app/tickets/order/[id].tsx renders (doc
+  // 111's documented gold-border quote treatment) -- token-identical, no
+  // new accent invented for this screen.
+  organizerNote: {
+    alignSelf: 'stretch', backgroundColor: Colors.white, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border,
+    borderLeftWidth: 2, borderLeftColor: Colors.goldAccent,
+    padding: 14, marginTop: EventSpacing.xs, gap: 4,
+  },
+  organizerNoteLabel: {
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary,
+    letterSpacing: 0.5, textTransform: 'uppercase',
+  },
+  organizerNoteText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.quoteText, lineHeight: 20 },
 });

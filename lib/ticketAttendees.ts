@@ -91,3 +91,56 @@ export function countAttendees(list: DoorAttendee[]): AttendeeCounts {
   }
   return { sold, checkedIn, refunded };
 }
+
+export interface EventMoneySummary {
+  grossFaceCents: number;
+  processingCents: number;
+  commissionCents: number;
+  payoutStatus: string | null;
+  payoutReleasedAt: string | null;
+  payoutPaidAt: string | null;
+}
+
+/**
+ * Per-event money summary for the organizer (parity gap O-06; web's
+ * getEventAttendeeData / MoneySummaryCard is the reference, src/lib/
+ * communities/organizerData.ts). ticketsSold and refundedCents are NOT
+ * recomputed here -- the caller (attendees.tsx) already has them from
+ * getEventAttendees/countAttendees on the same screen; this only queries
+ * the two tables that screen doesn't already load. §7: only face_cents /
+ * processing_cents / commission_cents are selected -- commission_bps_applied
+ * and any stripe_* column are never read here, matching organizerData.ts's
+ * own column-projection rule.
+ */
+export async function getEventMoneySummary(eventId: string): Promise<EventMoneySummary> {
+  const empty: EventMoneySummary = {
+    grossFaceCents: 0, processingCents: 0, commissionCents: 0,
+    payoutStatus: null, payoutReleasedAt: null, payoutPaidAt: null,
+  };
+  const [{ data: orderRows, error: orderErr }, { data: payoutRow }] = await Promise.all([
+    supabase
+      .from('ticket_orders')
+      .select('face_cents, processing_cents, commission_cents, status')
+      .eq('event_id', eventId),
+    // ticket_payouts_one_per_event UNIQUE(event_id) (confirmed live in
+    // supabase/migrations/20260816120000_claim_ticket_payout_batch_atomic.sql)
+    // -- at most one row, so maybeSingle() is correct, no order/limit needed.
+    supabase
+      .from('ticket_payouts')
+      .select('status, released_at, paid_at')
+      .eq('event_id', eventId)
+      .maybeSingle(),
+  ]);
+  if (orderErr) return empty;
+  const paid = ((orderRows ?? []) as {
+    face_cents: number | null; processing_cents: number | null; commission_cents: number | null; status: string;
+  }[]).filter((o) => o.status === 'paid');
+  return {
+    grossFaceCents: paid.reduce((s, o) => s + (o.face_cents ?? 0), 0),
+    processingCents: paid.reduce((s, o) => s + (o.processing_cents ?? 0), 0),
+    commissionCents: paid.reduce((s, o) => s + (o.commission_cents ?? 0), 0),
+    payoutStatus: (payoutRow as { status?: string } | null)?.status ?? null,
+    payoutReleasedAt: (payoutRow as { released_at?: string | null } | null)?.released_at ?? null,
+    payoutPaidAt: (payoutRow as { paid_at?: string | null } | null)?.paid_at ?? null,
+  };
+}

@@ -22,10 +22,10 @@ import {
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
+import { useRouter, useLocalSearchParams, Stack, Redirect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { ArrowLeft, Check, Plus } from 'lucide-react-native';
+import { ArrowLeft, Check, Plus, ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -42,10 +42,12 @@ import TimePicker from '../../components/composer/TimePicker';
 import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
 import EventPlaceSearch from '../../components/creator/EventPlaceSearch';
 import { EventLocationMap } from '../../components/creator/EventLocationMap';
-import { getCreatorAccess } from '../../lib/creatorMode';
+import { getCreatorAccess, canManageEvents, creatorLandingRoute } from '../../lib/creatorMode';
+import { CO_CREATOR_INVITES_ENABLED } from '../../constants/FeatureFlags';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { supabase } from '../../lib/supabase';
-import { eventHasPaidTier, getMyPayoutState, getTiers, isPayoutReady } from '../../lib/ticketing';
+import { eventHasPaidTier, getMyPayoutState, getTiers, isPayoutReady, refundLiveOrdersOnCancel, type CancelRefundSummary } from '../../lib/ticketing';
+import { OFFER_TYPE_OPTIONS, isOfferTypeSellableToday, isOfferType, type OfferType } from '../../lib/offerTypes';
 import {
   announceEventToMembers,
   createOperatorEvent,
@@ -54,7 +56,11 @@ import {
   getOperatorEvent,
   pickAndUploadEventImage,
   probeConfirmationMessage,
+  probeOfferType,
+  probeTicketCapacityRpc,
   saveEventTemplate,
+  setEventOfferType,
+  setEventTicketCapacity,
   setOperatorEventCoords,
   updateOperatorEvent,
   type OperatorEventFields,
@@ -106,7 +112,21 @@ export default function EventFormScreen() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   // §3.4 (d): a place was chosen but geocoding returned no lat/lng
   const [geocodeMissed, setGeocodeMissed] = useState(false);
+  // C-21: the RSVP cap, digits-only string for the input; '' = unlimited.
+  // Rides its own RPC after create/save, never the full-overwrite payload
+  // (same shape as coords).
+  const [ticketCapacity, setTicketCapacity] = useState('');
   const [category, setCategory] = useState('');
+  // C-18: the four decided-sellable offer types only (lib/offerTypes.ts);
+  // class_pack/subscription render as disabled "coming soon" chips, never
+  // selectable. Defaults to ticketed_event, matching the draft migration's
+  // own column default so behavior lines up whenever it eventually applies.
+  const [offerType, setOfferType] = useState<OfferType>('ticketed_event');
+  // join-gate door for offer_type (see lib/creatorEvents.ts probeOfferType):
+  // true once the column is confirmed live. The picker itself always
+  // renders -- it's real client-side logic either way -- this only gates
+  // whether a save attempts to persist the pick.
+  const [offerTypeColumnOpen, setOfferTypeColumnOpen] = useState(false);
   const [externalUrl, setExternalUrl] = useState('');
   const [ticketPrice, setTicketPrice] = useState('');
   const [publicName, setPublicName] = useState('');
@@ -128,6 +148,25 @@ export default function EventFormScreen() {
       if (value !== null) setAfterPurchaseMsg(value);
     });
   }, [editing, id]);
+
+  // C-18 door probe: same shape as the confirmation-message probe above.
+  // A missing column reads as door-closed and offerType just stays at its
+  // default; an edit on an already-tagged event seeds the real value.
+  useEffect(() => {
+    probeOfferType(editing ? id : null).then(({ open, value }) => {
+      setOfferTypeColumnOpen(open);
+      if (value && isOfferType(value)) setOfferType(value);
+    });
+  }, [editing, id]);
+
+  // C-21: the RSVP-cap field always renders (real client-side state either
+  // way, same call as offer type's picker); this only gates whether a save
+  // attempts the write RPC. Runs once -- the RPC's existence is not
+  // per-event, unlike the probes above.
+  const [ticketCapacityRpcOpen, setTicketCapacityRpcOpen] = useState(false);
+  useEffect(() => {
+    probeTicketCapacityRpc().then(setTicketCapacityRpcOpen);
+  }, []);
   const [seeded, setSeeded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -176,6 +215,22 @@ export default function EventFormScreen() {
     enabled: !!sourceId,
   });
 
+  // the event's own room, if one exists yet -- same lookup app/event/[id].tsx
+  // already uses. Only Live community events reliably have a topic row.
+  const { data: eventTopicId = null } = useQuery({
+    queryKey: ['event-topic', id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('community_topics')
+        .select('id')
+        .eq('explore_event_id', id!)
+        .maybeSingle();
+      return (data?.id as string | undefined) ?? null;
+    },
+    enabled: editing && !!eventCommunityId && !!id && eventStatus === 'Live',
+    staleTime: 60_000,
+  });
+
   useEffect(() => {
     if (!editing && duplicateFrom && existing && !seeded) {
       setTitle(existing.title);
@@ -188,6 +243,9 @@ export default function EventFormScreen() {
         setCoords({ lat: existing.latitude, lng: existing.longitude });
       }
       setGeocodeMissed(false);
+      // C-21: same reasoning as the pin -- a duplicate of a capped event
+      // starts capped the same way, the organizer can still change it
+      setTicketCapacity(existing.ticket_capacity != null ? String(existing.ticket_capacity) : '');
       setCategory(existing.category);
       setExternalUrl(existing.external_url);
       setTicketPrice(existing.ticket_price);
@@ -223,6 +281,8 @@ export default function EventFormScreen() {
       if (existing.latitude != null && existing.longitude != null) {
         setCoords({ lat: existing.latitude, lng: existing.longitude });
       }
+      // C-21: the stored RSVP cap, if any
+      setTicketCapacity(existing.ticket_capacity != null ? String(existing.ticket_capacity) : '');
       setCategory(existing.category);
       setExternalUrl(existing.external_url);
       setTicketPrice(existing.ticket_price);
@@ -370,6 +430,32 @@ export default function EventFormScreen() {
     }
   };
 
+  // C-18: best-effort, mirrors syncCoords -- a pin/offer-type save never
+  // blocks the real event save. Only attempted once the door probe found
+  // the column live; before that it would just fail on every save for no
+  // reason, so skip the round trip entirely.
+  const syncOfferType = async (eventId: string) => {
+    if (!offerTypeColumnOpen) return;
+    try {
+      await setEventOfferType(eventId, offerType);
+    } catch {
+      // column or write grant not actually live yet; the event still saved
+    }
+  };
+
+  // C-21: same best-effort shape, gated on probeTicketCapacityRpc rather
+  // than a column probe (the column is already live; only the RPC might not
+  // be -- see the probe's own comment in lib/creatorEvents.ts).
+  const syncTicketCapacity = async (eventId: string) => {
+    if (!ticketCapacityRpcOpen) return;
+    try {
+      await setEventTicketCapacity(eventId, ticketCapacity.trim() ? parseInt(ticketCapacity, 10) : null);
+    } catch {
+      // the RPC was probed open but this specific write still failed
+      // (permissions, a bad value); the event itself still saved
+    }
+  };
+
   const offerAnnounce = (eventId: string) => {
     // LIZ COPY (taste call 9): opt-in, never automatic
     setAlertInfo({
@@ -433,6 +519,8 @@ export default function EventFormScreen() {
       if (editing && id) {
         await updateOperatorEvent(id, fields, null);
         await syncCoords(id);
+        await syncOfferType(id);
+        await syncTicketCapacity(id);
         hapticSuccess();
         afterSave();
         await warnIfNothingOnSale(id, () => router.back());
@@ -440,6 +528,8 @@ export default function EventFormScreen() {
         const communityId = fromCommunity && community ? community.id : null;
         const newId = await createOperatorEvent(fields, communityId);
         await syncCoords(newId);
+        await syncOfferType(newId);
+        await syncTicketCapacity(newId);
         hapticSuccess();
         afterSave();
         if (communityId) {
@@ -584,12 +674,12 @@ export default function EventFormScreen() {
   const handleStatus = (status: 'Completed' | 'Cancelled') => {
     const fields = collectFields();
     if (!fields || !id) return;
-    // LIZ COPY
+    // LIZ COPY, except the Cancelled disclosure line: copy to the taste gate (TK-08)
     setAlertInfo({
       title: status === 'Cancelled' ? 'cancel this event?' : 'mark it completed?',
       message:
         status === 'Cancelled'
-          ? 'it comes off the scene everywhere. groups that formed around it keep their plans and decide for themselves.'
+          ? "it comes off the scene everywhere. groups that formed around it keep their plans and decide for themselves. anyone who paid for a ticket gets refunded in full."
           : 'it comes off the scene and into your past events.',
       buttons: [
         { text: 'keep it live', style: 'cancel' },
@@ -598,10 +688,22 @@ export default function EventFormScreen() {
           text: status === 'Cancelled' ? 'cancel it' : 'complete it',
           onPress: async () => {
             try {
+              let cancelSummary: CancelRefundSummary | null = null;
+              if (status === 'Cancelled') cancelSummary = await refundLiveOrdersOnCancel(id);
               await updateOperatorEvent(id, fields, status);
-              hapticLight();
-              afterSave();
-              router.back();
+              if (cancelSummary && cancelSummary.failedCount > 0) {
+                hapticLight();
+                afterSave();
+                // copy to the taste gate (TK-08)
+                showError(
+                  'some refunds need a follow-up',
+                  `${cancelSummary.refundedCount} of ${cancelSummary.refundedCount + cancelSummary.failedCount} buyers were refunded. the rest didn't go through -- open who's coming to retry them.`,
+                );
+              } else {
+                hapticLight();
+                afterSave();
+                router.back();
+              }
             } catch (e) {
               showError('That did not save', friendlyError(e, 'Try again in a moment.'));
             }
@@ -731,6 +833,10 @@ export default function EventFormScreen() {
   const endTimeHour = ((endHour24 + 11) % 12) + 1;
   const endTimeMinute = endTimeMatch ? endTimeMatch[2] : '00';
   const endTimePeriod: 'AM' | 'PM' = endHour24 >= 12 ? 'PM' : 'AM';
+
+  if (access && !access.hasEventHostGrant && !canManageEvents(access)) {
+    return <Redirect href={creatorLandingRoute(access)} />;
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -978,6 +1084,52 @@ export default function EventFormScreen() {
               ))}
             </View>
 
+            {/* C-18: the four decided-sellable offer types (lib/offerTypes.ts
+                isOfferTypeSellableToday). class_pack and subscription render
+                disabled with a "soon" tag and are never selectable -- that
+                stays an open founder decision, not guessed at here. */}
+            <Text style={styles.fieldLabel}>offer type</Text>
+            <Text style={styles.fieldHint}>what you&apos;re actually selling. changes what buyers see at checkout.</Text>
+            <View style={styles.chipWrap}>
+              {OFFER_TYPE_OPTIONS.map((o) => {
+                const sellable = isOfferTypeSellableToday(o.value);
+                const on = offerType === o.value;
+                return (
+                  <TouchableOpacity
+                    key={o.value}
+                    style={[styles.chip, on && styles.chipOn, !sellable && styles.chipDisabled]}
+                    onPress={() => { if (!sellable) return; hapticLight(); setOfferType(o.value); }}
+                    disabled={!sellable}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !sellable, selected: on }}
+                    accessibilityLabel={sellable ? o.label : `${o.label}, coming soon`}
+                  >
+                    <Text style={[styles.chipText, on && styles.chipTextOn, !sellable && styles.chipTextDisabled]}>
+                      {o.label}{!sellable ? ' · soon' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* C-21: the RSVP cap. Always renders -- real client-side state
+                either way, same call as the offer-type picker above -- the
+                write RPC's own probe (not shown here) gates the save, not
+                the field's visibility. Blank = no limit. */}
+            {/* LIZ COPY (proposed, taste gate) */}
+            <Text style={styles.fieldLabel}>how many can come</Text>
+            <Text style={styles.fieldHint}>leave it blank for no limit. once it&apos;s full, rsvps stop -- nobody gets waitlisted.</Text>
+            <TextInput
+              style={styles.input}
+              value={ticketCapacity}
+              onChangeText={(v) => setTicketCapacity(v.replace(/[^0-9]/g, '').slice(0, 5))}
+              keyboardType="number-pad"
+              /* copy to the taste gate */
+              placeholder="no limit"
+              placeholderTextColor={Colors.inkSoft}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
+
             {/* the tickets-link field is GONE per the 7-20 ruling: no
                 external ticket links at launch, ticketing runs through
                 washedup (doc 61 §1.2). The externalUrl state stays as a
@@ -1063,6 +1215,56 @@ export default function EventFormScreen() {
                     <Text style={[styles.chipText, !pinToChat && styles.chipTextOn]}>keep it off the chat</Text>
                   </TouchableOpacity>
                 </View>
+              </>
+            )}
+
+            {CO_CREATOR_INVITES_ENABLED && ((!editing && fromCommunity && !!community) || (editing && !!eventCommunityId)) && (
+              <TouchableOpacity
+                style={styles.linkRow}
+                onPress={() => router.push('/creator/co-creators')}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Co-creators"
+                accessibilityHint="Invite someone to help run this community."
+              >
+                <View style={styles.linkRowText}>
+                  <Text style={styles.linkRowTitle}>Co-creators</Text>
+                  <Text style={styles.linkRowHint}>invite someone to help run this community, not just this event.</Text>
+                </View>
+                <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+              </TouchableOpacity>
+            )}
+
+            {editing && eventCommunityId && eventStatus === 'Live' && eventTopicId && (
+              <>
+                <TouchableOpacity
+                  style={styles.linkRow}
+                  onPress={() => router.push(`/community-topic/${eventTopicId}`)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="The room"
+                  accessibilityHint="Set the welcome message and coordinate with the people going."
+                >
+                  <View style={styles.linkRowText}>
+                    <Text style={styles.linkRowTitle}>The room</Text>
+                    <Text style={styles.linkRowHint}>set the welcome message, coordinate with everyone going.</Text>
+                  </View>
+                  <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.linkRow}
+                  onPress={() => router.push(`/event-album/${eventTopicId}`)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Photos"
+                  accessibilityHint="See and add photos from this event's room."
+                >
+                  <View style={styles.linkRowText}>
+                    <Text style={styles.linkRowTitle}>Photos</Text>
+                    <Text style={styles.linkRowHint}>the shared album for this event's room.</Text>
+                  </View>
+                  <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+                </TouchableOpacity>
               </>
             )}
             </View>
@@ -1257,8 +1459,24 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   chipOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
+  chipDisabled: { opacity: 0.45 },
   chipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   chipTextOn: { color: Colors.white },
+  chipTextDisabled: { color: Colors.tertiary },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 14,
+    gap: 10,
+    marginTop: 12,
+  },
+  linkRowText: { flex: 1, gap: 2 },
+  linkRowTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  linkRowHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
   saveBtn: {
     backgroundColor: Colors.terracotta,
     borderRadius: 999,

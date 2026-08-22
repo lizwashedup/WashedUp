@@ -79,15 +79,37 @@ export interface AddonDraft {
   status: AddonStatus;
 }
 
+/** TK-02: a size/flavor/option sub-pick. Label only, never its own price --
+ *  see the migration header for why (no quote/charge mismatch to reason
+ *  about when a variation cannot change the total). */
+export interface AddonVariation {
+  id: string;
+  label: string;
+}
+
 const PROMO_COLUMNS =
   'id, event_id, code, discount_type, discount_value, unlocks_hidden, max_uses, uses_count, starts_at, ends_at, active';
 const ADDON_COLUMNS =
   'id, event_id, name, description, image_url, price_cents, quantity_cap, per_order_max, sales_open_at, sales_close_at, sold_count, status';
 
+/** column 42703 = the TK-02 migration has not been applied yet. Isolated
+ *  from ADDON_COLUMNS on purpose: the buyer's core add-on list must never
+ *  break because a variations column does not exist yet on prod. Same
+ *  dormant-until-applied shape as isMissingSchema in ticketing.ts,
+ *  topicAlbum.ts, organizerFollows.ts (each keeps its own copy, house
+ *  convention, not shared). */
+function isMissingVariationsColumn(code: string | undefined): boolean {
+  return code === '42703' || code === 'PGRST204';
+}
+
 /** One add-on pick on an order. The key is canon (add_on_id, not addon_id). */
 export interface AddonSelection {
   add_on_id: string;
   qty: number;
+  /** TK-02: which variation was picked, when the add-on has any. Omitted
+   *  entirely for an add-on with no variations, so the checkout body is
+   *  byte-identical to before this field existed until it is actually used. */
+  variation_id?: string;
 }
 
 // ─── creator: promo codes (organizer ALL-access + ownership WITH CHECK) ───
@@ -156,6 +178,65 @@ export async function updateAddon(
 export async function deleteAddon(addonId: string): Promise<boolean> {
   const { error } = await supabase.from(ADDON_TABLE).delete().eq('id', addonId);
   return !error;
+}
+
+/**
+ * TK-02, creator side: the variations configured on one add-on, own isolated
+ * read so a pre-migration prod never breaks the editor around it. []  on any
+ * failure (missing column, RLS, network) -- the editor then just shows no
+ * variations yet, same as a real empty list.
+ */
+export async function getAddonVariations(addonId: string): Promise<AddonVariation[]> {
+  const { data, error } = await supabase
+    .from(ADDON_TABLE)
+    .select('variations')
+    .eq('id', addonId)
+    .maybeSingle();
+  if (error || !data) return [];
+  const raw = (data as { variations?: unknown }).variations;
+  return Array.isArray(raw) ? (raw as AddonVariation[]) : [];
+}
+
+/**
+ * TK-02, creator side: replace the whole variations list on one add-on.
+ * Isolated write, same dormancy as every other unapplied-migration write in
+ * this file family (setJoinPolicy, withdrawOperatorApplication): fails
+ * cleanly with a friendly message until the migration lands, touches
+ * nothing else on the row.
+ */
+export async function setAddonVariations(
+  addonId: string,
+  variations: AddonVariation[],
+): Promise<{ ok: boolean; message: string | null }> {
+  const { error } = await supabase.from(ADDON_TABLE).update({ variations }).eq('id', addonId);
+  if (!error) return { ok: true, message: null };
+  if (isMissingVariationsColumn(error.code)) {
+    return { ok: false, message: "options aren't turned on for this event yet." };
+  }
+  return { ok: false, message: error.message };
+}
+
+/**
+ * TK-02, buyer side: variations for a batch of add-ons in one round trip,
+ * keyed by add_on_id. Isolated from listBuyerAddons/ADDON_COLUMNS on
+ * purpose -- see isMissingVariationsColumn above. Empty map on any failure,
+ * which reads to the buyer exactly like "no options," never an error.
+ */
+export async function getAddonVariationsMap(
+  addonIds: string[],
+): Promise<Map<string, AddonVariation[]>> {
+  const map = new Map<string, AddonVariation[]>();
+  if (addonIds.length === 0) return map;
+  const { data, error } = await supabase
+    .from(ADDON_TABLE)
+    .select('id, variations')
+    .in('id', addonIds);
+  if (error || !data) return map;
+  for (const row of data as { id: string; variations?: unknown }[]) {
+    const raw = row.variations;
+    if (Array.isArray(raw) && raw.length > 0) map.set(row.id, raw as AddonVariation[]);
+  }
+  return map;
 }
 
 // ─── buyer: what is actually buyable right now ────────────────────────────

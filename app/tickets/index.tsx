@@ -62,7 +62,7 @@ const QR_SIZE = 168;
 // quiet zone is part of the QR spec: scanners need clear margin around the marks
 const QR_QUIET_ZONE = 12;
 
-function SeatTicket({ seat, qty }: { seat: MySeat; qty: number }) {
+function SeatTicket({ seat, qty, eventEnded }: { seat: MySeat; qty: number; eventEnded: boolean }) {
   if (seat.voided) {
     return (
       <View style={styles.seat}>
@@ -96,6 +96,18 @@ function SeatTicket({ seat, qty }: { seat: MySeat; qty: number }) {
         />
       </View>
       <Text style={styles.seatCode}>{seat.reference_code}</Text>
+      {/* TK-07 (2026-08-19): the door's own record (ticket_checkins), not a
+          guess. "waitlisted" and "transferred" are skipped here on purpose,
+          neither exists anywhere in the schema yet (live-verified against
+          the real check constraints) -- faking them would be worse than
+          leaving them out. */}
+      {seat.checkedIn ? (
+        /* copy to the taste gate */
+        <Text style={styles.seatCheckedInNote}>checked in</Text>
+      ) : eventEnded ? (
+        /* copy to the taste gate */
+        <Text style={styles.seatExpiredNote}>expired, this one was never scanned</Text>
+      ) : null}
     </View>
   );
 }
@@ -138,9 +150,9 @@ function OrderRefund({ order }: { order: MyOrder }) {
 
   const confirmRefund = () => {
     Alert.alert(
-      /* LIZ COPY (web's confirm line, mirrored) */
-      `refund ${formatCents(preview.refundAmountCents)} to your card?`,
+      /* §5 disclosure leads (TK-08: consequence before amount); LIZ COPY RULED verbatim, never reworded */
       REFUND_DISCLOSURE,
+      `refund ${formatCents(preview.refundAmountCents)} to your card?`,
       [
         { text: 'keep my tickets', style: 'cancel' },
         { text: 'yes, refund it', style: 'destructive', onPress: () => refund.mutate() },
@@ -274,7 +286,12 @@ export default function YourTicketsScreen() {
                 </View>
                 <OrganizerNote eventId={o.event_id} />
                 {o.seats.map((seat) => (
-                  <SeatTicket key={seat.id} seat={seat} qty={o.qty} />
+                  <SeatTicket
+                    key={seat.id}
+                    seat={seat}
+                    qty={o.qty}
+                    eventEnded={!!o.event_date && new Date(o.event_date) < new Date()}
+                  />
                 ))}
                 <OrderRefund order={o} />
               </View>
@@ -342,6 +359,8 @@ const styles = StyleSheet.create({
     letterSpacing: 3, textDecorationLine: 'line-through',
   },
   seatVoidedNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  seatCheckedInNote: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  seatExpiredNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   organizerNote: {
     backgroundColor: Colors.white, borderRadius: 12,
     borderWidth: 1, borderColor: Colors.border,

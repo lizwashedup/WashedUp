@@ -86,6 +86,44 @@ export async function probeConfirmationMessage(
   return { open: true, value: typeof raw === 'string' && raw.trim() ? raw : null };
 }
 
+// ─── C-18: offer type (CTO scope item 9, draft migration 20260818120000) ──
+// That migration (explore_events.offer_type + event_offer_sessions +
+// set_event_offer_sessions) is REVIEW ONLY -- not applied, and this file
+// must never apply it. Same join-gate shape as the confirmation-message
+// door above: probe first, only read/write the column once it is
+// confirmed live. Unlike confirmation_message there is no RPC param for
+// this on operator_create/update_explore_event even in the draft migration
+// (it deliberately left those RPCs untouched -- see the migration's own
+// header), so the write is a standalone column update, never folded into
+// the full-overwrite RPC payload; it cannot null any of that RPC's fields
+// because it is not one of its params.
+export const OFFER_TYPE_COLUMN = 'offer_type';
+
+/** Mirrors probeConfirmationMessage exactly: a missing column reads as door-closed, never as an error. */
+export async function probeOfferType(
+  eventId?: string | null,
+): Promise<{ open: boolean; value: string | null }> {
+  let q = supabase.from('explore_events').select(OFFER_TYPE_COLUMN).limit(1);
+  if (eventId) q = q.eq('id', eventId);
+  const { data, error } = await q;
+  if (error) return { open: false, value: null };
+  const row = (data ?? [])[0] as Record<string, unknown> | undefined;
+  const raw = eventId && row ? row[OFFER_TYPE_COLUMN] : null;
+  return { open: true, value: typeof raw === 'string' ? raw : null };
+}
+
+/**
+ * Best-effort write, mirrors setOperatorEventCoords: throws on failure so
+ * the caller (event-form's syncOfferType) can swallow it the same way a
+ * missing pin never blocks a save. A missing column (42703, pre-migration)
+ * or an RLS refusal both just fail this call -- the picker still worked,
+ * this activates the moment the column and its write grant exist.
+ */
+export async function setEventOfferType(eventId: string, offerType: string): Promise<void> {
+  const { error } = await supabase.from('explore_events').update({ [OFFER_TYPE_COLUMN]: offerType }).eq('id', eventId);
+  if (error) throw error;
+}
+
 export interface OperatorEventRow extends OperatorEventFields {
   id: string;
   status: string;
@@ -96,12 +134,15 @@ export interface OperatorEventRow extends OperatorEventFields {
   // full-overwrite payload
   latitude: number | null;
   longitude: number | null;
+  // C-21: the RSVP cap. Same "own RPC, never the full-overwrite payload"
+  // shape as coords -- see setEventTicketCapacity below.
+  ticket_capacity: number | null;
 }
 
 export async function getOperatorEvent(eventId: string): Promise<OperatorEventRow | null> {
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id, latitude, longitude')
+    .select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id, latitude, longitude, ticket_capacity')
     .eq('id', eventId)
     .maybeSingle();
   if (error) throw error;
@@ -129,6 +170,7 @@ export async function getOperatorEvent(eventId: string): Promise<OperatorEventRo
     host_user_id: data.host_user_id ?? null,
     latitude: data.latitude ?? null,
     longitude: data.longitude ?? null,
+    ticket_capacity: data.ticket_capacity ?? null,
   };
 }
 
@@ -146,6 +188,62 @@ export async function setOperatorEventCoords(
     p_event_id: eventId,
     p_latitude: lat,
     p_longitude: lng,
+  });
+  if (error) throw error;
+}
+
+// ─── C-21: overall RSVP capacity (explore_events.ticket_capacity) ─────────
+// The COLUMN is already live (confirmed 2026-08-20) -- unlike doc 111 /
+// C-18 above, a column-read probe would always report "open" here and let
+// every save attempt a still-missing RPC, the exact eventRsvp.ts bug class
+// (a 2026-08-19 commit called set_event_rsvp_atomic unconditionally before
+// it existed and broke every RSVP toggle for two days). So this probes the
+// WRITE RPC directly instead of the column.
+
+/**
+ * A real call with a sentinel id that can never match a real row. If the
+ * RPC exists, its own ownership/not-found check (mirrors
+ * operator_set_explore_event_coords) rejects this harmlessly -- nothing to
+ * update, nothing touched. If it does not exist, PostgREST fails first with
+ * PGRST202, before Postgres ever runs. Either way this never writes
+ * anything; safe to call from a plain mount effect.
+ */
+export async function probeTicketCapacityRpc(): Promise<boolean> {
+  const { error } = await supabase.rpc('operator_set_event_ticket_capacity', {
+    p_event_id: '00000000-0000-0000-0000-000000000000',
+    p_ticket_capacity: null,
+  });
+  return error?.code !== 'PGRST202';
+}
+
+/**
+ * Best-effort, mirrors setOperatorEventCoords: throws on failure so the
+ * caller (event-form's syncTicketCapacity) can swallow it the same way a
+ * missing pin never blocks a save. Only ever called once
+ * probeTicketCapacityRpc found the door open. Null clears the cap
+ * (unlimited) -- matches set_event_rsvp_atomic's own null-means-unlimited
+ * contract in the capacity migration.
+ */
+export async function setEventTicketCapacity(eventId: string, capacity: number | null): Promise<void> {
+  const { error } = await supabase.rpc('operator_set_event_ticket_capacity', {
+    p_event_id: eventId,
+    p_ticket_capacity: capacity,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Seeds the event chat's first message, in the creator's own voice. Only
+ * works while the chat is still empty (see set_event_chat_welcome_message's
+ * own guard) -- this is "welcome the room," not a general chat-post path.
+ */
+export async function setEventChatWelcomeMessage(
+  eventId: string,
+  message: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('set_event_chat_welcome_message', {
+    p_event_id: eventId,
+    p_message: message,
   });
   if (error) throw error;
 }
