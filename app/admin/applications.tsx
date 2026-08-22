@@ -11,7 +11,6 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
@@ -19,6 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, X, ExternalLink } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { friendlyError } from '../../lib/friendlyError';
+import { openUrl } from '../../lib/url';
 import { hapticSuccess } from '../../lib/haptics';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
@@ -55,6 +55,7 @@ const STATUS_LABEL: Record<OperatorGrantStatus, string> = {
   approved: 'Approved',
   declined: 'Declined',
   revoked: 'Revoked',
+  withdrawn: 'Withdrawn',
 };
 
 // doc 12 question keys -> reviewer-facing labels
@@ -244,7 +245,7 @@ export default function AdminApplicationsScreen() {
                     <Text style={styles.answerLabel}>{ANSWER_LABELS[key]}</Text>
                     {key === 'proof_links' && Array.isArray(selected.application[key]) ? (
                       (selected.application[key] as string[]).map((link) => (
-                        <TouchableOpacity key={link} style={styles.linkRow} onPress={() => Linking.openURL(link)}>
+                        <TouchableOpacity key={link} style={styles.linkRow} onPress={() => openUrl(link)}>
                           <ExternalLink size={14} color={Colors.terracotta} strokeWidth={2} />
                           <Text style={styles.linkText} numberOfLines={1}>{link}</Text>
                         </TouchableOpacity>

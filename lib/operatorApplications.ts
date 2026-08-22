@@ -17,7 +17,15 @@ export type OperatorGrantStatus =
   | 'needs_more_info'
   | 'approved'
   | 'declined'
-  | 'revoked';
+  | 'revoked'
+  // inventory S-01: the applicant withdrew before a decision. Distinct from
+  // 'revoked' (platform-initiated, after approval) and 'declined' (a real
+  // decision was made) -- self-flipping like the rest of phase 4: the
+  // withdraw_operator_application() RPC does not exist on prod until its
+  // migration applies, so withdrawOperatorApplication() below will fail
+  // cleanly (caught, friendly error) until then, same pattern as
+  // setJoinPolicy elsewhere in this file family.
+  | 'withdrawn';
 
 export interface OperatorGrant {
   id: string;
@@ -106,6 +114,19 @@ export async function submitApplication(
   });
   if (error) throw error;
   return data as string;
+}
+
+/**
+ * Withdraw your own pending application (inventory S-01). Server-enforced:
+ * only the owner, only while the grant is still applied/in_review/
+ * needs_more_info. Dormant until withdraw_operator_application()'s
+ * migration applies -- the RPC call throws a normal PostgrestError until
+ * then, which the caller shows as a friendly "try again" the same way
+ * every other pre-migration write in this codebase is handled.
+ */
+export async function withdrawOperatorApplication(grantId: string): Promise<void> {
+  const { error } = await supabase.rpc('withdraw_operator_application', { p_grant_id: grantId });
+  if (error) throw error;
 }
 
 /** Shared confirmation copy (doc 12). */

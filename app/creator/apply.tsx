@@ -2,12 +2,14 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ChevronRight, Ticket, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { hapticLight } from '../../lib/haptics';
-import { fetchMyGrants, type OperatorGrant, type OperatorTrack } from '../../lib/operatorApplications';
+import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
+import { hapticLight, hapticSuccess } from '../../lib/haptics';
+import { friendlyError } from '../../lib/friendlyError';
+import { fetchMyGrants, withdrawOperatorApplication, type OperatorGrant, type OperatorTrack } from '../../lib/operatorApplications';
 
 const TRACK_CARDS: {
   track: OperatorTrack;
@@ -47,11 +49,23 @@ function statusLine(grant: OperatorGrant | undefined): { label: string; tappable
       return { label: 'not the right fit last time. the door stays open, apply again anytime.', tappable: true };
     case 'revoked':
       return { label: 'this track is closed for your account. reach out if that seems wrong.', tappable: false };
+    case 'withdrawn':
+      return { label: 'you withdrew this application. apply again anytime.', tappable: true };
   }
+}
+
+// inventory S-01: a real "withdraw my application" action, not a dead enum
+// value. Only offered while a decision has not been made yet -- once
+// declined/approved/revoked, withdrawing no longer means anything.
+function canWithdraw(grant: OperatorGrant | undefined): boolean {
+  return !!grant && (grant.status === 'applied' || grant.status === 'in_review' || grant.status === 'needs_more_info');
 }
 
 export default function CreatorApplyScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const [withdrawingId, setWithdrawingId] = React.useState<string | null>(null);
+  const [alertInfo, setAlertInfo] = React.useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: grants = [], isLoading, refetch } = useQuery({
     queryKey: ['my-operator-grants'],
@@ -64,6 +78,32 @@ export default function CreatorApplyScreen() {
       refetch();
     }, [refetch]),
   );
+
+  const confirmWithdraw = (grant: OperatorGrant) => {
+    hapticLight();
+    setAlertInfo({
+      title: 'withdraw this application?',
+      message: "you can apply again anytime, this just clears today's request.",
+      buttons: [
+        { text: 'keep it', style: 'cancel' },
+        {
+          text: 'withdraw',
+          onPress: async () => {
+            setWithdrawingId(grant.id);
+            try {
+              await withdrawOperatorApplication(grant.id);
+              hapticSuccess();
+              queryClient.invalidateQueries({ queryKey: ['my-operator-grants'] });
+            } catch (e) {
+              setAlertInfo({ title: 'That did not go through', message: friendlyError(e, 'Try again in a moment.') });
+            } finally {
+              setWithdrawingId(null);
+            }
+          },
+        },
+      ],
+    });
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -116,6 +156,19 @@ export default function CreatorApplyScreen() {
                       >
                         {status.label}
                       </Text>
+                      {canWithdraw(grant) && (
+                        <TouchableOpacity
+                          onPress={() => confirmWithdraw(grant!)}
+                          disabled={withdrawingId === grant!.id}
+                          hitSlop={8}
+                        >
+                          {withdrawingId === grant!.id ? (
+                            <ActivityIndicator size="small" color={Colors.terracotta} style={styles.withdrawSpinner} />
+                          ) : (
+                            <Text style={styles.withdrawLink}>withdraw</Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 </View>
@@ -125,6 +178,14 @@ export default function CreatorApplyScreen() {
           })}
         </ScrollView>
       )}
+
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -194,4 +255,11 @@ const styles = StyleSheet.create({
     color: Colors.quoteText,
   },
   statusTextApproved: { color: Colors.darkWarm },
+  withdrawLink: {
+    marginTop: 6,
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.terracotta,
+  },
+  withdrawSpinner: { marginTop: 6, alignSelf: 'flex-start' },
 });
