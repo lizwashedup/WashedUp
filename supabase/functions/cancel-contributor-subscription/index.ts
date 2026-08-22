@@ -9,8 +9,8 @@
 // bans a member of the contributor community. Idempotent: canceling an
 // already-canceled subscription is a no-op.
 //
-// Authorization: the caller must be a leader/co_leader of the house
-// community, or the admin. Nothing here touches any other community.
+// Authorization: the caller must be a leader/co_leader/admin/member_care of
+// the house community, or the admin. Nothing here touches any other community.
 // Deploy with verify_jwt: true.
 //
 // Secrets: STRIPE_SECRET_KEY (sk_test_... until Liz flips).
@@ -60,7 +60,9 @@ Deno.serve(async (req)=>{
     if (!authorized) {
       const { data: leaderRow, error: leaderErr } = await admin.from('community_members').select('id').eq('community_id', house.id).eq('user_id', user.id).eq('status', 'active').in('role', [
         'leader',
-        'co_leader'
+        'co_leader',
+        'admin',
+        'member_care'
       ]).limit(1).maybeSingle();
       if (leaderErr) throw new Error(`leader check failed: ${leaderErr.message}`);
       authorized = Boolean(leaderRow);

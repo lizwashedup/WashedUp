@@ -6,6 +6,7 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const classes = new Set(['green', 'yellow', 'red']);
 const privateScopes = new Set(['build_and_test', 'foundation_and_test', 'hold_for_liz']);
 const verifications = new Set(['unverified', 'verified', 'blocked']);
+const visualParityStates = new Set(['verified', 'unverified', 'not_applicable']);
 const gates = new Set([
   'all_releases',
   'architecture_pre_b',
@@ -147,6 +148,19 @@ if (!Array.isArray(manifest.requirements)) {
     if (requirement.id === 'R45') {
       if (!Array.isArray(requirement.subrequirements) || requirement.subrequirements.length !== 6) {
         fail('R45 must keep six individually named expansion directions');
+      }
+    }
+    if (requirement.visualParity !== undefined) {
+      if (!visualParityStates.has(requirement.visualParity)) {
+        fail(`${requirement.id} has an invalid visualParity state`);
+      }
+      if (!Array.isArray(requirement.visualParityEvidence)) {
+        fail(`${requirement.id} visualParityEvidence must be an array`);
+      } else {
+        checkEvidence({ id: requirement.id, evidence: requirement.visualParityEvidence });
+      }
+      if (requirement.visualParity === 'verified' && (requirement.visualParityEvidence || []).length === 0) {
+        fail(`${requirement.id} is visualParity verified without evidence`);
       }
     }
   }

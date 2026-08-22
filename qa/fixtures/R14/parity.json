@@ -1,0 +1,9 @@
+{
+  "requirement": "R14",
+  "title": "Native Scene feed parity",
+  "nativeRoute": "app/(tabs)/explore/index.tsx -> SceneDiscovery",
+  "webRoute": "washedup-web: src/app/app/scene/page.tsx",
+  "viewport": { "width": 390, "height": 844 },
+  "captured": false,
+  "notes": "Scaffold only, no screenshots captured yet. This is the worked example for the qa/fixtures convention (see qa/fixtures/README.md). Populate native.png and web.png here, confirm the events/communities destination switcher matches on both sides, then flip R14.visualParity to 'verified' in qa/requirements.json."
+}

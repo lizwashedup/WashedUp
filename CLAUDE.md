@@ -16,8 +16,8 @@ Every color in the app must come from constants/Colors.ts. Every font family, si
 
 Key values for reference:
 
-- Background: Colors.parchment (#F8F5F0)
-- Primary accent / buttons: Colors.terracotta (#D97746)
+- Background: Colors.parchment (#FAF5EC)
+- Primary accent / buttons: Colors.terracotta (#B5522E)
 - Primary text: Colors.asphalt (#1E1E1E)
 - Secondary text: Colors.textMedium (#666666)
 - Placeholder / inactive: Colors.textLight (#999999)

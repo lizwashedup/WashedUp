@@ -2,7 +2,7 @@
   "format": 3,
   "migration_count": 197,
   "inventory_sha256": "51c2d5fe425733eaccb490dfb47fa5fc39c7d3471de58293db7dbee3f22f0b40",
-  "side_effect_union_count": 57,
+  "side_effect_union_count": 58,
   "approved_legacy_secret_literals": [
     {
       "file": "20260505000000_albums_processor_webhook.sql",
@@ -13,7 +13,7 @@
   "classification_counts": {
     "scheduler": 6,
     "top_level_dml": 21,
-    "do_fixture_dml": 29,
+    "do_fixture_dml": 30,
     "irreversible_ddl": 1,
     "stateful_replacement": 8,
     "default_privileges": 1
@@ -87,7 +87,8 @@
       "20260714052620_leader_card_proposal_41.sql",
       "20260714223943_answers_withhold_proposal_42.sql",
       "20260716000100_first_join_prompts_and_area_wishlists.sql",
-      "20260716233736_participation_notice_evidence_proposal_49.sql"
+      "20260716233736_participation_notice_evidence_proposal_49.sql",
+      "20260817130000_explore_event_rsvp_capacity.sql"
     ],
     "irreversible_ddl": [
       "20260504200000_drop_album_v0.sql"

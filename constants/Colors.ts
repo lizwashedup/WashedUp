@@ -12,7 +12,7 @@ const brand = {
   birthdayPinkTint15: 'rgba(232,160,191,0.15)', // birthdayPink @ 15% — pill backgrounds on birthday party cards
   specialEventMaroon: '#5A1A22', // Special event featured pill: deep maroon SOLID fill (not a tint; the bolder "this is special" marker)
   specialEventCream: '#F5E6D0', // Special event featured pill: cream text on the maroon fill
-  parchment: '#F8F5F0', // App background
+  parchment: '#FAF5EC', // App background
   asphalt: '#1E1E1E', // Primary text
   white: '#FFFFFF',
 
