@@ -31,7 +31,7 @@ export default function TicketScanner({ onScan, busy }: TicketScannerProps) {
     return (
       <View style={styles.permWrap}>
         {/* copy to the taste gate */}
-        <Text style={styles.permText}>let the camera read tickets at the door.</Text>
+        <Text style={styles.permText}>let the camera read tickets to check people in.</Text>
         <TouchableOpacity style={styles.primaryBtn} onPress={requestPermission} accessibilityRole="button">
           <Text style={styles.primaryBtnText}>turn on the camera</Text>
         </TouchableOpacity>

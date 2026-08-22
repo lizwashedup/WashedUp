@@ -50,18 +50,21 @@ describe('ticket door offline contract', () => {
   });
 
   it('drains in order and retains only codes that still lack a server answer', async () => {
-    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify([
-      { code: 'FIRST', queuedAt: '2026-08-16T00:00:00Z' },
-      { code: 'SECOND', queuedAt: '2026-08-16T00:00:01Z' },
-      { code: 'THIRD', queuedAt: '2026-08-16T00:00:02Z' },
-    ]));
+    mockRpc
+      .mockResolvedValueOnce({ data: null, error: { message: 'offline' } })
+      .mockResolvedValueOnce({ data: null, error: { message: 'offline' } })
+      .mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+    await recordCheckin('first');
+    await recordCheckin('second');
+    await recordCheckin('third');
+
     mockRpc
       .mockResolvedValueOnce({ data: 'duplicate', error: null })
       .mockResolvedValueOnce({ data: null, error: { message: 'offline' } })
       .mockResolvedValueOnce({ data: null, error: { message: 'unknown reference' } });
 
     const summary = await syncQueuedCheckins();
-    expect(mockRpc.mock.calls.map((call) => call[1].p_reference_code)).toEqual([
+    expect(mockRpc.mock.calls.slice(3).map((call) => call[1].p_reference_code)).toEqual([
       'FIRST', 'SECOND', 'THIRD',
     ]);
     expect(summary.processed.map((item: { code: string }) => item.code)).toEqual(['FIRST', 'THIRD']);
@@ -72,5 +75,26 @@ describe('ticket door offline contract', () => {
   it('rejects an empty code before any database call', async () => {
     await expect(recordCheckin('   ')).resolves.toMatchObject({ kind: 'error', code: '' });
     expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('signs a queued record and drops it without replay if the signature no longer matches', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+    await recordCheckin('legit');
+    const stored = JSON.parse((await AsyncStorage.getItem(QUEUE_KEY)) ?? '[]');
+    expect(stored).toHaveLength(1);
+    expect(typeof stored[0].signature).toBe('string');
+    expect(stored[0].signature.length).toBeGreaterThan(0);
+
+    mockRpc.mockClear();
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify([
+      { code: 'TAMPERED', queuedAt: '2026-08-16T00:00:00Z', signature: 'not-a-real-signature' },
+    ]));
+    const summary = await syncQueuedCheckins();
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(summary.processed).toEqual([
+      { code: 'TAMPERED', outcome: { kind: 'error', message: 'that queued check-in did not verify. scan again.', code: 'TAMPERED' } },
+    ]);
+    expect(summary.remaining).toBe(0);
+    await expect(queuedCount()).resolves.toBe(0);
   });
 });

@@ -1030,7 +1030,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="creator/event-form" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/tickets" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="creator/attendees" options={{ headerShown: false, gestureEnabled: true }} />
-        <Stack.Screen name="creator/door" options={{ headerShown: false, gestureEnabled: true }} />
+        {/* O-09: was "creator/door" -- renamed, this route is reachable by producers */}
+        <Stack.Screen name="creator/check-in" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="creator/member/[id]" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="event-album/[topicId]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="tickets/index" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="tickets/order/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community/[id]" options={{ headerShown: false, gestureEnabled: true }} />

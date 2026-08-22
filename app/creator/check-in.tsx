@@ -1,11 +1,19 @@
 /**
- * Door mode (spec 100 P0 #5): check a reference_code in by TYPE or SCAN, one
- * screen two paths. A big pass/fail that is never colour alone (icon + text +
- * colour, §8 WCAG). Live checked-in / total. Works on bad signal: a network
- * failure queues locally and syncs; a real verdict never queues (lib/ticketDoor).
+ * Check-in mode (spec 100 P0 #5): check a reference_code in by TYPE or SCAN,
+ * one screen two paths. A big pass/fail that is never colour alone (icon +
+ * text + colour, §8 WCAG). Live checked-in / total. Works on bad signal: a
+ * network failure queues locally and syncs; a real verdict never queues
+ * (lib/ticketDoor).
  *
  * The read gates on is_ticketing_organizer via RLS (§7); the RPC re-checks the
  * organizer server-side, so this screen is a courier, not the authority.
+ *
+ * O-09 (2026-08-19): renamed from door.tsx/DoorScreen/"at the door" -- this
+ * screen and its route are reachable by producers (organizations), not just
+ * community leaders, and "door" is one of the five banned membership/room
+ * concepts (see organizerHome.ts's own header note). The underlying file
+ * lib/ticketDoor.ts and the DoorAttendee/countAttendees helpers keep their
+ * internal names; they are not user-facing navigation or copy.
  */
 
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
@@ -18,13 +26,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, Redirect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, X, CircleAlert, Clock, Keyboard as KeyboardIcon, ScanLine } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { hapticSuccess, hapticError, hapticWarning, hapticLight } from '../../lib/haptics';
+import { getCreatorAccess, canManageEvents, creatorLandingRoute } from '../../lib/creatorMode';
 import { countAttendees, getEventAttendees } from '../../lib/ticketAttendees';
 import { normalizeCode, queuedCount, recordCheckin, syncQueuedCheckins, type CheckinOutcome } from '../../lib/ticketDoor';
 
@@ -56,7 +65,7 @@ function outcomeToVerdict(o: CheckinOutcome): Verdict {
   return { tone: 'fail', label: 'did not go through', detail: o.message };
 }
 
-export default function DoorScreen() {
+export default function CheckInScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<Mode>('type');
@@ -65,6 +74,8 @@ export default function DoorScreen() {
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(0);
   const lastScan = useRef<{ code: string; at: number }>({ code: '', at: 0 });
+
+  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
 
   const { data: attendees = [] } = useQuery({
     queryKey: ['event-attendees', id],
@@ -138,14 +149,18 @@ export default function DoorScreen() {
           : styles.panelPending;
   const panelTextStyle = v?.tone === 'fail' ? styles.panelTextOnDark : styles.panelText;
 
+  if (access && !access.hasEventHostGrant && !canManageEvents(access)) {
+    return <Redirect href={creatorLandingRoute(access)} />;
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="back">
           <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2} />
         </TouchableOpacity>
-        {/* copy to the taste gate */}
-        <Text style={styles.headerTitle}>at the door</Text>
+        {/* copy to the taste gate. O-09: was "at the door" */}
+        <Text style={styles.headerTitle}>check in</Text>
         <View style={styles.headerSpacer} />
       </View>
 

@@ -28,7 +28,8 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
 import { executeRefund, formatCents, previewRefund } from '../../lib/ticketing';
-import { countAttendees, getEventAttendees, isLiveSeat, type DoorAttendee } from '../../lib/ticketAttendees';
+import { countAttendees, getEventAttendees, getEventMoneySummary, isLiveSeat, type DoorAttendee } from '../../lib/ticketAttendees';
+import { MoneySummaryCard } from '../../components/creator/MoneySummaryCard';
 
 type StatusFilter = 'all' | 'in' | 'notin' | 'refunded';
 
@@ -46,8 +47,15 @@ export default function AttendeesScreen() {
     enabled: !!id,
     staleTime: 10_000,
   });
+  const { data: money } = useQuery({
+    queryKey: ['event-money-summary', id],
+    queryFn: () => getEventMoneySummary(id!),
+    enabled: !!id,
+    staleTime: 10_000,
+  });
 
   const counts = countAttendees(attendees);
+  const refundedCents = useMemo(() => attendees.reduce((s, a) => s + a.refundedCents, 0), [attendees]);
   const tiers = useMemo(
     () => Array.from(new Set(attendees.map((a) => a.tierName).filter((t): t is string => !!t))),
     [attendees],
@@ -115,6 +123,7 @@ export default function AttendeesScreen() {
     setRefundingId(null);
     if (outcome.ok) {
       queryClient.invalidateQueries({ queryKey: ['event-attendees', id] });
+      queryClient.invalidateQueries({ queryKey: ['event-money-summary', id] });
       /* LIZ COPY (web's shipped strings, mirrored); pending is still success */
       Alert.alert(
         'refund sent',
@@ -149,7 +158,7 @@ export default function AttendeesScreen() {
         </TouchableOpacity>
         {/* copy to the taste gate */}
         <Text style={styles.headerTitle}>who's coming</Text>
-        <TouchableOpacity onPress={() => { hapticLight(); router.push(`/creator/door?id=${id}` as never); }} hitSlop={12} accessibilityRole="button" accessibilityLabel="open the door scanner">
+        <TouchableOpacity onPress={() => { hapticLight(); router.push(`/creator/check-in?id=${id}` as never); }} hitSlop={12} accessibilityRole="button" accessibilityLabel="open check-in">
           <ScanLine size={20} color={Colors.terracotta} strokeWidth={2} />
         </TouchableOpacity>
       </View>
@@ -169,6 +178,10 @@ export default function AttendeesScreen() {
           <Text style={styles.countL}>refunded</Text>
         </View>
       </View>
+
+      {money && (
+        <MoneySummaryCard money={money} ticketsSold={counts.sold} refundedCents={refundedCents} />
+      )}
 
       <TextInput
         style={styles.search}
