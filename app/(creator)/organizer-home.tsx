@@ -24,12 +24,12 @@
  */
 
 import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { ChevronRight, Plus, Ticket, Users } from 'lucide-react-native';
+import { ChevronRight, Plus, ScanLine, Ticket, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { EventAction, EventSpacing, EventSurface, EventType } from '../../constants/EventDesign';
 import { FontSizes, LineHeights } from '../../constants/Typography';
@@ -59,7 +59,12 @@ export default function OrganizerHomeScreen() {
   // event-host-only has no led communities; shares events.tsx's cache key
   // shape so the two tabs read the same list instead of double-fetching.
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const { data: events = [] } = useQuery({
+  // S-02: isPending (not isLoading) on purpose -- this query stays `enabled:
+  // false` (so also not "isFetching") for the whole time access is still
+  // loading, and isLoading is isPending && isFetching in this query-client
+  // major version. isPending alone stays true across that whole gap, which
+  // is what actually gates the false "nothing on the calendar" flash below.
+  const { data: events = [], isPending: eventsPending } = useQuery({
     queryKey: ['creator-events-tab', access?.ledCommunities.map((c) => c.id).join(',')],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -102,7 +107,11 @@ export default function OrganizerHomeScreen() {
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>{producerName}</Text>
 
-        {nextEvent ? (
+        {eventsPending ? (
+          <View style={[styles.emptyCard, styles.loadingCard]}>
+            <ActivityIndicator size="small" color={EventAction.primary} />
+          </View>
+        ) : nextEvent ? (
           <TouchableOpacity
             style={styles.urgencyCard}
             onPress={() => router.push(`/creator/attendees?id=${nextEvent.id}` as never)}
@@ -133,14 +142,6 @@ export default function OrganizerHomeScreen() {
         )}
 
         {nextEvent && (
-          <TouchableOpacity style={styles.postBtn} onPress={() => router.push('/creator/event-form')} activeOpacity={0.85}>
-            <Plus size={16} color={EventAction.onPrimary} strokeWidth={2.5} />
-            {/* LIZ COPY */}
-            <Text style={styles.postBtnText}>put on another event</Text>
-          </TouchableOpacity>
-        )}
-
-        {nextEvent && (
           <TouchableOpacity
             style={styles.linkRow}
             onPress={() => router.push(`/creator/attendees?id=${nextEvent.id}` as never)}
@@ -151,6 +152,24 @@ export default function OrganizerHomeScreen() {
               {/* LIZ COPY */}
               <Text style={styles.linkRowTitle}>who's coming</Text>
               <Text style={styles.linkRowMeta}>{inventoryLabel(counts.sold, capacity)}</Text>
+            </View>
+            <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
+          </TouchableOpacity>
+        )}
+
+        {/* O-01: entry/scanner surfaced directly on this home screen, not
+            only reachable through the events tab's per-event row */}
+        {nextEvent && (
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() => { router.push(`/creator/check-in?id=${nextEvent.id}` as never); }}
+            activeOpacity={0.8}
+          >
+            <ScanLine size={18} color={EventAction.primary} strokeWidth={2} />
+            <View style={{ flex: 1 }}>
+              {/* LIZ COPY */}
+              <Text style={styles.linkRowTitle}>check in</Text>
+              <Text style={styles.linkRowMeta}>{counts.checkedIn} of {counts.sold} checked in</Text>
             </View>
             <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
           </TouchableOpacity>
@@ -167,6 +186,23 @@ export default function OrganizerHomeScreen() {
               {followerCount === 1 ? 'person following your events' : 'people following your events'}
             </Text>
           </View>
+        )}
+
+        {/* O-03: dormant with the same follower-count gate above -- no point
+            offering to message an audience that doesn't exist as a concept yet */}
+        {followerCount != null && (
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() => router.push('/organizer-broadcast' as never)}
+            activeOpacity={0.8}
+          >
+            <View style={{ flex: 1 }}>
+              {/* LIZ COPY */}
+              <Text style={styles.linkRowTitle}>message your followers</Text>
+              <Text style={styles.linkRowMeta}>a quick update, right to their feed.</Text>
+            </View>
+            <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
+          </TouchableOpacity>
         )}
 
         <Text style={styles.sectionLabel}>money</Text>
@@ -189,6 +225,18 @@ export default function OrganizerHomeScreen() {
           </View>
           <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
         </TouchableOpacity>
+
+        {/* O-01: "put on another event" moves to the end of the scroll (was
+            rendering third, right after the urgency card); everything above
+            it is about the event already up, this is the next action once
+            you've read all of that, not a distraction ahead of it */}
+        {nextEvent && (
+          <TouchableOpacity style={styles.postBtn} onPress={() => router.push('/creator/event-form')} activeOpacity={0.85}>
+            <Plus size={16} color={EventAction.onPrimary} strokeWidth={2.5} />
+            {/* LIZ COPY */}
+            <Text style={styles.postBtnText}>put on another event</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -262,6 +310,7 @@ const styles = StyleSheet.create({
     marginTop: EventSpacing.xs,
   },
   emptyText: { fontFamily: EventType.body, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.secondary },
+  loadingCard: { alignItems: 'center', justifyContent: 'center', minHeight: 64 },
   emptyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
