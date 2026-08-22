@@ -34,8 +34,12 @@ import {
 import { isHouseCommunity } from '../../lib/houseCommunity';
 import { hapticSuccess, hapticError } from '../../lib/haptics';
 
-const NAME_MAX = 80;
+const NAME_MIN = 2;
+const NAME_MAX = 60;
 const HANDLE_MAX = 40;
+const CITY_MAX = 60;
+const PURPOSE_MIN = 10;
+const PURPOSE_MAX = 140;
 
 export default function SetupCommunityScreen() {
   const queryClient = useQueryClient();
@@ -44,6 +48,8 @@ export default function SetupCommunityScreen() {
   const [name, setName] = useState('');
   const [handle, setHandle] = useState('');
   const [handleTouched, setHandleTouched] = useState(false);
+  const [city, setCity] = useState('');
+  const [purpose, setPurpose] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -53,14 +59,23 @@ export default function SetupCommunityScreen() {
   };
 
   const handleValid = HANDLE_SHAPE.test(handle) && !isHouseCommunity(handle);
-  const canCreate = name.trim().length > 0 && handleValid && !busy;
+  // inventory C-04: city required before a community is publicly
+  // discoverable (doc says "required before public discovery"); gating it
+  // here, at creation, trivially satisfies that -- discovery can only ever
+  // happen after creation and publish.
+  const nameValid = name.trim().length >= NAME_MIN;
+  const cityValid = city.trim().length > 0;
+  // inventory C-04: a real, specific pitch, not the longer freeform
+  // description -- required before create, same as name/city/handle.
+  const purposeValid = purpose.trim().length >= PURPOSE_MIN;
+  const canCreate = nameValid && handleValid && cityValid && purposeValid && !busy;
 
   const handleCreate = async () => {
     if (!canCreate) return;
     setBusy(true);
     setProblem(null);
     try {
-      await createCommunity(handle, name.trim());
+      await createCommunity(handle, name.trim(), city.trim(), purpose.trim());
       hapticSuccess();
       await queryClient.invalidateQueries({ queryKey: ['creator-access'] });
       router.replace('/(creator)/today');
@@ -110,6 +125,40 @@ export default function SetupCommunityScreen() {
               autoCapitalize="words"
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
+            {!!name && !nameValid && (
+              /* LIZ COPY */
+              <Text style={styles.problem}>needs at least {NAME_MIN} characters.</Text>
+            )}
+
+            {/* LIZ COPY */}
+            <Text style={styles.fieldLabel}>city</Text>
+            <TextInput
+              style={styles.input}
+              value={city}
+              onChangeText={setCity}
+              maxLength={CITY_MAX}
+              autoCapitalize="words"
+              placeholder="where your people find you"
+              placeholderTextColor={Colors.inkSoft}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
+
+            {/* LIZ COPY */}
+            <Text style={styles.fieldLabel}>what's it for</Text>
+            <TextInput
+              style={[styles.input, styles.inputMultiline]}
+              value={purpose}
+              onChangeText={setPurpose}
+              maxLength={PURPOSE_MAX}
+              multiline
+              placeholder="one real sentence on why someone should join"
+              placeholderTextColor={Colors.inkSoft}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
+            {!!purpose && !purposeValid && (
+              /* LIZ COPY */
+              <Text style={styles.problem}>needs at least {PURPOSE_MIN} characters.</Text>
+            )}
 
             {/* LIZ COPY */}
             <Text style={styles.fieldLabel}>handle</Text>
@@ -197,6 +246,10 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
     marginBottom: 8,
+  },
+  inputMultiline: {
+    minHeight: 64,
+    textAlignVertical: 'top',
   },
   handlePreview: {
     fontFamily: Fonts.sans,

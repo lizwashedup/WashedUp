@@ -39,6 +39,10 @@ import {
 const THUMB_SIZE = 72;
 const LOGO_SIZE = 56;
 
+function initials(name: string): string {
+  return (name.trim().charAt(0) || '?').toUpperCase();
+}
+
 interface LinkDraft {
   label: string;
   url: string;
@@ -47,6 +51,7 @@ interface LinkDraft {
 interface Props {
   block: CommunityBlock;
   communityId: string;
+  communityName: string;
   isFirst: boolean;
   isLast: boolean;
   onMoveUp: () => void;
@@ -59,6 +64,7 @@ interface Props {
 export function BlockEditorCard({
   block,
   communityId,
+  communityName,
   isFirst,
   isLast,
   onMoveUp,
@@ -185,6 +191,11 @@ export function BlockEditorCard({
   const renderImagesEditor = () => (
     <View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
+        {images.length === 0 && (
+          <View style={styles.thumbEmpty}>
+            <Text style={styles.thumbEmptyInitial}>{initials(communityName)}</Text>
+          </View>
+        )}
         {images.map((url) => (
           <View key={url} style={styles.thumbWrap}>
             <Image source={{ uri: url }} style={styles.thumb} />
@@ -204,7 +215,11 @@ export function BlockEditorCard({
         )}
       </ScrollView>
       <Text style={styles.fieldHint}>
-        {images.length} of {maxImages} photos
+        {images.length === 0
+          ? block.block_type === 'cover'
+            ? 'this is the first thing people see — add a photo or two' /* LIZ COPY (proposed) */
+            : 'add a few photos to show the vibe' /* LIZ COPY (proposed) */
+          : `${images.length} of ${maxImages} photos`}
       </Text>
     </View>
   );
@@ -279,7 +294,9 @@ export function BlockEditorCard({
             ? 'what this community is'
             : block.block_type === 'founder'
               ? 'why you started this, in your own words' /* LIZ COPY */
-              : 'the note itself'
+              : block.block_type === 'cadence'
+                ? 'how often people hear from you, what membership feels like' /* LIZ COPY (proposed) */
+                : 'the note itself'
         }
         placeholderTextColor={Colors.inkSoft}
         multiline={multiline}
@@ -370,6 +387,7 @@ export function BlockEditorCard({
         return renderHeaderEditor();
       case 'about':
       case 'founder':
+      case 'cadence':
         return renderTextEditor(true, false);
       case 'pinned':
         return renderTextEditor(true, true);
@@ -462,6 +480,15 @@ const styles = StyleSheet.create({
   },
   inputMultiline: { minHeight: 100, textAlignVertical: 'top' },
   thumbRow: { gap: 10, paddingVertical: 4 },
+  thumbEmpty: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: 10,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbEmptyInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.tertiary },
   thumbWrap: { position: 'relative' },
   thumb: { width: THUMB_SIZE, height: THUMB_SIZE, borderRadius: 10 },
   logo: { width: LOGO_SIZE, height: LOGO_SIZE, borderRadius: 999 },

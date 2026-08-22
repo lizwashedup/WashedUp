@@ -9,6 +9,7 @@
  *   cover:        { images: string[] }
  *   header:       { tagline?: string; logo_url?: string }
  *   about:        { text: string }
+ *   cadence:      { text: string }
  *   events_auto:  {}   (renders itself from explore_events)
  *   members_auto: {}   (renders itself from membership data)
  *   gallery:      { images: string[] }
@@ -34,6 +35,7 @@ export type CommunityBlockType =
   | 'header'
   | 'founder'
   | 'about'
+  | 'cadence'
   | 'events_auto'
   | 'members_auto'
   | 'gallery'
@@ -80,6 +82,12 @@ export const BLOCK_TYPE_INFO: Record<
     hint: 'what this community is, in your words.',
     auto: false,
   },
+  cadence: {
+    // LIZ COPY (proposed)
+    label: 'what membership feels like',
+    hint: 'how often people hear from you, and what being a part of this actually feels like.',
+    auto: false,
+  },
   events_auto: {
     label: 'upcoming events',
     hint: 'fills itself from your events. nothing to write.',
@@ -113,6 +121,7 @@ export const BLOCK_TYPE_ORDER: CommunityBlockType[] = [
   'header',
   'founder',
   'about',
+  'cadence',
   'events_auto',
   'members_auto',
   'gallery',
@@ -129,6 +138,7 @@ export function defaultContentFor(type: CommunityBlockType): Record<string, unkn
       return {};
     case 'about':
     case 'founder':
+    case 'cadence':
       return { text: '' };
     case 'links':
       return { links: [] };

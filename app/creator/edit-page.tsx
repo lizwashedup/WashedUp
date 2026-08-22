@@ -85,6 +85,23 @@ export default function EditPageScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, community?.id, blocks]);
 
+  // the cadence block is ON BY DEFAULT too (C-05: the fixed intro spine),
+  // same seed-once pattern as founder above -- pre-apply (enum value not
+  // live yet) the insert fails quietly and retries on the next visit.
+  const cadenceSeedTried = React.useRef(false);
+  React.useEffect(() => {
+    if (isLoading || !community || cadenceSeedTried.current) return;
+    if (blocks.some((b) => b.block_type === 'cadence')) return;
+    cadenceSeedTried.current = true;
+    const nextPosition = blocks.length > 0 ? Math.max(...blocks.map((b) => b.position)) + 1 : 0;
+    addBlock(community.id, 'cadence', nextPosition)
+      .then(() => invalidate())
+      .catch(() => {
+        /* enum value not applied yet; the add sheet still offers it */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, community?.id, blocks]);
+
   const showError = (title: string, message: string) => setAlertInfo({ title, message });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: blocksKey });
 
@@ -166,7 +183,18 @@ export default function EditPageScreen() {
             keyboardShouldPersistTaps="handled"
             refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
           >
-            <Text style={styles.title}>your page</Text>
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>your page</Text>
+              {/* inventory C-05: the draft/published state is real (see
+                  community.tsx's own banner) but was only ever shown one
+                  screen away -- visible right here while actually editing,
+                  not duplicated, just not hidden from this screen either. */}
+              <View style={[styles.statusPill, community.status === 'active' && styles.statusPillLive]}>
+                <Text style={[styles.statusPillText, community.status === 'active' && styles.statusPillTextLive]}>
+                  {community.status === 'active' ? 'published' : 'draft'}
+                </Text>
+              </View>
+            </View>
             <Text style={styles.hint}>
               the blocks that make up {community.name}. tap one to fill it in, use the
               arrows to reorder, the eye to show or hide. this is what members and
@@ -197,6 +225,7 @@ export default function EditPageScreen() {
                 key={block.id}
                 block={block}
                 communityId={community.id}
+                communityName={community.name}
                 isFirst={i === 0}
                 isLast={i === blocks.length - 1}
                 onMoveUp={() => handleMove(i, -1)}
@@ -262,13 +291,28 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8 },
   headerBtn: { padding: 4 },
   content: { padding: 20, paddingBottom: 60 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   title: {
     fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
-    marginBottom: 8,
   },
+  statusPill: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  statusPillLive: { backgroundColor: Colors.goldBadgeSoft },
+  statusPillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  statusPillTextLive: { color: Colors.darkWarm },
   hint: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,

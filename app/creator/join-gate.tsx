@@ -20,7 +20,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, Redirect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -29,7 +29,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
-import { getCreatorAccess, getJoinGateSettings, updateJoinGateSettings, getJoinPolicy, setJoinPolicy, type JoinPolicy } from '../../lib/creatorMode';
+import { getCreatorAccess, canManageMembers, creatorLandingRoute, getJoinGateSettings, updateJoinGateSettings, getJoinPolicy, setJoinPolicy, getCommunityMemberCounts, type JoinPolicy } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { JOIN_GATE_ENABLED } from '../../constants/FeatureFlags';
 
@@ -67,15 +67,44 @@ export default function JoinGateScreen() {
   const [joinPolicy, setJoinPolicyState] = useState<JoinPolicy | null>(null);
   useEffect(() => { setJoinPolicyState(fetchedPolicy); }, [fetchedPolicy]);
 
-  const setJoinPolicyLocal = async (policy: JoinPolicy) => {
-    if (!community || policy === joinPolicy) return;
+  // inventory C-08: live counts next to the picker, and the source for the
+  // "you have N waiting" confirm copy below.
+  const { data: counts } = useQuery({
+    queryKey: ['creator-member-counts', community?.id],
+    queryFn: () => getCommunityMemberCounts(community!.id),
+    enabled: !!community,
+  });
+
+  const commitJoinPolicy = async (policy: JoinPolicy) => {
     const prev = joinPolicy;
     setJoinPolicyState(policy); // optimistic
-    const ok = await setJoinPolicy(community.id, policy);
+    const ok = await setJoinPolicy(community!.id, policy);
     if (!ok) {
       setJoinPolicyState(prev); // revert on a no-op/denied write
       setAlertInfo({ title: 'That did not save', message: 'give it another try.' });
     }
+  };
+
+  // inventory C-08: switching away from "you approve them" never touches
+  // anyone already waiting -- they stay pending until reviewed one by one --
+  // but a leader should not learn that only after the fact, so it is a real
+  // confirm step, not an instant optimistic flip, whenever people are
+  // actually waiting right now.
+  const setJoinPolicyLocal = (policy: JoinPolicy) => {
+    if (!community || policy === joinPolicy) return;
+    const pendingCount = counts?.pending ?? 0;
+    if (joinPolicy === 'approval_required' && pendingCount > 0) {
+      setAlertInfo({
+        title: `Switch off review with ${pendingCount} waiting?`,
+        message: `They stay exactly as they are, pending, until you approve or decline them yourself. This only changes what happens to new requests from here on.`,
+        buttons: [
+          { text: 'Keep reviewing', style: 'cancel' },
+          { text: 'Switch anyway', onPress: () => commitJoinPolicy(policy) },
+        ],
+      });
+      return;
+    }
+    commitJoinPolicy(policy);
   };
 
   useEffect(() => {
@@ -110,6 +139,8 @@ export default function JoinGateScreen() {
       setSaving(false);
     }
   };
+
+  if (access && !canManageMembers(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -162,6 +193,12 @@ export default function JoinGateScreen() {
                 <Text style={styles.fieldHint}>
                   approval means you review each request. open lets anyone join instantly.
                 </Text>
+                {counts && (
+                  <Text style={styles.policyPreview}>
+                    {counts.active} in the community
+                    {counts.pending > 0 ? ` · ${counts.pending} waiting for review` : ''}
+                  </Text>
+                )}
                 <View style={styles.policyRow}>
                   <TouchableOpacity
                     style={[styles.policyPill, joinPolicy === 'open' && styles.policyPillOn]}
@@ -184,6 +221,29 @@ export default function JoinGateScreen() {
                     </Text>
                   </TouchableOpacity>
                 </View>
+                {/* inventory C-08: invite_only added to the JoinPolicy type
+                    and offered here, same self-flipping shape as the two
+                    pills above. Deliberately NOT built: real invite-code
+                    generation/redemption -- that is its own, larger feature
+                    (bigger-rocks list), not a "small" wire-up. Selecting it
+                    today behaves like "you approve them" server-side (fails
+                    closed into review, never silently opens the door) until
+                    that larger feature ships. */}
+                <TouchableOpacity
+                  style={[styles.policyPill, styles.policyPillWide, joinPolicy === 'invite_only' && styles.policyPillOn]}
+                  onPress={() => { hapticLight(); setJoinPolicyLocal('invite_only'); }}
+                  activeOpacity={0.85}
+                >
+                  {/* copy to the taste gate */}
+                  <Text style={[styles.policyText, joinPolicy === 'invite_only' && styles.policyTextOn]}>
+                    invite only
+                  </Text>
+                </TouchableOpacity>
+                {joinPolicy === 'invite_only' && (
+                  <Text style={styles.policyNote}>
+                    invite codes are not built yet -- for now this reviews every request yourself, same as "you approve them".
+                  </Text>
+                )}
               </>
             )}
 
@@ -269,6 +329,8 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   fieldHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginBottom: 6 },
+  policyPreview: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 8 },
+  policyNote: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: -4, marginBottom: 16 },
   input: {
     backgroundColor: Colors.inputBg,
     borderRadius: 12,
@@ -292,6 +354,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   policyPillOn: { borderColor: Colors.terracotta, backgroundColor: Colors.brandSoft },
+  // overrides policyPill's flex:1 (meant for the two-pill row) so this
+  // standalone third pill renders as its own full-width block instead
+  policyPillWide: { flex: 0, marginTop: 8, marginBottom: 8 },
   policyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   policyTextOn: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
   saveBtn: {

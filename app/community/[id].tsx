@@ -68,7 +68,7 @@ const HERO_CONTROL_TOP = 8;
 // and trust, then the next event before long descriptions, then the person
 // behind it. A stranger's read never depends on the leader's block order;
 // members get the leader's own arrangement.
-const LOCK_BLOCK_ORDER: CommunityBlock['block_type'][] = ['header', 'about', 'founder'];
+const LOCK_BLOCK_ORDER: CommunityBlock['block_type'][] = ['header', 'about', 'founder', 'cadence'];
 
 export default function CommunityPageScreen() {
   const router = useRouter();
@@ -93,6 +93,11 @@ export default function CommunityPageScreen() {
     staleTime: 60_000,
   });
   const joinsInstantly = joinPolicy === 'open';
+  // SC-04 (2026-08-19): invite_only used to fall into the same "ask to join"
+  // bucket as approval_required, which is a real lie -- there is no review
+  // queue to ask into. Label only: the real invite-code redemption flow is
+  // a separate, larger build, correctly not started here.
+  const isInviteOnly = joinPolicy === 'invite_only';
 
   const { data: membership } = useQuery({
     queryKey: ['community-membership', id],
@@ -237,6 +242,17 @@ export default function CommunityPageScreen() {
         return (
           <View key={block.id} style={styles.block}>
             <Text style={styles.blockLabel}>about</Text>
+            <Text style={styles.bodyText}>{text}</Text>
+          </View>
+        );
+      }
+      case 'cadence': {
+        const text = typeof block.content.text === 'string' ? block.content.text : '';
+        if (!text) return null;
+        return (
+          <View key={block.id} style={styles.block}>
+            {/* LIZ COPY */}
+            <Text style={styles.blockLabel}>what membership feels like</Text>
             <Text style={styles.bodyText}>{text}</Text>
           </View>
         );
@@ -508,6 +524,10 @@ export default function CommunityPageScreen() {
                 </View>
               ) : membership && ['declined', 'removed', 'banned'].includes(membership.status) ? (
                 <Text style={styles.quietLine}>this community is not open to you right now.</Text>
+              ) : isInviteOnly ? (
+                /* SC-04: its own real label, not the approval-required copy.
+                   copy to the taste gate */
+                <Text style={styles.quietLine}>this community is invite only.</Text>
               ) : (
                 /* the action pill (doc 37 button canon): terracotta outline,
                    fully rounded, the tap that does something now */

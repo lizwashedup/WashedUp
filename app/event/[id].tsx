@@ -50,9 +50,13 @@ import { getParticipationNoticeStatus, recordParticipationAssent } from '../../l
 import { type DescriptionBlock } from '../../lib/eventContent';
 import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
 import { EventAction, EventSurface } from '../../constants/EventDesign';
-import { formatCents, getPublicTicketSummary } from '../../lib/ticketing';
+import { formatCents, getPublicTicketSummary, isLowInventory } from '../../lib/ticketing';
 import { EventFaqCards } from '../../components/events/EventFaqCards';
 import { TicketCheckoutSheet } from '../../components/events/TicketCheckoutSheet';
+import PlanChooserSheet, { type ChooserPlan } from '../../components/plans/PlanChooserSheet';
+import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
+import { getJoinGate } from '../../lib/communityJoin';
+import { getJoinPolicy } from '../../lib/creatorMode';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 280;
@@ -196,6 +200,12 @@ export default function EventDetailScreen() {
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [checkoutVisible, setCheckoutVisible] = useState(false);
+  // PL-01: the plan chooser sheet, shown by goFindPeople when open Plans
+  // already exist for this event, instead of guessing which one to open.
+  const [chooserPlans, setChooserPlans] = useState<ChooserPlan[]>([]);
+  const [chooserVisible, setChooserVisible] = useState(false);
+  // SC-05: the event page's own join door, mirroring community/[id].tsx's
+  const [joinPopupVisible, setJoinPopupVisible] = useState(false);
   const { blockUser } = useBlock();
 
   React.useEffect(() => {
@@ -526,6 +536,29 @@ export default function EventDetailScreen() {
     staleTime: 30_000,
   });
   const viewerIsMemberHere = MEMBER_STATE_ENABLED && viewerMembershipStatus === 'active';
+  const viewerJoinPending = MEMBER_STATE_ENABLED && viewerMembershipStatus === 'pending';
+  // SC-05: the event page had a follow pill but no real door into the
+  // community itself - gated the same way member-state already is, since
+  // without that flag we can't safely know they aren't already a member.
+  const viewerCanJoinHere =
+    MEMBER_STATE_ENABLED &&
+    !!userId &&
+    frontingTarget?.kind === 'community' &&
+    !viewerIsMemberHere &&
+    !viewerJoinPending;
+  const { data: joinPolicy = null } = useQuery({
+    queryKey: ['community-join-policy', event?.community_id],
+    queryFn: () => getJoinPolicy(event!.community_id!),
+    enabled: MEMBER_STATE_ENABLED && !!event?.community_id,
+    staleTime: 60_000,
+  });
+  const joinsInstantly = joinPolicy === 'open';
+  const { data: joinGate = null } = useQuery({
+    queryKey: ['community-gate', event?.community_id],
+    queryFn: () => getJoinGate(event!.community_id!),
+    enabled: MEMBER_STATE_ENABLED && !!event?.community_id,
+    staleTime: 60_000,
+  });
 
   const followMutation = useMutation({
     mutationFn: async () => {
@@ -543,17 +576,60 @@ export default function EventDetailScreen() {
     onError: () => hapticError(),
   });
 
-  const goFindPeople = useCallback(() => {
-    // item 07 is organization-event only; the chat law (item 04) keeps a
-    // community event's RSVP opening its own event-room chat instead.
-    if (!event || !canFindPeopleForEvent(event)) return;
-    hapticMedium();
+  const goToNewPlan = useCallback(() => {
+    if (!event) return;
     router.push({
       pathname: '/(tabs)/post',
       params: buildPlanPrefillFromEvent(event),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event]);
+
+  // PL-01: the real chooser step (spec: existing open Plans shown first,
+  // then an explicit "start a new Plan" action) instead of guessing a first
+  // match or skipping straight into the creation form.
+  const goFindPeople = useCallback(() => {
+    // item 07 is organization-event only; the chat law (item 04) keeps a
+    // community event's RSVP opening its own event-room chat instead.
+    if (!event || !canFindPeopleForEvent(event)) return;
+    hapticMedium();
+    const openPlans = getOpenLinkedPlans(
+      linkedPlans.map((p) => ({
+        id: p.id,
+        memberCount: memberCountsMap[p.id] ?? p.member_count,
+        maxInvites: p.max_invites,
+      })),
+    ).map((p) => linkedPlans.find((lp) => lp.id === p.id)!);
+    if (openPlans.length === 0) {
+      goToNewPlan();
+      return;
+    }
+    setChooserPlans(
+      openPlans.map((p) => {
+        const { text, isFull } = getPlanSpotsInfo(p);
+        return {
+          id: p.id,
+          title: p.title,
+          creator_name: p.creator_name,
+          creator_photo: p.creator_photo,
+          spotsText: text,
+          isFull,
+        };
+      }),
+    );
+    setChooserVisible(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event, linkedPlans, memberCountsMap, goToNewPlan]);
+
+  const handleChooserSelectPlan = useCallback((planId: string) => {
+    setChooserVisible(false);
+    router.push(`/plan/${planId}`);
+  }, []);
+
+  const handleChooserStartNew = useCallback(() => {
+    setChooserVisible(false);
+    goToNewPlan();
+  }, [goToNewPlan]);
 
   const invalidateRsvp = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['event-rsvp', id] });
@@ -584,13 +660,14 @@ export default function EventDetailScreen() {
           })),
         ).map((p) => linkedPlans.find((lp) => lp.id === p.id)!);
         if (openPlans.length > 0) {
+          // PL-01: routes through goFindPeople so 2+ open Plans show the
+          // real chooser instead of silently guessing openPlans[0].
           // LIZ COPY
           setAlertInfo({
             title: 'a group is forming for this',
             message: 'want in? your spot at the event stands either way.',
             buttons: [
-              { text: 'see the group', onPress: () => router.push(`/plan/${openPlans[0].id}`) },
-              { text: 'find people to go with', onPress: goFindPeople },
+              { text: 'see the group', onPress: goFindPeople },
               { text: 'just going', style: 'cancel' },
             ],
           });
@@ -986,28 +1063,52 @@ export default function EventDetailScreen() {
                   member of the fronting community never sees a follow pill,
                   because join auto-follows and "following" reads as a demotion
                   of what they actually are. */}
-              {viewerIsMemberHere ? (
-                <View style={[styles.followPill, styles.followPillOn]}>
-                  {/* LIZ COPY */}
-                  <Text style={[styles.followPillText, styles.followPillTextOn]}>member</Text>
-                </View>
-              ) : !!userId && !!followState?.available ? (
-                <TouchableOpacity
-                  style={[styles.followPill, followState.following && styles.followPillOn]}
-                  onPress={() => {
-                    if (previewMode) { showPreviewNotice(); return; }
-                    hapticLight();
-                    followMutation.mutate();
-                  }}
-                  disabled={followMutation.isPending}
-                  activeOpacity={0.85}
-                >
-                  {/* copy to the taste gate (doc 69 Q5) */}
-                  <Text style={[styles.followPillText, followState.following && styles.followPillTextOn]}>
-                    {followState.following ? 'following' : 'follow'}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
+              <View style={styles.entityCardActions}>
+                {viewerIsMemberHere ? (
+                  <View style={[styles.followPill, styles.followPillOn]}>
+                    {/* LIZ COPY */}
+                    <Text style={[styles.followPillText, styles.followPillTextOn]}>member</Text>
+                  </View>
+                ) : !!userId && !!followState?.available ? (
+                  <TouchableOpacity
+                    style={[styles.followPill, followState.following && styles.followPillOn]}
+                    onPress={() => {
+                      if (previewMode) { showPreviewNotice(); return; }
+                      hapticLight();
+                      followMutation.mutate();
+                    }}
+                    disabled={followMutation.isPending}
+                    activeOpacity={0.85}
+                  >
+                    {/* copy to the taste gate (doc 69 Q5) */}
+                    <Text style={[styles.followPillText, followState.following && styles.followPillTextOn]}>
+                      {followState.following ? 'following' : 'follow'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {/* SC-05: a real join door, not just the follow pill - law 1
+                    still applies here, so this stays the neutral pill style,
+                    never a second terracotta fill on this screen. */}
+                {viewerJoinPending ? (
+                  <View style={[styles.followPill, styles.followPillOn]}>
+                    {/* LIZ COPY */}
+                    <Text style={[styles.followPillText, styles.followPillTextOn]}>pending</Text>
+                  </View>
+                ) : viewerCanJoinHere ? (
+                  <TouchableOpacity
+                    style={styles.followPill}
+                    onPress={() => {
+                      if (previewMode) { showPreviewNotice(); return; }
+                      hapticLight();
+                      setJoinPopupVisible(true);
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    {/* LIZ COPY: proposal 91 - the door says what it does */}
+                    <Text style={styles.followPillText}>{joinsInstantly ? 'join' : 'ask to join'}</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             </View>
           )}
 
@@ -1160,10 +1261,18 @@ export default function EventDetailScreen() {
                   <Text style={styles.priceFees}>  fees included</Text>
                 </Text>
                 {!!ticketSummary.scarcity && ticketSummary.scarcity.left > 0 && (
-                  /* law 10: REAL remaining only, from the availability RPC */
-                  <Text style={styles.priceScarcity}>
-                    {ticketSummary.scarcity.left} of {ticketSummary.scarcity.cap} left
-                  </Text>
+                  /* law 10: REAL remaining only, from the availability RPC.
+                     TK-07: low inventory is its own honest state, not just
+                     the plain count -- mirrors PlanCard's spotsLeftBadge. */
+                  isLowInventory(ticketSummary.scarcity.left, ticketSummary.scarcity.cap) ? (
+                    <View style={styles.scarcityBadge}>
+                      <Text style={styles.scarcityBadgeText}>{ticketSummary.scarcity.left} left</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.priceScarcity}>
+                      {ticketSummary.scarcity.left} of {ticketSummary.scarcity.cap} left
+                    </Text>
+                  )
                 )}
               </>
             )}
@@ -1245,6 +1354,27 @@ export default function EventDetailScreen() {
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
+      />
+
+      {joinGate && (
+        <JoinCommunityPopup
+          visible={joinPopupVisible}
+          gate={joinGate}
+          joinsInstantly={joinsInstantly}
+          onClose={() => setJoinPopupVisible(false)}
+          onRequested={() => {
+            setJoinPopupVisible(false);
+            queryClient.invalidateQueries({ queryKey: ['community-membership', event?.community_id, userId] });
+          }}
+        />
+      )}
+
+      <PlanChooserSheet
+        visible={chooserVisible}
+        plans={chooserPlans}
+        onSelectPlan={handleChooserSelectPlan}
+        onStartNew={handleChooserStartNew}
+        onClose={() => setChooserVisible(false)}
       />
 
       <ParticipationNotice
@@ -1359,6 +1489,7 @@ const styles = StyleSheet.create({
   entityCardName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   entityCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
   entityCardMetaRow: { flexDirection: 'row', gap: 12, marginTop: 2 },
+  entityCardActions: { gap: 6, alignItems: 'flex-end' },
   // the founding-partner badge: gold trust marker, never the terracotta accent
   badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
   badgeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.brandDeep },
@@ -1443,6 +1574,11 @@ const styles = StyleSheet.create({
   priceFees: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   // real scarcity wears the terracotta scarcity token (doc 78 law 1)
   priceScarcity: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: EventAction.scarcity },
+  // TK-07: same filled-pill urgency convention as PlanCard's spotsLeftBadge
+  scarcityBadge: {
+    backgroundColor: EventAction.scarcity, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
+  },
+  scarcityBadgeText: { fontFamily: Fonts.sansBold, fontSize: 10, color: Colors.white, lineHeight: 14 },
   priceSoldOut: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.textMedium },
   // doc 78 law 8: the SINGLE accent belongs to the primary action (rsvp),
   // so find-people/chat drops to the secondary outline treatment - it was
