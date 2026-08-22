@@ -1,6 +1,8 @@
 import {
   daysUntilLabel,
+  deriveEventState,
   inventoryLabel,
+  needsAttention,
   pickNextUpcomingEvent,
   sumTierCapacity,
 } from '../organizerHome';
@@ -16,6 +18,11 @@ function event(overrides: Partial<CommunityEventRow> = {}): CommunityEventRow {
     status: 'Live',
     public_name: null,
     image_url: null,
+    community_id: null,
+    goingCount: 0,
+    ticketsSold: 0,
+    tiers: [],
+    roomArchived: null,
     ...overrides,
   };
 }
@@ -119,5 +126,104 @@ describe('daysUntilLabel', () => {
     // regression guard: a naive raw-ms diff could go negative near a day
     // boundary even though both instants land on the same LA calendar day
     expect(daysUntilLabel('2026-08-18T01:00:00.000Z', now)).toBe('today');
+  });
+});
+
+describe('deriveEventState', () => {
+  const now = '2026-08-18T12:00:00.000Z'; // Aug 18, LA morning
+
+  it('reads the terminal/admin statuses verbatim, date irrelevant', () => {
+    expect(deriveEventState(event({ status: 'Cancelled', event_date: '2026-09-01T02:00:00.000Z' }), now)).toBe('cancelled');
+    expect(deriveEventState(event({ status: 'Archived', event_date: '2026-01-01T02:00:00.000Z' }), now)).toBe('archived');
+    expect(deriveEventState(event({ status: 'Completed', event_date: '2026-01-01T02:00:00.000Z' }), now)).toBe('ended');
+    expect(deriveEventState(event({ status: 'Draft', event_date: '2026-09-01T02:00:00.000Z' }), now)).toBe('draft');
+  });
+
+  it('treats a dateless Live event as scheduled', () => {
+    expect(deriveEventState(event({ status: 'Live', event_date: null }), now)).toBe('scheduled');
+  });
+
+  it('is ended when still Live but the date already passed -- nobody closed it out', () => {
+    expect(deriveEventState(event({ status: 'Live', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe('ended');
+  });
+
+  it('is live on the day itself, regardless of ticket state', () => {
+    expect(
+      deriveEventState(
+        event({ status: 'Live', event_date: '2026-08-18T20:00:00.000Z', tiers: [{ quantity_cap: 10, status: 'on_sale' }], ticketsSold: 10 }),
+        now,
+      ),
+    ).toBe('live');
+  });
+
+  it('is sold_out for a future event whose offered capacity is fully claimed', () => {
+    expect(
+      deriveEventState(
+        event({ status: 'Live', event_date: '2026-09-01T02:00:00.000Z', tiers: [{ quantity_cap: 50, status: 'on_sale' }], ticketsSold: 50 }),
+        now,
+      ),
+    ).toBe('sold_out');
+  });
+
+  it('is on_sale for a future event with an open on_sale tier', () => {
+    expect(
+      deriveEventState(
+        event({ status: 'Live', event_date: '2026-09-01T02:00:00.000Z', tiers: [{ quantity_cap: 50, status: 'on_sale' }], ticketsSold: 12 }),
+        now,
+      ),
+    ).toBe('on_sale');
+  });
+
+  it('is scheduled for a future event with no tiers at all (RSVP-only)', () => {
+    expect(deriveEventState(event({ status: 'Live', event_date: '2026-09-01T02:00:00.000Z', tiers: [] }), now)).toBe('scheduled');
+  });
+
+  it('is scheduled, not on_sale, when every tier is still a draft', () => {
+    expect(
+      deriveEventState(
+        event({ status: 'Live', event_date: '2026-09-01T02:00:00.000Z', tiers: [{ quantity_cap: 50, status: 'draft' }] }),
+        now,
+      ),
+    ).toBe('scheduled');
+  });
+});
+
+describe('needsAttention', () => {
+  const now = '2026-08-18T12:00:00.000Z'; // Aug 18, LA morning
+
+  it('flags an overdue draft', () => {
+    expect(needsAttention(event({ status: 'Draft', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(true);
+  });
+
+  it('does not flag a draft with a future date', () => {
+    expect(needsAttention(event({ status: 'Draft', event_date: '2026-09-01T02:00:00.000Z' }), now)).toBe(false);
+  });
+
+  it('does not flag a draft with no date', () => {
+    expect(needsAttention(event({ status: 'Draft', event_date: null }), now)).toBe(false);
+  });
+
+  it('flags a Live event whose date passed and was never closed out', () => {
+    expect(needsAttention(event({ status: 'Live', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(true);
+  });
+
+  it('flags a Live event today with zero going and zero sold', () => {
+    expect(needsAttention(event({ status: 'Live', event_date: '2026-08-18T20:00:00.000Z', goingCount: 0, ticketsSold: 0 }), now)).toBe(true);
+  });
+
+  it('flags a Live event 2 days out with zero interest, but not 3 days out', () => {
+    expect(needsAttention(event({ status: 'Live', event_date: '2026-08-20T20:00:00.000Z', goingCount: 0, ticketsSold: 0 }), now)).toBe(true);
+    expect(needsAttention(event({ status: 'Live', event_date: '2026-08-21T20:00:00.000Z', goingCount: 0, ticketsSold: 0 }), now)).toBe(false);
+  });
+
+  it('does not flag a soon event that already has RSVPs or sales', () => {
+    expect(needsAttention(event({ status: 'Live', event_date: '2026-08-18T20:00:00.000Z', goingCount: 1, ticketsSold: 0 }), now)).toBe(false);
+    expect(needsAttention(event({ status: 'Live', event_date: '2026-08-18T20:00:00.000Z', goingCount: 0, ticketsSold: 1 }), now)).toBe(false);
+  });
+
+  it('never flags Cancelled, Completed, or Archived events', () => {
+    expect(needsAttention(event({ status: 'Cancelled', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
+    expect(needsAttention(event({ status: 'Completed', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
+    expect(needsAttention(event({ status: 'Archived', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
   });
 });

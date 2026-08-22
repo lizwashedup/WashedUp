@@ -64,18 +64,81 @@ export function inventoryLabel(sold: number, capacity: number | null): string {
   return `${sold} of ${capacity} tickets sold`;
 }
 
+/** Calendar days from now to eventDateISO, LA-day-boundary aware. Negative = past. */
+function dayDiff(eventDateISO: string, nowISO: string): number {
+  const now = getLADayParts(nowISO);
+  const then = getLADayParts(eventDateISO);
+  const nowUTC = Date.UTC(now.y, now.m, now.d);
+  const thenUTC = Date.UTC(then.y, then.m, then.d);
+  return Math.round((thenUTC - nowUTC) / 86400000);
+}
+
 /**
  * A short "when" for the urgency card: today / tomorrow / in N days. Both
  * dates are read on the LA calendar (matching formatEventDateLA) so this
  * agrees with the date printed next to it regardless of device timezone.
  */
 export function daysUntilLabel(eventDateISO: string, nowISO: string = new Date().toISOString()): string {
-  const now = getLADayParts(nowISO);
-  const then = getLADayParts(eventDateISO);
-  const nowUTC = Date.UTC(now.y, now.m, now.d);
-  const thenUTC = Date.UTC(then.y, then.m, then.d);
-  const diffDays = Math.round((thenUTC - nowUTC) / 86400000);
+  const diffDays = dayDiff(eventDateISO, nowISO);
   if (diffDays <= 0) return 'today';
   if (diffDays === 1) return 'tomorrow';
   return `in ${diffDays} days`;
+}
+
+/** The 8-word event-state vocabulary the C-16 events list derives every card from. */
+export type EventState =
+  | 'draft'
+  | 'scheduled'
+  | 'on_sale'
+  | 'sold_out'
+  | 'live'
+  | 'ended'
+  | 'cancelled'
+  | 'archived';
+
+type EventStateFields = Pick<CommunityEventRow, 'status' | 'event_date'> & {
+  tiers: Pick<TicketTier, 'quantity_cap' | 'status'>[];
+  goingCount: number;
+  ticketsSold: number;
+};
+
+/**
+ * C-16: one state per event, priority-ordered so every event lands in
+ * exactly one bucket. `status` carries the terminal/admin states
+ * (Cancelled/Archived/Completed/Draft) verbatim -- confirmed live values,
+ * see app/admin/events.tsx (Archived) and app/creator/event-form.tsx
+ * (handleStatus, Completed/Cancelled). A still-'Live' event whose date has
+ * already passed also resolves to 'ended': nothing marks that automatically,
+ * so this is the only way a forgotten show stops reading as upcoming.
+ */
+export function deriveEventState(e: EventStateFields, nowISO: string = new Date().toISOString()): EventState {
+  if (e.status === 'Cancelled') return 'cancelled';
+  if (e.status === 'Archived') return 'archived';
+  if (e.status === 'Completed') return 'ended';
+  if (e.status === 'Draft') return 'draft';
+  if (!e.event_date) return 'scheduled';
+  const diffDays = dayDiff(e.event_date, nowISO);
+  if (diffDays < 0) return 'ended';
+  if (diffDays === 0) return 'live';
+  const capacity = sumTierCapacity(e.tiers);
+  if (capacity != null && e.tiers.length > 0 && e.ticketsSold >= capacity) return 'sold_out';
+  if (e.tiers.some((t) => t.status === 'on_sale')) return 'on_sale';
+  return 'scheduled';
+}
+
+/**
+ * C-16: a real product decision this repo never wrote down, so this is a
+ * reasonable proposal, not a confirmed spec -- a draft past its date, OR a
+ * live event within 2 days of start with zero RSVPs/purchases (day-granular,
+ * matching this file's own daysUntilLabel precision rather than fetching a
+ * new start_time column for a true 48h window), OR a live event whose date
+ * has already passed but was never marked Completed/Cancelled.
+ */
+export function needsAttention(e: EventStateFields, nowISO: string = new Date().toISOString()): boolean {
+  if (!e.event_date) return false;
+  const diffDays = dayDiff(e.event_date, nowISO);
+  if (e.status === 'Draft') return diffDays < 0;
+  if (e.status !== 'Live') return false;
+  if (diffDays < 0) return true;
+  return diffDays <= 2 && e.goingCount === 0 && e.ticketsSold === 0;
 }
