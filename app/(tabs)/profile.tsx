@@ -37,8 +37,10 @@ import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall } fro
 import { isAdmin } from '../../constants/Admin';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import * as Updates from 'expo-updates';
-import { getCreatorAccess, hasCreatorAccess, creatorLandingRoute, isLeaderAccess, type CreatorAccess } from '../../lib/creatorMode';
+import { getCreatorAccess, hasCreatorAccess, type CreatorAccess } from '../../lib/creatorMode';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
+import { fetchMyGrants, type OperatorGrant } from '../../lib/operatorApplications';
+import { setSelectedCommunityId } from '../../lib/selectedCommunity';
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
 import { lastUnauthRedirectAt, deliberateSignOutAt } from '../../lib/navState';
@@ -75,10 +77,13 @@ export default function ProfileScreen() {
   // row). The full access object decides where the switch lands: leaders on
   // today, event-host-only grants on events (doc 34 §1.1)
   const [creatorAccess, setCreatorAccess] = useState<CreatorAccess | null>(null);
-  // slice 0 (doc 43 track B): the switch label is context-aware — the
-  // community's name for leaders, the organizer name for event hosts,
-  // the generic line only when neither resolves
-  const [switchName, setSwitchName] = useState<string | null>(null);
+  // inventory C-01: the organizer display name, only ever needed for the
+  // event-host row (each led community already carries its own name).
+  const [organizerName, setOrganizerName] = useState<string | null>(null);
+  // inventory C-01: applications still awaiting a decision, so they show up
+  // in the same entry list as approved entities instead of only being
+  // reachable by tapping back into "run things on washedup".
+  const [pendingGrants, setPendingGrants] = useState<OperatorGrant[]>([]);
   useEffect(() => {
     // the switch row is GRANT-gated, not flag-gated (7-21: approved
     // organizers must reach their space while the fleet is public-dark)
@@ -89,14 +94,19 @@ export default function ProfileScreen() {
           return;
         }
         setCreatorAccess(a);
-        if (isLeaderAccess(a) && a.ledCommunities[0]) {
-          setSwitchName(a.ledCommunities[0].name);
-        } else {
+        if (a.hasEventHostGrant) {
           const organizer = await getMyOrganizerProfile().catch(() => null);
-          setSwitchName(organizer?.display_name ?? null);
+          setOrganizerName(organizer?.display_name ?? null);
         }
       })
       .catch(() => setCreatorAccess(null));
+    fetchMyGrants()
+      .then((grants) => {
+        setPendingGrants(
+          grants.filter((g) => g.status === 'applied' || g.status === 'in_review' || g.status === 'needs_more_info'),
+        );
+      })
+      .catch(() => setPendingGrants([]));
   }, []);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [showDeleteFlow, setShowDeleteFlow] = useState(false);
@@ -1021,43 +1031,89 @@ export default function ProfileScreen() {
           {supportRows.map((row, i) => renderSettingsRow(row, i === supportRows.length - 1))}
         </View>
 
-        {/* Creators: the switch row is grant-gated and shows public-dark
-            (7-21); only the apply row stays behind the flag */}
-        {(COMMUNITIES_ENABLED || !!creatorAccess) && (
-          <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Creators</Text>
-            </View>
-            <View style={styles.settingsGroup}>
-              {creatorAccess && (
-                <TouchableOpacity
-                  style={styles.settingsRow}
-                  onPress={() => router.replace(creatorLandingRoute(creatorAccess))}
-                  activeOpacity={0.7}
-                >
-                  {/* LIZ COPY (slice 0): context-aware switch, named when a
-                      name exists */}
-                  <Text style={[styles.settingsLabel, { color: Colors.terracotta, fontFamily: Fonts.sansBold }]}>
-                    {switchName
-                      ? `switch to ${switchName.toLowerCase()} & your events`
-                      : 'switch to your community & events'}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={16} color={Colors.terracotta} />
-                </TouchableOpacity>
-              )}
-              {COMMUNITIES_ENABLED && (
-                <TouchableOpacity
-                  style={styles.settingsRow}
-                  onPress={() => router.push('/creator/apply')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.settingsLabel}>Run things on washedup</Text>
-                  <Ionicons name="chevron-forward" size={16} color={Colors.warmGray} />
-                </TouchableOpacity>
-              )}
-            </View>
-          </>
-        )}
+        {/* Creators: inventory C-01 — a real row per approved entity, not one
+            collapsed row that silently picks a single destination. A creator
+            who leads 2+ communities, or leads a community AND holds an
+            event-host grant, previously could only ever reach ONE of those
+            from here. Pending applications now show inline too, instead of
+            only being visible after tapping back into the apply screen. */}
+        {(() => {
+          const creatorRows: {
+            key: string;
+            label: string;
+            sublabel?: string;
+            accent?: boolean;
+            onPress: () => void;
+          }[] = [];
+          creatorAccess?.ledCommunities.forEach((c) => {
+            creatorRows.push({
+              key: c.id,
+              label: `switch to ${c.name.toLowerCase()} & your events`,
+              sublabel: c.status !== 'active' ? c.status : undefined,
+              accent: true,
+              onPress: () => {
+                setSelectedCommunityId(c.id);
+                router.replace('/(creator)/today');
+              },
+            });
+          });
+          if (creatorAccess?.hasEventHostGrant) {
+            creatorRows.push({
+              key: 'event-host',
+              label: organizerName
+                ? `switch to ${organizerName.toLowerCase()} & your events`
+                : 'switch to your events',
+              accent: true,
+              onPress: () => router.replace('/(creator)/organizer-home'),
+            });
+          }
+          pendingGrants.forEach((g) => {
+            creatorRows.push({
+              key: g.id,
+              label: g.track === 'event_host' ? 'putting on events' : 'starting a community',
+              sublabel: g.status === 'needs_more_info' ? 'needs more info' : 'in review',
+              onPress: () => router.push('/creator/apply'),
+            });
+          });
+          if (COMMUNITIES_ENABLED) {
+            creatorRows.push({
+              key: 'apply',
+              label: 'Run things on washedup',
+              onPress: () => router.push('/creator/apply'),
+            });
+          }
+          if (creatorRows.length === 0) return null;
+          return (
+            <>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Creators</Text>
+              </View>
+              <View style={styles.settingsGroup}>
+                {creatorRows.map((row, i) => (
+                  <TouchableOpacity
+                    key={row.key}
+                    style={[styles.settingsRow, i !== creatorRows.length - 1 && styles.settingsRowDivider]}
+                    onPress={row.onPress}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.settingsLabelStack}>
+                      <Text
+                        style={[
+                          styles.settingsLabel,
+                          row.accent && { color: Colors.terracotta, fontFamily: Fonts.sansBold },
+                        ]}
+                      >
+                        {row.label}
+                      </Text>
+                      {row.sublabel && <Text style={styles.creatorLifecycleBadge}>{row.sublabel}</Text>}
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={row.accent ? Colors.terracotta : Colors.warmGray} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          );
+        })()}
 
         {/* Admin */}
         {isAdmin(profile?.id ?? null) && (
@@ -1232,6 +1288,18 @@ const styles = StyleSheet.create({
     ...bodyMedium,
     flex: 1,
     color: Colors.asphalt,
+  },
+  // inventory C-01: label + lifecycle-state line, stacked, for the Creators
+  // entity rows (draft/archived communities, pending applications).
+  settingsLabelStack: {
+    flex: 1,
+    gap: 2,
+  },
+  creatorLifecycleBadge: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.warmGray,
+    textTransform: 'capitalize',
   },
   deleteAccountLink: {
     ...bodyMedium,

@@ -42,6 +42,7 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import ProfileButton from '../ProfileButton';
 import { hapticLight } from '../../lib/haptics';
 import { EVENT_CATEGORIES } from '../../lib/creatorEvents';
+import { friendlyError } from '../../lib/friendlyError';
 import { EventPoster } from './EventPoster';
 import { CommunityCard } from './CommunityCard';
 import {
@@ -67,6 +68,10 @@ export function SceneDiscovery() {
   // across a bottom-tab switch); Events leads by default (item 04/07: "join
   // event is primary" is the general framing throughout the CTO scope).
   const [destination, setDestination] = useState<SceneDestination>('events');
+  // SC-01: which destinations have ever been visited this mount, so a
+  // switched-away destination stays mounted (display:none) instead of
+  // unmounting -- keeps its ScrollView's native scroll offset on return.
+  const [visited, setVisited] = useState<Set<SceneDestination>>(() => new Set([destination]));
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -88,7 +93,11 @@ export function SceneDiscovery() {
               key={key}
               style={styles.destinationTab}
               onPress={() => {
-                if (!on) { hapticLight(); setDestination(key); }
+                if (!on) {
+                  hapticLight();
+                  setDestination(key);
+                  setVisited((v) => (v.has(key) ? v : new Set(v).add(key)));
+                }
               }}
               accessibilityRole="tab"
               accessibilityState={{ selected: on }}
@@ -104,7 +113,16 @@ export function SceneDiscovery() {
         })}
       </View>
 
-      {destination === 'events' ? <EventsDestination /> : <CommunitiesDestination />}
+      {visited.has('events') && (
+        <View style={[styles.destinationBody, destination !== 'events' && styles.destinationBodyHidden]}>
+          <EventsDestination />
+        </View>
+      )}
+      {visited.has('communities') && (
+        <View style={[styles.destinationBody, destination !== 'communities' && styles.destinationBodyHidden]}>
+          <CommunitiesDestination />
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -116,7 +134,7 @@ function EventsDestination() {
   const { width } = useWindowDimensions();
   const [category, setCategory] = useState<string | null>(null);
 
-  const { data: events = [], refetch, isRefetching } = useQuery({
+  const { data: events = [], isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['scene-events'],
     queryFn: getSceneEvents,
   });
@@ -167,7 +185,16 @@ function EventsDestination() {
       )}
 
       <Text style={styles.sectionLabel}>happening in LA</Text>
-      {filtered.length === 0 ? (
+      {isError ? (
+        <View style={styles.errorWrap}>
+          <Text style={styles.errorText}>
+            {friendlyError(error, "couldn't load what's happening. check your connection and try again.")}
+          </Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()} accessibilityRole="button" accessibilityLabel="try again">
+            <Text style={styles.retryBtnText}>try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : filtered.length === 0 ? (
         <Text style={styles.emptyLine}>
           the calendar is filling up. check back in a beat.
         </Text>
@@ -193,7 +220,7 @@ function CommunitiesDestination() {
   const router = useRouter();
   const { width } = useWindowDimensions();
 
-  const { data: communities = [], refetch, isRefetching } = useQuery({
+  const { data: communities = [], isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['scene-communities'],
     queryFn: getDiscoverableCommunities,
   });
@@ -211,6 +238,17 @@ function CommunitiesDestination() {
         <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={Colors.terracotta} />
       }
     >
+      {isError && (
+        <View style={styles.errorWrap}>
+          <Text style={styles.errorText}>
+            {friendlyError(error, "couldn't load communities. check your connection and try again.")}
+          </Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()} accessibilityRole="button" accessibilityLabel="try again">
+            <Text style={styles.retryBtnText}>try again</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {communities.length > 0 && (
         <View style={styles.communitiesList}>
           {communities.map((c) => (
@@ -282,6 +320,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   destinationUnderlineOn: { backgroundColor: Colors.terracotta },
+  destinationBody: { flex: 1 },
+  destinationBodyHidden: { display: 'none' },
+  errorWrap: { alignItems: 'center', paddingVertical: 8, marginBottom: 4, gap: 10 },
+  errorText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, lineHeight: LineHeights.bodyMD, textAlign: 'center' },
+  retryBtn: { borderRadius: 999, borderWidth: 1.5, borderColor: Colors.terracotta, paddingHorizontal: 20, paddingVertical: 9 },
+  retryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
 
   content: { padding: 20, paddingBottom: 60 },
   sectionLabel: {

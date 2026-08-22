@@ -5,6 +5,7 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   runOnJS,
+  cancelAnimation,
 } from 'react-native-reanimated';
 
 // expo-video is the supported replacement for expo-av. It works on both
@@ -45,7 +46,21 @@ function VideoSplashUnavailable({ onFinish }: Props) {
 
 function VideoSplashImpl({ onFinish }: Props) {
   const calledRef = useRef(false);
+  const mountedRef = useRef(true);
   const opacity = useSharedValue(1);
+
+  useEffect(() => {
+    // Prevents a known Hermes crash: the fade's runOnJS callback firing
+    // after unmount (component closed mid-animation).
+    return () => {
+      mountedRef.current = false;
+      cancelAnimation(opacity);
+    };
+  }, [opacity]);
+
+  const finishIfMounted = useCallback(() => {
+    if (mountedRef.current) onFinish();
+  }, [onFinish]);
 
   const player = useVideoPlayer(VIDEO_SOURCE, (p: any) => {
     p.loop = false;
@@ -66,9 +81,9 @@ function VideoSplashImpl({ onFinish }: Props) {
     try { player?.pause?.(); } catch {}
 
     opacity.value = withTiming(0, { duration: FADE_MS }, (done) => {
-      if (done) runOnJS(onFinish)();
+      if (done) runOnJS(finishIfMounted)();
     });
-  }, [onFinish, opacity, player]);
+  }, [finishIfMounted, opacity, player]);
 
   // Listen for the "playToEnd" event from the player — fires when the
   // video finishes naturally. Also listen for status errors.
