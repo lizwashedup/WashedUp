@@ -168,8 +168,9 @@ export const CHAT_DELETE_ENABLED = process.env.EXPO_PUBLIC_CHAT_DELETE_ENABLED =
  * renders nothing when it is off).
  *
  * When true: the members screen gets a "co-creators" entry; the primary
- * leader can search an existing profile or invite by email/phone, set the
- * co_leader role at invite time, and manage/revoke pending invites. Backed
+ * leader can search an existing profile or invite by email/phone, choose
+ * their tier (admin/events/member care/finance) at invite time, and
+ * manage/revoke pending invites. Backed
  * by supabase/migrations/20260817180000_community_co_creator_invites.sql
  * (create_/preview_/accept_/revoke_co_creator_invite RPCs) -- do not flip on
  * for a real build until that migration is applied to prod.

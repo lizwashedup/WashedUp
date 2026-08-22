@@ -5,12 +5,12 @@
  */
 
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, RefreshControl, ActivityIndicator, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { Check, X, ChevronRight } from 'lucide-react-native';
+import { Check, X, ChevronRight, Search } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { CO_CREATOR_INVITES_ENABLED } from '../../constants/FeatureFlags';
@@ -23,10 +23,15 @@ import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import {
   getCreatorAccess,
   getCommunityMembers,
+  getRemovedCommunityMembers,
   getJoinAnswerCards,
   isLeaderAccess,
+  canManageMembers,
+  creatorLandingRoute,
+  coCreatorRoleTag,
   reviewJoinRequest,
   removeMember,
+  membersToCsv,
   type CommunityMemberRow,
 } from '../../lib/creatorMode';
 
@@ -45,6 +50,14 @@ export default function CreatorMembersScreen() {
     queryFn: () => getCommunityMembers(community!.id),
     enabled: !!community,
   });
+  const [query, setQuery] = useState('');
+
+  const { data: removed = [] } = useQuery({
+    queryKey: ['creator-members-removed', community?.id],
+    queryFn: () => getRemovedCommunityMembers(community!.id),
+    enabled: !!community,
+  });
+  const [showRemoved, setShowRemoved] = useState(false);
 
   // private join answers, leader-eyes-only by RLS (community_member_answers)
   // the proposal-42 bridge: the projection RPC once 42 lands, the leader
@@ -57,6 +70,9 @@ export default function CreatorMembersScreen() {
 
   const pending = members.filter((m) => m.status === 'pending');
   const active = members.filter((m) => m.status === 'active');
+  const q = query.trim().toLowerCase();
+  const visiblePending = q ? pending.filter((m) => (m.name ?? '').toLowerCase().includes(q)) : pending;
+  const visibleActive = q ? active.filter((m) => (m.name ?? '').toLowerCase().includes(q)) : active;
 
   const act = async (fn: () => Promise<void>, id: string) => {
     setActingId(id);
@@ -64,11 +80,28 @@ export default function CreatorMembersScreen() {
       await fn();
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['creator-members', community?.id] });
+      queryClient.invalidateQueries({ queryKey: ['creator-members-removed', community?.id] });
     } catch (e) {
       setAlertInfo({ title: 'That did not work', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
       setActingId(null);
     }
+  };
+
+  // C-13: guard against the accidental approve, same shape as confirmDecline
+  // below -- approving activates the member immediately, drops their intro
+  // into the community chat, and sends them a notification, none of which
+  // can be reversed from the client today.
+  const confirmApprove = (m: CommunityMemberRow) => {
+    hapticLight();
+    setAlertInfo({
+      title: `Approve ${m.name ?? 'this request'}?`,
+      message: "They'll join the community chat right away and their introduction posts there.",
+      buttons: [
+        { text: 'Not yet', style: 'cancel' },
+        { text: 'Approve', onPress: () => act(() => reviewJoinRequest(m.id, true), m.id) },
+      ],
+    });
   };
 
   // guard against the accidental decline: it notifies and blocks a re-ask
@@ -82,6 +115,19 @@ export default function CreatorMembersScreen() {
         { text: 'Decline', onPress: () => act(() => reviewJoinRequest(m.id, false), m.id) },
       ],
     });
+  };
+
+  // inventory C-10: real export, native's own share sheet (mail, files,
+  // Messages, etc) instead of a download route that does not exist on
+  // mobile. Active members only, same fields the roster already shows.
+  const handleExport = async () => {
+    if (active.length === 0) return;
+    hapticLight();
+    try {
+      await Share.share({ message: membersToCsv(members) });
+    } catch (e) {
+      setAlertInfo({ title: 'That did not share', message: friendlyError(e, 'Try again in a moment.') });
+    }
   };
 
   const confirmRemove = (m: CommunityMemberRow) => {
@@ -99,7 +145,7 @@ export default function CreatorMembersScreen() {
   // members is a leader screen: an event-host-only grant never sees it
   // (doc 34 §1.3). The layout hides the tab; this covers stale pushes and
   // deep links.
-  if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
+  if (access && !isLeaderAccess(access) && !canManageMembers(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -120,6 +166,9 @@ export default function CreatorMembersScreen() {
               style={styles.coCreatorsCard}
               onPress={() => router.push('/creator/co-creators')}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Co-creators"
+              accessibilityHint="Invite someone to help run this community."
             >
               <View style={styles.coCreatorsCardText}>
                 <Text style={styles.coCreatorsCardTitle}>Co-creators</Text>
@@ -129,10 +178,26 @@ export default function CreatorMembersScreen() {
             </TouchableOpacity>
           )}
 
+          {(pending.length > 0 || active.length > 0) && (
+            <View style={styles.searchRow}>
+              <Search size={16} color={Colors.tertiary} strokeWidth={2.25} />
+              <TextInput
+                style={styles.searchInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="search members"
+                placeholderTextColor={Colors.tertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="search members by name"
+              />
+            </View>
+          )}
+
           {pending.length > 0 && (
             <>
               <Text style={styles.sectionLabel}>wants in ({pending.length})</Text>
-              {pending.map((m) => {
+              {visiblePending.map((m) => {
                 const answers = answersByMember?.get(m.id);
                 const expanded = expandedId === m.id;
                 return (
@@ -141,6 +206,10 @@ export default function CreatorMembersScreen() {
                       <TouchableOpacity
                         style={styles.rowTopTap}
                         onPress={() => { hapticLight(); setExpandedId(expanded ? null : m.id); }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${m.name ?? 'Someone'}, asked ${formatEventDateLA(m.created_at)}`}
+                        accessibilityHint={answers ? (expanded ? 'Collapse their answers' : 'Show their answers') : undefined}
+                        accessibilityState={answers ? { expanded } : undefined}
                       >
                         <MemberFace m={m} />
                         <View style={styles.rowTopText}>
@@ -159,8 +228,10 @@ export default function CreatorMembersScreen() {
                         <View style={styles.actionPair}>
                           <TouchableOpacity
                             style={[styles.roundBtn, styles.approveBtn]}
-                            onPress={() => act(() => reviewJoinRequest(m.id, true), m.id)}
+                            onPress={() => confirmApprove(m)}
                             hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Approve ${m.name ?? 'this request'}`}
                           >
                             <Check size={18} color={Colors.white} strokeWidth={2.5} />
                           </TouchableOpacity>
@@ -168,6 +239,8 @@ export default function CreatorMembersScreen() {
                             style={[styles.roundBtn, styles.declineBtn]}
                             onPress={() => confirmDecline(m)}
                             hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Decline ${m.name ?? 'this request'}`}
                           >
                             <X size={18} color={Colors.secondary} strokeWidth={2.5} />
                           </TouchableOpacity>
@@ -203,36 +276,86 @@ export default function CreatorMembersScreen() {
             </>
           )}
 
-          <Text style={[styles.sectionLabel, { marginTop: pending.length ? 20 : 0 }]}>
-            in the community ({active.length})
-          </Text>
-          {active.map((m) => (
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionLabel, { marginTop: pending.length ? 20 : 0 }]}>
+              in the community ({active.length})
+            </Text>
+            {active.length > 0 && (
+              <TouchableOpacity
+                onPress={handleExport}
+                hitSlop={12}
+                style={{ marginTop: pending.length ? 20 : 0 }}
+                accessibilityRole="button"
+                accessibilityLabel="Export the member list"
+              >
+                {/* LIZ COPY */}
+                <Text style={styles.exportLink}>export</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {visibleActive.map((m) => (
             <View key={m.id} style={styles.row}>
-              <MemberFace m={m} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowName}>
-                  {m.name ?? 'someone'}
-                  {/* LIZ COPY (decision 16): community creator; co-runner placeholder */}
-                  {m.role !== 'member' && (
-                    <Text style={styles.roleTag}>
-                      {m.role === 'leader' ? ' · community creator' : ' · helps run it'}
-                    </Text>
-                  )}
-                </Text>
-                <Text style={styles.rowMeta}>
-                  joined {m.joined_at ? formatEventDateLA(m.joined_at) : 'recently'}
-                </Text>
-              </View>
+              <TouchableOpacity
+                style={styles.rowTopTap}
+                onPress={() => { hapticLight(); router.push(`/creator/member/${m.id}` as never); }}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${m.name ?? 'member'}'s details`}
+              >
+                <MemberFace m={m} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowName}>
+                    {m.name ?? 'someone'}
+                    {/* LIZ COPY (decision 16): community creator; co-runner placeholder */}
+                    {m.role !== 'member' && (
+                      <Text style={styles.roleTag}>{coCreatorRoleTag(m.role)}</Text>
+                    )}
+                  </Text>
+                  <Text style={styles.rowMeta}>
+                    joined {m.joined_at ? formatEventDateLA(m.joined_at) : 'recently'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
               {m.role === 'member' && (
-                <TouchableOpacity onPress={() => confirmRemove(m)} hitSlop={8}>
+                <TouchableOpacity
+                  onPress={() => confirmRemove(m)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${m.name ?? 'this member'}`}
+                >
                   <Text style={styles.removeLink}>remove</Text>
                 </TouchableOpacity>
               )}
             </View>
           ))}
 
+          {removed.length > 0 && (
+            <>
+              <TouchableOpacity
+                onPress={() => { hapticLight(); setShowRemoved((v) => !v); }}
+                style={styles.removedToggle}
+                accessibilityRole="button"
+                accessibilityLabel={showRemoved ? 'hide removed members' : `show ${removed.length} removed member${removed.length === 1 ? '' : 's'}`}
+                accessibilityState={{ expanded: showRemoved }}
+              >
+                <Text style={styles.removedToggleText}>{showRemoved ? 'hide' : 'show'} removed ({removed.length})</Text>
+              </TouchableOpacity>
+              {showRemoved && removed.map((m) => (
+                <View key={m.id} style={[styles.row, styles.rowRemoved]}>
+                  <MemberFace m={m} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowName}>{m.name ?? 'someone'}</Text>
+                    <Text style={styles.rowMeta}>{m.status === 'banned' ? 'banned' : 'removed'}</Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+
           {active.length === 0 && pending.length === 0 && (
             <Text style={styles.empty}>share your page and the first faces show up here.</Text>
+          )}
+          {q.length > 0 && visiblePending.length === 0 && visibleActive.length === 0 && (pending.length > 0 || active.length > 0) && (
+            <Text style={styles.empty}>no one matches that search.</Text>
           )}
         </ScrollView>
       )}
@@ -276,6 +399,8 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginBottom: 2,
   },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  exportLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -313,6 +438,15 @@ const styles = StyleSheet.create({
   declineBtn: { backgroundColor: Colors.inputBg },
   removeLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary },
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, marginTop: 12 },
+  searchRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.cardBg, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 14, paddingVertical: 11, marginBottom: 4,
+  },
+  searchInput: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  removedToggle: { marginTop: 20, paddingVertical: 4 },
+  removedToggleText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary },
+  rowRemoved: { opacity: 0.6 },
   coCreatorsCard: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -49,7 +49,17 @@ export function MyCommunitiesList({ onOpen, onBrowse }: Props) {
             <Text style={styles.meta}>
               {c.member_count !== null ? `${c.member_count} in` : ' '}
               {/* LIZ COPY (decision 16): community creator; co-runner placeholder */}
-              {c.role === 'leader' ? ' · community creator' : c.role === 'co_leader' ? ' · helps run it' : ''}
+              {c.role === 'leader'
+                ? ' · community creator'
+                : c.role === 'co_leader' || c.role === 'admin'
+                  ? ' · helps run it'
+                  : c.role === 'events'
+                    ? ' · runs events'
+                    : c.role === 'member_care'
+                      ? ' · welcomes members'
+                      : c.role === 'finance'
+                        ? ' · handles payouts'
+                        : ''}
             </Text>
           </View>
         </TouchableOpacity>

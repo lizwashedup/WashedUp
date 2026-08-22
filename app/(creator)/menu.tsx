@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronRight, LifeBuoy } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { isAdmin } from '../../constants/Admin';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
@@ -210,6 +210,23 @@ export default function CreatorMenuScreen() {
             {/* LIZ COPY (proposed, taste gate; mirrors web's menu row) */}
             <Text style={styles.organizerName}>getting paid</Text>
             <Text style={styles.organizerMeta}>set up payouts with stripe, before or after your first event.</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
+        </TouchableOpacity>
+
+        {/* inventory C-30: help, support, and a live permissions summary --
+            reachable the same way payouts/organizer-profile are, from a
+            plain row here, never buried behind a trigger phrase */}
+        <Text style={styles.sectionLabel}>help</Text>
+        <TouchableOpacity
+          style={styles.organizerCard}
+          onPress={() => router.push('/creator/help')}
+          activeOpacity={0.8}
+        >
+          <LifeBuoy size={20} color={Colors.terracotta} strokeWidth={2} />
+          <View style={styles.organizerBody}>
+            <Text style={styles.organizerName}>help &amp; permissions</Text>
+            <Text style={styles.organizerMeta}>what you can do here, and how to reach a real person</Text>
           </View>
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
         </TouchableOpacity>

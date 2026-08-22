@@ -2,7 +2,7 @@ export type ProfileContextKind = 'person' | 'creator' | 'community';
 
 export interface LeadershipMembership {
   communityId: string;
-  role: 'leader' | 'co_leader' | 'member';
+  role: 'leader' | 'co_leader' | 'admin' | 'events' | 'member_care' | 'finance' | 'member';
   active: boolean;
 }
 
@@ -28,8 +28,7 @@ export function availableProfileContexts(access: ProfileContextAccess): ProfileC
   }];
   const ledCommunityIds = [...new Set(
     access.memberships
-      .filter((membership) =>
-        membership.active && (membership.role === 'leader' || membership.role === 'co_leader'))
+      .filter((membership) => membership.active && membership.role !== 'member')
       .map((membership) => membership.communityId)
       .filter(Boolean),
   )].sort();

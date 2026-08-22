@@ -23,10 +23,11 @@
  */
 
 import { supabase } from './supabase';
+import type { CoCreatorRole } from './creatorMode';
 
 // -- pure binding logic (mirrors the SQL RPC; DB-independent, unit-tested) ---
 
-export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+export type InviteStatus = 'pending' | 'viewed' | 'accepted' | 'revoked' | 'expired';
 
 export interface CoCreatorInviteRecord {
   id: string;
@@ -40,6 +41,8 @@ export interface CoCreatorInviteRecord {
   status: InviteStatus;
   /** ISO timestamp. */
   expiresAt: string;
+  /** S-03: the tier this invite grants on acceptance. */
+  role: CoCreatorRole;
 }
 
 export interface CallerIdentity {
@@ -55,7 +58,7 @@ export interface CallerIdentity {
 }
 
 export type InviteBindingOutcome =
-  | { ok: true; grantedRole: 'co_leader' }
+  | { ok: true; grantedRole: CoCreatorRole }
   | { ok: false; reason: 'not_found' | 'expired' | 'not_pending' | 'not_your_invite' };
 
 export function normalizeEmail(email: string): string {
@@ -101,10 +104,18 @@ export function decideInviteBindingOutcome(
 ): InviteBindingOutcome {
   if (!invite) return { ok: false, reason: 'not_found' };
   if (invite.status === 'expired') return { ok: false, reason: 'expired' };
-  if (invite.status !== 'pending') return { ok: false, reason: 'not_pending' };
+  // 'viewed' (opened via preview_co_creator_invite but not yet accepted) is
+  // still acceptable, same as 'pending' -- mirrors the SQL RPC's own
+  // `status IN ('pending', 'viewed')` check.
+  if (invite.status !== 'pending' && invite.status !== 'viewed') return { ok: false, reason: 'not_pending' };
   if (new Date(invite.expiresAt).getTime() <= now.getTime()) return { ok: false, reason: 'expired' };
   if (!isBindingMatch(invite, caller)) return { ok: false, reason: 'not_your_invite' };
-  return { ok: true, grantedRole: 'co_leader' };
+  // S-03: grants whatever tier the invite itself was created at -- must stay
+  // in lockstep with accept_co_creator_invite()'s own
+  // `INSERT ... VALUES (..., v_invite.role, ...)`. A hardcoded 'co_leader'
+  // here (the pre-S03 value) would silently misreport the real grant for
+  // every one of the four new tiers.
+  return { ok: true, grantedRole: invite.role };
 }
 
 // -- client-side validation helpers (form input, not security boundaries) ----
@@ -132,15 +143,22 @@ export type CoCreatorInviteTarget =
   | { kind: 'email'; email: string }
   | { kind: 'phone'; phone: string };
 
-/** Primary-leader-only server-side. Returns the raw token ONCE; nothing here sends it anywhere. */
+/**
+ * Primary-leader-only server-side. Returns the raw token ONCE; nothing here sends it anywhere.
+ * `role` is omitted on a brand-new invite (server defaults to 'admin' -- see the RPC). A RESEND
+ * must always pass the target row's existing `role` explicitly, or the resend silently re-grants
+ * 'admin' regardless of the tier the invite was originally sent at.
+ */
 export async function createCoCreatorInvite(
   communityId: string,
   target: CoCreatorInviteTarget,
+  role?: CoCreatorRole,
 ): Promise<CreateCoCreatorInviteResult> {
   const args: Record<string, unknown> = { p_community_id: communityId };
   if (target.kind === 'profile') args.p_target_user_id = target.userId;
   if (target.kind === 'email') args.p_target_email = target.email;
   if (target.kind === 'phone') args.p_target_phone = target.phone;
+  if (role) args.p_role = role;
 
   const { data, error } = await supabase.rpc('create_co_creator_invite', args).single();
   if (error) throw error;
@@ -163,6 +181,7 @@ export interface CoCreatorInvitePreview {
   expiresAt: string;
   /** Masked contact ("j***@example.com" / "***1234"), never the full address. Null for the existing-profile path. */
   targetHint: string | null;
+  role: CoCreatorRole;
 }
 
 /** Anon-callable. Read-only: looking a token up never consumes or grants it. */
@@ -173,6 +192,7 @@ export async function previewCoCreatorInvite(token: string): Promise<CoCreatorIn
   const row = data as {
     invite_id: string; community_id: string; community_name: string; community_handle: string;
     invited_by_name: string; status: InviteStatus; expires_at: string; target_hint: string | null;
+    role: CoCreatorRole;
   };
   return {
     inviteId: row.invite_id,
@@ -183,12 +203,13 @@ export async function previewCoCreatorInvite(token: string): Promise<CoCreatorIn
     status: row.status,
     expiresAt: row.expires_at,
     targetHint: row.target_hint,
+    role: row.role,
   };
 }
 
 export interface AcceptCoCreatorInviteResult {
   communityId: string;
-  role: 'co_leader';
+  role: CoCreatorRole;
 }
 
 /** The binding check happens server-side inside this call, unconditionally -- see the SQL RPC. */
@@ -222,6 +243,8 @@ export interface CoCreatorInviteRow {
   createdAt: string;
   targetName: string | null;
   targetPhoto: string | null;
+  /** S-03: the tier this invite grants on acceptance. Required to resend at the same tier. */
+  role: CoCreatorRole;
 }
 
 /** Leader/co_leader/inviter/admin-visible by RLS; no RPC needed for the read path. */
@@ -229,7 +252,7 @@ export async function listCommunityCoCreatorInvites(communityId: string): Promis
   const { data, error } = await supabase
     .from('community_creator_invites')
     .select(
-      'id, community_id, invited_by_user_id, target_user_id, target_email, target_phone, status, expires_at, created_at',
+      'id, community_id, invited_by_user_id, target_user_id, target_email, target_phone, status, expires_at, created_at, role',
     )
     .eq('community_id', communityId)
     .order('created_at', { ascending: false });
@@ -237,7 +260,7 @@ export async function listCommunityCoCreatorInvites(communityId: string): Promis
   const rows = (data ?? []) as Array<{
     id: string; community_id: string; invited_by_user_id: string; target_user_id: string | null;
     target_email: string | null; target_phone: string | null; status: InviteStatus;
-    expires_at: string; created_at: string;
+    expires_at: string; created_at: string; role: CoCreatorRole;
   }>;
 
   const ids = Array.from(new Set(rows.map((r) => r.target_user_id).filter((v): v is string => !!v)));
@@ -262,6 +285,7 @@ export async function listCommunityCoCreatorInvites(communityId: string): Promis
     createdAt: r.created_at,
     targetName: r.target_user_id ? (byId.get(r.target_user_id)?.first_name_display ?? null) : null,
     targetPhoto: r.target_user_id ? (byId.get(r.target_user_id)?.profile_photo_url ?? null) : null,
+    role: r.role,
   }));
 }
 

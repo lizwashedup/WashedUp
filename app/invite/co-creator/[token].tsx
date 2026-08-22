@@ -30,6 +30,27 @@ import {
   type CoCreatorInvitePreview,
 } from '../../../lib/coCreatorInvites';
 
+function inviteRoleLabel(role: string | null | undefined): string {
+  switch (role) {
+    case 'events': return 'Events';
+    case 'member_care': return 'Member care';
+    case 'finance': return 'Finance';
+    case 'admin':
+    case 'co_leader':
+    default: return 'Admin';
+  }
+}
+function roleAccessSummary(role: string | null | undefined): string {
+  switch (role) {
+    case 'events': return 'access to run events: create and edit them, tickets, and check-in.';
+    case 'member_care': return 'access to the member roster: review who wants in, and moderate the rooms.';
+    case 'finance': return 'access to the payouts and earnings for this community.';
+    case 'admin':
+    case 'co_leader':
+    default: return 'full co-creator access: broadcasts, members, the page, and rooms.';
+  }
+}
+
 export default function CoCreatorInviteClaimScreen() {
   const router = useRouter();
   const { token } = useLocalSearchParams<{ token: string }>();
@@ -97,7 +118,7 @@ export default function CoCreatorInviteClaimScreen() {
         ) : accepted ? (
           <>
             <Text style={styles.title}>You&apos;re a co-creator</Text>
-            <Text style={styles.body}>You now have full access to help run {preview.communityName}.</Text>
+            <Text style={styles.body}>You're on the team at {preview.communityName}.</Text>
             <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(creator)/community')}>
               <Text style={styles.primaryBtnText}>Go to the community</Text>
             </TouchableOpacity>
@@ -111,11 +132,11 @@ export default function CoCreatorInviteClaimScreen() {
           </>
         ) : (
           <>
-            <Text style={styles.eyebrow}>Co-creator invite</Text>
+            <Text style={styles.eyebrow}>{inviteRoleLabel(preview.role)} invite</Text>
             <Text style={styles.title}>{preview.invitedByName} invited you to help run {preview.communityName}</Text>
             {preview.targetHint && <Text style={styles.body}>Sent to {preview.targetHint}</Text>}
             <Text style={styles.body}>
-              Accepting gives you full co-creator access: broadcasts, members, the page, and rooms.
+              Accepting gives you {roleAccessSummary(preview.role)}
             </Text>
 
             {error && <Text style={styles.error}>{error}</Text>}

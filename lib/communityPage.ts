@@ -80,7 +80,7 @@ export interface MyCommunity {
   handle: string;
   name: string;
   accent_color: string | null;
-  role: 'leader' | 'co_leader' | 'member';
+  role: 'leader' | 'co_leader' | 'admin' | 'events' | 'member_care' | 'finance' | 'member';
   cover_image: string | null;
   member_count: number | null;
 }

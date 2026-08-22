@@ -28,7 +28,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess } from '../../lib/haptics';
-import { getCreatorAccess, getBroadcasts, isLeaderAccess, publishCommunity, sendBroadcast } from '../../lib/creatorMode';
+import { getCreatorAccess, getBroadcasts, isLeaderAccess, creatorLandingRoute, publishCommunity, sendBroadcast } from '../../lib/creatorMode';
 import { createTopic, getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
@@ -125,7 +125,7 @@ export default function CreatorCommunityScreen() {
   // community is a leader screen: an event-host-only grant never sees it
   // (doc 34 §1.3). The layout hides the tab; this covers stale pushes and
   // deep links.
-  if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
+  if (access && !isLeaderAccess(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -149,6 +149,9 @@ export default function CreatorCommunityScreen() {
                 style={[styles.publishBtn, publishing && { opacity: 0.6 }]}
                 onPress={handlePublish}
                 disabled={publishing}
+                accessibilityRole="button"
+                accessibilityLabel="Publish your page"
+                accessibilityState={{ disabled: publishing, busy: publishing }}
               >
                 {publishing ? (
                   <ActivityIndicator size="small" color={Colors.white} />
@@ -174,11 +177,15 @@ export default function CreatorCommunityScreen() {
               multiline
               maxLength={4000}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+              accessibilityLabel="Broadcast message to your members"
             />
             <TouchableOpacity
               style={[styles.sendBtn, (!draft.trim() || sending) && { opacity: 0.4 }]}
               onPress={handleSend}
               disabled={!draft.trim() || sending}
+              accessibilityRole="button"
+              accessibilityLabel="Send to members"
+              accessibilityState={{ disabled: !draft.trim() || sending, busy: sending }}
             >
               {sending ? (
                 <ActivityIndicator size="small" color={Colors.white} />
@@ -201,7 +208,13 @@ export default function CreatorCommunityScreen() {
           )}
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>your page</Text>
-          <TouchableOpacity style={styles.editPageCard} onPress={() => router.push('/creator/edit-page')}>
+          <TouchableOpacity
+            style={styles.editPageCard}
+            onPress={() => router.push('/creator/edit-page')}
+            accessibilityRole="button"
+            accessibilityLabel="Edit your page"
+            accessibilityHint="Your cover, your about, your blocks. What members and visitors see."
+          >
             <View style={styles.editPageTextWrap}>
               <Text style={styles.editPageTitle}>edit your page</Text>
               <Text style={styles.editPageHint}>
@@ -212,7 +225,13 @@ export default function CreatorCommunityScreen() {
           </TouchableOpacity>
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>your join gate</Text>
-          <TouchableOpacity style={styles.editPageCard} onPress={() => router.push('/creator/join-gate')}>
+          <TouchableOpacity
+            style={styles.editPageCard}
+            onPress={() => router.push('/creator/join-gate')}
+            accessibilityRole="button"
+            accessibilityLabel="Set up the door"
+            accessibilityHint="Your welcome message, your intro question, your guidelines link."
+          >
             <View style={styles.editPageTextWrap}>
               <Text style={styles.editPageTitle}>set up the door</Text>
               <Text style={styles.editPageHint}>
@@ -233,6 +252,8 @@ export default function CreatorCommunityScreen() {
               style={styles.roomRow}
               onPress={() => router.push(`/community-topic/${r.id}` as never)}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={`Open room: ${r.name}`}
             >
               <Text style={styles.roomRowName} numberOfLines={1}>{r.name}</Text>
               <Text style={styles.roomRowOpen}>open</Text>
@@ -247,11 +268,15 @@ export default function CreatorCommunityScreen() {
               placeholderTextColor={Colors.inkSoft}
               maxLength={60}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+              accessibilityLabel="New room name"
             />
             <TouchableOpacity
               style={[styles.sendBtn, (!roomDraft.trim() || roomBusy) && { opacity: 0.4 }]}
               onPress={handleCreateRoom}
               disabled={!roomDraft.trim() || roomBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Open the room"
+              accessibilityState={{ disabled: !roomDraft.trim() || roomBusy, busy: roomBusy }}
             >
               {roomBusy ? (
                 <ActivityIndicator size="small" color={Colors.white} />

@@ -38,7 +38,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
-import { getCreatorAccess, isLeaderAccess } from '../../lib/creatorMode';
+import { getCreatorAccess, isLeaderAccess, getCommunityMembers, type CommunityMemberRow, type CoCreatorRole } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { supabase } from '../../lib/supabase';
 import {
@@ -74,6 +74,7 @@ function Avatar({ name, photo, size }: { name: string; photo: string | null; siz
 function statusLabel(status: CoCreatorInviteRow['status']): string {
   switch (status) {
     case 'pending': return 'Waiting to accept';
+    case 'viewed': return 'Opened, not accepted yet';
     case 'accepted': return 'Accepted';
     case 'revoked': return 'Canceled';
     case 'expired': return 'Expired';
@@ -81,11 +82,42 @@ function statusLabel(status: CoCreatorInviteRow['status']): string {
   }
 }
 
+/** "3 days left" / "2 hours left" / "Expires soon" -- countdown for an outstanding invite's 72h window. */
+function expiryLabel(expiresAt: string): string {
+  const msLeft = new Date(expiresAt).getTime() - Date.now();
+  if (msLeft <= 0) return 'Expires soon';
+  const hoursLeft = Math.round(msLeft / (60 * 60 * 1000));
+  if (hoursLeft < 1) return 'Expires soon';
+  if (hoursLeft < 24) return `${hoursLeft} hour${hoursLeft === 1 ? '' : 's'} left`;
+  const daysLeft = Math.round(hoursLeft / 24);
+  return `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
+}
+
+/** Rebuilds the CoCreatorInviteTarget a row was originally created with, for a resend. */
+function targetFromRow(row: CoCreatorInviteRow): { kind: 'profile'; userId: string } | { kind: 'email'; email: string } | { kind: 'phone'; phone: string } | null {
+  if (row.targetUserId) return { kind: 'profile', userId: row.targetUserId };
+  if (row.targetEmail) return { kind: 'email', email: row.targetEmail };
+  if (row.targetPhone) return { kind: 'phone', phone: row.targetPhone };
+  return null;
+}
+
 function inviteTargetLabel(row: CoCreatorInviteRow): string {
   if (row.targetName) return row.targetName;
   if (row.targetEmail) return row.targetEmail;
   if (row.targetPhone) return row.targetPhone;
   return 'Someone';
+}
+
+function teamRoleLabel(role: CommunityMemberRow['role']): string {
+  switch (role) {
+    case 'leader': return 'Primary creator';
+    case 'co_leader':
+    case 'admin': return 'Admin';
+    case 'events': return 'Events';
+    case 'member_care': return 'Member care';
+    case 'finance': return 'Finance';
+    default: return 'Co-creator';
+  }
 }
 
 export default function CoCreatorsScreen() {
@@ -109,8 +141,24 @@ export default function CoCreatorsScreen() {
     queryFn: () => listCommunityCoCreatorInvites(community!.id),
     enabled: !!community && CO_CREATOR_INVITES_ENABLED,
   });
-  const pendingInvites = invites.filter((i) => i.status === 'pending');
-  const pastInvites = invites.filter((i) => i.status !== 'pending');
+  // 'viewed' (opened via the preview link but not yet accepted) is still
+  // outstanding -- same bucket as 'pending', same actions (resend/cancel).
+  const pendingInvites = invites.filter((i) => i.status === 'pending' || i.status === 'viewed');
+  const pastInvites = invites.filter((i) => i.status !== 'pending' && i.status !== 'viewed');
+
+  // C-25: the roster of who is actually already running this community
+  // (leader + accepted co-creators), distinct from the pending/past invite
+  // history below. Same source the member roster (C-10) reads, filtered to
+  // the two elevated roles -- role model stays flat by design, no new query.
+  const { data: allMembers = [], isLoading: teamLoading } = useQuery({
+    queryKey: ['community-members', community?.id],
+    queryFn: () => getCommunityMembers(community!.id),
+    enabled: !!community,
+  });
+  const ROLE_RANK: Record<string, number> = { leader: 0, admin: 1, co_leader: 1, events: 2, member_care: 3, finance: 4 };
+  const team = allMembers
+    .filter((m) => m.status === 'active' && m.role !== 'member')
+    .sort((a, b) => (ROLE_RANK[a.role] ?? 9) - (ROLE_RANK[b.role] ?? 9));
 
   const [composer, setComposer] = useState<ComposerMode>('closed');
   const [searchQuery, setSearchQuery] = useState('');
@@ -119,6 +167,14 @@ export default function CoCreatorsScreen() {
   const [contactKind, setContactKind] = useState<ContactKind>('email');
   const [contactValue, setContactValue] = useState('');
   const [inviting, setInviting] = useState<string | null>(null);
+  const [resending, setResending] = useState<string | null>(null);
+  const [inviteRole, setInviteRole] = useState<CoCreatorRole>('admin');
+  const ROLE_OPTIONS: { value: CoCreatorRole; label: string }[] = [
+    { value: 'admin', label: 'Admin' },
+    { value: 'events', label: 'Events' },
+    { value: 'member_care', label: 'Member care' },
+    { value: 'finance', label: 'Finance' },
+  ];
 
   const closeComposer = () => {
     setComposer('closed');
@@ -159,7 +215,7 @@ export default function CoCreatorsScreen() {
     if (!community || inviting) return;
     setInviting(profile.id);
     try {
-      const result = await createCoCreatorInvite(community.id, { kind: 'profile', userId: profile.id });
+      const result = await createCoCreatorInvite(community.id, { kind: 'profile', userId: profile.id }, inviteRole);
       afterInviteCreated(buildCoCreatorInviteLink(result.rawToken));
     } catch (e) {
       setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
@@ -182,12 +238,34 @@ export default function CoCreatorsScreen() {
     setInviting('contact');
     try {
       const target = contactKind === 'email' ? ({ kind: 'email', email: value } as const) : ({ kind: 'phone', phone: value } as const);
-      const result = await createCoCreatorInvite(community.id, target);
+      const result = await createCoCreatorInvite(community.id, target, inviteRole);
       afterInviteCreated(buildCoCreatorInviteLink(result.rawToken));
     } catch (e) {
       setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
       setInviting(null);
+    }
+  };
+
+  /** Resend is just create_co_creator_invite() again with the same target and
+      the row's existing role -- the RPC itself supersedes any existing
+      pending/viewed invite for that target (see the migration's supersede
+      step), so no separate wrapper or cancel-first step is needed here. Role
+      MUST be passed explicitly: the RPC defaults p_role to 'admin' when
+      omitted, so dropping it here would silently upgrade any narrower-tier
+      invite to Admin on every resend. */
+  const handleResend = async (row: CoCreatorInviteRow) => {
+    if (!community || resending) return;
+    const target = targetFromRow(row);
+    if (!target) return;
+    setResending(row.id);
+    try {
+      const result = await createCoCreatorInvite(community.id, target, row.role);
+      afterInviteCreated(buildCoCreatorInviteLink(result.rawToken));
+    } catch (e) {
+      setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
+    } finally {
+      setResending(null);
     }
   };
 
@@ -240,9 +318,25 @@ export default function CoCreatorsScreen() {
           >
             <Text style={styles.title}>Co-creators</Text>
             <Text style={styles.hint}>
-              Invite someone to help run {community.name}. They get full co-creator
-              access, just like you.
+              Invite someone to help run {community.name}. Pick how much they can do.
             </Text>
+
+            {teamLoading ? (
+              <ActivityIndicator size="small" color={Colors.terracotta} style={{ marginTop: 12, marginBottom: 12 }} />
+            ) : team.length > 0 ? (
+              <>
+                <Text style={styles.sectionLabel}>Team</Text>
+                {team.map((m) => (
+                  <View key={m.id} style={styles.inviteCard}>
+                    <Avatar name={m.name ?? 'Someone'} photo={m.photo_url} size={40} />
+                    <View style={styles.inviteCardText}>
+                      <Text style={styles.inviteCardName}>{m.name ?? 'Someone'}</Text>
+                      <Text style={styles.inviteCardStatus}>{teamRoleLabel(m.role)}</Text>
+                    </View>
+                  </View>
+                ))}
+              </>
+            ) : null}
 
             {!isPrimaryLeader ? (
               <View style={styles.notice}>
@@ -274,6 +368,20 @@ export default function CoCreatorsScreen() {
                   <TouchableOpacity onPress={closeComposer} hitSlop={10} style={styles.closeComposerBtn}>
                     <X size={18} color={Colors.text3} strokeWidth={2.5} />
                   </TouchableOpacity>
+                </View>
+
+                <View style={styles.modeTabs}>
+                  {ROLE_OPTIONS.map((opt) => (
+                    <TouchableOpacity
+                      key={opt.value}
+                      style={[styles.modeTab, inviteRole === opt.value && styles.modeTabActive]}
+                      onPress={() => setInviteRole(opt.value)}
+                    >
+                      <Text style={[styles.modeTabText, inviteRole === opt.value && styles.modeTabTextActive]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
 
                 {composer === 'search' ? (
@@ -374,12 +482,28 @@ export default function CoCreatorsScreen() {
                         <Avatar name={inviteTargetLabel(row)} photo={row.targetPhoto} size={40} />
                         <View style={styles.inviteCardText}>
                           <Text style={styles.inviteCardName}>{inviteTargetLabel(row)}</Text>
-                          <Text style={styles.inviteCardStatus}>{statusLabel(row.status)}</Text>
+                          <Text style={styles.inviteCardStatus}>
+                            {statusLabel(row.status)} · {expiryLabel(row.expiresAt)}
+                          </Text>
                         </View>
                         {isPrimaryLeader && (
-                          <TouchableOpacity onPress={() => confirmRevoke(row)} hitSlop={10} style={styles.revokeBtn}>
-                            <Text style={styles.revokeBtnText}>Cancel</Text>
-                          </TouchableOpacity>
+                          <View style={styles.inviteCardActions}>
+                            <TouchableOpacity
+                              onPress={() => handleResend(row)}
+                              disabled={resending === row.id}
+                              hitSlop={10}
+                              style={styles.resendBtn}
+                            >
+                              {resending === row.id ? (
+                                <ActivityIndicator size="small" color={Colors.terracotta} />
+                              ) : (
+                                <Text style={styles.resendBtnText}>Resend</Text>
+                              )}
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => confirmRevoke(row)} hitSlop={10} style={styles.revokeBtn}>
+                              <Text style={styles.revokeBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                          </View>
                         )}
                       </View>
                     ))}
@@ -523,6 +647,9 @@ const styles = StyleSheet.create({
   inviteCardText: { flex: 1 },
   inviteCardName: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.text1 },
   inviteCardStatus: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.text3, marginTop: 2 },
+  inviteCardActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  resendBtn: { paddingHorizontal: 10, paddingVertical: 6 },
+  resendBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   revokeBtn: { paddingHorizontal: 10, paddingVertical: 6 },
   revokeBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorBrand },
   avatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.brandSoft },

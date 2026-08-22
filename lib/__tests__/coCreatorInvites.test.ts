@@ -24,6 +24,10 @@ const NOW = new Date('2026-08-17T18:00:00.000Z');
 const FUTURE = new Date(NOW.getTime() + HOUR_MS).toISOString();
 const PAST = new Date(NOW.getTime() - HOUR_MS).toISOString();
 
+// Matches the RPC's own p_role default (see create_co_creator_invite) so a
+// fixture that doesn't care about tier still reflects realistic data.
+const DEFAULT_ROLE = 'admin';
+
 function profileInvite(overrides: Partial<CoCreatorInviteRecord> = {}): CoCreatorInviteRecord {
   return {
     id: 'invite-1',
@@ -33,6 +37,7 @@ function profileInvite(overrides: Partial<CoCreatorInviteRecord> = {}): CoCreato
     targetPhone: null,
     status: 'pending',
     expiresAt: FUTURE,
+    role: DEFAULT_ROLE,
     ...overrides,
   };
 }
@@ -46,6 +51,7 @@ function emailInvite(overrides: Partial<CoCreatorInviteRecord> = {}): CoCreatorI
     targetPhone: null,
     status: 'pending',
     expiresAt: FUTURE,
+    role: DEFAULT_ROLE,
     ...overrides,
   };
 }
@@ -62,7 +68,7 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
 
     it('grants access to the intended recipient', () => {
       const outcome = decideInviteBindingOutcome(invite, caller({ userId: SAGE }), NOW);
-      expect(outcome).toEqual({ ok: true, grantedRole: 'co_leader' });
+      expect(outcome).toEqual({ ok: true, grantedRole: DEFAULT_ROLE });
     });
 
     it('REFUSES the same token/invite when redeemed by anyone else', () => {
@@ -79,7 +85,7 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
       // RPC's "status stays pending after a failed attempt" assertion proves
       // against a real row; here it falls straight out of purity.
       const realAttempt = decideInviteBindingOutcome(invite, caller({ userId: SAGE }), NOW);
-      expect(realAttempt).toEqual({ ok: true, grantedRole: 'co_leader' });
+      expect(realAttempt).toEqual({ ok: true, grantedRole: DEFAULT_ROLE });
     });
   });
 
@@ -92,7 +98,7 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
         caller({ userId: OTHER, confirmedEmail: 'invitee@example.com' }),
         NOW,
       );
-      expect(outcome).toEqual({ ok: true, grantedRole: 'co_leader' });
+      expect(outcome).toEqual({ ok: true, grantedRole: DEFAULT_ROLE });
     });
 
     it('REFUSES a signed-in caller whose confirmed email does not match, even holding a valid token', () => {
@@ -134,7 +140,7 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
         caller({ userId: OTHER, confirmedEmail: 'INVITEE@example.com' }),
         NOW,
       );
-      expect(outcome).toEqual({ ok: true, grantedRole: 'co_leader' });
+      expect(outcome).toEqual({ ok: true, grantedRole: DEFAULT_ROLE });
     });
   });
 
@@ -147,6 +153,7 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
       targetPhone: normalizePhoneDigits('+1 (555) 123-4567'),
       status: 'pending',
       expiresAt: FUTURE,
+      role: DEFAULT_ROLE,
     };
 
     it('grants access to whoever holds the matching CONFIRMED phone, regardless of formatting', () => {
@@ -155,7 +162,7 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
         caller({ userId: OTHER, confirmedPhone: '15551234567' }),
         NOW,
       );
-      expect(outcome).toEqual({ ok: true, grantedRole: 'co_leader' });
+      expect(outcome).toEqual({ ok: true, grantedRole: DEFAULT_ROLE });
     });
 
     it('REFUSES a different phone number', () => {
@@ -179,6 +186,26 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
       const invite = profileInvite({ targetUserId: SAGE, status: 'revoked' });
       const outcome = decideInviteBindingOutcome(invite, caller({ userId: SAGE }), NOW);
       expect(outcome).toEqual({ ok: false, reason: 'not_pending' });
+    });
+  });
+
+  describe('viewed (opened via preview, not yet accepted)', () => {
+    it('is still acceptable for the correct recipient, same as pending', () => {
+      const invite = profileInvite({ targetUserId: SAGE, status: 'viewed' });
+      const outcome = decideInviteBindingOutcome(invite, caller({ userId: SAGE }), NOW);
+      expect(outcome).toEqual({ ok: true, grantedRole: DEFAULT_ROLE });
+    });
+
+    it('still REFUSES the wrong person, viewed or not', () => {
+      const invite = profileInvite({ targetUserId: SAGE, status: 'viewed' });
+      const outcome = decideInviteBindingOutcome(invite, caller({ userId: OTHER }), NOW);
+      expect(outcome).toEqual({ ok: false, reason: 'not_your_invite' });
+    });
+
+    it('still expires on the same schedule as pending', () => {
+      const invite = profileInvite({ targetUserId: SAGE, status: 'viewed', expiresAt: PAST });
+      const outcome = decideInviteBindingOutcome(invite, caller({ userId: SAGE }), NOW);
+      expect(outcome).toEqual({ ok: false, reason: 'expired' });
     });
   });
 
@@ -218,6 +245,7 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
       targetPhone: '15551234567',
       status: 'pending',
       expiresAt: FUTURE,
+      role: DEFAULT_ROLE,
     };
 
     it('matches on confirmed email alone', () => {
@@ -244,6 +272,20 @@ describe('decideInviteBindingOutcome: the binding guarantee', () => {
           caller({ userId: OTHER, confirmedEmail: 'nope@example.com', confirmedPhone: '10000000000' }),
         ),
       ).toBe(false);
+    });
+  });
+
+  // S-03 regression guard: decideInviteBindingOutcome must report whatever
+  // tier the invite itself was created at, not a fixed constant -- it has to
+  // stay in lockstep with accept_co_creator_invite()'s real INSERT. A prior
+  // version of this function hardcoded grantedRole to the pre-S03 'co_leader'
+  // value, which every test above would have missed since they all used the
+  // same default role.
+  describe('grantedRole reflects the invite\'s own tier, not a fixed constant', () => {
+    it('grants the exact non-default tier the invite was created at', () => {
+      const invite = profileInvite({ targetUserId: SAGE, role: 'finance' });
+      const outcome = decideInviteBindingOutcome(invite, caller({ userId: SAGE }), NOW);
+      expect(outcome).toEqual({ ok: true, grantedRole: 'finance' });
     });
   });
 });

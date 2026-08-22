@@ -6,11 +6,14 @@
 -- the private foundation; activation/experience decisions remain gated per
 -- the source classification rule and are NOT decided by this file.
 --
--- Co-creator invite: the primary leader of a community invites a co-creator,
--- who lands with the EXISTING `co_leader` role on community_members (no new
--- role shape invented; is_community_leader() already treats leader/co_leader
--- as peers everywhere in the phase-1 skeleton, so accepting = full existing
--- co-leader capability).
+-- Co-creator invite: the primary leader (Owner) of a community invites a
+-- co-creator at a chosen tier (p_role, added by S-03
+-- 20260821010000/20260821020000: admin/events/member_care/finance -- never
+-- leader or member), who lands with that role on community_members on
+-- acceptance. Originally this table only ever granted 'co_leader'; the CHECK
+-- constraint below and every hardcoded literal were widened for S-03 without
+-- otherwise touching this file's structure. 'co_leader' remains a valid,
+-- permanent role (S-03's Admin tier synonym); nothing here migrates old rows.
 --
 -- Two invite shapes, one table, one acceptance path:
 --   * existing profile  -> target_user_id set at creation. RLS lets that user
@@ -56,10 +59,18 @@
 --     co_leaders also invite is a one-line RLS-equivalent change to the RPC's
 --     guard, no schema change, exactly like the topics leaders-only precedent
 --     in communities_skeleton.sql.
---   * role is CHECKed to 'co_leader' only. This table is scoped to the
---     co-creator invite feature specifically, not a general leadership-
---     transfer mechanism; widening to 'leader' (ownership transfer) is a
---     separate, unbuilt concern.
+--   * role is CHECKed to NOT IN ('leader', 'member'): a co-creator invite can
+--     grant any tier except ownership (leader) or plain membership (member).
+--     'leader' stays out on purpose -- this table is scoped to the co-creator
+--     invite feature specifically, not a general leadership-transfer
+--     mechanism; widening to 'leader' (ownership transfer) is a separate,
+--     unbuilt concern. The NOT IN form (rather than an allowlist naming
+--     'admin'/'events'/'member_care'/'finance' explicitly) is deliberate: it
+--     only ever references the two labels that existed when this table was
+--     first written, so it needs no edit when S-03
+--     (20260821010000_community_role_tiers_enum.sql) later adds the four new
+--     labels -- they are admitted automatically, this file does not need to
+--     re-apply after that migration merges.
 --   * Token is stored only as an md5 hash (token_hash), never in plaintext.
 --     This is not password hashing -- the security property is "a full DB
 --     dump does not hand out live bearer tokens", not collision resistance
@@ -105,7 +116,7 @@ DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'community_creator_invite_status') THEN
     CREATE TYPE public.community_creator_invite_status AS ENUM
-      ('pending', 'accepted', 'revoked', 'expired');
+      ('pending', 'viewed', 'accepted', 'revoked', 'expired');
   END IF;
 END $$;
 
@@ -124,10 +135,10 @@ CREATE TABLE IF NOT EXISTS public.community_creator_invites (
   target_email         text,
   target_phone         text,
   role                 public.community_member_role NOT NULL DEFAULT 'co_leader'
-                         CHECK (role = 'co_leader'),
+                         CHECK (role NOT IN ('leader', 'member')),
   status               public.community_creator_invite_status NOT NULL DEFAULT 'pending',
   token_hash           text NOT NULL UNIQUE,
-  expires_at           timestamptz NOT NULL DEFAULT (now() + interval '7 days'),
+  expires_at           timestamptz NOT NULL DEFAULT (now() + interval '72 hours'),
   accepted_at          timestamptz,
   accepted_by_user_id  uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   revoked_at           timestamptz,
@@ -138,16 +149,20 @@ CREATE TABLE IF NOT EXISTS public.community_creator_invites (
   CHECK (target_email IS NULL OR target_email = lower(btrim(target_email)))
 );
 
--- one outstanding invite per target per community, per target style
+-- one outstanding invite per target per community, per target style. Scoped
+-- to ('pending', 'viewed') rather than just 'pending' -- opening a preview
+-- link still counts as outstanding, so it keeps holding this slot until it
+-- is accepted, expires, or is superseded by a resend (see the supersede
+-- step in create_co_creator_invite() below).
 CREATE UNIQUE INDEX IF NOT EXISTS community_creator_invites_pending_user_idx
   ON public.community_creator_invites (community_id, target_user_id)
-  WHERE status = 'pending' AND target_user_id IS NOT NULL;
+  WHERE status IN ('pending', 'viewed') AND target_user_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS community_creator_invites_pending_email_idx
   ON public.community_creator_invites (community_id, target_email)
-  WHERE status = 'pending' AND target_email IS NOT NULL;
+  WHERE status IN ('pending', 'viewed') AND target_email IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS community_creator_invites_pending_phone_idx
   ON public.community_creator_invites (community_id, target_phone)
-  WHERE status = 'pending' AND target_phone IS NOT NULL;
+  WHERE status IN ('pending', 'viewed') AND target_phone IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS community_creator_invites_community_idx
   ON public.community_creator_invites (community_id, status);
@@ -195,7 +210,8 @@ CREATE OR REPLACE FUNCTION public.create_co_creator_invite(
   p_community_id   uuid,
   p_target_user_id uuid DEFAULT NULL,
   p_target_email   text DEFAULT NULL,
-  p_target_phone   text DEFAULT NULL
+  p_target_phone   text DEFAULT NULL,
+  p_role           public.community_member_role DEFAULT 'admin'
 )
 RETURNS TABLE(invite_id uuid, raw_token text, expires_at timestamptz)
 LANGUAGE plpgsql SECURITY DEFINER
@@ -207,7 +223,7 @@ DECLARE
   v_phone   text := CASE WHEN p_target_phone IS NOT NULL THEN regexp_replace(p_target_phone, '[^0-9]', '', 'g') END;
   v_token   text;
   v_id      uuid;
-  v_expires timestamptz := now() + interval '7 days';
+  v_expires timestamptz := now() + interval '72 hours';
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501';
@@ -224,6 +240,9 @@ BEGIN
   END IF;
   IF p_target_user_id = v_uid THEN
     RAISE EXCEPTION 'cannot invite yourself' USING ERRCODE = '22023';
+  END IF;
+  IF p_role IN ('leader', 'member') THEN
+    RAISE EXCEPTION 'invite a role other than leader or plain member' USING ERRCODE = '22023';
   END IF;
 
   -- primary-leader gate: an active leader row for this community, not an
@@ -254,6 +273,22 @@ BEGIN
     END IF;
   END IF;
 
+  -- resend supersedes rather than hard-fails: without this, the partial
+  -- unique indexes above would raise a plain 23505 unique_violation on a
+  -- second invite to the same still-outstanding target. Flip any existing
+  -- pending/viewed row for this exact target to 'revoked' first, so the
+  -- INSERT below always has a clear slot and the old token stops working
+  -- immediately (matches revoke_co_creator_invite()'s own status flip).
+  UPDATE public.community_creator_invites
+  SET status = 'revoked', revoked_at = now(), revoked_by_user_id = v_uid
+  WHERE community_id = p_community_id
+    AND status IN ('pending', 'viewed')
+    AND (
+      (p_target_user_id IS NOT NULL AND target_user_id = p_target_user_id)
+      OR (v_email IS NOT NULL AND target_email = v_email)
+      OR (v_phone IS NOT NULL AND target_phone = v_phone)
+    );
+
   -- token: two concatenated gen_random_uuid()s, no hyphens, core-Postgres
   -- only (~244 bits of randomness; see header note on why md5-at-rest is
   -- adequate here despite not being a cryptographic hash for this purpose).
@@ -261,9 +296,9 @@ BEGIN
 
   INSERT INTO public.community_creator_invites
     (community_id, invited_by_user_id, target_user_id, target_email, target_phone,
-     token_hash, expires_at)
+     role, token_hash, expires_at)
   VALUES
-    (p_community_id, v_uid, p_target_user_id, v_email, v_phone, md5(v_token), v_expires)
+    (p_community_id, v_uid, p_target_user_id, v_email, v_phone, p_role, md5(v_token), v_expires)
   RETURNING id INTO v_id;
 
   RETURN QUERY SELECT v_id, v_token, v_expires;
@@ -284,7 +319,8 @@ RETURNS TABLE(
   invited_by_name text,
   status         public.community_creator_invite_status,
   expires_at     timestamptz,
-  target_hint    text
+  target_hint    text,
+  role           public.community_member_role
 )
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -308,13 +344,24 @@ BEGIN
     RETURN;
   END IF;
 
+  -- opening the preview IS the "viewed" event -- this function's whole
+  -- purpose is showing an unauthenticated deep-link opener what they were
+  -- invited to, so a look here is the only "viewed" signal this feature
+  -- has. Guarded to only ever advance pending -> viewed, never overwrite a
+  -- terminal state (accepted/revoked/expired) or re-touch an already-viewed
+  -- row's timestamp semantics.
+  IF v_invite.status = 'pending' AND v_invite.expires_at > now() THEN
+    UPDATE public.community_creator_invites SET status = 'viewed' WHERE id = v_invite.id;
+    v_invite.status := 'viewed';
+  END IF;
+
   RETURN QUERY SELECT
     v_invite.id,
     v_invite.community_id,
     v_invite.c_name,
     v_invite.c_handle,
     v_invite.inviter_name,
-    CASE WHEN v_invite.status = 'pending' AND v_invite.expires_at <= now() THEN 'expired'::public.community_creator_invite_status
+    CASE WHEN v_invite.status IN ('pending', 'viewed') AND v_invite.expires_at <= now() THEN 'expired'::public.community_creator_invite_status
          ELSE v_invite.status END,
     v_invite.expires_at,
     CASE
@@ -323,7 +370,8 @@ BEGIN
       WHEN v_invite.target_phone IS NOT NULL THEN
         '***' || right(v_invite.target_phone, 4)
       ELSE NULL
-    END;
+    END,
+    v_invite.role;
 END;
 $$;
 
@@ -361,11 +409,11 @@ BEGIN
     RAISE EXCEPTION 'invite not found' USING ERRCODE = '22023';
   END IF;
 
-  IF v_invite.status = 'pending' AND v_invite.expires_at <= now() THEN
+  IF v_invite.status IN ('pending', 'viewed') AND v_invite.expires_at <= now() THEN
     UPDATE public.community_creator_invites SET status = 'expired' WHERE id = v_invite.id;
     RAISE EXCEPTION 'this invite has expired' USING ERRCODE = '22023';
   END IF;
-  IF v_invite.status <> 'pending' THEN
+  IF v_invite.status NOT IN ('pending', 'viewed') THEN
     RAISE EXCEPTION 'this invite is no longer available' USING ERRCODE = '22023';
   END IF;
 
@@ -399,9 +447,9 @@ BEGIN
   END IF;
 
   INSERT INTO public.community_members (community_id, user_id, role, status, joined_at)
-  VALUES (v_invite.community_id, v_uid, 'co_leader', 'active', now())
+  VALUES (v_invite.community_id, v_uid, v_invite.role, 'active', now())
   ON CONFLICT (community_id, user_id) DO UPDATE
-    SET role = 'co_leader', status = 'active',
+    SET role = v_invite.role, status = 'active',
         joined_at = coalesce(public.community_members.joined_at, now())
     WHERE public.community_members.status <> 'banned';
 
@@ -410,7 +458,7 @@ BEGIN
       target_user_id = coalesce(target_user_id, v_uid)
   WHERE id = v_invite.id;
 
-  RETURN QUERY SELECT v_invite.community_id, 'co_leader'::public.community_member_role;
+  RETURN QUERY SELECT v_invite.community_id, v_invite.role;
 END;
 $$;
 
@@ -447,11 +495,11 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.create_co_creator_invite(uuid, uuid, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.create_co_creator_invite(uuid, uuid, text, text, public.community_member_role) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.preview_co_creator_invite(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.accept_co_creator_invite(text, uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.revoke_co_creator_invite(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.create_co_creator_invite(uuid, uuid, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_co_creator_invite(uuid, uuid, text, text, public.community_member_role) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.preview_co_creator_invite(text) TO authenticated, anon;
 GRANT EXECUTE ON FUNCTION public.accept_co_creator_invite(text, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.revoke_co_creator_invite(uuid) TO authenticated;
@@ -736,12 +784,114 @@ BEGIN
       RAISE EXCEPTION 'self-test C8 FAIL: a non-leader was able to create a co-creator invite';
     END IF;
 
+    -- ============ CASE 9: preview marks the invite viewed, and a viewed ====
+    -- ============ invite (not just pending) can still be accepted ==========
+    UPDATE public.community_members SET role = 'member' WHERE community_id = v_cid AND user_id = v_sage;
+    PERFORM set_config('request.jwt.claims',
+      json_build_object('sub', v_leader, 'role', 'authenticated')::text, true);
+    DECLARE
+      v_invite7 uuid; v_token7 text; v_preview_status public.community_creator_invite_status;
+    BEGIN
+      SELECT invite_id, raw_token INTO v_invite7, v_token7
+      FROM public.create_co_creator_invite(v_cid, p_target_user_id => v_sage);
+
+      -- an anon preview open (no jwt claim) is the "viewed" signal itself
+      PERFORM set_config('request.jwt.claims', NULL, true);
+      SELECT status INTO v_preview_status FROM public.preview_co_creator_invite(v_token7);
+      IF v_preview_status IS DISTINCT FROM 'viewed' THEN
+        RAISE EXCEPTION 'self-test C9: preview did not report viewed (got %)', v_preview_status;
+      END IF;
+      SELECT status INTO v_status FROM public.community_creator_invites WHERE id = v_invite7;
+      IF v_status <> 'viewed' THEN
+        RAISE EXCEPTION 'self-test C9: invite row did not persist viewed status (got %)', v_status;
+      END IF;
+
+      -- a second preview open must not error or un-flip it
+      PERFORM public.preview_co_creator_invite(v_token7);
+
+      -- the bound target can still accept a viewed (not just pending) invite
+      PERFORM set_config('request.jwt.claims',
+        json_build_object('sub', v_sage, 'role', 'authenticated')::text, true);
+      SELECT role INTO v_role FROM public.accept_co_creator_invite(p_token => v_token7);
+      IF v_role IS DISTINCT FROM 'co_leader' THEN
+        RAISE EXCEPTION 'self-test C9 FAIL: a viewed invite could not be accepted';
+      END IF;
+    END;
+
+    -- ============ CASE 10: resend supersedes instead of hard-failing =======
+    UPDATE public.community_members SET role = 'member' WHERE community_id = v_cid AND user_id = v_other;
+    PERFORM set_config('request.jwt.claims',
+      json_build_object('sub', v_leader, 'role', 'authenticated')::text, true);
+    DECLARE
+      v_invite8a uuid; v_token8a text;
+      v_invite8b uuid; v_token8b text;
+      v_status8a public.community_creator_invite_status;
+    BEGIN
+      SELECT invite_id, raw_token INTO v_invite8a, v_token8a
+      FROM public.create_co_creator_invite(v_cid, p_target_user_id => v_other);
+
+      -- resend to the SAME still-outstanding target: must succeed (not a
+      -- 23505 unique_violation off the partial indexes above) and must
+      -- supersede the earlier invite, not sit alongside it.
+      SELECT invite_id, raw_token INTO v_invite8b, v_token8b
+      FROM public.create_co_creator_invite(v_cid, p_target_user_id => v_other);
+
+      SELECT status INTO v_status8a FROM public.community_creator_invites WHERE id = v_invite8a;
+      IF v_status8a <> 'revoked' THEN
+        RAISE EXCEPTION 'self-test C10 FAIL: resend did not revoke the earlier outstanding invite (got %)', v_status8a;
+      END IF;
+
+      -- the OLD token must no longer work
+      PERFORM set_config('request.jwt.claims',
+        json_build_object('sub', v_other, 'role', 'authenticated')::text, true);
+      v_raised := false;
+      BEGIN
+        PERFORM public.accept_co_creator_invite(p_token => v_token8a);
+      EXCEPTION WHEN OTHERS THEN v_raised := true;
+      END;
+      IF NOT v_raised THEN
+        RAISE EXCEPTION 'self-test C10 FAIL: a superseded (revoked) old token was still accepted';
+      END IF;
+
+      -- the NEW token works
+      SELECT role INTO v_role FROM public.accept_co_creator_invite(p_token => v_token8b);
+      IF v_role IS DISTINCT FROM 'co_leader' THEN
+        RAISE EXCEPTION 'self-test C10 FAIL: the new superseding invite could not be accepted';
+      END IF;
+    END;
+
+    -- ============ CASE 11: S-03 -- a leader-role invite is refused =========
+    -- (ownership transfer is a separate, unbuilt concern; see the S-03
+    -- capabilities migration's header). Uses only 'leader', a label that
+    -- existed before S-03 too, so this case runs correctly whether or not
+    -- the S-03 enum migration has applied yet.
+    PERFORM set_config('request.jwt.claims',
+      json_build_object('sub', v_leader, 'role', 'authenticated')::text, true);
+    v_raised := false;
+    BEGIN
+      PERFORM public.create_co_creator_invite(v_cid, p_target_user_id => v_other, p_role => 'leader');
+    EXCEPTION WHEN OTHERS THEN v_raised := true;
+    END;
+    IF NOT v_raised THEN
+      RAISE EXCEPTION 'self-test C11 FAIL: an invite was created with role=leader (ownership transfer)';
+    END IF;
+
+    -- ============ CASE 12: S-03 -- a plain-member-role invite is refused ===
+    v_raised := false;
+    BEGIN
+      PERFORM public.create_co_creator_invite(v_cid, p_target_user_id => v_other, p_role => 'member');
+    EXCEPTION WHEN OTHERS THEN v_raised := true;
+    END;
+    IF NOT v_raised THEN
+      RAISE EXCEPTION 'self-test C12 FAIL: an invite was created with role=member';
+    END IF;
+
     RAISE EXCEPTION 'SELFTEST_ROLLBACK';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM <> 'SELFTEST_ROLLBACK' THEN RAISE; END IF;
   END;
   PERFORM set_config('request.jwt.claims', NULL, true);
-  RAISE NOTICE 'community_creator_invites binding self-test passed (8 cases, including the forwarded-link case)';
+  RAISE NOTICE 'community_creator_invites binding self-test passed (12 cases: the original 8, viewed-status-on-preview, resend-supersedes, plus S-03''s leader-role-refused and member-role-refused)';
 END $$;
 
 COMMIT;
