@@ -121,10 +121,12 @@ export default function CommunityPageScreen() {
   // preview (doc 37 §2, Liz's pull-forward): a leader can force the page to
   // render as a stranger or as a plain member, client-side only. RLS knows
   // who they are, so without this a leader can never see the lock view. The
-  // param is honored ONLY for an active leader/co_leader of THIS community;
-  // anyone else gets their real projection.
+  // param is honored ONLY for an active leader/co_leader/admin of THIS
+  // community (admin is the same tier as co_leader -- see S-03,
+  // lib/creatorMode.ts isAdminTier); anyone else gets their real projection.
   const isLeaderHere =
-    membership?.status === 'active' && (membership.role === 'leader' || membership.role === 'co_leader');
+    membership?.status === 'active' &&
+    (membership.role === 'leader' || membership.role === 'co_leader' || membership.role === 'admin');
   const previewMode =
     isLeaderHere && (preview === 'visitor' || preview === 'member') ? preview : null;
   const isMember = previewMode ? previewMode === 'member' : membership?.status === 'active';
