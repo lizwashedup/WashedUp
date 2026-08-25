@@ -376,37 +376,23 @@ async function fetchMembers(planId: string): Promise<Member[]> {
     }));
   }
 
-  // Fallback: get member user_ids, then query profiles_public view (no PII, publicly readable)
-  const { data: memberRows, error: memberError } = await supabase
-    .from('event_members')
-    .select('id, user_id, joined_at')
-    .eq('event_id', planId)
-    .eq('status', 'joined')
-    .order('joined_at', { ascending: true });
+  // Fallback: get_event_members_reveal requires membership and throws for a
+  // non-member viewer (most viewers of a plan they haven't joined yet), which
+  // is how we land here. get_event_members_public has no membership gate by
+  // design — see 20260824200000_get_event_members_public_reveal_for_nonmembers.sql.
+  const { data: publicRows, error: publicError } = await supabase
+    .rpc('get_event_members_public', { p_event_id: planId });
 
-  if (memberError) throw memberError;
-  if (!memberRows || memberRows.length === 0) return [];
+  if (publicError) throw publicError;
+  if (!publicRows || publicRows.length === 0) return [];
 
-  const userIds = memberRows.map((m: any) => m.user_id);
-
-  const { data: profileRows } = await supabase
-    .from('profiles_public')
-    .select('id, first_name_display, profile_photo_url')
-    .in('id', userIds);
-
-  const profileMap: Record<string, any> = {};
-  (profileRows ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-
-  return memberRows.map((m: any) => {
-    const profile = profileMap[m.user_id];
-    return {
-      id: m.id,
-      user_id: m.user_id,
-      joined_at: m.joined_at,
-      first_name_display: profile?.first_name_display ?? null,
-      profile_photo_url: profile?.profile_photo_url ?? null,
-    };
-  });
+  return publicRows.map((row: any) => ({
+    id: row.id,
+    user_id: row.user_id,
+    first_name_display: row.first_name_display ?? null,
+    profile_photo_url: row.profile_photo_url ?? null,
+    joined_at: row.joined_at ?? '',
+  }));
 }
 
 // ─── Member Avatar ────────────────────────────────────────────────────────────
