@@ -18,8 +18,10 @@
 -- not part of the stated spec, easy to add later as its own small migration
 -- if wanted. Flag both simplifications back before assuming they're final.
 --
--- NOT YET APPLIED to any database. File + self-test only -- applying is a
--- separate approval.
+-- Includes the full SC-08/SC-09/C-24 room-config gate (album on/off,
+-- creator-controlled; archived hard-stop reusing the same flag chat already
+-- enforces) added 2026-08-24 before this ever went live, so the feature
+-- ships complete on first application rather than in two passes.
 
 begin;
 
@@ -48,6 +50,15 @@ create index community_topic_album_uploads_album_idx
   on public.community_topic_album_uploads (topic_album_id) where deleted_at is null;
 create index community_topic_album_uploads_user_idx
   on public.community_topic_album_uploads (user_id);
+
+-- SC-09/C-24: "album on/off" is a room-level configuration item the event's
+-- creator controls, same family as the room's other config (welcome copy,
+-- expiry). Defaults OFF -- a conservative launch posture for a brand-new,
+-- not-yet-Liz-reviewed capability being turned on across every event room;
+-- flip the default later if that turns out to be the wrong call, this is a
+-- technical choice, not a cited product decision.
+alter table public.community_topics
+  add column if not exists album_enabled boolean not null default false;
 
 alter table public.community_topic_albums        enable row level security;
 alter table public.community_topic_album_uploads  enable row level security;
@@ -94,6 +105,8 @@ declare
   v_upload jsonb;
   v_upload_id uuid;
   v_result uuid[] := array[]::uuid[];
+  v_album_enabled boolean;
+  v_archived boolean;
 begin
   if v_user_id is null then
     raise exception 'Not signed in';
@@ -103,6 +116,23 @@ begin
   end if;
   if not is_topic_member(p_topic_id, v_user_id) then
     raise exception 'Not a member of this chat' using errcode = 'insufficient_privilege';
+  end if;
+
+  -- SC-09/C-24: album on/off (creator-controlled, see set_topic_album_enabled)
+  -- and the room's existing archived hard-stop (event_end+48h, same flag
+  -- community-topic chat already enforces) both gate new uploads server-side.
+  -- Viewing/reading is untouched by either flag -- same parity as chat
+  -- history staying readable in a closed room.
+  select album_enabled, archived into v_album_enabled, v_archived
+  from community_topics where id = p_topic_id;
+  if v_album_enabled is null then
+    raise exception 'topic not found';
+  end if;
+  if not v_album_enabled then
+    raise exception 'Photos are not turned on for this event' using errcode = 'insufficient_privilege';
+  end if;
+  if v_archived then
+    raise exception 'This room is closed' using errcode = 'insufficient_privilege';
   end if;
 
   insert into community_topic_albums (topic_id)
@@ -143,6 +173,35 @@ $$;
 revoke all on function public.start_topic_album_upload_batch(uuid, jsonb) from public;
 grant execute on function public.start_topic_album_upload_batch(uuid, jsonb) to authenticated;
 
+-- SC-09/C-24: only the event's creator (explore_events.host_user_id, an
+-- existing column -- see repo CLAUDE.md, "host" DB columns stay as-is, only
+-- UI copy/new naming avoids the word) can flip the room's album on/off.
+create or replace function public.set_topic_album_enabled(p_topic_id uuid, p_enabled boolean)
+returns void language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_host uuid;
+begin
+  if v_user_id is null then
+    raise exception 'Not signed in';
+  end if;
+  select e.host_user_id into v_host
+  from community_topics t
+  join explore_events e on e.id = t.explore_event_id
+  where t.id = p_topic_id;
+  if v_host is null then
+    raise exception 'not an event room';
+  end if;
+  if v_host <> v_user_id then
+    raise exception 'Only the creator can change this' using errcode = 'insufficient_privilege';
+  end if;
+  update community_topics set album_enabled = p_enabled where id = p_topic_id;
+end;
+$$;
+
+revoke all on function public.set_topic_album_enabled(uuid, boolean) from public;
+grant execute on function public.set_topic_album_enabled(uuid, boolean) to authenticated;
+
 create or replace function public.soft_delete_topic_album_upload(p_upload_id uuid)
 returns void language plpgsql security definer set search_path to 'public' as $$
 declare v_user_id uuid := auth.uid();
@@ -167,6 +226,14 @@ create policy "topic members can upload to topic-album-media"
     bucket_id = 'topic-album-media'
     and (storage.foldername(name))[2] = auth.uid()::text
     and is_topic_member(((storage.foldername(name))[1])::uuid, auth.uid())
+    -- SC-09/C-24: same album on/off + archived hard-stop gate as the RPC
+    -- above, enforced again here since storage uploads can bypass the RPC.
+    and exists (
+      select 1 from community_topics t
+      where t.id = ((storage.foldername(name))[1])::uuid
+        and t.album_enabled
+        and not t.archived
+    )
   );
 
 create policy "topic members can read topic-album-media"
@@ -208,6 +275,7 @@ declare
   v_upload_ids uuid[];
   v_raised boolean;
   v_count int;
+  v_media_id uuid;
 begin
   select id into v_creator from auth.users u
   where not exists (select 1 from public.admin_users a where a.user_id = u.id)
@@ -273,14 +341,80 @@ begin
     raise exception 'SELF-TEST FAIL: a non-member uploaded to the topic album';
   end if;
 
+  -- SC-09/C-24 album on/off: defaults false, and even a real topic member
+  -- cannot upload until the creator turns it on.
+  if (select album_enabled from community_topics where id = v_topic_id) is distinct from false then
+    raise exception 'SELF-TEST FAIL: album_enabled did not default to false';
+  end if;
+
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_attendee, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_raised := false;
+  begin
+    perform public.start_topic_album_upload_batch(v_topic_id,
+      jsonb_build_array(jsonb_build_object(
+        'id', gen_random_uuid()::text, 'content_type', 'photo', 'media_format', 'jpg',
+        'file_size_bytes', 1000,
+        'media_url', v_topic_id::text || '/' || v_attendee::text || '/' || (gen_random_uuid()::text) || '/photo.jpg'
+      )));
+  exception when others then v_raised := true;
+  end;
+  reset role;
+  if not v_raised then
+    raise exception 'SELF-TEST FAIL: a member uploaded while album_enabled was still false';
+  end if;
+
+  -- only the creator (event host_user_id) may flip the toggle
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_outsider, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_raised := false;
+  begin
+    perform public.set_topic_album_enabled(v_topic_id, true);
+  exception when others then v_raised := true;
+  end;
+  reset role;
+  if not v_raised then
+    raise exception 'SELF-TEST FAIL: a non-member enabled the album toggle';
+  end if;
+
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_attendee, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_raised := false;
+  begin
+    perform public.set_topic_album_enabled(v_topic_id, true);
+  exception when others then v_raised := true;
+  end;
+  reset role;
+  if not v_raised then
+    raise exception 'SELF-TEST FAIL: a non-creator member enabled the album toggle';
+  end if;
+
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_creator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  perform public.set_topic_album_enabled(v_topic_id, true);
+  reset role;
+  if (select album_enabled from community_topics where id = v_topic_id) is distinct from true then
+    raise exception 'SELF-TEST FAIL: creator enable did not take';
+  end if;
+
+  -- pre-existing bug caught here (never run against a real database before
+  -- today): the id field and the media_url's own upload-id path segment
+  -- must be the SAME value -- two independent gen_random_uuid() calls
+  -- almost never match, which would make every real client upload fail this
+  -- exact check too. Fixed by computing the id once and reusing it.
+  v_media_id := gen_random_uuid();
   perform set_config('request.jwt.claims',
     json_build_object('sub', v_attendee, 'role', 'authenticated')::text, true);
   set local role authenticated;
   v_upload_ids := public.start_topic_album_upload_batch(v_topic_id,
     jsonb_build_array(jsonb_build_object(
-      'id', gen_random_uuid()::text, 'content_type', 'photo', 'media_format', 'jpg',
+      'id', v_media_id::text, 'content_type', 'photo', 'media_format', 'jpg',
       'file_size_bytes', 1000,
-      'media_url', v_topic_id::text || '/' || v_attendee::text || '/' || (gen_random_uuid()::text) || '/photo.jpg'
+      'media_url', v_topic_id::text || '/' || v_attendee::text || '/' || v_media_id::text || '/photo.jpg'
     )));
   reset role;
   if array_length(v_upload_ids, 1) <> 1 then
@@ -371,6 +505,40 @@ begin
 
   if not exists (select 1 from storage.buckets where id = 'topic-album-media' and public = false) then
     raise exception 'SELF-TEST FAIL: topic-album-media bucket missing or not private';
+  end if;
+
+  -- SC-08/SC-09/C-24 hard stop: once the room is archived (same flag the
+  -- event_end+48h cron sets, same one chat already enforces), new uploads
+  -- are blocked server-side even though album_enabled is still true.
+  update public.community_topics set archived = true where id = v_topic_id;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_attendee, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_raised := false;
+  begin
+    perform public.start_topic_album_upload_batch(v_topic_id,
+      jsonb_build_array(jsonb_build_object(
+        'id', gen_random_uuid()::text, 'content_type', 'photo', 'media_format', 'jpg',
+        'file_size_bytes', 1000,
+        'media_url', v_topic_id::text || '/' || v_attendee::text || '/' || (gen_random_uuid()::text) || '/photo.jpg'
+      )));
+  exception when others then v_raised := true;
+  end;
+  reset role;
+  if not v_raised then
+    raise exception 'SELF-TEST FAIL: uploaded to an archived (hard-stopped) room';
+  end if;
+
+  -- viewing stays available after hard stop, same parity as chat history --
+  -- only new uploads are blocked, existing photos are untouched
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_creator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  select count(*) into v_count from public.community_topic_album_uploads
+  where topic_album_id in (select id from public.community_topic_albums where topic_id = v_topic_id);
+  reset role;
+  if v_count <> 0 then
+    raise exception 'SELF-TEST FAIL: expected 0 visible uploads at this point (prior one was soft-deleted), got %', v_count;
   end if;
 
   delete from public.community_topic_album_uploads where topic_album_id in (
