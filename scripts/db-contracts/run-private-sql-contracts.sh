@@ -3,8 +3,8 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 DEFAULT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
-REPO_ROOT=${WASHEDUP_SOURCE_ROOT:-$DEFAULT_ROOT}
-CONTRACT_ROOT=${WASHEDUP_CONTRACT_ROOT:-$REPO_ROOT}
+REPO_ROOT=$DEFAULT_ROOT
+CONTRACT_ROOT=$REPO_ROOT
 CONTAINER="washedup-db-contracts-$$"
 CONTAINER_ID=
 IMAGE="postgres:17-alpine"
@@ -17,6 +17,12 @@ PEOPLE_DM_MIGRATION="$REPO_ROOT/supabase/migrations/20260816122000_require_accep
 CIRCLE_TRUST_MIGRATION="$REPO_ROOT/supabase/migrations/20260816123000_circle_member_vouching.sql"
 CHAT_SCALE_MIGRATION="$REPO_ROOT/supabase/migrations/20260816130000_r42_chat_scale_review_only.sql"
 PAYOUT_BLOCK_MIGRATION="$REPO_ROOT/supabase/migrations/20260817120000_block_delete_account_with_pending_payout.sql"
+CIRCLE_SUGGESTIONS_MIGRATION="$REPO_ROOT/docs/database/review-only/circle-suggestions-v2.sql"
+COMMUNITY_JOIN_POLICY_MIGRATION="$REPO_ROOT/docs/database/review-only/community-join-policy-existing-text.sql"
+TECHNICAL_HARDENING_MIGRATION="$REPO_ROOT/docs/database/review-only/technical-database-hardening.sql"
+EVENT_MEMBERS_PUBLIC_MIGRATION="$REPO_ROOT/supabase/migrations/20260824210000_secure_event_members_public_visibility.sql"
+TOPIC_ALBUM_HARDENING_MIGRATION="$REPO_ROOT/supabase/migrations/20260824211000_harden_topic_album_upload_metadata.sql"
+IDENTITY_MARKS_TRIGGER_MIGRATION="$REPO_ROOT/supabase/migrations/20260824212000_fix_event_members_identity_marks_trigger_safe.sql"
 CONTRACT_FILES="$CONTRACT_ROOT/supabase/tests/contracts"
 
 case "$CONTAINER" in
@@ -34,6 +40,12 @@ for required_file in \
   "$CIRCLE_TRUST_MIGRATION" \
   "$CHAT_SCALE_MIGRATION" \
   "$PAYOUT_BLOCK_MIGRATION" \
+  "$CIRCLE_SUGGESTIONS_MIGRATION" \
+  "$COMMUNITY_JOIN_POLICY_MIGRATION" \
+  "$TECHNICAL_HARDENING_MIGRATION" \
+  "$EVENT_MEMBERS_PUBLIC_MIGRATION" \
+  "$TOPIC_ALBUM_HARDENING_MIGRATION" \
+  "$IDENTITY_MARKS_TRIGGER_MIGRATION" \
   "$CONTRACT_FILES/00_account_deletion_fixture.sql" \
   "$CONTRACT_FILES/01_account_deletion_contract.sql" \
   "$CONTRACT_FILES/10_refund_fixture.sql" \
@@ -51,7 +63,15 @@ for required_file in \
   "$CONTRACT_FILES/60_chat_scale_fixture.sql" \
   "$CONTRACT_FILES/61_chat_scale_contract.sql" \
   "$CONTRACT_FILES/70_payout_block_fixture.sql" \
-  "$CONTRACT_FILES/71_payout_block_contract.sql"
+  "$CONTRACT_FILES/71_payout_block_contract.sql" \
+  "$CONTRACT_FILES/80_circle_suggestions_fixture.sql" \
+  "$CONTRACT_FILES/81_circle_suggestions_contract.sql" \
+  "$CONTRACT_FILES/90_community_join_policy_fixture.sql" \
+  "$CONTRACT_FILES/91_community_join_policy_contract.sql" \
+  "$CONTRACT_FILES/100_technical_database_hardening_fixture.sql" \
+  "$CONTRACT_FILES/101_technical_database_hardening_contract.sql" \
+  "$CONTRACT_FILES/110_release_blockers_fixture.sql" \
+  "$CONTRACT_FILES/111_release_blockers_contract.sql"
 do
   if [ ! -f "$required_file" ]; then
     echo "required private contract file is missing: $required_file" >&2
@@ -93,6 +113,12 @@ CONTAINER_ID=$(docker run \
   --volume "$CIRCLE_TRUST_MIGRATION:/migrations/circle-trust.sql:ro" \
   --volume "$CHAT_SCALE_MIGRATION:/migrations/chat-scale.sql:ro" \
   --volume "$PAYOUT_BLOCK_MIGRATION:/migrations/payout-block.sql:ro" \
+  --volume "$CIRCLE_SUGGESTIONS_MIGRATION:/migrations/circle-suggestions.sql:ro" \
+  --volume "$COMMUNITY_JOIN_POLICY_MIGRATION:/migrations/community-join-policy.sql:ro" \
+  --volume "$TECHNICAL_HARDENING_MIGRATION:/migrations/technical-database-hardening.sql:ro" \
+  --volume "$EVENT_MEMBERS_PUBLIC_MIGRATION:/migrations/event-members-public.sql:ro" \
+  --volume "$TOPIC_ALBUM_HARDENING_MIGRATION:/migrations/topic-album-hardening.sql:ro" \
+  --volume "$IDENTITY_MARKS_TRIGGER_MIGRATION:/migrations/identity-marks-trigger.sql:ro" \
   --volume "$CONTRACT_FILES:/contracts:ro" \
   "$IMAGE")
 invalid_id=$(printf '%s' "$CONTAINER_ID" | tr -d '0-9a-f')
@@ -122,6 +148,21 @@ psql_file() {
   file=$2
   docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d "$database" -f "$file"
 }
+
+run_release_blockers_contract() {
+  docker exec "$CONTAINER_ID" createdb -U postgres release_blockers_contract
+  psql_file release_blockers_contract /contracts/110_release_blockers_fixture.sql
+  psql_file release_blockers_contract /migrations/event-members-public.sql
+  psql_file release_blockers_contract /migrations/topic-album-hardening.sql
+  psql_file release_blockers_contract /migrations/identity-marks-trigger.sql
+  psql_file release_blockers_contract /contracts/111_release_blockers_contract.sql
+}
+
+if [ "${DB_CONTRACT_LANE:-}" = "release-blockers" ]; then
+  run_release_blockers_contract
+  echo "PASS: focused release-blocker database contracts"
+  exit 0
+fi
 
 docker exec "$CONTAINER_ID" createdb -U postgres deletion_contract
 psql_file deletion_contract /contracts/00_account_deletion_fixture.sql
@@ -182,7 +223,24 @@ psql_file payout_block_contract /contracts/70_payout_block_fixture.sql
 psql_file payout_block_contract /migrations/payout-block.sql
 psql_file payout_block_contract /contracts/71_payout_block_contract.sql
 
-echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, and pending-payout deletion block"
+docker exec "$CONTAINER_ID" createdb -U postgres circle_suggestions_contract
+psql_file circle_suggestions_contract /contracts/80_circle_suggestions_fixture.sql
+psql_file circle_suggestions_contract /migrations/circle-suggestions.sql
+psql_file circle_suggestions_contract /contracts/81_circle_suggestions_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres community_join_policy_contract
+psql_file community_join_policy_contract /contracts/90_community_join_policy_fixture.sql
+psql_file community_join_policy_contract /migrations/community-join-policy.sql
+psql_file community_join_policy_contract /contracts/91_community_join_policy_contract.sql
+
+docker exec "$CONTAINER_ID" createdb -U postgres technical_database_hardening_contract
+psql_file technical_database_hardening_contract /contracts/100_technical_database_hardening_fixture.sql
+psql_file technical_database_hardening_contract /migrations/technical-database-hardening.sql
+psql_file technical_database_hardening_contract /contracts/101_technical_database_hardening_contract.sql
+
+run_release_blockers_contract
+
+echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, and identity-marks trigger safety"
 if [ "$static_status" -ne 0 ]; then
   echo "Release gate remains closed by static diagnostics"
   exit "$static_status"

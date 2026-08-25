@@ -1,3 +1,4 @@
+-- ARCHIVED. NON-EXECUTABLE. PRESERVED WITH ITS SUPERSEDED STEP-2 SIBLING.
 -- ============================================================================
 -- S-03 co-creator role model, step 1 of 2: enum values only.
 --

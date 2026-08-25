@@ -1,92 +1,90 @@
-<!-- Handoff v2, see ~/.claude/templates/handoff-template.md -->
+# WashedUp current handoff
 
-## CANONICAL PRODUCT SOURCE, verified 2026-08-17
+Updated 2026-08-24. This file is a current state pointer, not product authority and not release approval.
 
-The product and build-order source of truth is the complete 39-page PDF:
+## Source authority
 
-`/Users/josh/Downloads/WashedUp_Package_Josh_Freedman.pdf`
+Josh's 39-page `WashedUp, Package for Josh Freedman` dated 5 August 2026 is the foundational product vision and build-order document. Keep using it for the original Blocks A through F, ownership boundaries, and product intent.
 
-- Title: `WashedUp, Package for Josh Freedman`
-- Date: 5 August 2026
-- Pages: 39
-- SHA-256: `18fd8930e08265650161ba9bdf279367defaeed3634f54f327f23744d75f0260`
-- Codex read all 39 pages directly on 2026-08-17 and visually checked the Block A/B and Part 11 pages.
+Later direct Liz Q&A, functional specs, and design handoffs refine that foundation. They supersede the 39-page package only where they explicitly conflict or answer a question that was still open in the package. They do not erase the package or replace its unaffected direction.
 
-Do not substitute `qa/requirements.json`, an old draft, a memory summary, or this handoff for the PDF. Those are indexes and state snapshots only. Re-open the PDF whenever scoping or reconciling a Liz question.
+The complete source inventory is:
 
-### What the PDF assigns
+`/Users/josh/Desktop/Crucible/clients/washed-up/liz-source-documents/INDEX.md`
 
-- Liz owns product direction, the detailed Scene scope, design, creator conversations, legal, and the product decisions listed in Part 11.
-- Josh/Codex owns backend and architecture decisions, how the blocks are built, and the money/user-safety quality bar.
-- The six architectural questions in Part 11 are questions for Josh/Codex to answer, not questions to send back to Liz.
-- The PDF says basic Circles was already live on 5 August. Its stated problem is awareness and unmeasured usage, not whether Circles exists.
+Use that inventory before scoping or asking Liz anything. The local correction note at `docs/liz/2026-08-24-source-index-corrections.md` records known stale or ambiguous rows in the index. Current repository evidence decides implementation state, but code does not decide Liz's product policy.
 
-### Reconciled Liz asks, after checking the PDF, screenshots, code, and git history
+## Non-negotiable boundary
 
-1. Send the detailed Scene scope that Part 10 says Liz will write and hand over, and which she later said she was targeting for Monday.
-2. Walk through the current Block A ticketing outstanding list that Parts 2, 4, and 10 say Liz maintains and will take Josh through.
-3. Approve or rewrite the exact delete-chat copy and approve it for a review build. This code landed after the PDF, on 6 August, explicitly marked as Liz-copy placeholder and flag-off.
-4. Approve the active-member pill label (`Member`) and approve it for a review build. This also landed after the PDF, on 6 August, explicitly marked as Liz-copy placeholder and flag-off.
-5. Decide whether to approve the tested archive of legacy `friends` and `pinned_people` data, preserving it read-only for rollback, or leave it untouched. The PDF does not answer this data-retention decision.
-6. Decide the account-deletion policy when an organizer is still owed a payout: block deletion until paid, or permit deletion while retaining the minimum financial record required to complete payment. Do not present forfeiture as the default alternative. This gap was found after the PDF.
+- Liz decides product behavior, visible design, Community behavior, public wording, policy, and release taste.
+- Josh and engineering may prepare and test local technical work without inventing those decisions.
+- Never commit, push, deploy, submit a build, apply a migration, activate a flag, change a cron, rotate a credential, or mutate production without Josh's fresh explicit approval for that exact action.
+- Nothing visual or Community-facing ships without Liz's signoff.
+- Preserve the dirty worktree. Do not reset, stash, clean, stage, or absorb unrelated work.
 
-Do not ask Liz again about plan-card attendee display, Girls Trips tracking, where the money code lives, whether Communities is live, or build-number auto-increment. Those are already answered. Check App Store Connect before asking her anything about TestFlight access. Do not send a vague `Circles call` question without a specific behavior or decision to review.
+## Current local preparation
 
-## CRITICAL UPDATE, read this first (2026-08-16, added after this file was first written)
+The native and web repositories contain uncommitted work in separate review batches:
 
-A background job from later that same night tried to publish a production OTA update for both platforms. Its own completion notice claimed success (exit 0). That claim was checked against the real log and is WRONG: it actually failed, exit code 1, a bundling error in a chat GIF component (Giphy SDK) when building for web. Nothing reached Expo's servers. No real user got a different app than before. Do not trust a background task's own success/fail label without checking the real output.
+1. Web-preview compatibility shims for native-only Giphy and notification libraries.
+2. Event-room album controls, expiry handling, upload safety, and tests.
+3. Native and web Who's Going restoration with authenticated, visibility-aware database support.
+4. Legacy Friends and Post surface removal, still isolated because it is user-facing and large.
+5. Database migration-inventory reconciliation, review-only Circle and Community proposals, private SQL contracts, and a review-only technical hardening package.
+6. A deterministic full-loop script at `qa/guinea-verify-washedup.sh`.
 
-Separately, a large batch of new, uncommitted work is sitting in this repo: Communities screens, ticket wallet delivery, discovery/intelligence libraries, 5 new database migrations dated 20260816, new test suites. This looks like it landed from an overnight build. None of it is committed. None of it is live. It needs a real review before anything in it ships, and the web-bundle break needs fixing before any future OTA attempt for "both platforms" is tried again (this repo's own scripts/publish-ota.sh and scripts/ota-guard.sh exist specifically to prevent this class of mistake, publish one platform at a time, not "all").
+Incompatible and superseded drafts have been preserved outside `supabase/migrations` under `docs/database/superseded-migrations/`. Review-only SQL stays under `docs/database/review-only/`, where the normal migration runner cannot apply it.
 
-Everything below this point is the original handoff from earlier that night and is still accurate for what it covers.
+## Verification state
 
----
+The latest completed full local loop on 24 August passed:
 
-# crucible: WashedUp 2 fixes committed, real hook bug fixed, secret rotation left half-done, ~15-20% of 40-page plan (2026-08-15 21:03)
+- Native TypeScript.
+- 46 native Jest suites and 402 tests.
+- 94 focused Deno checks.
+- Isolated private PostgreSQL contracts, including Circle, Community, and technical hardening cases.
+- Fresh Expo web and native iOS exports.
+- Web TypeScript.
+- 22 web Vitest files and 196 tests.
+- Native and web diff checks.
 
-**Terminal tag:** crucible-T4980
+Always rerun `sh qa/guinea-verify-washedup.sh` after any further edit. Passing local automation does not prove live schema compatibility, authenticated device behavior, visual correctness, App Store readiness, or release safety.
 
-**TLDR:** Two security fixes from earlier tonight are now live on the database AND committed to git (68d1c0f), not pushed. Found and fixed a real bug in commit-scope-guard.py (was wrongly blocking multi-line commit messages), verified with real tests. Mid-rotation on 2 notification tokens, Josh said stop before the database side was updated to match the edge-function side, this is UNRESOLVED and needs to be closed one way or the other before anything else touches it. Against Liz's 40-page plan, real progress is roughly 15-20 percent: Block A done, Block B has unwired code but nothing live, Blocks C-F not started.
+## Safe work versus release blockers
 
-**Status:** in-progress, one CRITICAL open item
-**Supersedes:** crucible-T4980-washedup-two-security-fixes-live-ios-sim-running-6decisions-pending-20260815-0136.md
-**Parent record:** `~/.claude/projects/-Users-josh-Desktop-Crucible-clients-washed-up-repos-WashedUp/memory/project_washedup-status-20260815-rotation-halfdone-40pagedoc-progress.md` (full detail, read this first on resume)
+Safe local work includes code review, static checks, isolated database contracts, local builds that do not incur cost, documentation reconciliation, and preparation of screenshots or comparison packs.
 
-## Decisions
+Release remains blocked on the exact batch-specific gates in `docs/audits/2026-08-24-uncommitted-work-inventory.md`, including:
 
-- Task #67 (3/4 tables) and #61 Stage 1 (token-to-vault move): both applied live, both independently reverified, both committed as of tonight (commit `68d1c0f`). Not pushed to origin. [PROVEN: git log, live DB queries, this session]
-- `organizer_receivables` deliberately excluded from the FK fix: it's a money ledger, the correct FK behavior is a product call for Liz, not a cleanup. Routed to her, not decided here. [PROVEN: Josh's direct correction, this session]
-- Found and fixed a real bug in `~/.claude/hooks/commit-scope-guard.py`: it splits commands on every newline to find `git commit` calls, but wasn't quote/heredoc-aware, so a commit message built via `-m "$(cat <<'EOF' ... EOF)"` got shredded into fake fragments and the real `-- <pathspec>` became invisible, making a correctly-scoped commit look pathspec-less and get wrongly blocked. Fixed by routing the command text through the same `unquoted_spans()` helper `commit-push-guard.py` already uses. Verified 4 ways: syntax check, the exact failing case now allows, a genuinely unscoped commit still blocks, the `-a` flag still blocks, the `ALLOW-FULL-COMMIT` override still works. [PROVEN: 4 real test runs with recorded exit codes, this session]
-- **CRITICAL, NOT resolved:** Josh said "deploy" for the token-rotation Stage 2 cutover. Ran `supabase secrets set` on `NOTIFY_REPORT_RUN_TOKEN` and `NOTIFY_PLAN_POSTED_RUN_TOKEN` (both edge-function secrets) to fresh random values. Josh then said stop, mid-sequence, before the matching Postgres Vault secrets (`notify_report_run_token`, `notify_plan_posted_run_token`) were updated to match. As of now, the edge functions and the database trigger may be sending different token values to each other. Real blast radius is small: only 2 internal alert emails (abuse-report flags, new-plan-posted notices), both fail silently on mismatch (existing `EXCEPTION WHEN OTHERS`), nothing user-facing, no auth/payment/data risk. But it is a live inconsistency sitting open right now. [PROVEN: `supabase secrets set` real exit code 0, this session; NOT YET re-verified whether vault still holds the old value]
-- A `supabase secrets list` call printed what looked like every secret in the project (Stripe keys, service role key, etc). Verified this was NOT a real leak: none of the printed values match their real format (no `sk_live_`/`sk_test_` prefix on the Stripe entries, no `eyJ` JWT shape on the service role key), consistent with Supabase's own digest/hash display, not real values. [PROVEN: format-mismatch check against known real secret shapes, this session]
-- 40-page doc completion, fresh this session: Block A (money loop) done, committed. Block B (Scene/Communities): real screen code exists (community detail/thread, creator setup/apply, touched 8/13) but wired into nothing, no real user can reach it, blocked on Liz's scope doc (task #27, "targeting Monday" as of 8/13). Blocks C/D/E/F: not started, each gated behind B. User count fresh-checked: 4,025 of her 10,000 target (separate axis from build completion, don't conflate). [PROVEN: git log, file/nav grep, live DB count, this session]
+- Authenticated native and web walkthroughs for album and Who's Going states.
+- Device checks for native Giphy and notification initialization.
+- End-to-end verification of Yours and Post before legacy removal can be recommended.
+- A prepared and verified rollback path for the legacy surface removal.
+- Liz approval for visible and Community-facing behavior and copy.
+- Canonical migration provenance and fresh live fingerprints before any database promotion.
+- Josh's separate approval for every protected action.
 
-## State
+The legacy secret-shaped migration exception remains a release blocker until its lifecycle is proven without exposing a value.
 
-- WashedUp repo: clean except `AGENTS.md` (unexplained, still unflagged, not investigated) and `supabase/.temp/linked-project.json` (harmless CLI artifact). 3 commits ahead of origin, none pushed. [PROVEN: `git status`/`git log`, this session]
-- The Liz-facing message + TestFlight instructions file exists (`clients/washed-up/liz-outstanding-and-testflight-20260815.md`), opened for Josh, NOT sent to Liz yet. Real, verified-unanswered items in it: circles feature call, 3 copy-blocked flags, legacy archive migration go-ahead, eas.json autoIncrement question, the new organizer_receivables policy question, and a new TestFlight-access question. Two previously-uncertain items (plan cards, Girls Trips tracking) were confirmed ALREADY answered by Liz on 8/13 and correctly excluded. [PROVEN: nexus-mem cross-check, this session]
-- TestFlight: not started. Needs a fresh paid EAS build (last real build was 6/16-6/23, predates this whole week), Josh's cost approval, then submit, then confirming Liz has App Store Connect tester access (unknown, can't check from here).
-- Two MCP sessions dead all evening: Vercel (blocks checking command-center-next's real status) and Gmail (blocks checking for any of Liz's replies by email). Neither retried since expiring; need a fresh login before either can be checked again.
-- iOS simulator + Metro from earlier tonight (`npx expo start --port 8081`, pid ~3364/3208): confirmed STILL RUNNING as of this session's later hours, but nobody re-confirmed whether the real app UI ever finished loading in it. Cold thread, not touched again after the initial build.
-- New memory file this session: `project_washedup-status-20260815-rotation-halfdone-40pagedoc-progress.md`, indexed in this repo's MEMORY.md under a new Project section.
+The three new local forward migrations `20260824210000`, `20260824211000`, and `20260824212000` pass static and isolated contracts. They remain uncommitted and unapplied. The historical event-album migration fingerprint is still unverified.
 
-## Next: durable
+## Unresolved notification credential decision
 
-- **Close the rotation, first thing, before anything else touches these 2 functions:** either finish it (update `notify_report_run_token` and `notify_plan_posted_run_token` in Vault to match what's now live on the edge functions; full Stage 2 runbook already in scratchpad `washedup-token-rotation-plan.md`) or revert it (set the edge-function secrets back to their original values). Live-check current state first, don't assume either half is still true.
-- Push the 3 commits to origin: needs Josh's push word, separate from commit approval, never asked this session.
-- Old duplicate-friend-rows cleanup migration (`20260330000000_remove_symmetric_friend_rows.sql`): still staged, still a real judgment call on live rows, still unresolved.
-- Send the Liz file, or extract its questions into whatever channel Josh actually uses with her (text/call), Josh's own action.
-- TestFlight build: needs Josh's real go on cost before anything happens.
-- command-center-next real status and Josh's Gmail: both need a fresh login before Claude can check either again.
-- AGENTS.md: still an unexplained untracked file at repo root, still not investigated, low priority.
+`NOTIFY_REPORT_RUN_TOKEN` and `NOTIFY_PLAN_POSTED_RUN_TOKEN` were rotated on the Supabase Edge Function side, but the matching Vault values were not updated. Finish versus revert is still unresolved.
 
-## Next: expiring
+Do not choose or change either side. Josh must explicitly choose one of these two actions before any credential work:
 
-- The half-done rotation is the most time-sensitive item in this whole handoff, treat it as should-resolve-same-day, not a someday item.
-- Metro/simulator processes won't survive a Mac restart.
-- Liz's Scene scope doc: still "targeting Monday" per her 8/13 reply, unchanged.
+1. Finish the rotation by updating the matching Vault values.
+2. Revert the Edge Function secrets to the prior matching values.
 
-## Blockers
+No secret value belongs in a handoff, log, test artifact, or chat.
 
-- Vercel and Gmail MCP sessions both expired, need fresh logins.
-- Everything else is Josh's decision, not a technical blocker.
+## Product decisions still needed
+
+Do not send a broad or recycled question list. The current prepared questions and evidence requirements are in `docs/liz/2026-08-24-approval-pack.md`. Engineering should finish every safe local artifact first, then ask only the remaining decision questions supported by that pack.
+
+## Current git and live status
+
+- All work described here is local and uncommitted unless a path's own provenance record says it documents an earlier live change.
+- Nothing from this orchestration was committed, pushed, deployed, applied to production, or sent to Liz.
+- A passing local test is not permission to release.

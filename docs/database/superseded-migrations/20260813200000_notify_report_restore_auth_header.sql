@@ -1,3 +1,4 @@
+-- ARCHIVED. NON-EXECUTABLE. SUPERSEDED BY THE VAULT-BASED NOTIFICATION CHAIN.
 -- Restore the Authorization header on the notify-report DB trigger.
 --
 -- 20260307100000_report_email_alert.sql originally sent

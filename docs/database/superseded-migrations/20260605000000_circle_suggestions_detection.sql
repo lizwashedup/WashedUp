@@ -1,3 +1,4 @@
+-- ARCHIVED SUPERSEDED ARTIFACT. NOT AN ACTIVE MIGRATION.
 -- Circles: co-attendance suggestions (Step 10). Read + status + detection.
 --
 -- REVIEW ONLY. NOT applied by the agent. Sits on top of the circles schema

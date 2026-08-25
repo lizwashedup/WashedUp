@@ -1,3 +1,4 @@
+-- ARCHIVED. NON-EXECUTABLE. DEPENDS ON THE SUPERSEDED ENUM JOIN-POLICY DRAFT.
 -- ============================================================================
 -- community join review actions (inventory C-12 / C-13): a leader-authored
 -- decline message, and a real "ask a follow-up" action that leaves the

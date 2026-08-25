@@ -24,10 +24,12 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
+import { getTopicMeta, isInSaveNoticeWindow } from '../../lib/communityChat';
 import {
   getTopicAlbum,
   uploadTopicAlbumMedia,
   softDeleteTopicAlbumUpload,
+  setTopicAlbumEnabled,
   type TopicAlbumUpload,
 } from '../../lib/topicAlbum';
 
@@ -43,6 +45,7 @@ export default function EventAlbumScreen() {
   const { topicId } = useLocalSearchParams<{ topicId: string }>();
   const [myId, setMyId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [enabling, setEnabling] = useState(false);
   const [viewerId, setViewerId] = useState<string | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
@@ -56,6 +59,33 @@ export default function EventAlbumScreen() {
     queryFn: () => getTopicAlbum(topicId!),
     enabled: !!topicId,
   });
+
+  // SC-09/C-24: room-level album on/off + the existing archived hard-stop,
+  // same shape community-topic/[id].tsx already reads for the chat gate.
+  const { data: topicMeta, refetch: refetchMeta } = useQuery({
+    queryKey: ['topic-meta', topicId],
+    queryFn: () => getTopicMeta(topicId!),
+    enabled: !!topicId,
+    staleTime: 60_000,
+  });
+  const albumEnabled = topicMeta?.album_enabled === true;
+  const archived = topicMeta?.archived === true;
+  const isCreator = !!myId && myId === topicMeta?.explore_events?.host_user_id;
+  const saveNotice = !!topicMeta && isInSaveNoticeWindow(topicMeta);
+
+  const handleEnableAlbum = async () => {
+    if (!topicId || enabling) return;
+    hapticLight();
+    setEnabling(true);
+    try {
+      await setTopicAlbumEnabled(topicId, true);
+      await refetchMeta();
+    } catch (e) {
+      setAlertInfo({ title: 'Could not turn on photos', message: friendlyError(e, 'Try again in a moment.') });
+    } finally {
+      setEnabling(false);
+    }
+  };
 
   const handleAddPhotos = async () => {
     if (!topicId || uploading) return;
@@ -162,6 +192,34 @@ export default function EventAlbumScreen() {
           <Text style={styles.emptyTitle}>photos aren&apos;t live here yet</Text>
           <Text style={styles.emptyBody}>check back soon.</Text>
         </View>
+      ) : !albumEnabled && !archived ? (
+        <View style={styles.centered}>
+          {isCreator ? (
+            <>
+              <Text style={styles.emptyTitle}>turn on photos for this event?</Text>
+              <Text style={styles.emptyBody}>anyone in the room can add what they took.</Text>
+              <TouchableOpacity
+                style={[styles.addBtn, enabling && styles.addBtnBusy]}
+                onPress={handleEnableAlbum}
+                disabled={enabling}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Turn on photos"
+              >
+                {enabling ? (
+                  <ActivityIndicator size="small" color={Colors.white} />
+                ) : (
+                  <Text style={styles.addBtnText}>turn on photos</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.emptyTitle}>no photos for this event</Text>
+              <Text style={styles.emptyBody}>the organizer hasn&apos;t turned this on.</Text>
+            </>
+          )}
+        </View>
       ) : (
         <FlatList
           data={uploads}
@@ -172,31 +230,53 @@ export default function EventAlbumScreen() {
           columnWrapperStyle={uploads.length > 0 ? { gap: GRID_GAP } : undefined}
           onRefresh={refetch}
           refreshing={isRefetching}
+          ListHeaderComponent={
+            saveNotice ? (
+              <View style={styles.saveNotice}>
+                <Text style={styles.saveNoticeText}>this room closes soon -- save what you want to keep.</Text>
+              </View>
+            ) : archived ? (
+              <View style={styles.saveNotice}>
+                <Text style={styles.saveNoticeText}>this room is closed. photos are view-only.</Text>
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
             <View style={styles.emptyGrid}>
-              <Text style={styles.emptyTitle}>no photos yet -- be the first.</Text>
-              <Text style={styles.emptyBody}>whoever's here can add what they took.</Text>
+              {archived ? (
+                <>
+                  <Text style={styles.emptyTitle}>no photos were saved here.</Text>
+                  <Text style={styles.emptyBody}>this room is closed.</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.emptyTitle}>no photos yet -- be the first.</Text>
+                  <Text style={styles.emptyBody}>whoever's here can add what they took.</Text>
+                </>
+              )}
             </View>
           }
           ListFooterComponent={
-            <TouchableOpacity
-              style={[styles.addBtn, uploading && styles.addBtnBusy]}
-              onPress={handleAddPhotos}
-              disabled={uploading}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Add photos"
-              accessibilityState={{ disabled: uploading, busy: uploading }}
-            >
-              {uploading ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
-                <>
-                  <Camera size={18} color={Colors.white} strokeWidth={2.5} />
-                  <Text style={styles.addBtnText}>add photos</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            archived ? null : (
+              <TouchableOpacity
+                style={[styles.addBtn, uploading && styles.addBtnBusy]}
+                onPress={handleAddPhotos}
+                disabled={uploading}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Add photos"
+                accessibilityState={{ disabled: uploading, busy: uploading }}
+              >
+                {uploading ? (
+                  <ActivityIndicator size="small" color={Colors.white} />
+                ) : (
+                  <>
+                    <Camera size={18} color={Colors.white} strokeWidth={2.5} />
+                    <Text style={styles.addBtnText}>add photos</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )
           }
         />
       )}
@@ -269,6 +349,15 @@ const styles = StyleSheet.create({
   tileImage: { width: '100%', height: '100%', borderRadius: 4, backgroundColor: Colors.inputBg },
   tilePlaceholder: { alignItems: 'center', justifyContent: 'center' },
   emptyGrid: { paddingVertical: 48, alignItems: 'center', gap: 6 },
+  saveNotice: {
+    marginHorizontal: GRID_PADDING,
+    marginTop: GRID_PADDING,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: Colors.inputBg,
+  },
+  saveNoticeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textAlign: 'center' },
   emptyTitle: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm, textAlign: 'center' },
   emptyBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, textAlign: 'center' },
   addBtn: {

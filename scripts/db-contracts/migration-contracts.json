@@ -1,8 +1,8 @@
 {
   "format": 3,
-  "migration_count": 197,
-  "inventory_sha256": "51c2d5fe425733eaccb490dfb47fa5fc39c7d3471de58293db7dbee3f22f0b40",
-  "side_effect_union_count": 58,
+  "migration_count": 223,
+  "inventory_sha256": "563497685a50f664d95e6213935578568c55c31e6cca3be3b89c26238abc060f",
+  "side_effect_union_count": 69,
   "approved_legacy_secret_literals": [
     {
       "file": "20260505000000_albums_processor_webhook.sql",
@@ -11,9 +11,9 @@
     }
   ],
   "classification_counts": {
-    "scheduler": 6,
-    "top_level_dml": 21,
-    "do_fixture_dml": 30,
+    "scheduler": 8,
+    "top_level_dml": 23,
+    "do_fixture_dml": 39,
     "irreversible_ddl": 1,
     "stateful_replacement": 8,
     "default_privileges": 1
@@ -33,7 +33,9 @@
       "20260516120000_albums_cover_and_archive.sql",
       "20260518230000_waitlist_exceptions_expiry_cron.sql",
       "20260707120000_event_chat_model.sql",
-      "20260814140100_schedule_release_expired_ticket_holds.sql"
+      "20260712035429_fix_batch_28_s1_s2_s3_s5.sql",
+      "20260814140100_schedule_release_expired_ticket_holds.sql",
+      "20260819030000_fix_event_chat_archive_timer.sql"
     ],
     "top_level_dml": [
       "20260323000000_launch_party_unlimited_capacity.sql",
@@ -56,7 +58,9 @@
       "20260813104958_office_tools_seed_data.sql",
       "20260813231609_block_non_us_signups.sql",
       "20260814130000_ticket_inbox_failed_state_and_event_ordering.sql",
-      "20260814151000_one_reaction_per_person_v2.sql"
+      "20260814151000_one_reaction_per_person_v2.sql",
+      "20260818170000_event_chat_topic_albums.sql",
+      "20260824211000_harden_topic_album_upload_metadata.sql"
     ],
     "do_fixture_dml": [
       "20260608000100_decline_soft.sql",
@@ -88,7 +92,16 @@
       "20260714223943_answers_withhold_proposal_42.sql",
       "20260716000100_first_join_prompts_and_area_wishlists.sql",
       "20260716233736_participation_notice_evidence_proposal_49.sql",
-      "20260817130000_explore_event_rsvp_capacity.sql"
+      "20260817130000_explore_event_rsvp_capacity.sql",
+      "20260817180000_community_co_creator_invites.sql",
+      "20260818140000_event_chat_welcome_message.sql",
+      "20260818170000_event_chat_topic_albums.sql",
+      "20260818180000_follower_broadcasts_o03.sql",
+      "20260819193833_fix_events_check_marks_trigger_system_context.sql",
+      "20260820010000_operator_set_event_ticket_capacity.sql",
+      "20260820020000_follower_broadcast_push_fanout.sql",
+      "20260820030000_community_purpose_name_length.sql",
+      "20260821001500_fix_creator_milestones_trigger_auth_gap.sql"
     ],
     "irreversible_ddl": [
       "20260504200000_drop_album_v0.sql"

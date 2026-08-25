@@ -485,6 +485,11 @@ export interface TopicMeta {
   community_id: string;
   explore_event_id: string | null;
   /**
+   * SC-09/C-24 (2026-08-24): room-level album on/off, creator-controlled
+   * (see setTopicAlbumEnabled in lib/topicAlbum.ts). Defaults false.
+   */
+  album_enabled: boolean;
+  /**
    * Live bug fix (2026-08-19): a cancelled event and one that simply ended
    * both just archive the topic, with nothing recording which reason it
    * was. explore_events.status already carries that distinction at the
@@ -502,12 +507,15 @@ export interface TopicMeta {
    * SC-08 (2026-08-19): event_date/start_time/venue ride the same embed so
    * the room header can show a real logistics recap and a real expiry
    * timestamp instead of neither. Null for persistent community rooms.
+   * end_time added 2026-08-24 so computeEventRoomExpiry can match the real
+   * cron calculation (event_end+48h) instead of the old start-time-only one.
    */
   explore_events: {
     status: string | null;
     host_user_id: string | null;
     event_date: string | null;
     start_time: string | null;
+    end_time: string | null;
     venue: string | null;
   } | null;
 }
@@ -516,7 +524,7 @@ export async function getTopicMeta(topicId: string): Promise<TopicMeta | null> {
   const { data, error } = await supabase
     .from('community_topics')
     .select(
-      'id, name, archived, community_id, explore_event_id, explore_events(status, host_user_id, event_date, start_time, venue)',
+      'id, name, archived, album_enabled, community_id, explore_event_id, explore_events(status, host_user_id, event_date, start_time, end_time, venue)',
     )
     .eq('id', topicId)
     .maybeSingle();
@@ -525,24 +533,36 @@ export async function getTopicMeta(topicId: string): Promise<TopicMeta | null> {
 }
 
 /**
- * SC-08: the room's real close time, computed the same way the live cron
- * actually computes it right now (id 29, archive-community-event-topics:
- * coalesce(start_time, event_date) + 48h -- keyed off the event START, a
- * known bug, fix written but unapplied in
- * 20260819030000_fix_event_chat_archive_timer.sql). This intentionally
- * mirrors today's REAL behavior, not the fixed behavior, so the timestamp
- * shown is never wrong about what will actually happen until that migration
- * is applied. Null when there is nothing to key off (persistent room, or a
- * linked event with neither field set).
+ * SC-08: the room's real close time. Matches the live cron's calculation
+ * (id 29, archive-community-event-topics) as of the 2026-08-19 fix applying
+ * 2026-08-23: coalesce(end_time, start_time, event_date) + 48h, keyed off
+ * the event's real END, not its start -- a multi-day event's room no longer
+ * locks itself while the event is still happening. Null when there is
+ * nothing to key off (persistent room, or a linked event with none of the
+ * three fields set).
  */
 export function computeEventRoomExpiry(meta: Pick<TopicMeta, 'explore_events'>): Date | null {
   const ev = meta.explore_events;
   if (!ev) return null;
-  const base = ev.start_time ?? (ev.event_date ? `${ev.event_date}T00:00:00` : null);
+  const base = ev.end_time ?? ev.start_time ?? (ev.event_date ? `${ev.event_date}T00:00:00` : null);
   if (!base) return null;
   const d = new Date(base);
   if (Number.isNaN(d.getTime())) return null;
   return new Date(d.getTime() + 48 * 60 * 60 * 1000);
+}
+
+/**
+ * SC-09/C-24: true during the T-24h save-notice window -- after the room's
+ * real expiry minus 24h, before the expiry itself. Once `archived` flips
+ * true (the actual hard stop), this returns false; archived is the
+ * authoritative state at that point, not the client's own clock.
+ */
+export function isInSaveNoticeWindow(meta: Pick<TopicMeta, 'archived' | 'explore_events'>): boolean {
+  if (meta.archived) return false;
+  const expiry = computeEventRoomExpiry(meta);
+  if (!expiry) return false;
+  const now = Date.now();
+  return now >= expiry.getTime() - 24 * 60 * 60 * 1000 && now < expiry.getTime();
 }
 
 export async function getTopicMessages(topicId: string): Promise<TopicMessage[]> {

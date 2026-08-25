@@ -1,12 +1,24 @@
 const mockFrom = jest.fn();
 const mockCreateSignedUrl = jest.fn();
-const mockStorageFrom = jest.fn(() => ({ createSignedUrl: mockCreateSignedUrl }));
+const mockUpload = jest.fn();
+const mockRemove = jest.fn();
+const mockStorageFrom = jest.fn(() => ({
+  createSignedUrl: mockCreateSignedUrl,
+  upload: mockUpload,
+  remove: mockRemove,
+}));
 const mockRpc = jest.fn();
+const mockGetUser = jest.fn();
 jest.mock('../supabase', () => ({
-  supabase: { from: mockFrom, storage: { from: mockStorageFrom }, rpc: mockRpc },
+  supabase: {
+    from: mockFrom,
+    storage: { from: mockStorageFrom },
+    rpc: mockRpc,
+    auth: { getUser: mockGetUser },
+  },
 }));
 
-const { getTopicAlbum, softDeleteTopicAlbumUpload } = require('../topicAlbum');
+const { getTopicAlbum, softDeleteTopicAlbumUpload, setTopicAlbumEnabled, uploadTopicAlbumMedia } = require('../topicAlbum');
 
 function albumChain(result: { data: unknown; error: unknown }) {
   return { select: jest.fn().mockReturnThis(), eq: jest.fn().mockReturnThis(), maybeSingle: jest.fn().mockResolvedValue(result) };
@@ -30,7 +42,37 @@ beforeEach(() => {
   mockCreateSignedUrl.mockReset();
   mockStorageFrom.mockClear();
   mockRpc.mockReset();
+  mockUpload.mockReset();
+  mockRemove.mockReset();
+  mockGetUser.mockReset();
   mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: 'https://signed.example/ok' } });
+  mockRemove.mockResolvedValue({ error: null });
+});
+
+describe('uploadTopicAlbumMedia', () => {
+  it('removes uploaded storage objects when database registration fails', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: 'user-1' } } });
+    mockUpload.mockResolvedValue({ error: null });
+    mockRpc.mockResolvedValue({ error: new Error('registration failed') });
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    }) as any;
+
+    try {
+      await expect(uploadTopicAlbumMedia('topic-1', [{
+        localUri: 'file:///clip.mp4',
+        contentType: 'video',
+        mediaFormat: 'mp4',
+      }])).rejects.toThrow('registration failed');
+    } finally {
+      global.fetch = originalFetch;
+    }
+
+    expect(mockRemove).toHaveBeenCalledWith([
+      expect.stringMatching(/^topic-1\/user-1\/.+\/original\.mp4$/),
+    ]);
+  });
 });
 
 describe('getTopicAlbum', () => {
@@ -121,5 +163,18 @@ describe('softDeleteTopicAlbumUpload', () => {
   it('throws when the RPC errors', async () => {
     mockRpc.mockResolvedValue({ error: new Error('nope') });
     await expect(softDeleteTopicAlbumUpload('up-1')).rejects.toThrow('nope');
+  });
+});
+
+describe('setTopicAlbumEnabled', () => {
+  it('calls the enable RPC with the topic id and flag', async () => {
+    mockRpc.mockResolvedValue({ error: null });
+    await setTopicAlbumEnabled('topic-1', true);
+    expect(mockRpc).toHaveBeenCalledWith('set_topic_album_enabled', { p_topic_id: 'topic-1', p_enabled: true });
+  });
+
+  it('throws when the RPC errors (e.g. a non-creator tried)', async () => {
+    mockRpc.mockResolvedValue({ error: new Error('Only the creator can change this') });
+    await expect(setTopicAlbumEnabled('topic-1', true)).rejects.toThrow('Only the creator can change this');
   });
 });

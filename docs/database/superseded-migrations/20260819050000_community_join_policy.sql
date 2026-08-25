@@ -1,3 +1,4 @@
+-- ARCHIVED. NON-EXECUTABLE. INCOMPATIBLE WITH THE OBSERVED LIVE TEXT COLUMN.
 -- ============================================================================
 -- community join policy (inventory C-08, "proposal 91" -- the "who gets in"
 -- three-way picker already built and wired on BOTH join-gate screens

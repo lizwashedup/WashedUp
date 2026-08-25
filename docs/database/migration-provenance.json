@@ -4,7 +4,7 @@
   "unresolved_versions": [
     {
       "version": "20260813200000",
-      "status": "unresolved",
+      "status": "resolved_local_inventory",
       "local_candidates": [
         "20260813200000_event_members_anon_read_rls_fix.sql",
         "20260813200000_notify_report_restore_auth_header.sql"
@@ -14,7 +14,80 @@
         "event_members anonymous-read policy fingerprint",
         "notify_report_alert function fingerprint"
       ],
-      "resolution": null
+      "observed_evidence_2026_08_24": [
+        "Both local candidates entered git in commit 6a2d5ec, so commit history does not establish a unique ordering.",
+        "The captured live schema contains the event_members hardening objects described by 20260813200000_event_members_anon_read_rls_fix.sql.",
+        "The captured live notify_report_alert body is newer than 20260813200000_notify_report_restore_auth_header.sql and reads its run token from Vault, so the restore-auth-header file is an abandoned superseded implementation, not the current desired definition.",
+        "This project's direct linked-query apply method historically bypassed the Supabase migration ledger, so a missing or ambiguous ledger row cannot by itself prove that an effect was absent."
+      ],
+      "safe_resolution_requirement": "The abandoned notify-report draft must remain outside active migration inventory. Live token reconciliation remains a separate protected credential decision.",
+      "resolution": {
+        "date": "2026-08-24",
+        "disposition": "The superseded notify-report draft was moved intact, with an archive marker, to docs/database/superseded-migrations. The active 20260813200000 version is now uniquely the event-members policy fix.",
+        "production_claim": "No claim is made that either candidate is represented in the Supabase migration ledger. No production database or credential action occurred."
+      }
+    }
+  ],
+  "unresolved_chains": [
+    {
+      "chain": "community_join_policy_text_vs_enum",
+      "status": "archived_from_active_inventory",
+      "files": [
+        "20260819050000_community_join_policy.sql",
+        "20260819060000_community_join_review_actions.sql",
+        "20260821010000_community_role_tiers_enum.sql",
+        "20260821020000_community_role_tiers_capabilities.sql"
+      ],
+      "observed_evidence_2026_08_24": [
+        "The live communities.join_policy column is text NOT NULL DEFAULT open and all five observed rows are open.",
+        "20260819050000 tries to create an enum and add the already-existing column, so it cannot be the forward migration for the observed live shape.",
+        "20260821020000 requires the enum type and recreates the enum-signature setter, so a later text proposal cannot repair the chronological chain by itself.",
+        "The non-executable text proposal is stored under docs/database/review-only and is tested only in the isolated private contract harness."
+      ],
+      "safe_resolution_requirement": "Keep the Community release gate closed until the text-compatible join-policy proposal is approved, the five existing rows receive a Liz-approved treatment, and any review-action or role-tier replacement is independently decomposed and contract-tested.",
+      "resolution": {
+        "date": "2026-08-24",
+        "disposition": "All four enum-dependent review-only files were moved together to docs/database/superseded-migrations, preventing a partial role-tier feature or an incompatible enum-backed join-policy migration from entering a sequential apply.",
+        "compatible_proposal": "docs/database/review-only/community-join-policy-existing-text.sql",
+        "preserved_follow_up": "Review actions and role-tier capability code remain available in the archive for a future text-compatible rewrite. They are not release candidates."
+      }
+    },
+    {
+      "chain": "circle_suggestions_review_only_scheduler",
+      "status": "archived_from_active_inventory",
+      "files": [
+        "20260605000000_circle_suggestions_detection.sql",
+        "20260823090100_schedule_circle_suggestions_detection.sql"
+      ],
+      "observed_evidence_2026_08_24": [
+        "The detector file labels itself REVIEW ONLY.",
+        "The later file schedules that review-only detector.",
+        "The hardened v2 proposal is intentionally stored outside active migrations and has isolated contracts."
+      ],
+      "safe_resolution_requirement": "Keep the production Circle cron unchanged until the hardened detector and Liz-owned presentation and dismissal behavior are approved.",
+      "resolution": {
+        "date": "2026-08-24",
+        "disposition": "Both older files were moved together to docs/database/superseded-migrations so sequential local migration tooling cannot activate a review-only implementation.",
+        "production_claim": "No production cron, function, migration, or feature flag was changed."
+      }
+    },
+    {
+      "chain": "event_members_identity_marks_live_artifact",
+      "status": "archived_from_active_inventory",
+      "files": [
+        "20260824190000_fix_event_members_identity_marks_trigger_auth_gap.sql"
+      ],
+      "observed_evidence_2026_08_24": [
+        "The original self-test selected real profile IDs and inserted synthetic event memberships.",
+        "Its cleanup did not remove user_marks that the trigger could award.",
+        "The original file also failed to create or verify the trigger itself."
+      ],
+      "safe_resolution_requirement": "Use the catalog-only forward migration and isolated fixtures. Audit any live residual marks separately under explicit production authorization.",
+      "resolution": {
+        "date": "2026-08-24",
+        "disposition": "The unsafe artifact was preserved under docs/database/superseded-migrations. The active forward replacement is 20260824212000_fix_event_members_identity_marks_trigger_safe.sql.",
+        "production_claim": "No production rows, marks, triggers, functions, or migration history were changed."
+      }
     }
   ]
 }

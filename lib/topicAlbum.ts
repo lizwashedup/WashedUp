@@ -1,9 +1,10 @@
 /**
- * SC-09/C-24: photo/video albums for event-chat topics (draft migration
+ * SC-09/C-24: photo/video albums for event-chat topics (migration
  * 20260818170000_event_chat_topic_albums.sql -- tables
  * community_topic_albums / community_topic_album_uploads, RPCs
  * start_topic_album_upload_batch / soft_delete_topic_album_upload, private
- * bucket topic-album-media). NOT applied anywhere yet.
+ * bucket topic-album-media). Reported applied on 2026-08-24; the live
+ * fingerprint and migration-ledger disposition remain unverified.
  *
  * Self-flipping (house canon, the proposal-49 pattern lib/organizerFollows.ts
  * documents): every read below treats a missing-relation/function error as
@@ -143,7 +144,8 @@ export async function uploadTopicAlbumMedia(topicId: string, inputs: TopicAlbumU
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
 
-  const payload = await Promise.all(
+  const uploadedPaths: string[] = [];
+  const attempts = await Promise.allSettled(
     inputs.map(async (input) => {
       const uploadId = Crypto.randomUUID();
       const ext = input.contentType === 'photo' ? 'jpg' : (input.mediaFormat || 'mp4').toLowerCase();
@@ -170,6 +172,7 @@ export async function uploadTopicAlbumMedia(topicId: string, inputs: TopicAlbumU
         .from(BUCKET)
         .upload(path, bytes, { contentType: httpContentType, upsert: false });
       if (error) throw error;
+      uploadedPaths.push(path);
 
       return {
         id: uploadId,
@@ -181,14 +184,40 @@ export async function uploadTopicAlbumMedia(topicId: string, inputs: TopicAlbumU
     }),
   );
 
+  const failed = attempts.find((attempt) => attempt.status === 'rejected');
+  if (failed) {
+    if (uploadedPaths.length > 0) {
+      await supabase.storage.from(BUCKET).remove(uploadedPaths);
+    }
+    throw failed.reason;
+  }
+
+  const payload = attempts.map((attempt) => {
+    if (attempt.status !== 'fulfilled') throw new Error('album upload did not finish');
+    return attempt.value;
+  });
+
   const { error } = await supabase.rpc('start_topic_album_upload_batch', {
     p_topic_id: topicId,
     p_uploads: payload,
   });
-  if (error) throw error;
+  if (error) {
+    await supabase.storage.from(BUCKET).remove(uploadedPaths);
+    throw error;
+  }
 }
 
 export async function softDeleteTopicAlbumUpload(uploadId: string): Promise<void> {
   const { error } = await supabase.rpc('soft_delete_topic_album_upload', { p_upload_id: uploadId });
+  if (error) throw error;
+}
+
+/**
+ * SC-09/C-24: room-level album on/off, creator-only (RPC enforces the
+ * host_user_id check server-side, same as every other write here -- this
+ * just surfaces a normal write error on failure).
+ */
+export async function setTopicAlbumEnabled(topicId: string, enabled: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_topic_album_enabled', { p_topic_id: topicId, p_enabled: enabled });
   if (error) throw error;
 }

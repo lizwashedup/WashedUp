@@ -1,3 +1,4 @@
+-- ARCHIVED SUPERSEDED ARTIFACT. NOT AN ACTIVE MIGRATION.
 -- fix: detect_circle_suggestions() (20260605000000_circle_suggestions_detection.sql)
 -- was written and granted to service_role but nothing ever called it -- no
 -- cron job, no edge function anywhere in supabase/functions/. The suggestion

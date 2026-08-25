@@ -1,3 +1,4 @@
+-- ARCHIVED. NON-EXECUTABLE. SECTION 7B DEPENDS ON THE SUPERSEDED ENUM CHAIN.
 -- ============================================================================
 -- S-03 co-creator role model, step 2 of 2: capability functions, RLS/RPC
 -- reclassification, ownership-only role changes.
