@@ -33,6 +33,7 @@
         "npm:@supabase/supabase-js@^2.97.0",
         "npm:@tanstack/react-query@^5.90.21",
         "npm:@types/jest@30",
+        "npm:@types/react-test-renderer@^19.1.0",
         "npm:@types/react@19.1",
         "npm:babel-plugin-module-resolver@^5.0.2",
         "npm:base64-arraybuffer@^1.0.2",

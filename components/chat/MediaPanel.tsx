@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, Text, Pressable, TextInput, StyleSheet, useWindowDimensions, Platform } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GiphyGridView, GiphyContent } from '@giphy/react-native-sdk';
+import { GiphyGridView, GiphyContent } from './GiphyGrid';
 import emojiGroups from 'unicode-emoji-json/data-by-group.json';
 import emojiByChar from 'unicode-emoji-json/data-by-emoji.json';
 import Colors from '../../constants/Colors';
@@ -58,9 +58,10 @@ export default function MediaPanel({ onSelect, onBackspace, onGifSelect, height,
   const [activeSlug, setActiveSlug] = useState('smileys_emotion');
   const [query, setQuery] = useState('');
   const [recents, setRecents] = useState<string[]>([]);
-  // The SDK is configured at app boot (app/_layout.tsx). Without a key the GIF
-  // tab shows a friendly message instead of crashing.
-  const gifReady = !!GIPHY_API_KEY;
+  // The SDK is configured at app boot (app/_layout.tsx). Without a key, or on
+  // web (native-only SDK, GiphyGrid.web.ts stubs it out), the GIF tab shows a
+  // friendly message instead of crashing.
+  const gifReady = !!GIPHY_API_KEY && Platform.OS !== 'web';
 
   useEffect(() => {
     AsyncStorage.getItem(RECENTS_KEY)

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { OneSignal, OSNotificationPermission } from 'react-native-onesignal';
+import { OneSignal, OSNotificationPermission } from '../lib/oneSignalShim';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';

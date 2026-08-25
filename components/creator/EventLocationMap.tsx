@@ -15,7 +15,11 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { MapPin, MapPinOff } from 'lucide-react-native';
-import { MapView, Marker } from '../MapView.native';
+// Extensionless import so Metro resolves MapView.web.tsx on web and
+// MapView.native.tsx on native. Hardcoding .native pulls native-only
+// react-native-maps into the web bundle and breaks the entire web build
+// (matches components/plans/PlansMapView.tsx's existing correct pattern).
+import { MapView, Marker } from '../MapView';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSurface } from '../../constants/EventDesign';

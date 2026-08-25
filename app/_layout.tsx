@@ -19,7 +19,7 @@ import {
 import { Stack, useRouter, usePathname, useRootNavigationState } from 'expo-router';
 import { setAudioModeAsync } from 'expo-audio';
 import * as SplashScreen from 'expo-splash-screen';
-import { OneSignal } from 'react-native-onesignal';
+import { OneSignal } from '../lib/oneSignalShim';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, LogBox, Platform } from 'react-native';
 import 'react-native-reanimated';
@@ -73,15 +73,9 @@ import PushPrimerModal from '../components/PushPrimerModal';
 import VideoSplash from '../components/VideoSplash';
 import { BrandedAlert } from '../components/BrandedAlert';
 import * as Sentry from '@sentry/react-native';
-import { GiphySDK } from '@giphy/react-native-sdk';
+import { initGiphySDK } from '../lib/giphyInit';
 
-// Configure the Giphy SDK once at app boot so the chat MediaPanel's first open
-// isn't paying for SDK init (which made the smile button feel laggy on Android).
-// Idempotent; no-op when the key is absent — MediaPanel shows fallback copy.
-if (process.env.EXPO_PUBLIC_GIPHY_SDK_KEY) {
-  try { GiphySDK.configure({ apiKey: process.env.EXPO_PUBLIC_GIPHY_SDK_KEY }); }
-  catch { /* leave unconfigured; MediaPanel falls back gracefully */ }
-}
+initGiphySDK();
 
 Sentry.init({
   dsn: 'https://fb9ffdb4b5f0fb3ea5191274a258f266@o4511311419604992.ingest.us.sentry.io/4511311773827072',
