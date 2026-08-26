@@ -19,7 +19,6 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@18';
 import { corsHeaders } from '../_shared/cors.ts';
 import { CURRENT_SUB_STATUSES, getHouseCommunity, jsonResponse, serviceClient, stripeKeyIsTest } from '../_shared/contributor.ts';
-const ADMIN_EMAIL = 'liz@washedup.app'; // mirrors public.is_admin
 Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
@@ -56,7 +55,8 @@ Deno.serve(async (req)=>{
       }, 409, corsHeaders);
     }
     // caller must run the house (leader/co_leader) or be the admin
-    let authorized = user.email === ADMIN_EMAIL;
+    const { data: isAdmin } = await admin.rpc('is_admin', { user_id: user.id });
+    let authorized = Boolean(isAdmin);
     if (!authorized) {
       const { data: leaderRow, error: leaderErr } = await admin.from('community_members').select('id').eq('community_id', house.id).eq('user_id', user.id).eq('status', 'active').in('role', [
         'leader',
