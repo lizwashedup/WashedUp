@@ -27,13 +27,19 @@ export function parseReferralCode(url: string): string | null {
   return m ? m[1] : null;
 }
 
-async function resolveAndSend(code: string): Promise<boolean> {
+/**
+ * Resolve a referral code to its owner and send the people request.
+ * Returns the owner's user id (so a caller with a screen can land on their
+ * profile), or null when the code resolves to nothing. The request send is
+ * best-effort and idempotent server-side: already_connected /
+ * cannot_re_request / blocked are swallowed (the scan is a soft action).
+ */
+export async function resolveAndConnect(code: string): Promise<string | null> {
   const { data: recipientId, error } = await supabase.rpc(
     'resolve_referral_code',
     { p_code: code },
   );
-  if (error || !recipientId) return false;
-  // Best-effort: ignore already_connected / cannot_re_request / blocked.
+  if (error || !recipientId) return null;
   try {
     await supabase.rpc('send_people_request', {
       p_recipient: recipientId,
@@ -43,7 +49,20 @@ async function resolveAndSend(code: string): Promise<boolean> {
   } catch {
     /* soft action */
   }
-  return true;
+  return recipientId as string;
+}
+
+async function resolveAndSend(code: string): Promise<boolean> {
+  return (await resolveAndConnect(code)) !== null;
+}
+
+/** Stash a referral code for consumePendingReferral() to run after sign-in. */
+export async function stashPendingReferral(code: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PENDING_KEY, code);
+  } catch {
+    /* best-effort */
+  }
 }
 
 /**
@@ -58,7 +77,7 @@ export async function handleReferralUrl(url: string): Promise<boolean> {
     if (data.session?.user) {
       await resolveAndSend(code);
     } else {
-      await AsyncStorage.setItem(PENDING_KEY, code);
+      await stashPendingReferral(code);
     }
   } catch {
     /* best-effort */

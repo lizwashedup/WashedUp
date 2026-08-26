@@ -1,10 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { fetchWithTimeout } from '../_shared/fetchWithTimeout.ts';
 import { isAuthorizedRunToken } from '../_shared/runTokenAuth.ts';
+import { getAdminAlertEmail } from '../_shared/alertRecipient.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
 const EXTERNAL_FETCH_TIMEOUT_MS = 10_000;
-const PLAN_ALERT_EMAIL = 'liz@washedup.app';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const RUN_TOKEN = Deno.env.get('NOTIFY_PLAN_POSTED_RUN_TOKEN')!;
@@ -30,7 +30,7 @@ interface PlanPayload {
 // This function is invoked only by the on_plan_posted DB trigger, but
 // title/description/host_message/location_text/creator name+city are all
 // free-text fields a user types themselves, so they still need escaping
-// before they're emailed as HTML to liz@washedup.app. Same full 5-entity
+// before they're emailed as HTML to the admin alert recipient. Same full 5-entity
 // escape as og-moment's escapeHtml (the reference implementation in this
 // codebase), widened to accept unknown so numeric fields like max_invites
 // can go through the same helper.
@@ -84,7 +84,10 @@ Deno.serve(async (req) => {
     const planLink = `https://washedup.app/e/${esc(plan.id)}`;
     const postedAt = new Date(plan.created_at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
 
-    // ── 1. Send email to liz@washedup.app ──────────────────────────────────────
+    // ── 1. Send email to the admin alert recipient ────────────────────────────
+    // Recipient comes from public.admin_alert_recipients (alert_key 'default'),
+    // the 698769d centralization -- no hardcoded address. Absent row = skip the
+    // email (same degrade as the DB watchdogs), loudly, so logs show it.
     const html = `
       <div style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #B5522E; margin-bottom: 4px;">New Plan Posted</h2>
@@ -105,22 +108,28 @@ Deno.serve(async (req) => {
       </div>
     `.trim();
 
-    const emailRes = await fetchWithTimeout('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: 'WashedUp Plans <plans@washedup.app>',
-        to: [PLAN_ALERT_EMAIL],
-        subject: `[WashedUp] New plan: "${plan.title}" by ${creatorName}`,
-        html,
-      }),
-      timeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
-    });
-    if (!emailRes) {
-      console.error('[notify-plan-posted] Resend timeout or network error');
+    const alertEmail = await getAdminAlertEmail(supabase);
+    let emailRes: Response | null = null;
+    if (!alertEmail) {
+      console.error('[notify-plan-posted] no admin_alert_recipients row for alert_key "default" -- email skipped');
+    } else {
+      emailRes = await fetchWithTimeout('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'WashedUp Plans <plans@washedup.app>',
+          to: [alertEmail],
+          subject: `[WashedUp] New plan: "${plan.title}" by ${creatorName}`,
+          html,
+        }),
+        timeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
+      });
+      if (!emailRes) {
+        console.error('[notify-plan-posted] Resend timeout or network error');
+      }
     }
 
     // ── 2. Push notification to admin devices (dual-send during cutover) ──────

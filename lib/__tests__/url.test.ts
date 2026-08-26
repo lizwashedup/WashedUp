@@ -15,9 +15,17 @@ describe('internalRouteFor', () => {
     expect(internalRouteFor(`http://www.washedup.app/e/${PLAN_ID}`)).toBe(`/e/${PLAN_ID}`);
   });
 
-  it('ignores a query string or fragment on the link', () => {
-    expect(internalRouteFor(`https://washedup.app/e/${PLAN_ID}?utm_source=chat`)).toBe(`/e/${PLAN_ID}`);
+  it('keeps the query string but drops a fragment (S-05: params must survive)', () => {
+    expect(internalRouteFor(`https://washedup.app/e/${PLAN_ID}?utm_source=chat`)).toBe(`/e/${PLAN_ID}?utm_source=chat`);
     expect(internalRouteFor(`https://washedup.app/e/${PLAN_ID}#top`)).toBe(`/e/${PLAN_ID}`);
+  });
+
+  it('strips sentence punctuation from the end of a query too', () => {
+    expect(internalRouteFor(`https://washedup.app/e/${PLAN_ID}?task=checkin.`)).toBe(`/e/${PLAN_ID}?task=checkin`);
+  });
+
+  it('routes a referral link to the native landing screen', () => {
+    expect(internalRouteFor('https://washedup.app/r/abc123')).toBe('/r/abc123');
   });
 
   it('tolerates a trailing slash', () => {
@@ -35,7 +43,6 @@ describe('internalRouteFor', () => {
   });
 
   it('leaves paths with no native route alone', () => {
-    expect(internalRouteFor('https://washedup.app/r/abc123')).toBeNull();
     expect(internalRouteFor('https://washedup.app')).toBeNull();
     expect(internalRouteFor('https://washedup.app/support')).toBeNull();
     expect(internalRouteFor(`https://washedup.app/e/${PLAN_ID}/extra`)).toBeNull();

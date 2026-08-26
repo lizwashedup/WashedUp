@@ -1,13 +1,14 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { getAdminAlertEmail } from '../_shared/alertRecipient.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
-const ALERT_EMAIL = 'liz@washedup.app';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // Watchdog: scheduled every 5 min via pg_cron. Three independent checks, each
-// emailing Liz via Resend (email is the sink: a push-outage alarm must not ride
-// push). NONE of this touches app_notifications.
+// emailing the admin alert recipient (admin_alert_recipients, key 'default')
+// via Resend (email is the sink: a push-outage alarm must not ride push).
+// NONE of this touches app_notifications.
 //   1. recent_edge_function_failures: 4xx/5xx from pg_net edge calls (15m). The
 //      original check (a verify_jwt flip took push down silently for 4 days).
 //   2. push_registration_health: device_tokens minted/refreshed in 24h, catches
@@ -26,11 +27,19 @@ function esc(s: unknown): string {
   return String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string));
 }
 
-async function sendAlert(subject: string, html: string): Promise<boolean> {
+// Recipient comes from public.admin_alert_recipients (alert_key 'default'),
+// the 698769d centralization -- no hardcoded address. A missing row skips the
+// send and returns false so callers record alerted:false; the skip is logged
+// loudly since a silent watchdog is the exact failure this function watches for.
+async function sendAlert(alertEmail: string | null, subject: string, html: string): Promise<boolean> {
+  if (!alertEmail) {
+    console.error('[monitor-push-health] no admin_alert_recipients row for alert_key "default" -- alert email skipped:', subject);
+    return false;
+  }
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: 'WashedUp Alerts <plans@washedup.app>', to: [ALERT_EMAIL], subject, html }),
+    body: JSON.stringify({ from: 'WashedUp Alerts <plans@washedup.app>', to: [alertEmail], subject, html }),
   });
   return res.ok;
 }
@@ -42,6 +51,7 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const result: Record<string, unknown> = {};
+  const alertEmail = await getAdminAlertEmail(supabase);
 
   // Check 1: 4xx/5xx from pg_net edge calls (last 15 min). No early return.
   const { data: failures, error: failErr } = await supabase.rpc('recent_edge_function_failures', { window_minutes: 15 });
@@ -62,7 +72,7 @@ Deno.serve(async (req) => {
           <h3>Sample failures</h3><ul>${sampleHtml}</ul>
           <p>If <code>verify_jwt</code> is true, redeploy with <code>--no-verify-jwt</code>.</p>
         </div>`.trim();
-      result.failuresAlerted = await sendAlert(`[ALERT] Push pipeline failing: ${failureRows.length} errors in last 15min`, html);
+      result.failuresAlerted = await sendAlert(alertEmail, `[ALERT] Push pipeline failing: ${failureRows.length} errors in last 15min`, html);
     }
   }
 
@@ -84,7 +94,7 @@ Deno.serve(async (req) => {
           <p>Only <strong>${r.active_24h}</strong> device tokens active in 24h (${details}). Healthy runs ~50 to 175 per day.</p>
           <p>Signature of OneSignal not initializing on-device (empty App ID / SDK not starting) or new-user registration breaking. Check EXPO_PUBLIC_ONESIGNAL_APP_ID + the hardcoded fallback in usePushNotifications.ts and that the latest OTA carries it.</p>
         </div>`.trim();
-      (result.registration as any).alerted = await sendAlert(`[ALERT] Push registration stalled: ${r.active_24h} tokens/24h`, html);
+      (result.registration as any).alerted = await sendAlert(alertEmail, `[ALERT] Push registration stalled: ${r.active_24h} tokens/24h`, html);
     }
   }
 
@@ -106,7 +116,7 @@ Deno.serve(async (req) => {
           <p>OneSignal delivered <strong>${d.delivered}/${d.recipients}</strong> (ratio ${d.ratio}) in the last 90 min, below the 3% floor.</p>
           <p>Steady-state is ~13% (coverage gap). Near-zero with real volume means a transport failure: empty App ID, dead APNs key, or verify_jwt flipped on send-push-notifications.</p>
         </div>`.trim();
-      (result.delivery as any).alerted = await sendAlert(`[ALERT] Push delivery collapsed: ${d.delivered}/${d.recipients} in 90min`, html);
+      (result.delivery as any).alerted = await sendAlert(alertEmail, `[ALERT] Push delivery collapsed: ${d.delivered}/${d.recipients} in 90min`, html);
     }
   }
 

@@ -13,7 +13,7 @@
  * plans. An id in neither gets a real screen with a way onward, not a bounce.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -41,8 +41,24 @@ async function resolveTarget(id: string): Promise<Target> {
 }
 
 export default function ShortLinkLanding() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string }>();
+  const { id } = params;
   const [target, setTarget] = useState<Target | null>(null);
+
+  // S-05 deep-link contract: any extra query params on the short link
+  // (task / return_route / filter / revision) ride along to the resolved
+  // screen instead of dying here (they used to be dropped, fixed 2026-08-25).
+  const forwardedSearch = useMemo(() => {
+    const entries = Object.entries(params).filter(([key]) => key !== 'id');
+    if (entries.length === 0) return '';
+    const qs = entries
+      .map(([key, value]) => {
+        const v = Array.isArray(value) ? value[0] ?? '' : String(value ?? '');
+        return `${encodeURIComponent(key)}=${encodeURIComponent(v)}`;
+      })
+      .join('&');
+    return `?${qs}`;
+  }, [params]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,8 +72,8 @@ export default function ShortLinkLanding() {
     return () => { cancelled = true; };
   }, [id]);
 
-  if (target === 'event') return <Redirect href={`/event/${id}` as never} />;
-  if (target === 'plan') return <Redirect href={`/plan/${id}` as never} />;
+  if (target === 'event') return <Redirect href={`/event/${id}${forwardedSearch}` as never} />;
+  if (target === 'plan') return <Redirect href={`/plan/${id}${forwardedSearch}` as never} />;
 
   if (target === 'missing') {
     return (

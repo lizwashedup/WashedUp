@@ -24,8 +24,13 @@ function day(iso: string | null): string {
 
 export function computeNetToYouCents(m: EventMoneySummary, refundedCents: number): number {
   // first-order net: face minus our 4% minus refunds. Mirrors web's own
-  // explicitly-held §6 formula (commission-on-refund treatment unresolved
-  // there too) -- this is a faithful port of the shipped formula, not a new gap.
+  // explicitly-held §6 formula. refundedCents MUST be scoped to positions on
+  // still-'paid' orders (sumRefundedCentsOnPaidOrders in lib/ticketAttendees):
+  // getEventMoneySummary already drops fully-refunded orders from gross AND
+  // commission, so an unscoped refund total double-subtracted full refunds
+  // (fixed 2026-08-25). Commission on a PARTIALLY refunded order is still
+  // charged in full here -- that treatment is the unresolved §6 product
+  // question (Liz's call), deliberately unchanged.
   return m.grossFaceCents - m.commissionCents - refundedCents;
 }
 

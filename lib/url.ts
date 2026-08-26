@@ -16,15 +16,18 @@ import { router } from 'expo-router';
  * both platforms and the person stays in the app instead of bouncing out to a
  * browser to read a page the app already renders.
  */
-const OWN_LINK = /^https?:\/\/(?:www\.)?washedup\.app(\/[^?#\s]*)?/i;
+const OWN_LINK = /^https?:\/\/(?:www\.)?washedup\.app(\/[^?#\s]*)?(?:\?([^#\s]*))?/i;
 
 /**
  * Only paths with a real native route may be routed in app: app/e/[id].tsx
- * (the short link landing, which itself disambiguates plan from event) and
- * app/plans/[slug].tsx. Anything else on the domain, /r/ referral redirects
- * included, still goes to the browser because there is no screen to land on.
+ * (the short link landing, which itself disambiguates plan from event),
+ * app/plans/[slug].tsx, and app/r/[code].tsx (referral landing, S-05 fix
+ * 2026-08-25 -- handing /r/ to the OS was a DEAD TAP on iOS, because the OS
+ * looks up the verified handler for washedup.app and hands the URL straight
+ * back to this already-open app). Anything else on the domain still goes to
+ * the browser because there is no screen to land on.
  */
-const OWN_ROUTE = /^\/(e|plans)\/([^/?#]+)\/?$/;
+const OWN_ROUTE = /^\/(e|plans|r)\/([^/?#]+)\/?$/;
 
 /**
  * An id or slug never legitimately ends in sentence punctuation, but the chat
@@ -34,13 +37,24 @@ const OWN_ROUTE = /^\/(e|plans)\/([^/?#]+)\/?$/;
  */
 const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
 
-/** The in app route for one of our own links, or null when it is not ours. */
+/**
+ * The in app route for one of our own links, or null when it is not ours.
+ * The query string rides along (S-05 deep-link contract: params like task /
+ * return_route / filter must survive the handoff; they used to be silently
+ * dropped here, fixed 2026-08-25). The #fragment stays dropped: it is a web
+ * scroll anchor with no native meaning.
+ */
 export function internalRouteFor(url: string): string | null {
   const own = url.match(OWN_LINK);
   if (!own) return null;
   const route = (own[1] ?? '').match(OWN_ROUTE);
   if (!route) return null;
-  const raw = route[2].replace(TRAILING_PUNCTUATION, '');
+  // Sentence punctuation clings to whatever the link ends with: the query
+  // when one is present, the id/slug otherwise.
+  let search = own[2] ?? '';
+  let raw = route[2];
+  if (search) search = search.replace(TRAILING_PUNCTUATION, '');
+  else raw = raw.replace(TRAILING_PUNCTUATION, '');
   if (!raw) return null;
   let segment = raw;
   try {
@@ -49,7 +63,7 @@ export function internalRouteFor(url: string): string | null {
     // A malformed percent escape stays as written: the landing screen says
     // "this one is gone" for itself rather than us throwing on the way there.
   }
-  return `/${route[1]}/${segment}`;
+  return `/${route[1]}/${segment}${search ? `?${search}` : ''}`;
 }
 
 /**

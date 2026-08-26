@@ -31,21 +31,32 @@ const CHECKOUT_KEY = 'pendingCheckoutOrderId';
 export function parseAppDestination(url: string): string | null {
   if (!url) return null;
   if (!/washedup/i.test(url)) return null;
-  // strip scheme/host/query so one matcher handles https and the custom scheme
-  const path = url
-    .replace(/^[a-z]+:\/\//i, '')
-    .replace(/^[^/]*/, '')
-    .split('?')[0]
-    .split('#')[0];
+  // strip scheme/host so one matcher handles https and the custom scheme;
+  // keep the query aside so it can ride along on the returned href (S-05
+  // deep-link contract: params like task / return_route / filter must
+  // survive the detour -- they used to be silently dropped here, fixed
+  // 2026-08-25). The #fragment stays dropped: web scroll anchor only.
+  const beforeHash = url.split('#')[0];
+  const qIndex = beforeHash.indexOf('?');
+  const search = qIndex === -1 ? '' : beforeHash.slice(qIndex);
+  const withoutQuery = qIndex === -1 ? beforeHash : beforeHash.slice(0, qIndex);
+  // https URLs carry a real host to strip; the custom scheme does not
+  // (washedupapp://e/<id> -- 'e' is the first path segment, not a host, and
+  // the old host-strip silently ate it, killing every custom-scheme link).
+  const isHttp = /^https?:\/\//i.test(withoutQuery);
+  const afterScheme = withoutQuery.replace(/^[a-z]+:\/\//i, '');
+  const path = isHttp
+    ? afterScheme.replace(/^[^/]*/, '')
+    : `/${afterScheme.replace(/^\/+/, '')}`;
 
   const e = path.match(/^\/e\/([A-Za-z0-9-]+)$/);
-  if (e) return `/e/${e[1]}`;
+  if (e) return `/e/${e[1]}${search}`;
   const plan = path.match(/^\/plans\/([A-Za-z0-9_-]+)$/);
-  if (plan) return `/plans/${plan[1]}`;
+  if (plan) return `/plans/${plan[1]}${search}`;
   const appPlan = path.match(/^\/app\/plan\/([A-Za-z0-9-]+)$/);
-  if (appPlan) return `/plan/${appPlan[1]}`;
+  if (appPlan) return `/plan/${appPlan[1]}${search}`;
   const appEvent = path.match(/^\/app\/event\/([A-Za-z0-9-]+)$/);
-  if (appEvent) return `/event/${appEvent[1]}`;
+  if (appEvent) return `/event/${appEvent[1]}${search}`;
   return null;
 }
 

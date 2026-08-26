@@ -28,7 +28,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
 import { executeRefund, formatCents, previewRefund } from '../../lib/ticketing';
-import { countAttendees, getEventAttendees, getEventMoneySummary, isLiveSeat, type DoorAttendee } from '../../lib/ticketAttendees';
+import { countAttendees, getEventAttendees, getEventMoneySummary, isLiveSeat, sumRefundedCentsOnPaidOrders, type DoorAttendee } from '../../lib/ticketAttendees';
 import { MoneySummaryCard } from '../../components/creator/MoneySummaryCard';
 
 type StatusFilter = 'all' | 'in' | 'notin' | 'refunded';
@@ -55,7 +55,10 @@ export default function AttendeesScreen() {
   });
 
   const counts = countAttendees(attendees);
-  const refundedCents = useMemo(() => attendees.reduce((s, a) => s + a.refundedCents, 0), [attendees]);
+  // Only refunds on still-'paid' orders: fully-refunded orders are already
+  // excluded from gross/commission by getEventMoneySummary, so counting their
+  // refunded_cents here double-subtracted them from net (see helper's doc).
+  const refundedCents = useMemo(() => sumRefundedCentsOnPaidOrders(attendees), [attendees]);
   const tiers = useMemo(
     () => Array.from(new Set(attendees.map((a) => a.tierName).filter((t): t is string => !!t))),
     [attendees],

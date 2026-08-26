@@ -1,7 +1,7 @@
 const mockFrom = jest.fn();
 jest.mock('../supabase', () => ({ supabase: { from: mockFrom } }));
 
-const { countAttendees, getEventAttendees, isLiveSeat } = require('../ticketAttendees');
+const { countAttendees, getEventAttendees, isLiveSeat, sumRefundedCentsOnPaidOrders } = require('../ticketAttendees');
 
 function attendee(overrides: Record<string, unknown> = {}) {
   return {
@@ -70,5 +70,17 @@ describe('ticket attendee data contract', () => {
     expect(isLiveSeat(rows[0])).toBe(true);
     expect(isLiveSeat(rows[1])).toBe(false);
     expect(countAttendees(rows)).toEqual({ sold: 2, checkedIn: 1, refunded: 1 });
+  });
+
+  it('sums refunds for the money summary only from still-paid orders', () => {
+    const rows = [
+      // partial refund on a paid order: counts (gross still includes the order)
+      attendee({ positionId: 'p1', orderStatus: 'paid', refundedCents: 1500 }),
+      // fully refunded order: its gross/commission already left the summary,
+      // so its refunded cents must NOT be subtracted a second time
+      attendee({ positionId: 'p2', orderStatus: 'refunded', refundedCents: 5000 }),
+      attendee({ positionId: 'p3', orderStatus: 'paid', refundedCents: 0 }),
+    ];
+    expect(sumRefundedCentsOnPaidOrders(rows)).toBe(1500);
   });
 });

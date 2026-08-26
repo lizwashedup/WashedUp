@@ -78,6 +78,22 @@ export function isLiveSeat(a: DoorAttendee): boolean {
   return a.orderStatus === 'paid' && !a.voided;
 }
 
+/**
+ * Refund total for the money summary, scoped to positions whose order is
+ * still 'paid'. getEventMoneySummary already excludes non-'paid' orders from
+ * gross/commission, so a FULLY refunded order (status flipped to 'refunded')
+ * contributes nothing to gross — subtracting its positions' refunded_cents
+ * again double-counted the refund and understated net-to-you. Mirrors
+ * getPayoutSummary (lib/ticketing.ts), which only ever reads positions
+ * belonging to 'paid' orders and therefore never had this distortion.
+ */
+export function sumRefundedCentsOnPaidOrders(list: DoorAttendee[]): number {
+  return list.reduce(
+    (s, a) => (a.orderStatus === 'paid' ? s + a.refundedCents : s),
+    0,
+  );
+}
+
 export function countAttendees(list: DoorAttendee[]): AttendeeCounts {
   let sold = 0;
   let checkedIn = 0;
