@@ -2,7 +2,7 @@
   "expo": {
     "name": "WashedUp",
     "slug": "washedup-app",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon.png",
     "scheme": "washedupapp",
@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.washedup.app",
-      "buildNumber": "30",
+      "buildNumber": "31",
       "usesAppleSignIn": true,
       "associatedDomains": ["applinks:washedup.app"],
       "config": {},
