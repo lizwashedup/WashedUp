@@ -7,11 +7,10 @@
  * no route for it, so a tapped referral link opened the app onto
  * +not-found's spinner and bounced -- dead on iOS entirely, since the OS
  * never even offered the browser. Now the tap lands here:
- *   - signed in  -> resolve the code, send the people request (idempotent
- *     server-side), land on the inviter's profile so the tap visibly DID
- *     something. handleReferralUrl in app/_layout.tsx may fire for the same
- *     URL via the Linking listener; both paths swallow already_connected,
- *     so the double-fire is harmless.
+ *   - signed in  -> claim the inviter's server-side request, then land on the
+ *     inviter's profile so the tap visibly DID something. handleReferralUrl
+ *     in app/_layout.tsx may fire for the same URL via the Linking listener;
+ *     the claim RPC is idempotent, so the double-fire is harmless.
  *   - signed out -> stash the code (consumePendingReferral runs it after
  *     sign-in, unchanged) and continue to the auth gate.
  *   - dead code  -> a real screen with a way onward, mirroring /e/'s
@@ -48,14 +47,14 @@ export default function ReferralLanding() {
           if (!cancelled) router.replace(unauthedRoute() as never);
           return;
         }
-        const recipientId = await resolveAndConnect(code);
+        const inviterId = await resolveAndConnect(code);
         if (cancelled) return;
-        if (!recipientId) {
+        if (!inviterId) {
           setDead(true);
           return;
         }
         if (YOURS_PAGE_ENABLED) {
-          router.replace(`/person/${recipientId}` as never);
+          router.replace(`/person/${inviterId}` as never);
         } else {
           router.replace('/(tabs)/plans' as never);
         }

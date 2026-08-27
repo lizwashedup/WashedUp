@@ -3,8 +3,9 @@
  *
  * A washedup.app/r/<code> link (the value encoded in the QR and the text
  * invite) is handled here:
- *   - authenticated scanner  -> resolve the code to the owner and send a
- *     people request immediately
+ *   - authenticated scanner  -> claim the inviter's server-side request so
+ *     the recipient sees "Liz already wants to add you," not a reversed
+ *     request from the recipient back to Liz
  *   - unauthenticated scanner -> stash the code; consumePendingReferral()
  *     runs it once the user signs in (best-effort capture)
  *
@@ -28,28 +29,17 @@ export function parseReferralCode(url: string): string | null {
 }
 
 /**
- * Resolve a referral code to its owner and send the people request.
- * Returns the owner's user id (so a caller with a screen can land on their
- * profile), or null when the code resolves to nothing. The request send is
- * best-effort and idempotent server-side: already_connected /
- * cannot_re_request / blocked are swallowed (the scan is a soft action).
+ * Claim a referral code. The server resolves the inviter, records conversion,
+ * and creates the inviter -> current-user pending request in one transaction.
+ * Returns the inviter's user id so the route can land on their profile.
  */
 export async function resolveAndConnect(code: string): Promise<string | null> {
-  const { data: recipientId, error } = await supabase.rpc(
-    'resolve_referral_code',
+  const { data: inviterId, error } = await supabase.rpc(
+    'claim_referral_invite',
     { p_code: code },
   );
-  if (error || !recipientId) return null;
-  try {
-    await supabase.rpc('send_people_request', {
-      p_recipient: recipientId,
-      p_context: 'referral_invite',
-      p_context_event_id: null,
-    });
-  } catch {
-    /* soft action */
-  }
-  return recipientId as string;
+  if (error || !inviterId) return null;
+  return inviterId as string;
 }
 
 async function resolveAndSend(code: string): Promise<boolean> {
