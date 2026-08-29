@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.washedup.app",
-      "buildNumber": "31",
+      "buildNumber": "32",
       "usesAppleSignIn": true,
       "associatedDomains": ["applinks:washedup.app"],
       "config": {},
