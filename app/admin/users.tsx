@@ -9,13 +9,16 @@ import {
   TextInput,
   RefreshControl,
   Alert,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticWarning, hapticSuccess } from '../../lib/haptics';
-import { ArrowLeft, Search, UserX } from 'lucide-react-native';
+import { ArrowLeft, Bell, Search, UserX, X } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { friendlyError } from '../../lib/friendlyError';
 import Colors from '../../constants/Colors';
@@ -26,6 +29,7 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 
 interface AdminUser {
   id: string;
+  email: string | null;
   first_name_display: string | null;
   profile_photo_url: string | null;
   city: string | null;
@@ -39,6 +43,10 @@ export default function AdminUsersScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [removing, setRemoving] = useState<string | null>(null);
+  const [notifyingUser, setNotifyingUser] = useState<AdminUser | null>(null);
+  const [notificationTitle, setNotificationTitle] = useState('');
+  const [notificationBody, setNotificationBody] = useState('');
+  const [sendingNotification, setSendingNotification] = useState(false);
 
   React.useEffect(() => {
     supabase.auth
@@ -56,7 +64,7 @@ export default function AdminUsersScreen() {
     queryFn: async (): Promise<AdminUser[]> => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, first_name_display, profile_photo_url, city, created_at, onboarding_status')
+        .select('id, email, first_name_display, profile_photo_url, city, created_at, onboarding_status')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data ?? [];
@@ -69,9 +77,54 @@ export default function AdminUsersScreen() {
     if (!q) return users;
     return users.filter((u) =>
       (u.first_name_display ?? '').toLowerCase().includes(q) ||
+      (u.email ?? '').toLowerCase().includes(q) ||
       (u.city ?? '').toLowerCase().includes(q),
     );
   }, [users, search]);
+
+  const openNotificationPrompt = (user: AdminUser) => {
+    setNotificationTitle('');
+    setNotificationBody('');
+    setNotifyingUser(user);
+  };
+
+  const closeNotificationPrompt = () => {
+    if (sendingNotification) return;
+    setNotifyingUser(null);
+    setNotificationTitle('');
+    setNotificationBody('');
+  };
+
+  const sendNotification = async () => {
+    if (!notifyingUser) return;
+
+    const title = notificationTitle.trim();
+    if (!title) {
+      Alert.alert('Title required', 'Enter a short notification title.');
+      return;
+    }
+
+    const recipientName = notifyingUser.first_name_display ?? 'this user';
+    setSendingNotification(true);
+    try {
+      const { error } = await supabase.rpc('admin_send_user_notification', {
+        p_user_id: notifyingUser.id,
+        p_title: title,
+        p_body: notificationBody.trim() || null,
+      });
+      if (error) throw error;
+
+      hapticSuccess();
+      setNotifyingUser(null);
+      setNotificationTitle('');
+      setNotificationBody('');
+      Alert.alert('Sent', `Notification sent to ${recipientName}.`);
+    } catch (e: any) {
+      Alert.alert('Error', friendlyError(e, 'Could not send notification. Try again.'));
+    } finally {
+      setSendingNotification(false);
+    }
+  };
 
   const handleDeleteAndBan = (user: AdminUser) => {
     const name = user.first_name_display ?? 'this user';
@@ -134,7 +187,7 @@ export default function AdminUsersScreen() {
         <Search size={16} color={Colors.warmGray} strokeWidth={2} style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by name or city…"
+          placeholder="Search by name, email, or city…"
           placeholderTextColor={Colors.textLight}
           value={search}
           onChangeText={setSearch}
@@ -181,18 +234,28 @@ export default function AdminUsersScreen() {
                   <Text style={styles.statusBadge}>{user.onboarding_status}</Text>
                 )}
               </View>
-              <TouchableOpacity
-                style={[styles.banBtn, removing === user.id && { opacity: 0.5 }]}
-                onPress={() => handleDeleteAndBan(user)}
-                disabled={removing === user.id}
-                hitSlop={8}
-              >
-                {removing === user.id ? (
-                  <ActivityIndicator size="small" color={Colors.errorRed} />
-                ) : (
-                  <UserX size={18} color={Colors.errorRed} strokeWidth={2} />
-                )}
-              </TouchableOpacity>
+              <View style={styles.rowActions}>
+                <TouchableOpacity
+                  style={styles.notifyBtn}
+                  onPress={() => openNotificationPrompt(user)}
+                  hitSlop={8}
+                  accessibilityLabel={`Notify ${user.first_name_display ?? 'user'}`}
+                >
+                  <Bell size={18} color={Colors.terracotta} strokeWidth={2} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.banBtn, removing === user.id && { opacity: 0.5 }]}
+                  onPress={() => handleDeleteAndBan(user)}
+                  disabled={removing === user.id}
+                  hitSlop={8}
+                >
+                  {removing === user.id ? (
+                    <ActivityIndicator size="small" color={Colors.errorRed} />
+                  ) : (
+                    <UserX size={18} color={Colors.errorRed} strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           ))}
 
@@ -203,6 +266,82 @@ export default function AdminUsersScreen() {
           )}
         </ScrollView>
       )}
+
+      <Modal
+        visible={notifyingUser !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeNotificationPrompt}
+        statusBarTranslucent
+      >
+        <SafeAreaView style={styles.modalContainer} edges={['top', 'bottom']}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboardView}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <View style={styles.modalHeader}>
+              <TouchableOpacity
+                style={styles.modalHeaderBtn}
+                onPress={closeNotificationPrompt}
+                disabled={sendingNotification}
+                hitSlop={12}
+              >
+                <X size={22} color={Colors.asphalt} strokeWidth={2} />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle} numberOfLines={1}>
+                Notify {notifyingUser?.first_name_display ?? 'user'}
+              </Text>
+              <View style={styles.modalHeaderBtn} />
+            </View>
+
+            <View style={styles.notificationForm}>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Title</Text>
+                <TextInput
+                  style={styles.input}
+                  value={notificationTitle}
+                  onChangeText={setNotificationTitle}
+                  placeholder="Short notification title"
+                  placeholderTextColor={Colors.textLight}
+                  maxLength={80}
+                  autoFocus
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+              </View>
+
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Message</Text>
+                <TextInput
+                  style={[styles.input, styles.messageInput]}
+                  value={notificationBody}
+                  onChangeText={setNotificationBody}
+                  placeholder="Optional message"
+                  placeholderTextColor={Colors.textLight}
+                  multiline
+                  maxLength={240}
+                  textAlignVertical="top"
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.sendBtn,
+                  (!notificationTitle.trim() || sendingNotification) && styles.sendBtnDisabled,
+                ]}
+                onPress={sendNotification}
+                disabled={!notificationTitle.trim() || sendingNotification}
+              >
+                {sendingNotification ? (
+                  <ActivityIndicator size="small" color={Colors.white} />
+                ) : (
+                  <Text style={styles.sendBtnText}>Send</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -282,6 +421,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  notifyBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Colors.accentSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+
   banBtn: {
     width: 36,
     height: 36,
@@ -290,6 +440,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+  },
+
+  modalContainer: { flex: 1, backgroundColor: Colors.parchment },
+  modalKeyboardView: { flex: 1 },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  modalHeaderBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  modalTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  notificationForm: { padding: 20, gap: 4 },
+  fieldWrap: { marginBottom: 12 },
+  fieldLabel: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.asphalt,
+  },
+  messageInput: { minHeight: 104 },
+  sendBtn: {
+    minHeight: 48,
+    borderRadius: 999,
+    backgroundColor: Colors.terracotta,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  sendBtnDisabled: { opacity: 0.5 },
+  sendBtnText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.white,
   },
 
   empty: { alignItems: 'center', marginTop: 60 },
