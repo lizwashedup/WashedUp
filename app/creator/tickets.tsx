@@ -758,14 +758,21 @@ export default function TicketSetupScreen() {
           </>
         )}
 
-        {/* buyer questions (§3.8): asked right after purchase, up to 11,
-            never blocking the sale. Rendered like the tiers list. */}
+        {/* buyer questions (§3.8): up to 11. Rendered like the tiers list.
+            2026-08-28 correction: the 2026-08-27 note here was stale --
+            begin_ticket_checkout already enforces every active required
+            question atomically before Stripe is ever involved (confirmed by
+            reading the live function directly; closed per 75-threshold spec
+            item 1d, specs/washedup-75-THRESHOLD-SPEC-v1-20260828.md). The
+            cited live-function-correctness-audit-20260824.md finding is
+            narrower and unrelated: the 11-question cap is raceable, not that
+            required answers can be skipped. */}
         <View style={styles.sectionHeader}>
           {/* copy to the taste gate */}
           <Text style={styles.sectionTitle}>what you'll ask buyers</Text>
         </View>
-        {/* copy to the taste gate (§3.8 timing) */}
-        <Text style={styles.emptyText}>asked right after they buy, never in the way of the sale.</Text>
+        {/* copy to the taste gate */}
+        <Text style={styles.emptyText}>asked when they buy.</Text>
 
         {questionsLoading ? (
           <ActivityIndicator size="small" color={Colors.terracotta} />

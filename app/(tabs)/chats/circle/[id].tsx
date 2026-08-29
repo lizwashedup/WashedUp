@@ -43,6 +43,10 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
   // presenting) makes the second silently fail ("goes nowhere"). The tap sets
   // this flag; MenuCard's onClosed (post-dismiss) consumes it.
   const pendingAddRef = useRef(false);
+  // Same deferral, for "Make a plan" -- it used to navigate immediately inside
+  // the row's onPress, racing the still-dismissing MenuCard modal and freezing
+  // the UI (Liz, 2026-08-27). Deferred to onClosed like "Start a circle" above.
+  const pendingPlanRef = useRef(false);
 
   // Memoized so the props handed to the (memoized) ChatThread stay referentially
   // stable across this screen's own state changes (+ menu, add-people, plan).
@@ -132,10 +136,9 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         // From a DM: open the composer with the counterpart pre-attached as a
         // removable invite chip (a normal plan + invite), not the circle-plan
         // composer. Decided 2026-06-10 (Liz owns; sanity-check live).
+        // Deferred to MenuCard's onClosed, same reason as "circle" below.
         onPress: () => {
-          if (disp?.otherUserId) {
-            router.push(buildComposerWithPerson(disp.otherUserId, disp.title, disp.otherAvatar) as never);
-          }
+          pendingPlanRef.current = true;
         },
       },
       {
@@ -213,6 +216,12 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
           if (pendingAddRef.current) {
             pendingAddRef.current = false;
             setAddOpen(true);
+          }
+          if (pendingPlanRef.current) {
+            pendingPlanRef.current = false;
+            if (disp?.otherUserId) {
+              router.push(buildComposerWithPerson(disp.otherUserId, disp.title, disp.otherAvatar) as never);
+            }
           }
         }}
         anchor={menuAnchor}

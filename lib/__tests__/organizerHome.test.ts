@@ -1,6 +1,7 @@
 import {
   daysUntilLabel,
   deriveEventState,
+  hasUnpublishedTickets,
   inventoryLabel,
   needsAttention,
   pickNextUpcomingEvent,
@@ -225,5 +226,31 @@ describe('needsAttention', () => {
     expect(needsAttention(event({ status: 'Cancelled', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
     expect(needsAttention(event({ status: 'Completed', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
     expect(needsAttention(event({ status: 'Archived', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
+  });
+});
+
+describe('hasUnpublishedTickets', () => {
+  it('is false for a free/RSVP event with no tiers at all', () => {
+    expect(hasUnpublishedTickets([])).toBe(false);
+  });
+
+  it('is true when every tier is still a draft', () => {
+    expect(hasUnpublishedTickets([tier({ status: 'draft' })])).toBe(true);
+  });
+
+  it('is false once at least one tier is on sale', () => {
+    expect(hasUnpublishedTickets([tier({ status: 'draft' }), tier({ status: 'on_sale' })])).toBe(false);
+  });
+
+  it('is false when sold out (on_sale tiers exist, just exhausted)', () => {
+    expect(hasUnpublishedTickets([tier({ status: 'on_sale' })])).toBe(false);
+  });
+
+  it('is false when every tier already closed -- a finished sale is not a draft', () => {
+    expect(hasUnpublishedTickets([tier({ status: 'closed' })])).toBe(false);
+  });
+
+  it('is true for a mix of closed and draft tiers -- the draft one is real', () => {
+    expect(hasUnpublishedTickets([tier({ status: 'closed' }), tier({ status: 'draft' })])).toBe(true);
   });
 });

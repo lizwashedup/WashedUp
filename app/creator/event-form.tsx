@@ -8,7 +8,7 @@
  * minimal per decision 15a.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams, Stack, Redirect } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect, Stack, Redirect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { ArrowLeft, Check, Plus, ChevronRight } from 'lucide-react-native';
@@ -47,6 +47,7 @@ import { CO_CREATOR_INVITES_ENABLED } from '../../constants/FeatureFlags';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { supabase } from '../../lib/supabase';
 import { eventHasPaidTier, getMyPayoutState, getTiers, isPayoutReady, refundLiveOrdersOnCancel, type CancelRefundSummary } from '../../lib/ticketing';
+import { hasUnpublishedTickets } from '../../lib/organizerHome';
 import { OFFER_TYPE_OPTIONS, isOfferTypeSellableToday, isOfferType, type OfferType } from '../../lib/offerTypes';
 import {
   announceEventToMembers,
@@ -167,6 +168,30 @@ export default function EventFormScreen() {
   useEffect(() => {
     probeTicketCapacityRpc().then(setTicketCapacityRpcOpen);
   }, []);
+
+  // Audit finding (75-threshold spec item 2): warnIfNothingOnSale only ever
+  // fires once, right after a save, and its "later" button never resurfaces.
+  // This makes the same signal durable on the event's own management view --
+  // read-only, best-effort, mirrors the door-probe effects above. Only a
+  // published (Live) event can mislead anyone, so drafts are skipped.
+  // Review finding 2026-08-29: a plain useEffect never reran when a creator
+  // followed this nudge to the tickets screen and came straight back, since
+  // this screen stays mounted and none of the deps change -- useFocusEffect
+  // re-checks every time the screen regains focus instead.
+  const [ticketsUnpublished, setTicketsUnpublished] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!editing || !id || eventStatus !== 'Live') {
+        setTicketsUnpublished(false);
+        return;
+      }
+      let cancelled = false;
+      getTiers(id)
+        .then((tiers) => { if (!cancelled) setTicketsUnpublished(hasUnpublishedTickets(tiers)); })
+        .catch(() => { if (!cancelled) setTicketsUnpublished(false); });
+      return () => { cancelled = true; };
+    }, [editing, id, eventStatus]),
+  );
   const [seeded, setSeeded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -888,6 +913,24 @@ export default function EventFormScreen() {
               </Text>
             )}
 
+            {editing && eventStatus === 'Live' && ticketsUnpublished && (
+              // Audit finding (75-threshold spec item 2): durable version of
+              // warnIfNothingOnSale's one-time popup -- stays visible on
+              // every visit to this event until tickets are actually on sale.
+              <TouchableOpacity
+                style={styles.ticketNudge}
+                onPress={() => router.push(`/creator/tickets?id=${id}` as never)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.ticketNudgeBody}>
+                  {/* copy to the taste gate */}
+                  <Text style={styles.ticketNudgeTitle}>your tickets are still drafts</Text>
+                  <Text style={styles.ticketNudgeMeta}>this event is up, but nobody can buy a ticket yet. set them up →</Text>
+                </View>
+                <ChevronRight size={18} color={Colors.terracotta} strokeWidth={2.5} />
+              </TouchableOpacity>
+            )}
+
             {/* §3 canvas: this is not a form of grey boxes, it is a PAGE being
                 built. The top half is the page itself, media-led (doc 80: the
                 cover is the one warm-dark surface, so it reads as the face of a
@@ -1353,6 +1396,21 @@ const styles = StyleSheet.create({
   },
   statusLine: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary, marginBottom: 12 },
   savedLine: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2, marginBottom: 12 },
+  // Golden Hour: same white-card/terracotta-border shape as CreatorSpaceBanner
+  ticketNudge: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    padding: 14,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  ticketNudgeBody: { flex: 1, gap: 2 },
+  ticketNudgeTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  ticketNudgeMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   savedLineProblem: { color: EventAction.error },
   reviewCard: {
     backgroundColor: Colors.white,

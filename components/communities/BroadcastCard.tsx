@@ -6,6 +6,7 @@
  */
 
 import React, { useState } from 'react';
+import { Image } from 'expo-image';
 import {
   View,
   Text,
@@ -28,6 +29,7 @@ import {
   type CommunityBroadcast,
 } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
+import LinkifiedText from '../LinkifiedText';
 
 const REACTION_SET = ['❤️', '🔥', '👏'];
 
@@ -36,9 +38,10 @@ interface Props {
   /** Broadcasts are the community speaking; attribution is its name, never a person. */
   communityName: string;
   onError: (title: string, message: string) => void;
+  mentionNames?: Set<string>;
 }
 
-export function BroadcastCard({ broadcast, communityName, onError }: Props) {
+export function BroadcastCard({ broadcast, communityName, onError, mentionNames }: Props) {
   const queryClient = useQueryClient();
   const [showReplies, setShowReplies] = useState(false);
   const [draft, setDraft] = useState('');
@@ -92,8 +95,9 @@ export function BroadcastCard({ broadcast, communityName, onError }: Props) {
       {!!communityName && <Text style={styles.attribution}>{communityName}</Text>}
       {/* LIZ COPY */}
       {isIntro && <Text style={styles.introEyebrow}>just joined</Text>}
-      <Text style={styles.body}>{intro ? intro.lead : broadcast.body}</Text>
-      {!!intro?.qa && <Text style={styles.body}>{intro.qa}</Text>}
+      {!!broadcast.image_url && <Image source={{ uri: broadcast.image_url }} style={styles.image} contentFit="cover" />}
+      <LinkifiedText text={intro ? intro.lead : broadcast.body} style={styles.body} mentionNames={mentionNames} />
+      {!!intro?.qa && <LinkifiedText text={intro.qa} style={styles.body} mentionNames={mentionNames} />}
       <Text style={styles.meta}>{formatTimestampLA(broadcast.created_at)}</Text>
 
       <View style={styles.reactionRow}>
@@ -188,6 +192,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
+  image: { width: '100%', height: 180, borderRadius: 12, backgroundColor: Colors.inputBg, marginBottom: 8 },
   meta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 6 },
   reactionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   reactionChip: {

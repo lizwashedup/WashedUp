@@ -293,6 +293,8 @@ export interface CommunityBroadcast {
   sender_photo: string | null;
   kind: 'broadcast' | 'intro' | 'message';
   payload: IntroPayload | null;
+  image_url: string | null;
+  edited_at: string | null;
   reactions: BroadcastReaction[];
   reply_count: number;
 }
@@ -337,7 +339,7 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
   const { data: { user } } = await supabase.auth.getUser();
   const { data: rows, error } = await supabase
     .from('community_broadcasts')
-    .select('id, body, created_at, sender_id, kind, payload')
+    .select('id, body, created_at, sender_id, kind, payload, image_url, edited_at')
     .eq('community_id', communityId)
     .order('created_at', { ascending: false })
     .limit(30);
@@ -398,17 +400,42 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
  * kind='message' rides the same stream as broadcasts and intro cards, so
  * ordering, unreads, previews, and realtime all inherit.
  */
-export async function sendCommunityMessage(communityId: string, body: string): Promise<void> {
+export async function sendCommunityMessage(communityId: string, body: string, imageUrl?: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
   const trimmed = body.trim();
-  if (!trimmed) return;
+  if (!trimmed && !imageUrl) return;
   const { error } = await supabase.from('community_broadcasts').insert({
     community_id: communityId,
     sender_id: user.id,
     body: trimmed.slice(0, 4000),
+    image_url: imageUrl ?? null,
     kind: 'message',
   });
+  if (error) throw error;
+}
+
+export async function editCommunityMessage(messageId: string, body: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { error } = await supabase
+    .from('community_broadcasts')
+    .update({ body: body.trim().slice(0, 4000), edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', user.id)
+    .eq('kind', 'message');
+  if (error) throw error;
+}
+
+export async function deleteCommunityMessage(messageId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const { error } = await supabase
+    .from('community_broadcasts')
+    .delete()
+    .eq('id', messageId)
+    .eq('sender_id', user.id)
+    .eq('kind', 'message');
   if (error) throw error;
 }
 
@@ -469,6 +496,28 @@ export interface TopicMessage {
   sender_id: string;
   sender_name: string | null;
   sender_photo: string | null;
+  image_url: string | null;
+  reply_to_message_id: string | null;
+  edited_at: string | null;
+  reply_to: TopicReply | null;
+  reactions: TopicMessageReaction[];
+}
+
+export interface TopicMessageReaction {
+  user_id: string;
+  reaction: string;
+}
+
+export interface TopicReply {
+  id: string;
+  body: string;
+  sender_name: string | null;
+}
+
+export interface CommunityChatMember {
+  id: string;
+  first_name: string | null;
+  avatar_url: string | null;
 }
 
 /**
@@ -568,12 +617,39 @@ export function isInSaveNoticeWindow(meta: Pick<TopicMeta, 'archived' | 'explore
 export async function getTopicMessages(topicId: string): Promise<TopicMessage[]> {
   const { data, error } = await supabase
     .from('community_topic_messages')
-    .select('id, body, created_at, sender_id')
+    .select('id, body, created_at, sender_id, image_url, reply_to_message_id, edited_at')
     .eq('topic_id', topicId)
     .order('created_at', { ascending: true })
     .limit(300);
   if (error) throw error;
-  return attachSenderProfiles(data ?? []);
+  const enriched = await attachSenderProfiles(data ?? []);
+  if (enriched.length === 0) return [];
+  const messageIds = enriched.map((message) => message.id);
+  const { data: reactionRows, error: reactionError } = await supabase
+    .from('community_topic_message_reactions')
+    .select('message_id, user_id, reaction')
+    .in('message_id', messageIds);
+  if (reactionError) throw reactionError;
+  const reactionsByMessage = new Map<string, TopicMessageReaction[]>();
+  (reactionRows ?? []).forEach((row: any) => {
+    const current = reactionsByMessage.get(row.message_id) ?? [];
+    current.push({ user_id: row.user_id, reaction: row.reaction });
+    reactionsByMessage.set(row.message_id, current);
+  });
+  const byId = new Map(enriched.map((message) => [message.id, message]));
+  return enriched.map((message) => {
+    const parent = message.reply_to_message_id ? byId.get(message.reply_to_message_id) : null;
+    return {
+      ...message,
+      image_url: message.image_url ?? null,
+      reply_to_message_id: message.reply_to_message_id ?? null,
+      edited_at: message.edited_at ?? null,
+      reply_to: parent
+        ? { id: parent.id, body: parent.body, sender_name: parent.sender_name }
+        : null,
+      reactions: reactionsByMessage.get(message.id) ?? [],
+    };
+  });
 }
 
 export async function sendTopicMessage(topicId: string, body: string): Promise<void> {
@@ -583,6 +659,39 @@ export async function sendTopicMessage(topicId: string, body: string): Promise<v
     .from('community_topic_messages')
     .insert({ topic_id: topicId, sender_id: user.id, body: body.trim() });
   if (error) throw error;
+}
+
+async function profilesForUserIds(userIds: string[]): Promise<CommunityChatMember[]> {
+  if (userIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('profiles_public')
+    .select('id, first_name_display, profile_photo_url')
+    .in('id', Array.from(new Set(userIds)));
+  if (error) throw error;
+  return (data ?? []).map((profile: any) => ({
+    id: profile.id,
+    first_name: profile.first_name_display ?? null,
+    avatar_url: profile.profile_photo_url ?? null,
+  }));
+}
+
+export async function getTopicChatMembers(topicId: string): Promise<CommunityChatMember[]> {
+  const { data, error } = await supabase
+    .from('community_topic_members')
+    .select('user_id')
+    .eq('topic_id', topicId);
+  if (error) throw error;
+  return profilesForUserIds((data ?? []).map((row: any) => row.user_id));
+}
+
+export async function getCommunityChatMembers(communityId: string): Promise<CommunityChatMember[]> {
+  const { data, error } = await supabase
+    .from('community_members')
+    .select('user_id')
+    .eq('community_id', communityId)
+    .eq('status', 'active');
+  if (error) throw error;
+  return profilesForUserIds((data ?? []).map((row: any) => row.user_id));
 }
 
 /**

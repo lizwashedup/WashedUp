@@ -100,6 +100,8 @@ Deno.serve(async (req) => {
     title: string;
     body: string | null;
     event_id: string | null;
+    circle_id: string | null;
+    topic_id: string | null;
   }>;
 
   if (notifications.length === 0) {
@@ -157,7 +159,7 @@ Deno.serve(async (req) => {
           include_aliases: { external_id: [n.user_id] },
           headings: { en: n.title },
           contents: { en: n.body },
-          data: { type: n.type, eventId: n.event_id },
+          data: { type: n.type, eventId: n.event_id, circleId: n.circle_id, topicId: n.topic_id },
           ios_badgeType: 'SetTo',
           ios_badgeCount: badgeCounts[n.user_id] ?? 1,
         }),
@@ -179,7 +181,7 @@ Deno.serve(async (req) => {
     to: string;
     title: string;
     body: string | null;
-    data: { type: string; eventId: string | null };
+    data: { type: string; eventId: string | null; circleId: string | null; topicId: string | null };
     sound: string;
     badge: number;
   };
@@ -193,7 +195,7 @@ Deno.serve(async (req) => {
       to: token,
       title: n.title,
       body: n.body,
-      data: { type: n.type, eventId: n.event_id },
+      data: { type: n.type, eventId: n.event_id, circleId: n.circle_id, topicId: n.topic_id },
       sound: 'default',
       badge: badgeCounts[n.user_id] ?? 1,
     });

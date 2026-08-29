@@ -339,7 +339,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               e.stopPropagation();
               hapticLight();
               const share = buildPlanShareContent(plan);
-              Share.share({ message: share.message, url: share.url });
+              Share.share({ message: `${share.message}\n${share.url}` });
             }}
             style={styles.iconBtn}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

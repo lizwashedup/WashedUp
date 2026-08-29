@@ -1423,7 +1423,7 @@ export default function PlanDetailScreen() {
         location_text: plan.location_text,
         slug: plan.slug,
       });
-      await Share.share({ message: share.message, url: share.url });
+      await Share.share({ message: `${share.message}\n${share.url}` });
     } catch {}
   }, [plan]);
 

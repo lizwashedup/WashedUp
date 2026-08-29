@@ -25,7 +25,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCreatorEvents, type CommunityEventRow } from '../../lib/creatorMode';
 import { deleteEventTemplate, listEventTemplates } from '../../lib/creatorEvents';
-import { deriveEventState, needsAttention, pickNextUpcomingEvent, type EventState } from '../../lib/organizerHome';
+import { deriveEventState, hasUnpublishedTickets, needsAttention, pickNextUpcomingEvent, type EventState } from '../../lib/organizerHome';
 import { formatEventDateLA } from '../../lib/laDate';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
@@ -172,8 +172,18 @@ export default function CreatorEventsScreen() {
                 : [
                     formatEventDateLA(e.event_date ?? ''),
                     e.venue,
-                    // LIZ COPY: only worth a word when it changes what to do
-                    state === 'sold_out' ? 'sold out' : state === 'on_sale' ? 'on sale' : null,
+                    // LIZ COPY: only worth a word when it changes what to do.
+                    // Audit finding (75-threshold spec item 2): a "scheduled"
+                    // event with tiers that were set up but never turned on
+                    // read identically to one with no tickets at all -- this
+                    // is the third case that closes that gap.
+                    state === 'sold_out'
+                      ? 'sold out'
+                      : state === 'on_sale'
+                        ? 'on sale'
+                        : hasUnpublishedTickets(e.tiers)
+                          ? 'tickets not on sale yet'
+                          : null,
                   ].filter(Boolean).join(' · ')}
           </Text>
           {!!e.public_name && !opts?.draft && (

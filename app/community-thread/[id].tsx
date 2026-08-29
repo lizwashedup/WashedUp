@@ -7,7 +7,7 @@
  * the whole stream.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -18,12 +18,13 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Bell, BellOff, CalendarDays } from 'lucide-react-native';
+import { ArrowLeft, Bell, BellOff, CalendarDays, Image as ImageIcon, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -31,21 +32,30 @@ import { ReportModal } from '../../components/modals/ReportModal';
 import { useBlock } from '../../hooks/useBlock';
 import { BroadcastCard } from '../../components/communities/BroadcastCard';
 import { OfflineBanner, PermissionState } from '../../components/state/StateViews';
+import LinkifiedText from '../../components/LinkifiedText';
+import LinkPreviewCard from '../../components/chat/LinkPreviewCard';
+import MiniProfileCard from '../../components/MiniProfileCard';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import {
   getCommunityBroadcasts,
+  getCommunityChatMembers,
   getCommunityChatPayload,
   getMyBroadcastMute,
   getPinnedCommunityEvent,
   markBroadcastsRead,
+  deleteCommunityMessage,
+  editCommunityMessage,
   sendCommunityMessage,
   setBroadcastMute,
   type CommunityBroadcast,
 } from '../../lib/communityChat';
 import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
 import { formatEventDateLA } from '../../lib/laDate';
+import { extractFirstUrl } from '../../lib/url';
+import { formatChatDay, insertMentionAt, isSameChatDay, mentionQueryAt } from '../../lib/communityChatUi';
+import { pickAndUploadChatPhoto } from '../../lib/pickChatPhoto';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { supabase } from '../../lib/supabase';
 
@@ -60,6 +70,12 @@ export default function CommunityThreadScreen() {
   const [myId, setMyId] = useState<string | null>(null);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [showReport, setShowReport] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const selectionRef = useRef({ start: 0, end: 0 });
+  const draftRef = useRef('');
   const { blockUser } = useBlock();
 
   useEffect(() => {
@@ -100,6 +116,23 @@ export default function CommunityThreadScreen() {
     queryFn: getCommunityChatPayload,
   });
   const card = payload?.cards.find((c) => c.community_id === id) ?? null;
+
+  const { data: members = [] } = useQuery({
+    queryKey: ['community-chat-members', id],
+    queryFn: () => getCommunityChatMembers(id!),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+  const mentionNames = useMemo(() => new Set(
+    members.flatMap((member) => member.first_name ? [member.first_name.toLowerCase()] : []),
+  ), [members]);
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const query = mentionQuery.toLowerCase();
+    return members
+      .filter((member) => member.id !== myId && member.first_name && (!query || member.first_name.toLowerCase().startsWith(query)))
+      .slice(0, 6);
+  }, [members, mentionQuery, myId]);
 
   const { data: broadcasts = [], isLoading } = useQuery({
     queryKey: ['community-broadcasts', id],
@@ -145,7 +178,7 @@ export default function CommunityThreadScreen() {
       .channel(`community-thread-${id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'community_broadcasts', filter: `community_id=eq.${id}` },
+        { event: '*', schema: 'public', table: 'community_broadcasts', filter: `community_id=eq.${id}` },
         () => {
           queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] });
           markBroadcastsRead(id).catch(() => {});
@@ -166,8 +199,12 @@ export default function CommunityThreadScreen() {
     if (!id || !draft.trim() || sending) return;
     setSending(true);
     try {
-      await sendCommunityMessage(id, draft);
+      if (editingMessageId) await editCommunityMessage(editingMessageId, draft);
+      else await sendCommunityMessage(id, draft);
       setDraft('');
+      draftRef.current = '';
+      setEditingMessageId(null);
+      setMentionQuery(null);
       await queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] });
       listRef.current?.scrollToEnd({ animated: true });
     } catch (e) {
@@ -186,6 +223,55 @@ export default function CommunityThreadScreen() {
     } catch (e) {
       showError('That did not save', friendlyError(e, 'Try again in a moment.'));
     }
+  };
+
+  const handleDeleteMessage = async (messageId: string) => {
+    try {
+      await deleteCommunityMessage(messageId);
+      hapticLight();
+      await queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] });
+    } catch (e) {
+      showError('That did not remove', friendlyError(e, 'Try again in a moment.'));
+    }
+  };
+
+  const openOwnMessageMenu = (message: CommunityBroadcast) => {
+    hapticLight();
+    setAlertInfo({
+      title: 'Your message',
+      buttons: [
+        ...(message.body ? [{ text: 'edit', onPress: () => { setDraft(message.body); draftRef.current = message.body; setEditingMessageId(message.id); } }] : []),
+        { text: 'delete this message', style: 'destructive', onPress: () => handleDeleteMessage(message.id) },
+        { text: 'cancel', style: 'cancel' },
+      ],
+    });
+  };
+
+  const handlePickPhoto = async () => {
+    if (!myId || !id || uploadingPhoto || editingMessageId) return;
+    setUploadingPhoto(true);
+    try {
+      const imageUrl = await pickAndUploadChatPhoto(myId);
+      if (!imageUrl) return;
+      await sendCommunityMessage(id, draft, imageUrl);
+      setDraft('');
+      draftRef.current = '';
+      setMentionQuery(null);
+      await queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] });
+      listRef.current?.scrollToEnd({ animated: true });
+    } catch (e) {
+      showError('That photo did not send', friendlyError(e, 'Try again in a moment.'));
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const insertMention = (firstName: string) => {
+    const inserted = insertMentionAt(draftRef.current, selectionRef.current.start, firstName);
+    setDraft(inserted.text);
+    draftRef.current = inserted.text;
+    selectionRef.current = { start: inserted.caret, end: inserted.caret };
+    setMentionQuery(null);
   };
 
   return (
@@ -246,37 +332,66 @@ export default function CommunityThreadScreen() {
           ref={listRef}
           data={thread}
           keyExtractor={(b) => b.id}
-          renderItem={({ item }) =>
-            item.kind === 'message' ? (
-              <View style={[styles.messageRow, item.sender_id === myId && styles.messageRowMine]}>
-                {/* T3 (doc 121): faces in the main chat, exactly the topic
-                    rooms' treatment; broadcast and intro cards keep their
-                    distinct look (that redesign is T5, gated on T2) */}
-                {item.sender_id !== myId && (item.sender_photo ? (
-                  <Image source={{ uri: item.sender_photo }} style={styles.face} contentFit="cover" />
-                ) : (
-                  <View style={[styles.face, styles.facePlaceholder]}>
-                    <Text style={styles.faceInitial}>{(item.sender_name ?? '?').slice(0, 1).toLowerCase()}</Text>
+          renderItem={({ item, index }) => {
+            const previous = index > 0 ? thread[index - 1] : null;
+            const showDay = !previous || !isSameChatDay(previous.created_at, item.created_at);
+            const grouped = item.kind === 'message'
+              && previous?.kind === 'message'
+              && previous.sender_id === item.sender_id
+              && isSameChatDay(previous.created_at, item.created_at);
+            const mine = item.sender_id === myId;
+            const firstUrl = extractFirstUrl(item.body);
+            return (
+              <View>
+                {showDay && <Text style={styles.daySeparator}>{formatChatDay(item.created_at)}</Text>}
+                {item.kind === 'message' ? (
+                  <View style={[styles.messageRow, grouped && styles.messageRowGrouped, mine && styles.messageRowMine]}>
+                    {!mine && (!grouped ? (
+                      <TouchableOpacity onPress={() => setProfileUserId(item.sender_id)} accessibilityLabel={`View ${item.sender_name ?? 'member'} profile`}>
+                        {item.sender_photo ? (
+                          <Image source={{ uri: item.sender_photo }} style={styles.face} contentFit="cover" />
+                        ) : (
+                          <View style={[styles.face, styles.facePlaceholder]}>
+                            <Text style={styles.faceInitial}>{(item.sender_name ?? '?').slice(0, 1).toLowerCase()}</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    ) : <View style={styles.faceSpacer} />)}
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onLongPress={() => {
+                        if (mine) openOwnMessageMenu(item);
+                        else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone');
+                      }}
+                      style={[styles.bubble, mine && styles.bubbleMine]}
+                      accessibilityHint="hold for message actions"
+                    >
+                      {!mine && !grouped && <Text style={styles.senderName}>{item.sender_name ?? 'someone'}</Text>}
+                      {!!item.image_url && <Image source={{ uri: item.image_url }} style={styles.messageImage} contentFit="cover" />}
+                      {!!item.body && (
+                        <LinkifiedText
+                          text={item.body}
+                          style={[styles.messageText, mine && styles.messageTextMine]}
+                          linkStyle={mine && styles.messageTextMine}
+                          mentionNames={mentionNames}
+                          mentionStyle={mine && styles.messageTextMine}
+                        />
+                      )}
+                      {!!firstUrl && <LinkPreviewCard url={firstUrl} isOwn={mine} />}
+                      {!!item.edited_at && <Text style={[styles.editedText, mine && styles.messageTextMine]}>edited</Text>}
+                    </TouchableOpacity>
                   </View>
-                ))}
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onLongPress={() => { if (item.sender_id && item.sender_id !== myId) openMemberMenu(item.sender_id, item.sender_name ?? 'someone'); }}
-                  style={[styles.bubble, item.sender_id === myId && styles.bubbleMine]}
-                  accessibilityHint={item.sender_id !== myId ? 'hold to report or block' : undefined}
-                >
-                  {item.sender_id !== myId && (
-                    <Text style={styles.senderName}>{item.sender_name ?? 'someone'}</Text>
-                  )}
-                  <Text style={[styles.messageText, item.sender_id === myId && styles.messageTextMine]}>
-                    {item.body}
-                  </Text>
-                </TouchableOpacity>
+                ) : (
+                  <BroadcastCard
+                    broadcast={item}
+                    communityName={card?.name ?? ''}
+                    onError={showError}
+                    mentionNames={mentionNames}
+                  />
+                )}
               </View>
-            ) : (
-              <BroadcastCard broadcast={item} communityName={card?.name ?? ''} onError={showError} />
-            )
-          }
+            );
+          }}
           contentContainerStyle={styles.listContent}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           ListEmptyComponent={
@@ -301,11 +416,68 @@ export default function CommunityThreadScreen() {
       ) : (
         <>
           {!online && <OfflineBanner label="you're offline. messages will send once you're back." />}
+          {mentionQuery !== null && mentionCandidates.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.mentionBar}
+            >
+              {mentionCandidates.map((member) => (
+                <TouchableOpacity
+                  key={member.id}
+                  style={styles.mentionChip}
+                  onPress={() => insertMention(member.first_name!)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Mention ${member.first_name}`}
+                >
+                  {member.avatar_url ? (
+                    <Image source={{ uri: member.avatar_url }} style={styles.mentionAvatar} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.mentionAvatar, styles.facePlaceholder]}>
+                      <Text style={styles.faceInitial}>{member.first_name?.slice(0, 1).toLowerCase()}</Text>
+                    </View>
+                  )}
+                  <Text style={styles.mentionName} numberOfLines={1}>{member.first_name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+          {!!editingMessageId && (
+            <View style={styles.editingBar}>
+              <Text style={styles.editingText}>editing</Text>
+              <TouchableOpacity onPress={() => { setEditingMessageId(null); setDraft(''); draftRef.current = ''; }} hitSlop={8} accessibilityLabel="Cancel edit">
+                <X size={18} color={Colors.tertiary} />
+              </TouchableOpacity>
+            </View>
+          )}
           <View style={styles.composer}>
+            <TouchableOpacity
+              style={styles.photoBtn}
+              onPress={handlePickPhoto}
+              disabled={!myId || uploadingPhoto || !!editingMessageId}
+              accessibilityRole="button"
+              accessibilityLabel="Add photo"
+            >
+              {uploadingPhoto
+                ? <ActivityIndicator size="small" color={Colors.terracotta} />
+                : <ImageIcon size={22} color={Colors.terracotta} strokeWidth={2.25} />}
+            </TouchableOpacity>
             <TextInput
               style={styles.input}
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={(text) => {
+                const previousLength = draftRef.current.length;
+                const caret = selectionRef.current.start >= previousLength ? text.length : selectionRef.current.start;
+                selectionRef.current = { start: caret, end: caret };
+                draftRef.current = text;
+                setDraft(text);
+                setMentionQuery(mentionQueryAt(text, caret));
+              }}
+              onSelectionChange={(event) => {
+                selectionRef.current = event.nativeEvent.selection;
+                setMentionQuery(mentionQueryAt(draftRef.current, event.nativeEvent.selection.start));
+              }}
               placeholder="say something"
               placeholderTextColor={Colors.inkSoft}
               multiline
@@ -344,6 +516,20 @@ export default function CommunityThreadScreen() {
           reportedUserName={reportTarget.name}
         />
       )}
+      <MiniProfileCard
+        visible={!!profileUserId}
+        userId={profileUserId}
+        onClose={() => setProfileUserId(null)}
+        onReport={(userId, userName) => {
+          setProfileUserId(null);
+          setReportTarget({ id: userId, name: userName });
+          setShowReport(true);
+        }}
+        onBlock={(userId, userName) => {
+          setProfileUserId(null);
+          blockUser(userId, userName, () => queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] }));
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -418,8 +604,10 @@ const styles = StyleSheet.create({
   welcomeBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
   flex: { flex: 1 },
   messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 10 },
+  messageRowGrouped: { marginTop: -7 },
   messageRowMine: { justifyContent: 'flex-end' },
   face: { width: 28, height: 28, borderRadius: 14 },
+  faceSpacer: { width: 28 },
   facePlaceholder: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
   faceInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
   bubble: {
@@ -435,6 +623,40 @@ const styles = StyleSheet.create({
   senderName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 2 },
   messageText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   messageTextMine: { color: Colors.white },
+  messageImage: { width: 220, height: 180, borderRadius: 12, backgroundColor: Colors.inputBg, marginBottom: 6 },
+  editedText: { fontFamily: Fonts.sans, fontSize: FontSizes.micro, color: Colors.tertiary, marginTop: 3 },
+  daySeparator: {
+    alignSelf: 'center',
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    marginVertical: 8,
+  },
+  mentionBar: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: 'center' },
+  mentionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    backgroundColor: Colors.inputBg,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  mentionAvatar: { width: 26, height: 26, borderRadius: 13 },
+  mentionName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, maxWidth: 120 },
+  editingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  editingText: { flex: 1, fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -444,6 +666,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.parchment,
+  },
+  photoBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.inputBg,
   },
   input: {
     flex: 1,

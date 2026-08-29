@@ -127,6 +127,24 @@ export function deriveEventState(e: EventStateFields, nowISO: string = new Date(
 }
 
 /**
+ * Audit finding (2026-08-28, 75-threshold spec item 2): tickets are born as
+ * drafts and a creator can publish a real event believing a typed price
+ * means it's sellable, when nobody can actually buy yet. Zero tiers is a
+ * legitimate free/RSVP event (same read as warnIfNothingOnSale in
+ * event-form.tsx) -- only "tiers exist, none on sale" is the real gap this
+ * flags. Orthogonal to EventState/deriveEventState on purpose: this is a
+ * ticket-setup nudge, not a new event-lifecycle state, so it layers on top
+ * without touching the tested 8-word state vocabulary.
+ * Review finding 2026-08-29: TierStatus has a real 'closed' state (sale
+ * already ran and ended) distinct from 'draft' (never published) -- the
+ * original "none on_sale" check caught both, mislabeling a correctly closed
+ * sale as "still drafts." Only an actual draft tier means something.
+ */
+export function hasUnpublishedTickets(tiers: Pick<TicketTier, 'status'>[]): boolean {
+  return tiers.some((t) => t.status === 'draft') && !tiers.some((t) => t.status === 'on_sale');
+}
+
+/**
  * C-16: a real product decision this repo never wrote down, so this is a
  * reasonable proposal, not a confirmed spec -- a draft past its date, OR a
  * live event within 2 days of start with zero RSVPs/purchases (day-granular,

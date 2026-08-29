@@ -114,7 +114,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
       location_text: plan.location_text,
       slug: plan.slug ?? null,
     });
-    Share.share({ message: share.message, url: share.url });
+    Share.share({ message: `${share.message}\n${share.url}` });
   }, [plan.id, plan.title, plan.start_time, plan.location_text, plan.slug]);
 
   const handlePress = useCallback(() => {

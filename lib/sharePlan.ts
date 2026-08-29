@@ -1,9 +1,10 @@
 /**
  * Builds the share content for a plan. `message` is the human-readable label
- * (title + date + venue), `url` is the deep-linkable URL. The caller passes
- * both to React Native's Share.share — keeping the URL out of `message` avoids
- * the URL being rendered twice on iOS apps that concatenate both fields
- * (e.g. WhatsApp shows message+url back-to-back).
+ * (title + date + venue), `url` is the deep-linkable URL. Callers should
+ * combine them into a single Share.share({ message: `${message}\n${url}` })
+ * call — passing `url` as its own field relies on the receiving app to insert
+ * a separator, which WhatsApp's share extension does not do, gluing the URL
+ * directly onto the preceding text (confirmed live, Liz 2026-08-27).
  */
 interface SharePlanInput {
   id: string;
