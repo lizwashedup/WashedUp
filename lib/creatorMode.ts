@@ -165,7 +165,7 @@ export async function getCreatorAccess(): Promise<CreatorAccess> {
       .select('role, joined_at, communities ( id, handle, name, status )')
       .eq('user_id', user.id)
       .eq('status', 'active')
-      .in('role', ['leader', 'co_leader', 'admin', 'events', 'member_care', 'finance'])
+      .neq('role', 'member')
       // deterministic order: the oldest-led community is the default the
       // switcher (lib/selectedCommunity) falls back to
       .order('joined_at', { ascending: true }),
