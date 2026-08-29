@@ -63,7 +63,7 @@ const FAQ: FaqItem[] = [
   },
   {
     q: 'what is the difference between a community event and a standalone event',
-    a: 'a community event posts from your community and can pin to your community chat. a standalone event is put on by you or your organizer profile alone, with no member room attached.',
+    a: 'a community event posts from your community and can pin to your community chat. a standalone event is put on by you or your organization alone, with no member room attached.',
   },
   {
     q: 'why can’t I see the "attendees" tab',

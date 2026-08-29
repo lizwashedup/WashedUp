@@ -30,6 +30,8 @@ import ProgressHead from '../../../components/onboarding/ProgressHead';
 const GENDERS = ['woman', 'man', 'non-binary'] as const;
 type Gender = (typeof GENDERS)[number];
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const GENDER_TO_ENUM: Record<Gender, string> = {
   woman: 'woman',
   man: 'man',
@@ -65,6 +67,7 @@ export default function OnboardingBasicsScreen() {
   const [gender, setGender] = useState<Gender | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
@@ -171,7 +174,15 @@ export default function OnboardingBasicsScreen() {
   }, []);
 
   const namesValid = firstName.trim().length > 0 && lastName.trim().length > 0;
-  const canContinue = !!birthday && !!gender && !dateError && namesValid;
+  const trimmedEmail = email.trim();
+  const canContinue = !!birthday && !!gender && !dateError && namesValid && !!trimmedEmail && EMAIL_REGEX.test(trimmedEmail);
+
+  const validateEmail = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return 'email is required.';
+    if (!EMAIL_REGEX.test(trimmed)) return 'enter a valid email address.';
+    return null;
+  };
 
   const openDatePicker = () => {
     if (birthday) {
@@ -203,7 +214,9 @@ export default function OnboardingBasicsScreen() {
   const submit = useSubmitGuard();
 
   const handleContinue = async () => {
-    if (!canContinue || !birthday || !gender || loading) return;
+    const nextEmailError = validateEmail(email);
+    setEmailError(nextEmailError);
+    if (!canContinue || nextEmailError || !birthday || !gender || loading) return;
     if (!submit.tryAcquire()) return;
     setSaveError(null);
     setLoading(true);
@@ -233,7 +246,6 @@ export default function OnboardingBasicsScreen() {
         email: string | null;
         marketing_opt_in: boolean;
       };
-      const trimmedEmail = email.trim();
       const updates: ProfileUpdate = {
         birthday: isoBirthday,
         gender: GENDER_TO_ENUM[gender],
@@ -367,13 +379,17 @@ export default function OnboardingBasicsScreen() {
             </View>
             <View style={styles.gap16} />
 
-            <Text style={styles.label}>
-              email <Text style={styles.labelHint}>(optional)</Text>
-            </Text>
+            <Text style={styles.label}>email</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, emailError ? styles.inputError : null]}
               value={email}
-              onChangeText={(t) => setEmail(t ?? '')}
+              onChangeText={(t) => {
+                const nextEmail = t ?? '';
+                setEmail(nextEmail);
+                if (emailError) setEmailError(validateEmail(nextEmail));
+              }}
+              onBlur={() => setEmailError(validateEmail(email))}
+              onSubmitEditing={() => setEmailError(validateEmail(email))}
               placeholder="you@example.com"
               placeholderTextColor={Colors.text3}
               keyboardType="email-address"
@@ -384,6 +400,9 @@ export default function OnboardingBasicsScreen() {
               returnKeyType="next"
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
+            {emailError ? (
+              <Text style={styles.fieldError}>{emailError}</Text>
+            ) : null}
             <View style={styles.gap16} />
 
             <Pressable
@@ -578,13 +597,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: Colors.text2,
     marginBottom: 8,
-  },
-  labelHint: {
-    fontFamily: Fonts.sans,
-    fontSize: 11,
-    letterSpacing: 0.2,
-    textTransform: 'none',
-    color: Colors.text3,
   },
   nameRow: {
     flexDirection: 'row',

@@ -101,7 +101,7 @@ export default function CreatorMenuScreen() {
                 ? community.name.toLowerCase()
                 : organizerProfile
                   ? organizerProfile.display_name.toLowerCase()
-                  : 'your organizer profile'}
+                  : 'your organization'}
             </Text>
             <TouchableOpacity
               onPress={() =>
@@ -116,7 +116,7 @@ export default function CreatorMenuScreen() {
                 {community
                   ? 'view your public page'
                   : organizerProfile
-                    ? 'edit your organizer profile'
+                    ? 'edit your organization'
                     : 'set it up. takes a minute.'}
               </Text>
             </TouchableOpacity>
@@ -174,7 +174,7 @@ export default function CreatorMenuScreen() {
                 identity (proposal 36) keeps a quiet row; for event hosts
                 the identity card above IS this entry */}
             {/* LIZ COPY */}
-            <Text style={styles.sectionLabel}>your organizer profile</Text>
+            <Text style={styles.sectionLabel}>your organization</Text>
             <TouchableOpacity
               style={styles.organizerCard}
               onPress={() => router.push('/creator/organizer-profile')}
@@ -185,7 +185,7 @@ export default function CreatorMenuScreen() {
               ) : null}
               <View style={styles.organizerBody}>
                 <Text style={styles.organizerName}>
-                  {organizerProfile ? organizerProfile.display_name : 'set up your organizer profile'}
+                  {organizerProfile ? organizerProfile.display_name : 'set up your organization'}
                 </Text>
                 {/* LIZ COPY */}
                 <Text style={styles.organizerMeta}>

@@ -218,7 +218,7 @@ export default function OrganizerHomeScreen() {
         <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/creator/organizer-profile')} activeOpacity={0.8}>
           <View style={{ flex: 1 }}>
             {/* LIZ COPY */}
-            <Text style={styles.linkRowTitle}>your organizer profile</Text>
+            <Text style={styles.linkRowTitle}>your organization</Text>
             <Text style={styles.linkRowMeta}>
               {organizerProfile ? 'the name your events wear' : 'set it up. takes a minute.'}
             </Text>

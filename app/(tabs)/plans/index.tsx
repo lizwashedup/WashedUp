@@ -362,15 +362,27 @@ function groupIntoFeedItems(plans: Plan[]): FeedItem[] {
   }
   for (const rootId of Object.keys(clusters)) {
     const members = clusters[rootId];
-    if (members.length < 2) {
-      // Cluster collapsed to 1 by client-side filters — render as a normal
-      // standalone card with no "popular plan" header.
-      items.push({ kind: 'standalone', plan: members[0] });
-      continue;
-    }
     // Most spots first (leftmost), full plans last.
     members.sort((a, b) => feedItemSpotsRemaining(b) - feedItemSpotsRemaining(a));
-    items.push({ kind: 'cluster', rootId, plans: members });
+
+    // Cap each creator at one card, preserving the cluster's existing sort
+    // priority by keeping the first plan encountered for each creator id.
+    const seenCreatorIds = new Set<string>();
+    const cappedMembers = members.filter((plan) => {
+      const creatorId = plan.creator?.id;
+      if (!creatorId) return true;
+      if (seenCreatorIds.has(creatorId)) return false;
+      seenCreatorIds.add(creatorId);
+      return true;
+    });
+
+    if (cappedMembers.length < 2) {
+      // Cluster collapsed to 1 by client-side filters or the creator cap —
+      // render as a normal standalone card with no "popular plan" header.
+      items.push({ kind: 'standalone', plan: cappedMembers[0] });
+      continue;
+    }
+    items.push({ kind: 'cluster', rootId, plans: cappedMembers });
   }
   // Final chronological pass: clusters slot in by their earliest member's
   // start_time, interleaved with standalones — otherwise clusters all bunch

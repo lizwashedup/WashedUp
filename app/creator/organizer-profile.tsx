@@ -122,7 +122,7 @@ export default function OrganizerProfileScreen() {
         ) : (
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             {/* LIZ COPY */}
-            <Text style={styles.title}>your organizer profile</Text>
+            <Text style={styles.title}>your organization</Text>
             {/* LIZ COPY */}
             <Text style={styles.subtitle}>
               the name your events wear. it fronts your listings; each event can still set its own.
