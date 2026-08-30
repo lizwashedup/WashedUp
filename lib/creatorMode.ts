@@ -149,7 +149,8 @@ export function coCreatorRoleTag(role: CommunityMemberRole): string {
 }
 
 export async function getCreatorAccess(): Promise<CreatorAccess> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
   if (!user) return { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: false, isRevoked: false };
 
   // admin view-as (doc 00 7-13): force the event-host-only shape at the one
@@ -159,7 +160,7 @@ export async function getCreatorAccess(): Promise<CreatorAccess> {
     return { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: true, isRevoked: false };
   }
 
-  const [{ data: memberships }, { data: grants }] = await Promise.all([
+  const [membershipResult, grantResult] = await Promise.all([
     supabase
       .from('community_members')
       .select('role, joined_at, communities ( id, handle, name, status )')
@@ -175,6 +176,10 @@ export async function getCreatorAccess(): Promise<CreatorAccess> {
       .eq('user_id', user.id)
       .in('status', ['approved', 'revoked']),
   ]);
+  if (membershipResult.error) throw membershipResult.error;
+  if (grantResult.error) throw grantResult.error;
+  const memberships = membershipResult.data;
+  const grants = grantResult.data;
 
   const ledCommunities: LedCommunity[] = (memberships ?? [])
     .map((m: any) => {

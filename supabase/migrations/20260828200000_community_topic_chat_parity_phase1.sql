@@ -49,6 +49,55 @@ CREATE INDEX IF NOT EXISTS idx_community_topic_messages_reply_to
   ON public.community_topic_messages (reply_to_message_id)
   WHERE reply_to_message_id IS NOT NULL;
 
+-- UPDATE is intentionally available to message owners for body/image edits,
+-- but row identity and room identity must never move with that edit.
+CREATE OR REPLACE FUNCTION public.community_topic_message_identity_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = 'public'
+AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.topic_id IS DISTINCT FROM OLD.topic_id
+     OR NEW.sender_id IS DISTINCT FROM OLD.sender_id
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'community topic message identity cannot be changed';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS community_topic_message_identity_guard ON public.community_topic_messages;
+CREATE TRIGGER community_topic_message_identity_guard
+  BEFORE UPDATE ON public.community_topic_messages
+  FOR EACH ROW EXECUTE FUNCTION public.community_topic_message_identity_immutable();
+
+-- A reply must point to a message in the same topic. A plain FK proves only
+-- that the parent exists and otherwise permits cross-room reply corruption.
+CREATE OR REPLACE FUNCTION public.community_topic_message_reply_same_topic()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = 'public'
+AS $$
+DECLARE
+  v_parent_topic_id uuid;
+BEGIN
+  IF NEW.reply_to_message_id IS NULL THEN RETURN NEW; END IF;
+  SELECT topic_id INTO v_parent_topic_id
+  FROM public.community_topic_messages
+  WHERE id = NEW.reply_to_message_id;
+  IF v_parent_topic_id IS NULL OR v_parent_topic_id IS DISTINCT FROM NEW.topic_id THEN
+    RAISE EXCEPTION 'reply target must belong to the same community topic';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS community_topic_message_reply_topic_guard ON public.community_topic_messages;
+CREATE TRIGGER community_topic_message_reply_topic_guard
+  BEFORE INSERT OR UPDATE ON public.community_topic_messages
+  FOR EACH ROW EXECUTE FUNCTION public.community_topic_message_reply_same_topic();
+
 DROP POLICY IF EXISTS community_topic_messages_update_own ON public.community_topic_messages;
 CREATE POLICY community_topic_messages_update_own ON public.community_topic_messages
   FOR UPDATE
@@ -76,7 +125,36 @@ CREATE TABLE IF NOT EXISTS public.community_topic_message_reactions (
   UNIQUE (message_id, user_id)
 );
 
+ALTER TABLE public.community_topic_message_reactions
+  DROP CONSTRAINT IF EXISTS community_topic_message_reactions_value_check;
+ALTER TABLE public.community_topic_message_reactions
+  ADD CONSTRAINT community_topic_message_reactions_value_check
+  CHECK (char_length(reaction) BETWEEN 1 AND 16);
+
 ALTER TABLE public.community_topic_message_reactions ENABLE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON public.community_topic_message_reactions TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.community_topic_reaction_identity_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = 'public'
+AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.message_id IS DISTINCT FROM OLD.message_id
+     OR NEW.user_id IS DISTINCT FROM OLD.user_id
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'community topic reaction identity cannot be changed';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS community_topic_reaction_identity_guard ON public.community_topic_message_reactions;
+CREATE TRIGGER community_topic_reaction_identity_guard
+  BEFORE UPDATE ON public.community_topic_message_reactions
+  FOR EACH ROW EXECUTE FUNCTION public.community_topic_reaction_identity_immutable();
 
 -- Membership check reuses is_topic_member(topic_id, user_id), the same
 -- SECURITY DEFINER helper community_topic_messages_select/_insert already use
@@ -148,6 +226,28 @@ ALTER TABLE public.community_broadcasts
   ADD COLUMN IF NOT EXISTS image_url text,
   ADD COLUMN IF NOT EXISTS edited_at timestamptz;
 
+CREATE OR REPLACE FUNCTION public.community_broadcast_identity_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = 'public'
+AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.community_id IS DISTINCT FROM OLD.community_id
+     OR NEW.sender_id IS DISTINCT FROM OLD.sender_id
+     OR NEW.kind IS DISTINCT FROM OLD.kind
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'community message identity cannot be changed';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS community_broadcast_identity_guard ON public.community_broadcasts;
+CREATE TRIGGER community_broadcast_identity_guard
+  BEFORE UPDATE ON public.community_broadcasts
+  FOR EACH ROW EXECUTE FUNCTION public.community_broadcast_identity_immutable();
+
 ALTER TABLE public.community_broadcasts
   DROP CONSTRAINT IF EXISTS community_broadcasts_body_check;
 ALTER TABLE public.community_broadcasts
@@ -203,6 +303,22 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns
     WHERE table_schema='public' AND table_name='community_broadcasts' AND column_name='edited_at') THEN
     RAISE EXCEPTION 'community_broadcasts.edited_at missing';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+    WHERE tgname='community_topic_message_identity_guard' AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'community topic message identity guard missing';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+    WHERE tgname='community_topic_message_reply_topic_guard' AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'community topic reply guard missing';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+    WHERE tgname='community_topic_reaction_identity_guard' AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'community topic reaction identity guard missing';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+    WHERE tgname='community_broadcast_identity_guard' AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'community broadcast identity guard missing';
   END IF;
 END $$;
 

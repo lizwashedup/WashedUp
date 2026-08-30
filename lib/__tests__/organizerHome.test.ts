@@ -84,6 +84,10 @@ describe('sumTierCapacity', () => {
     ).toBe(50);
   });
 
+  it('ignores closed tiers because they are no longer offered', () => {
+    expect(sumTierCapacity([tier({ quantity_cap: 50, status: 'closed' })])).toBeNull();
+  });
+
   it('returns null when there are no offered tiers', () => {
     expect(sumTierCapacity([tier({ status: 'draft' })])).toBeNull();
     expect(sumTierCapacity([])).toBeNull();
@@ -183,6 +187,15 @@ describe('deriveEventState', () => {
     expect(
       deriveEventState(
         event({ status: 'Live', event_date: '2026-09-01T02:00:00.000Z', tiers: [{ quantity_cap: 50, status: 'draft' }] }),
+        now,
+      ),
+    ).toBe('scheduled');
+  });
+
+  it('is scheduled, not sold_out, when every tier is closed', () => {
+    expect(
+      deriveEventState(
+        event({ status: 'Live', event_date: '2026-09-01T02:00:00.000Z', tiers: [{ quantity_cap: 50, status: 'closed' }], ticketsSold: 50 }),
         now,
       ),
     ).toBe('scheduled');

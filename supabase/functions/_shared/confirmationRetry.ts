@@ -17,39 +17,25 @@
 //      already uses (proven in the 2026-07-21 rewrite and the 2026-08-14
 //      money audit) rather than a second bespoke retry system.
 
-/** In-call attempts against Resend within ONE drain invocation (the fast
- * path for a blip that clears in under ~1.2s). Anything still failing after
- * this is handed to a durable retry row, which gets the SAME
- * claim/attempts/poison-cap machinery (up to MAX_ATTEMPTS drain cycles) as
- * every other row in ticket_webhook_events, so there is no reason to burn a
- * large in-call time budget here — a batch can hold up to BATCH_SIZE rows
- * and every one of them shares the same invocation's wall-clock budget. */
-export const CONFIRMATION_SEND_ATTEMPTS = 3;
+/** One provider call per durable queue attempt. Retrying inside the serial
+ * settlement drain let a small set of failing emails monopolize the queue.
+ * The inbox row already supplies bounded durable retries, so each invocation
+ * should fail fast and yield. */
+export const CONFIRMATION_SEND_ATTEMPTS = 1;
 
-const BACKOFF_SCHEDULE_MS = [300, 900] as const;
+/** Bound one provider attempt tightly enough that confirmation failures cannot
+ * starve fresh paid checkout events in the same drain. */
+export const CONFIRMATION_SEND_TIMEOUT_MS = 5_000;
 
-/** Delay before in-call retry attempt `attemptIndex` (0-based: 0 = the
- * delay before the SECOND overall attempt, i.e. the first retry). Clamped
- * to the schedule's last value past its length instead of growing
- * unbounded, and never negative. */
-export function confirmationBackoffMs(attemptIndex: number): number {
-  if (attemptIndex < 0) return 0;
-  return BACKOFF_SCHEDULE_MS[Math.min(attemptIndex, BACKOFF_SCHEDULE_MS.length - 1)];
+/** Resend deduplicates this request for 24 hours. The queue's poison window is
+ * about one hour, so every retry of one order uses the same provider key. */
+export function confirmationIdempotencyKey(orderId: string): string {
+  return `ticket-confirmation/${orderId}`;
 }
 
-/**
- * Should a Resend response be retried WITHIN this same invocation? `status`
- * is null for a thrown/timed-out fetch (fetchWithTimeout's own "unreachable"
- * signal, which never distinguishes a DNS/TLS/connect failure from a real
- * timeout) — always worth an immediate retry, same as a 5xx/429/408. A clean
- * 4xx otherwise (bad request, invalid/rotated API key, unprocessable
- * recipient) will not succeed on the SAME key and payload a moment later, so
- * in-call retry is skipped for it; it still gets a durable retry (decided by
- * the caller in ticket-inbox-drain, not here) because the underlying cause
- * might be fixed within the drain's retry window (e.g. an operator rotates a
- * key back, or Resend's own validation was a transient false rejection).
- */
-export function isImmediatelyRetryableStatus(status: number | null): boolean {
-  if (status === null) return true;
-  return status === 408 || status === 429 || (status >= 500 && status < 600);
+/** A replay after a crash can see settle_ticket_hold return false even though
+ * the first attempt already committed the paid order. Never cancel that
+ * order's valid confirmation outbox or claim a refund is owed. */
+export function settlementFalseDisposition(orderStatus: string | null): 'already_paid' | 'refund_owed' {
+  return orderStatus === 'paid' ? 'already_paid' : 'refund_owed';
 }

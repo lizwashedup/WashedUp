@@ -29,7 +29,7 @@ export default function CreatorLayout() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const viewingAsEventHost = useViewAsEventHost();
-  const { data: access, isLoading } = useQuery({
+  const { data: access, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['creator-access'],
     queryFn: getCreatorAccess,
     staleTime: 30_000,
@@ -41,6 +41,13 @@ export default function CreatorLayout() {
         <ActivityIndicator size="large" color={Colors.terracotta} />
       </View>
     );
+  }
+
+  // A failed access read is unknown, never "no access." Redirecting here
+  // recreates the setup-loop failure mode during any transient database or
+  // network error. Keep the creator in place and let them retry the query.
+  if (isError) {
+    return <CreatorAccessErrorScreen retry={() => void refetch()} retrying={isFetching} />;
   }
 
   // inventory C-01: a revoked creator gets a real Support screen, not a
@@ -183,6 +190,31 @@ export default function CreatorLayout() {
         </View>
       )}
     </View>
+  );
+}
+
+function CreatorAccessErrorScreen({ retry, retrying }: { retry: () => void; retrying: boolean }) {
+  return (
+    <SafeAreaView style={revokedStyles.container} edges={['top', 'bottom']}>
+      <View style={revokedStyles.content}>
+        <Text style={revokedStyles.title}>creator space didn’t load</Text>
+        <Text style={revokedStyles.body}>your access has not changed. check your connection and try again.</Text>
+        <TouchableOpacity
+          style={revokedStyles.supportBtn}
+          onPress={retry}
+          disabled={retrying}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Retry creator access"
+        >
+          {retrying ? (
+            <ActivityIndicator color={Colors.white} />
+          ) : (
+            <Text style={revokedStyles.supportBtnText}>try again</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 

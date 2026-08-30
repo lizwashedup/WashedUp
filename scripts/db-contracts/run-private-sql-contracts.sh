@@ -23,7 +23,10 @@ TECHNICAL_HARDENING_MIGRATION="$REPO_ROOT/docs/database/review-only/technical-da
 EVENT_MEMBERS_PUBLIC_MIGRATION="$REPO_ROOT/supabase/migrations/20260824210000_secure_event_members_public_visibility.sql"
 TOPIC_ALBUM_HARDENING_MIGRATION="$REPO_ROOT/supabase/migrations/20260824211000_harden_topic_album_upload_metadata.sql"
 IDENTITY_MARKS_TRIGGER_MIGRATION="$REPO_ROOT/supabase/migrations/20260824212000_fix_event_members_identity_marks_trigger_safe.sql"
+THRESHOLD_CHAT_MIGRATION="$REPO_ROOT/supabase/migrations/20260828200000_community_topic_chat_parity_phase1.sql"
+THRESHOLD_RECEIPT_MIGRATION="$REPO_ROOT/supabase/migrations/20260829210000_ticket_receipt_resend_rate_limit.sql"
 CONTRACT_FILES="$CONTRACT_ROOT/supabase/tests/contracts"
+CONTRACT_LANE=${DB_CONTRACT_LANE:-${1:-}}
 
 case "$CONTAINER" in
   washedup-db-contracts-[0-9]*) ;;
@@ -46,6 +49,8 @@ for required_file in \
   "$EVENT_MEMBERS_PUBLIC_MIGRATION" \
   "$TOPIC_ALBUM_HARDENING_MIGRATION" \
   "$IDENTITY_MARKS_TRIGGER_MIGRATION" \
+  "$THRESHOLD_CHAT_MIGRATION" \
+  "$THRESHOLD_RECEIPT_MIGRATION" \
   "$CONTRACT_FILES/00_account_deletion_fixture.sql" \
   "$CONTRACT_FILES/01_account_deletion_contract.sql" \
   "$CONTRACT_FILES/10_refund_fixture.sql" \
@@ -71,7 +76,9 @@ for required_file in \
   "$CONTRACT_FILES/100_technical_database_hardening_fixture.sql" \
   "$CONTRACT_FILES/101_technical_database_hardening_contract.sql" \
   "$CONTRACT_FILES/110_release_blockers_fixture.sql" \
-  "$CONTRACT_FILES/111_release_blockers_contract.sql"
+  "$CONTRACT_FILES/111_release_blockers_contract.sql" \
+  "$CONTRACT_FILES/120_threshold_75_fixture.sql" \
+  "$CONTRACT_FILES/121_threshold_75_contract.sql"
 do
   if [ ! -f "$required_file" ]; then
     echo "required private contract file is missing: $required_file" >&2
@@ -94,7 +101,9 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 static_status=0
-node "$REPO_ROOT/scripts/db-contracts/static-contracts.mjs" || static_status=$?
+if [ "$CONTRACT_LANE" != "threshold-75" ]; then
+  node "$REPO_ROOT/scripts/db-contracts/static-contracts.mjs" || static_status=$?
+fi
 
 docker image inspect "$IMAGE" >/dev/null
 CONTAINER_ID=$(docker run \
@@ -119,6 +128,8 @@ CONTAINER_ID=$(docker run \
   --volume "$EVENT_MEMBERS_PUBLIC_MIGRATION:/migrations/event-members-public.sql:ro" \
   --volume "$TOPIC_ALBUM_HARDENING_MIGRATION:/migrations/topic-album-hardening.sql:ro" \
   --volume "$IDENTITY_MARKS_TRIGGER_MIGRATION:/migrations/identity-marks-trigger.sql:ro" \
+  --volume "$THRESHOLD_CHAT_MIGRATION:/migrations/threshold-chat.sql:ro" \
+  --volume "$THRESHOLD_RECEIPT_MIGRATION:/migrations/threshold-receipt.sql:ro" \
   --volume "$CONTRACT_FILES:/contracts:ro" \
   "$IMAGE")
 invalid_id=$(printf '%s' "$CONTAINER_ID" | tr -d '0-9a-f')
@@ -158,9 +169,23 @@ run_release_blockers_contract() {
   psql_file release_blockers_contract /contracts/111_release_blockers_contract.sql
 }
 
-if [ "${DB_CONTRACT_LANE:-}" = "release-blockers" ]; then
+run_threshold_75_contract() {
+  docker exec "$CONTAINER_ID" createdb -U postgres threshold_75_contract
+  psql_file threshold_75_contract /contracts/120_threshold_75_fixture.sql
+  psql_file threshold_75_contract /migrations/threshold-chat.sql
+  psql_file threshold_75_contract /migrations/threshold-receipt.sql
+  psql_file threshold_75_contract /contracts/121_threshold_75_contract.sql
+}
+
+if [ "$CONTRACT_LANE" = "release-blockers" ]; then
   run_release_blockers_contract
   echo "PASS: focused release-blocker database contracts"
+  exit 0
+fi
+
+if [ "$CONTRACT_LANE" = "threshold-75" ]; then
+  run_threshold_75_contract
+  echo "PASS: focused threshold 75 database contracts"
   exit 0
 fi
 
@@ -239,6 +264,7 @@ psql_file technical_database_hardening_contract /migrations/technical-database-h
 psql_file technical_database_hardening_contract /contracts/101_technical_database_hardening_contract.sql
 
 run_release_blockers_contract
+run_threshold_75_contract
 
 echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, and identity-marks trigger safety"
 if [ "$static_status" -ne 0 ]; then

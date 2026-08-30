@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { fetchWithTimeout } from '../_shared/fetchWithTimeout.ts';
 
 /**
  * ticket-resend-receipt — TK-05 (2026-08-19), the real half of "email/wallet
@@ -20,10 +21,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
  * CONTRACT: POST, verify_jwt on. Body: { order_id: string }.
  * Success: { ok: true }. Failure: 4xx/5xx with { error }.
  *
- * Scope cut, not a silent guess: no durable per-order cooldown was added —
- * the client disables its own button after one send per screen visit. A
- * persistent server-side cooldown is a reasonable later hardening, not a
- * launch blocker for a buyer re-requesting their own receipt.
+ * A durable per-order cooldown is claimed server-side before the provider
+ * call. Client button state is convenience only, never the abuse boundary.
  */
 
 const CORS = {
@@ -36,6 +35,8 @@ const CORS = {
 // resend reads as the same message, not a different one
 const CONFIRMATION_FROM = 'washedup <tickets@washedup.app>';
 const WALLET_URL = 'https://washedup.app/app/tickets';
+const RESEND_COOLDOWN_MS = 10 * 60 * 1000;
+const PROVIDER_TIMEOUT_MS = 5_000;
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -95,6 +96,21 @@ Deno.serve(async (req) => {
   if (order.buyer_user_id !== callerId) return json(403, { error: 'not your order' });
   if (order.status !== 'paid') return json(409, { error: `order is ${order.status}, nothing to resend` });
 
+  const requestedAt = new Date();
+  const cooldownCutoff = new Date(requestedAt.getTime() - RESEND_COOLDOWN_MS).toISOString();
+  const { data: claimed, error: claimErr } = await service
+    .from('ticket_orders')
+    .update({ receipt_resend_last_requested_at: requestedAt.toISOString() })
+    .eq('id', orderId)
+    .eq('buyer_user_id', callerId)
+    .eq('status', 'paid')
+    .or(`receipt_resend_last_requested_at.is.null,receipt_resend_last_requested_at.lt.${cooldownCutoff}`)
+    .select('id');
+  if (claimErr) return json(500, { error: 'could not start the resend. give it another try.' });
+  if (!claimed || claimed.length === 0) {
+    return json(429, { error: 'a receipt was just requested. try again in a few minutes.' });
+  }
+
   const [{ data: event }, { data: seats }] = await Promise.all([
     service.from('explore_events').select('title, event_date, venue, confirmation_message').eq('id', order.event_id).maybeSingle(),
     service.from('ticket_order_positions').select('position_index, reference_code, voided_at').eq('order_id', orderId).order('position_index', { ascending: true }),
@@ -140,17 +156,22 @@ Deno.serve(async (req) => {
 
   let res: Response | null = null;
   try {
-    res = await fetch('https://api.resend.com/emails', {
+    res = await fetchWithTimeout('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      timeoutMs: PROVIDER_TIMEOUT_MS,
+      headers: {
+        Authorization: `Bearer ${resendKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `ticket-receipt/${orderId}/${Math.floor(requestedAt.getTime() / RESEND_COOLDOWN_MS)}`,
+      },
       body: JSON.stringify({ from: CONFIRMATION_FROM, to: [callerEmail], subject, html, text }),
     });
   } catch (err) {
     console.error('ticket-resend-receipt: resend unreachable', err instanceof Error ? err.message : 'unknown');
     return json(502, { error: 'that did not send. give it another try.' });
   }
-  if (!res.ok) {
-    console.error('ticket-resend-receipt: resend refused', res.status);
+  if (!res || !res.ok) {
+    console.error('ticket-resend-receipt: resend refused', res?.status ?? 'unreachable');
     return json(502, { error: 'that did not send. give it another try.' });
   }
   return json(200, { ok: true });

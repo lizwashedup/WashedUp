@@ -44,7 +44,7 @@ export function pickNextUpcomingEvent(
  * Draft tiers are not yet on sale and do not count as "offered".
  */
 export function sumTierCapacity(tiers: Pick<TicketTier, 'quantity_cap' | 'status'>[]): number | null {
-  const offered = tiers.filter((t) => t.status !== 'draft');
+  const offered = tiers.filter((t) => t.status === 'on_sale');
   if (offered.length === 0) return null;
   let total = 0;
   for (const t of offered) {
@@ -121,7 +121,7 @@ export function deriveEventState(e: EventStateFields, nowISO: string = new Date(
   if (diffDays < 0) return 'ended';
   if (diffDays === 0) return 'live';
   const capacity = sumTierCapacity(e.tiers);
-  if (capacity != null && e.tiers.length > 0 && e.ticketsSold >= capacity) return 'sold_out';
+  if (capacity != null && e.tiers.some((t) => t.status === 'on_sale') && e.ticketsSold >= capacity) return 'sold_out';
   if (e.tiers.some((t) => t.status === 'on_sale')) return 'on_sale';
   return 'scheduled';
 }

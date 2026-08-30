@@ -1,0 +1,33 @@
+{
+  "tester": "authorized tester name",
+  "device": "physical iPhone model and iOS version",
+  "tested_at": "2026-08-29T00:00:00.000Z",
+  "app_version": "1.0.6",
+  "build_number": 35,
+  "test_order_id": "00000000-0000-4000-8000-000000000000",
+  "artifacts": {
+    "testflight": "artifacts/testflight-build-35.png",
+    "chat_and_notifications": "artifacts/chat-notification-walkthrough.mov",
+    "creator_and_tickets": "artifacts/creator-ticket-walkthrough.mov",
+    "ticket_email": "artifacts/ticket-email.png"
+  },
+  "checks": {
+    "testflight_build_35_visible": false,
+    "app_opens": false,
+    "topic_text_seen_by_second_account": false,
+    "topic_photo_seen_and_notification_nonblank": false,
+    "reply_edit_mention_reaction_persist_for_second_account": false,
+    "archived_topic_message_and_reaction_rejected": false,
+    "notification_tap_opens_exact_topic": false,
+    "main_thread_photo_edit_delete_persist_for_second_account": false,
+    "creator_space_does_not_loop": false,
+    "created_community_lands_selected_in_creator_space": false,
+    "draft_ticket_warning_persists_after_return": false,
+    "on_sale_ticket_clears_warning": false,
+    "required_ticket_questions_block_checkout_until_answered": false,
+    "fresh_paid_checkout_email_received_once": false,
+    "duplicate_webhook_does_not_send_second_email": false,
+    "transient_email_failure_creates_retry_or_alert_evidence": false,
+    "receipt_resend_is_buyer_only_and_rate_limited": false
+  }
+}

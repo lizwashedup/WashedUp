@@ -66,4 +66,27 @@ describe('getCreatorAccess', () => {
     expect(memberships.neq).toHaveBeenCalledWith('role', 'member');
     expect(memberships.in).not.toHaveBeenCalled();
   });
+
+  it('does not turn a membership read failure into an empty creator state', async () => {
+    const memberships = queryChain({ data: null, error: new Error('membership read failed') });
+    const grants = queryChain({ data: [], error: null });
+    mockFrom.mockImplementation((table: string) => (table === 'community_members' ? memberships : grants));
+
+    await expect(getCreatorAccess()).rejects.toThrow('membership read failed');
+  });
+
+  it('does not turn a grant read failure into an empty creator state', async () => {
+    const memberships = queryChain({ data: [], error: null });
+    const grants = queryChain({ data: null, error: new Error('grant read failed') });
+    mockFrom.mockImplementation((table: string) => (table === 'community_members' ? memberships : grants));
+
+    await expect(getCreatorAccess()).rejects.toThrow('grant read failed');
+  });
+
+  it('does not turn an auth read failure into no creator access', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null }, error: new Error('auth read failed') });
+
+    await expect(getCreatorAccess()).rejects.toThrow('auth read failed');
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
 });
