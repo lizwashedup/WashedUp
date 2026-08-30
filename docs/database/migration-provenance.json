@@ -26,6 +26,25 @@
         "disposition": "The superseded notify-report draft was moved intact, with an archive marker, to docs/database/superseded-migrations. The active 20260813200000 version is now uniquely the event-members policy fix.",
         "production_claim": "No claim is made that either candidate is represented in the Supabase migration ledger. No production database or credential action occurred."
       }
+    },
+    {
+      "version": "20260825110000",
+      "status": "resolved_local_inventory",
+      "local_candidates": [
+        "20260825110000_centralize_admin_alert_recipient.sql",
+        "20260825110000_harden_admin_delete_gate_and_reports_fks.sql"
+      ],
+      "observed_evidence_2026_08_29": [
+        "Both files entered git in commit 698769d and were directly applied to production on 2026-08-25.",
+        "The project's linked-query apply path historically bypassed the Supabase migration ledger, so the local timestamp is not a reliable production-ledger identifier.",
+        "The two migrations are independent: one centralizes alert-recipient configuration and the other hardens the admin delete gate and adds reports foreign keys."
+      ],
+      "safe_resolution_requirement": "Preserve both SQL bodies, give the active local inventory unique forward-ordering versions, and make no claim that the production migration ledger was rewritten.",
+      "resolution": {
+        "date": "2026-08-29",
+        "disposition": "The alert-recipient migration retained version 20260825110000. The admin-delete migration was renamed to 20260825110100_harden_admin_delete_gate_and_reports_fks.sql with its SQL body unchanged except for this provenance header.",
+        "production_claim": "No production database, migration ledger, or credential action occurred. Both effects had already been directly applied and verified before this local-inventory repair."
+      }
     }
   ],
   "unresolved_chains": [

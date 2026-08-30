@@ -1,6 +1,6 @@
 -- DRAFT: DO NOT APPLY WITHOUT JOSH WORD
 --
--- Closes the gap flagged in 20260825110000_harden_admin_delete_gate_and_reports_fks.sql:
+-- Closes the gap flagged in 20260825110100_harden_admin_delete_gate_and_reports_fks.sql:
 -- admin_ban_user() is the ONLY one of the app's three user-delete paths that
 -- does not clean up `reports` before deleting the profile. Both
 -- admin_cascade_delete_user() and delete_own_account() already run

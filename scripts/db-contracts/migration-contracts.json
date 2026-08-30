@@ -1,8 +1,8 @@
 {
   "format": 3,
-  "migration_count": 223,
-  "inventory_sha256": "563497685a50f664d95e6213935578568c55c31e6cca3be3b89c26238abc060f",
-  "side_effect_union_count": 69,
+  "migration_count": 236,
+  "inventory_sha256": "ecc8c4f139dce99d9cbca710e7207883e40d4945a3480acb57aaa90be22e5efa",
+  "side_effect_union_count": 71,
   "approved_legacy_secret_literals": [
     {
       "file": "20260505000000_albums_processor_webhook.sql",
@@ -12,10 +12,10 @@
   ],
   "classification_counts": {
     "scheduler": 8,
-    "top_level_dml": 23,
+    "top_level_dml": 24,
     "do_fixture_dml": 39,
     "irreversible_ddl": 1,
-    "stateful_replacement": 8,
+    "stateful_replacement": 9,
     "default_privileges": 1
   },
   "classification_reasons": {
@@ -60,7 +60,8 @@
       "20260814130000_ticket_inbox_failed_state_and_event_ordering.sql",
       "20260814151000_one_reaction_per_person_v2.sql",
       "20260818170000_event_chat_topic_albums.sql",
-      "20260824211000_harden_topic_album_upload_metadata.sql"
+      "20260824211000_harden_topic_album_upload_metadata.sql",
+      "20260825110000_centralize_admin_alert_recipient.sql"
     ],
     "do_fixture_dml": [
       "20260608000100_decline_soft.sql",
@@ -114,7 +115,8 @@
       "20260706100500_join_flow.sql",
       "20260706150000_mvp_batch.sql",
       "20260708220000_open_composer.sql",
-      "20260814120000_ticket_payouts_payout_id_shared_per_organizer.sql"
+      "20260814120000_ticket_payouts_payout_id_shared_per_organizer.sql",
+      "20260828200000_community_topic_chat_parity_phase1.sql"
     ],
     "default_privileges": [
       "20260816121000_revoke_unsafe_default_function_execute.sql"

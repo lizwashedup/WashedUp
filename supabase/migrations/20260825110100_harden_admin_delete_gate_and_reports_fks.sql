@@ -1,3 +1,10 @@
+-- Local inventory note: this file was originally committed and directly
+-- applied as 20260825110000_harden_admin_delete_gate_and_reports_fks.sql.
+-- It was renamed to version 20260825110100 on 2026-08-29 because a parallel
+-- migration already owned 20260825110000. The SQL is unchanged; the rename
+-- only restores deterministic ordering for fresh databases. See
+-- docs/database/migration-provenance.json.
+--
 -- Two narrow, independent hardening fixes found during the 2026-08-25
 -- admin/ban correctness read:
 --

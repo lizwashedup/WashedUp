@@ -16,7 +16,7 @@
     "test": "jest",
     "typecheck": "tsc --noEmit --pretty false",
     "qa": "npm run qa:all",
-    "qa:all": "npm run qa:traceability && npm run typecheck && npm run qa:test && npm run qa:confirmations && npm run qa:notifications && npm run qa:payouts && npm run qa:ticketing",
+    "qa:all": "npm run qa:traceability && npm run typecheck && npm run qa:test && npm run qa:confirmations && npm run qa:notifications && npm run qa:payouts && npm run qa:ticketing && npm run test:db:static",
     "qa:confirmations": "deno test --no-remote --no-config supabase/functions/_tests/confirmationRetry_test.ts",
     "qa:notifications": "deno test --no-remote --no-config supabase/functions/_tests/runTokenAuth_test.ts",
     "qa:payouts": "deno test --no-remote --no-config supabase/functions/_tests/payoutReconciliation_test.ts supabase/functions/_tests/payoutBatchClaim_test.ts",
