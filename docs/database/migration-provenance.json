@@ -1,6 +1,37 @@
 {
   "format": 1,
   "schema_provenance": "incomplete",
+  "direct_applied": [
+    {
+      "file": "20260825110000_centralize_admin_alert_recipient.sql",
+      "production_evidence": "../../../../handoffs/crucible-T5273-threshold-local-gates-green-release-proof-pending-20260829-2225.md: both effects directly applied and verified before local inventory repair",
+      "apply_date": "2026-08-25",
+      "approval_class": "verified_direct_apply"
+    },
+    {
+      "file": "20260825110100_harden_admin_delete_gate_and_reports_fks.sql",
+      "production_evidence": "../../../../handoffs/crucible-T5273-threshold-local-gates-green-release-proof-pending-20260829-2225.md: both effects directly applied and verified before local inventory repair",
+      "apply_date": "2026-08-25",
+      "approval_class": "verified_direct_apply"
+    }
+  ],
+  "held_migrations": [
+    {
+      "file": "docs/database/review-only/community-join-policy-existing-text.sql",
+      "reason": "Review-only text-compatible proposal. Requires product approval and a separately decomposed apply plan.",
+      "source": "docs/database/review-only/community-join-policy-existing-text.sql"
+    },
+    {
+      "file": "docs/database/review-only/circle-suggestions-v2.sql",
+      "reason": "Hardened Circle suggestions proposal remains review-only pending presentation and dismissal decisions.",
+      "source": "docs/database/review-only/circle-suggestions-v2.sql"
+    },
+    {
+      "file": "docs/database/review-only/technical-database-hardening.sql",
+      "reason": "Technical hardening package is a review-only proposal and is excluded from automatic apply.",
+      "source": "docs/database/review-only/technical-database-hardening.sql"
+    }
+  ],
   "unresolved_versions": [
     {
       "version": "20260813200000",

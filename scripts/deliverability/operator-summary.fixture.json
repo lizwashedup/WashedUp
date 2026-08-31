@@ -1,0 +1,1 @@
+{"paid":{"drained":3,"failed":1,"skipped":0,"batch":4},"free":{"claimed":2,"delivered":1,"retried":0,"failed":0,"cancelled":0,"failures":[{"jobId":42,"eventId":"event-42","userId":"user-42","action":"state_update_failed","reason":"delivered-state update could not be confirmed"}]}}

@@ -2,6 +2,7 @@ type NativeFlags = {
   YOURS_PAGE_ENABLED: boolean;
   GROUPS_ENABLED: boolean;
   COMMUNITIES_ENABLED: boolean;
+  SCENE_DISCOVERY_ENABLED: boolean;
   JOIN_GATE_ENABLED: boolean;
   CHAT_DELETE_ENABLED: boolean;
   MEMBER_STATE_ENABLED: boolean;
@@ -12,6 +13,7 @@ const envKeys = [
   'EXPO_PUBLIC_YOURS_PAGE_ENABLED',
   'EXPO_PUBLIC_GROUPS_ENABLED',
   'EXPO_PUBLIC_COMMUNITIES_ENABLED',
+  'EXPO_PUBLIC_SCENE_DISCOVERY_ENABLED',
   'EXPO_PUBLIC_JOIN_GATE_ENABLED',
   'EXPO_PUBLIC_CHAT_DELETE_ENABLED',
   'EXPO_PUBLIC_MEMBER_STATE_ENABLED',
@@ -51,6 +53,7 @@ describe('native feature flag contract', () => {
       YOURS_PAGE_ENABLED: true,
       GROUPS_ENABLED: true,
       COMMUNITIES_ENABLED: false,
+      SCENE_DISCOVERY_ENABLED: true,
       JOIN_GATE_ENABLED: false,
       CHAT_DELETE_ENABLED: false,
       MEMBER_STATE_ENABLED: false,
@@ -61,6 +64,7 @@ describe('native feature flag contract', () => {
   describe.each([
     ['Yours', 'EXPO_PUBLIC_YOURS_PAGE_ENABLED', 'YOURS_PAGE_ENABLED'],
     ['Groups', 'EXPO_PUBLIC_GROUPS_ENABLED', 'GROUPS_ENABLED'],
+    ['Scene discovery', 'EXPO_PUBLIC_SCENE_DISCOVERY_ENABLED', 'SCENE_DISCOVERY_ENABLED'],
   ] as const)('%s rollback flag', (_name, envKey, flagKey) => {
     it.each([
       ['true', true],

@@ -101,20 +101,32 @@ export const PHONE_CANONICAL_ENABLED =
 /**
  * Communities & Events (creator platform).
  *
- * When false (current prod default): nothing changes anywhere. No creator
- * application entry on the profile screen, no community surfaces.
+ * This remains opt-in until the Community release gate is cleared. Scene's
+ * event discovery shell has its own launch flag below, so shipping the current
+ * Scene no longer activates unfinished Community controls.
  *
  * When true: the "run things on washedup" entry appears on the profile
  * screen (creator applications, phase 2). Later phases (community pages,
  * creator mode, discovery) hang off this same flag.
  *
- * Local dev: set EXPO_PUBLIC_COMMUNITIES_ENABLED=true in .env.local
- * (gitignored). The value is env-driven and ships OFF wherever the var is
- * unset (CI / prod / EAS), so it cannot ship on by accident. The admin
- * review queue (/admin/applications) is NOT behind this flag; it is gated
- * by isAdmin like the rest of the admin surfaces.
+ * The admin review queue (/admin/applications) is not behind this flag; it is
+ * gated by isAdmin like the rest of the admin surfaces.
  */
 export const COMMUNITIES_ENABLED = process.env.EXPO_PUBLIC_COMMUNITIES_ENABLED === 'true';
+
+/**
+ * Scene event discovery shell.
+ *
+ * LAUNCH: committed ON. Exact lowercase `false` is the emergency rollback.
+ * This is intentionally separate from COMMUNITIES_ENABLED: the Scene can show
+ * live events without opening Community routes before their database release
+ * gate is certified.
+ */
+const SCENE_DISCOVERY_COMMITTED_DEFAULT = true;
+export const SCENE_DISCOVERY_ENABLED =
+  process.env.EXPO_PUBLIC_SCENE_DISCOVERY_ENABLED === 'false'
+    ? false
+    : SCENE_DISCOVERY_COMMITTED_DEFAULT;
 
 /**
  * Community join-policy gate (proposal 91): the "who gets in" toggle on the

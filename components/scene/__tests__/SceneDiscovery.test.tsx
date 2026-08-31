@@ -25,7 +25,7 @@ beforeEach(() => {
 it('renders both destination tabs, Events selected by default', () => {
   let tree: ReturnType<typeof create>;
   act(() => {
-    tree = create(<SceneDiscovery />);
+    tree = create(<SceneDiscovery communitiesEnabled />);
   });
 
   const eventsTab = tree!.root.findByProps({ accessibilityLabel: 'events' });
@@ -36,10 +36,21 @@ it('renders both destination tabs, Events selected by default', () => {
   expect(communitiesTab.props.accessibilityState).toEqual({ selected: false });
 });
 
+it('ships event discovery without exposing Communities before its release gate opens', () => {
+  let tree: ReturnType<typeof create>;
+  act(() => {
+    tree = create(<SceneDiscovery communitiesEnabled={false} />);
+  });
+
+  expect(tree!.root.findByProps({ accessibilityLabel: 'events' })).toBeTruthy();
+  expect(tree!.root.findAllByProps({ accessibilityLabel: 'communities' })).toHaveLength(0);
+  expect(tree!.root.findAllByType(Text).some((node) => node.props.children === 'tell us about it')).toBe(false);
+});
+
 it('switches to the Communities destination on tap, retaining the shared shell', () => {
   let tree: ReturnType<typeof create>;
   act(() => {
-    tree = create(<SceneDiscovery />);
+    tree = create(<SceneDiscovery communitiesEnabled />);
   });
 
   const communitiesTab = tree!.root.findByProps({ accessibilityLabel: 'communities' });
@@ -56,7 +67,7 @@ it('switches to the Communities destination on tap, retaining the shared shell',
 it('switching destination never navigates away — Scene stays one shared screen', () => {
   let tree: ReturnType<typeof create>;
   act(() => {
-    tree = create(<SceneDiscovery />);
+    tree = create(<SceneDiscovery communitiesEnabled />);
   });
 
   const communitiesTab = tree!.root.findByProps({ accessibilityLabel: 'communities' });
@@ -70,7 +81,7 @@ it('switching destination never navigates away — Scene stays one shared screen
 it('the creator recruiting card is always reachable on the Communities destination, even with zero communities', () => {
   let tree: ReturnType<typeof create>;
   act(() => {
-    tree = create(<SceneDiscovery />);
+    tree = create(<SceneDiscovery communitiesEnabled />);
   });
 
   act(() => {

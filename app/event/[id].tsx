@@ -28,9 +28,9 @@ import { useBlock } from '../../hooks/useBlock';
 import Colors from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { COMMUNITIES_ENABLED, MEMBER_STATE_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, MEMBER_STATE_ENABLED, SCENE_DISCOVERY_ENABLED } from '../../constants/FeatureFlags';
 import { showAddToCalendar } from '../../lib/addToCalendar';
-import { getMyRsvp, getRsvpCount, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
+import { canParticipateInSceneEvent, getMyRsvp, getRsvpCount, isCommunityEventReleaseBlocked, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
 import { formatEventDateLA, getTodayInLA, laWallTimeToUTC } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
@@ -294,6 +294,11 @@ export default function EventDetailScreen() {
   // standalone events keep rsvp + find-people + the doc-09 smart popup
   // exactly as built. Flag off, community events do not exist visibly.
   const isCommunityEvent = COMMUNITIES_ENABLED && !!event?.community_id;
+  const sceneParticipationEnabled = canParticipateInSceneEvent(
+    SCENE_DISCOVERY_ENABLED,
+    COMMUNITIES_ENABLED,
+    event?.community_id,
+  );
 
   const { data: linkedPlans = [] } = useQuery({
     queryKey: ['event-plans', id],
@@ -399,12 +404,12 @@ export default function EventDetailScreen() {
   const { data: myRsvp = null } = useQuery({
     queryKey: ['event-rsvp', id, userId],
     queryFn: () => getMyRsvp(id!),
-    enabled: COMMUNITIES_ENABLED && !!id && !!userId,
+    enabled: sceneParticipationEnabled && !!id && !!userId,
   });
   const { data: rsvpCount = null } = useQuery({
     queryKey: ['event-rsvp-count', id],
     queryFn: () => getRsvpCount(id!),
-    enabled: COMMUNITIES_ENABLED && !!id,
+    enabled: sceneParticipationEnabled && !!id,
   });
 
   // proposal 36: a STANDALONE listing with no per-event public_name override
@@ -783,6 +788,19 @@ export default function EventDetailScreen() {
     );
   }
 
+  if (isCommunityEventReleaseBlocked(COMMUNITIES_ENABLED, event.community_id)) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.centered}>
+          <Text style={styles.emptyText}>this event is not available in this build yet.</Text>
+          <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
+            <Text style={styles.goBackText}>go back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const ticketPrice = normalizeTicketPrice(event.ticket_price);
   const isFree = ticketPrice === null;
 
@@ -1116,7 +1134,7 @@ export default function EventDetailScreen() {
               before the body). Threshold logic (doc 37): a real count only
               from five up, never "1 person going"; below that, the
               invitation, and only when flattering (never "0 going"). */}
-          {COMMUNITIES_ENABLED && rsvpCount !== null && (
+          {sceneParticipationEnabled && rsvpCount !== null && (
             <View style={styles.metaRow}>
               <Users size={16} color={Colors.warmGray} strokeWidth={2} />
               <Text style={styles.metaText}>
@@ -1293,7 +1311,7 @@ export default function EventDetailScreen() {
           >
             <Text style={styles.rsvpButtonText}>get tickets</Text>
           </TouchableOpacity>
-        ) : COMMUNITIES_ENABLED && (
+        ) : sceneParticipationEnabled && (
           <TouchableOpacity
             style={[styles.rsvpButton, myRsvp === 'going' && styles.rsvpButtonGoing]}
             onPress={() => {

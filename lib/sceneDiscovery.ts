@@ -84,12 +84,14 @@ export interface SceneEvent {
   leader_avatar_url?: string | null;
 }
 
-export async function getSceneEvents(): Promise<SceneEvent[]> {
-  const { data, error } = await supabase
+export async function getSceneEvents(includeCommunityEvents = false): Promise<SceneEvent[]> {
+  let query = supabase
     .from('explore_events')
     .select('id, title, description, image_url, event_date, start_time, end_time, venue, category, ticket_price, external_url, public_name, community_id, host_user_id, latitude, longitude')
     .eq('status', 'Live')
     .limit(60);
+  if (!includeCommunityEvents) query = query.is('community_id', null);
+  const { data, error } = await query;
   if (error) throw error;
   // Past events roll off (the server cron catches up hourly; the feed never
   // waits for it) and the soonest upcoming event leads. Dateless rows sink

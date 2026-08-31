@@ -25,6 +25,10 @@ TOPIC_ALBUM_HARDENING_MIGRATION="$REPO_ROOT/supabase/migrations/20260824211000_h
 IDENTITY_MARKS_TRIGGER_MIGRATION="$REPO_ROOT/supabase/migrations/20260824212000_fix_event_members_identity_marks_trigger_safe.sql"
 THRESHOLD_CHAT_MIGRATION="$REPO_ROOT/supabase/migrations/20260828200000_community_topic_chat_parity_phase1.sql"
 THRESHOLD_RECEIPT_MIGRATION="$REPO_ROOT/supabase/migrations/20260829210000_ticket_receipt_resend_rate_limit.sql"
+DELIVERABILITY_MIGRATION="$REPO_ROOT/supabase/migrations/20260830120000_free_rsvp_confirmation_outbox.sql"
+CONSENT_SYNC_MIGRATION="$REPO_ROOT/supabase/migrations/20260830130000_audience_sync_outbox_and_suppression.sql"
+DELIVERY_SCHEDULER_MIGRATION="$REPO_ROOT/supabase/migrations/20260831170000_schedule_delivery_workers_seed_only.sql"
+DELIVERY_RESCUE_SQL="$REPO_ROOT/scripts/deliverability/g0-rescue.sql"
 CONTRACT_FILES="$CONTRACT_ROOT/supabase/tests/contracts"
 CONTRACT_LANE=${DB_CONTRACT_LANE:-${1:-}}
 
@@ -51,6 +55,10 @@ for required_file in \
   "$IDENTITY_MARKS_TRIGGER_MIGRATION" \
   "$THRESHOLD_CHAT_MIGRATION" \
   "$THRESHOLD_RECEIPT_MIGRATION" \
+  "$DELIVERABILITY_MIGRATION" \
+  "$CONSENT_SYNC_MIGRATION" \
+  "$DELIVERY_SCHEDULER_MIGRATION" \
+  "$DELIVERY_RESCUE_SQL" \
   "$CONTRACT_FILES/00_account_deletion_fixture.sql" \
   "$CONTRACT_FILES/01_account_deletion_contract.sql" \
   "$CONTRACT_FILES/10_refund_fixture.sql" \
@@ -78,7 +86,14 @@ for required_file in \
   "$CONTRACT_FILES/110_release_blockers_fixture.sql" \
   "$CONTRACT_FILES/111_release_blockers_contract.sql" \
   "$CONTRACT_FILES/120_threshold_75_fixture.sql" \
-  "$CONTRACT_FILES/121_threshold_75_contract.sql"
+  "$CONTRACT_FILES/121_threshold_75_contract.sql" \
+  "$CONTRACT_FILES/130_deliverability_fixture.sql" \
+  "$CONTRACT_FILES/131_deliverability_contract.sql" \
+  "$CONTRACT_FILES/140_consent_sync_fixture.sql" \
+  "$CONTRACT_FILES/141_consent_sync_contract.sql" \
+  "$CONTRACT_FILES/160_delivery_scheduler_fixture.sql" \
+  "$CONTRACT_FILES/161_delivery_scheduler_contract.sql" \
+  "$CONTRACT_FILES/162_delivery_rescue_contract.sql"
 do
   if [ ! -f "$required_file" ]; then
     echo "required private contract file is missing: $required_file" >&2
@@ -130,6 +145,10 @@ CONTAINER_ID=$(docker run \
   --volume "$IDENTITY_MARKS_TRIGGER_MIGRATION:/migrations/identity-marks-trigger.sql:ro" \
   --volume "$THRESHOLD_CHAT_MIGRATION:/migrations/threshold-chat.sql:ro" \
   --volume "$THRESHOLD_RECEIPT_MIGRATION:/migrations/threshold-receipt.sql:ro" \
+  --volume "$DELIVERABILITY_MIGRATION:/migrations/deliverability.sql:ro" \
+  --volume "$CONSENT_SYNC_MIGRATION:/migrations/consent-sync.sql:ro" \
+  --volume "$DELIVERY_SCHEDULER_MIGRATION:/migrations/delivery-scheduler.sql:ro" \
+  --volume "$DELIVERY_RESCUE_SQL:/g0-rescue.sql:ro" \
   --volume "$CONTRACT_FILES:/contracts:ro" \
   "$IMAGE")
 invalid_id=$(printf '%s' "$CONTAINER_ID" | tr -d '0-9a-f')
@@ -177,6 +196,42 @@ run_threshold_75_contract() {
   psql_file threshold_75_contract /contracts/121_threshold_75_contract.sql
 }
 
+run_deliverability_contract() {
+  docker exec "$CONTAINER_ID" createdb -U postgres deliverability_contract
+  psql_file deliverability_contract /contracts/130_deliverability_fixture.sql
+  psql_file deliverability_contract /migrations/deliverability.sql
+  psql_file deliverability_contract /contracts/131_deliverability_contract.sql
+}
+
+run_consent_sync_contract() {
+  docker exec "$CONTAINER_ID" createdb -U postgres consent_sync_contract
+  psql_file consent_sync_contract /contracts/140_consent_sync_fixture.sql
+  psql_file consent_sync_contract /migrations/deliverability.sql
+  psql_file consent_sync_contract /migrations/consent-sync.sql
+  psql_file consent_sync_contract /contracts/141_consent_sync_contract.sql
+}
+
+run_delivery_scheduler_contract() {
+  docker exec "$CONTAINER_ID" createdb -U postgres delivery_scheduler_contract
+  psql_file delivery_scheduler_contract /contracts/160_delivery_scheduler_fixture.sql
+  set +e
+  scheduler_missing_output=$(docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d delivery_scheduler_contract \
+    -f /migrations/delivery-scheduler.sql 2>&1)
+  scheduler_missing_status=$?
+  set -e
+  if [ "$scheduler_missing_status" -eq 0 ]; then
+    echo "delivery scheduler accepted missing Vault tokens" >&2
+    exit 1
+  fi
+  echo "$scheduler_missing_output" | grep -F "Vault token(s) are missing or empty" >/dev/null
+  docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d delivery_scheduler_contract -c \
+    "INSERT INTO vault.decrypted_secrets(name, decrypted_secret) VALUES ('transactional_email_run_token','fixture-transactional-token'), ('audience_sync_run_token','fixture-audience-token');"
+  psql_file delivery_scheduler_contract /migrations/delivery-scheduler.sql
+  psql_file delivery_scheduler_contract /contracts/161_delivery_scheduler_contract.sql
+  psql_file delivery_scheduler_contract /g0-rescue.sql
+  psql_file delivery_scheduler_contract /contracts/162_delivery_rescue_contract.sql
+}
+
 if [ "$CONTRACT_LANE" = "release-blockers" ]; then
   run_release_blockers_contract
   echo "PASS: focused release-blocker database contracts"
@@ -186,6 +241,24 @@ fi
 if [ "$CONTRACT_LANE" = "threshold-75" ]; then
   run_threshold_75_contract
   echo "PASS: focused threshold 75 database contracts"
+  exit 0
+fi
+
+if [ "$CONTRACT_LANE" = "deliverability" ]; then
+  run_deliverability_contract
+  echo "PASS: focused deliverability database contracts"
+  exit 0
+fi
+
+if [ "$CONTRACT_LANE" = "consent-sync" ]; then
+  run_consent_sync_contract
+  echo "PASS: focused consent-sync database contracts"
+  exit 0
+fi
+
+if [ "$CONTRACT_LANE" = "delivery-scheduler" ]; then
+  run_delivery_scheduler_contract
+  echo "PASS: focused G0 delivery scheduler and rescue contracts"
   exit 0
 fi
 
@@ -265,8 +338,11 @@ psql_file technical_database_hardening_contract /contracts/101_technical_databas
 
 run_release_blockers_contract
 run_threshold_75_contract
+run_deliverability_contract
+run_consent_sync_contract
+run_delivery_scheduler_contract
 
-echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, and identity-marks trigger safety"
+echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, identity-marks trigger safety, durable free RSVP confirmations, audience consent sync, and G0 scheduler rescue"
 if [ "$static_status" -ne 0 ]; then
   echo "Release gate remains closed by static diagnostics"
   exit "$static_status"

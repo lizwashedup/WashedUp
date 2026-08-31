@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -206,6 +207,135 @@ function checkProvenance(provenance, duplicateVersions) {
       error(`known unresolved migration provenance: ${record.version}`);
     }
   }
+
+  const directApplied = Array.isArray(provenance.direct_applied)
+    ? provenance.direct_applied
+    : [];
+  const requiredDirectFields = [
+    'file',
+    'production_evidence',
+    'apply_date',
+    'approval_class',
+  ];
+  const directFiles = new Set();
+  for (const record of directApplied) {
+    for (const field of requiredDirectFields) {
+      if (typeof record?.[field] !== 'string' || record[field].trim() === '') {
+        error(`direct-applied provenance for ${record?.file ?? '<unknown>'} needs ${field}`);
+      }
+    }
+    if (record?.file) {
+      if (directFiles.has(record.file)) error(`duplicate direct-applied provenance record: ${record.file}`);
+      directFiles.add(record.file);
+      if (!files.includes(record.file)) {
+        error(`direct-applied provenance references a missing active migration: ${record.file}`);
+      }
+    }
+    if (record?.production_evidence) {
+      const evidencePath = record.production_evidence.split(':', 1)[0];
+      const candidates = [
+        resolve(repoRoot, evidencePath),
+        resolve(dirname(provenancePath), evidencePath),
+      ];
+      if (!candidates.some((candidate) => existsSync(candidate))) {
+        error(`direct-applied provenance evidence is missing for ${record.file}: ${evidencePath}`);
+      }
+    }
+    if (record?.apply_date && !/^\d{4}-\d{2}-\d{2}$/.test(record.apply_date)) {
+      error(`direct-applied provenance for ${record.file} has invalid apply_date: ${record.apply_date}`);
+    }
+    if (record?.approval_class && !/^(?:explicit|repair|verified_direct_apply)$/.test(record.approval_class)) {
+      error(`direct-applied provenance for ${record.file} has unsupported approval_class: ${record.approval_class}`);
+    }
+  }
+
+  const held = Array.isArray(provenance.held_migrations) ? provenance.held_migrations : [];
+  const heldFiles = new Set();
+  for (const record of held) {
+    if (typeof record?.file !== 'string' || typeof record?.reason !== 'string' || typeof record?.source !== 'string') {
+      error(`held migration records need file, reason, and source: ${record?.file ?? '<unknown>'}`);
+      continue;
+    }
+    if (heldFiles.has(record.file)) error(`duplicate held migration record: ${record.file}`);
+    heldFiles.add(record.file);
+    if (files.includes(record.file)) error(`held migration remains in active inventory: ${record.file}`);
+  }
+}
+
+function gitTrackedMigrationFiles() {
+  try {
+    return execFileSync('git', ['-C', repoRoot, 'ls-files', '--', 'supabase/migrations/*.sql'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).split('\n').filter(Boolean).map((file) => file.replace(/^supabase\/migrations\//, '')).sort();
+  } catch {
+    return [];
+  }
+}
+
+function gitUntrackedMigrationFiles() {
+  const override = process.env.DB_CONTRACTS_UNTRACKED_OVERRIDE;
+  if (override !== undefined) return override.split(',').map((file) => file.trim()).filter(Boolean).sort();
+  try {
+    return execFileSync('git', ['-C', repoRoot, 'ls-files', '--others', '--exclude-standard', '--', 'supabase/migrations/*.sql'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).split('\n').filter(Boolean).map((file) => file.replace(/^supabase\/migrations\//, '')).sort();
+  } catch {
+    return [];
+  }
+}
+
+function checkReleaseInventory(files, inventoryMatches, provenance, contracts) {
+  const heldRecords = Array.isArray(provenance?.held_migrations)
+    ? provenance.held_migrations
+    : [];
+  const held = heldRecords
+    .map((record) => record?.file)
+    .filter((file) => typeof file === 'string');
+  const activeHeld = new Set(
+    held
+      .map((file) => file.split('/').at(-1))
+      .filter((file) => files.includes(file)),
+  );
+  console.log(`HELD: ${held.length ? held.join(', ') : 'none'}`);
+  const candidates = files.filter((file) => !activeHeld.has(file));
+  console.log(`RELEASE_CANDIDATES: ${candidates.length} active migration(s), held excluded`);
+  if (candidates.length !== files.length - activeHeld.size) {
+    error('release candidate calculation does not equal active inventory minus explicitly recorded held migrations');
+  }
+  const allowedUntracked = new Set(contracts?.approved_untracked_migrations ?? []);
+  const untracked = gitUntrackedMigrationFiles();
+  const unknownUntracked = untracked.filter((file) => !allowedUntracked.has(file));
+  if (unknownUntracked.length) {
+    error(`unknown active migration file(s): ${unknownUntracked.join(', ')}. Remediation: classify each file as active, held, or archive it, then regenerate migration-contracts.json inventory_count and inventory_sha256.`);
+  }
+  if (inventoryMatches) return;
+  const tracked = gitTrackedMigrationFiles();
+  if (!tracked.length) return;
+  const local = new Set(files);
+  const trackedSet = new Set(tracked);
+  const unknown = files.filter((file) => !trackedSet.has(file) && !allowedUntracked.has(file));
+  const missing = tracked.filter((file) => !local.has(file));
+  if (unknown.length) {
+    error(`unknown active migration file(s): ${unknown.join(', ')}. Remediation: classify each file as active, held, or archive it, then regenerate migration-contracts.json inventory_count and inventory_sha256.`);
+  }
+  if (missing.length) {
+    error(`tracked migration file(s) missing from active inventory: ${missing.join(', ')}. Remediation: restore the file or record its archive/superseded disposition before changing the inventory digest: ${missing.join(', ')}`);
+  }
+  if (!held.length) console.log('HELD: none');
+}
+
+function checkPrivateHarness() {
+  const runnerPath = join(repoRoot, 'scripts/db-contracts/run-private-sql-contracts.sh');
+  if (!existsSync(runnerPath)) {
+    error(`private SQL contract runner is missing: ${runnerPath}`);
+    return;
+  }
+  const runner = readFileSync(runnerPath, 'utf8');
+  if (!/--network\s+none/.test(runner)) error('private SQL contract runner must use --network none');
+  if (!/POSTGRES_PASSWORD=contract-only/.test(runner)) error('private SQL contract runner must use an isolated contract-only password');
+  if (/SUPABASE_(?:ACCESS_TOKEN|DB_PASSWORD)|SERVICE_ROLE_KEY/.test(runner)) error('private SQL contract runner must not reference production credentials');
 }
 
 function checkClassifications(contracts, files, inventoryMatches) {
@@ -337,6 +467,11 @@ checkVaultFunctionLiterals(files);
 checkNotificationHandlers(files);
 checkPayoutContracts();
 checkProvenance(provenance, duplicateVersions);
+const inventoryMatches = contracts
+  ? files.length === contracts.migration_count && inventoryDigest(files) === contracts.inventory_sha256
+  : false;
+checkReleaseInventory(files, inventoryMatches, provenance, contracts);
+checkPrivateHarness();
 
 if (diagnostics.length) {
   for (const message of diagnostics) console.error(`FAIL: ${message}`);

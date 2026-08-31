@@ -13,6 +13,24 @@ const NUDGE_KEY_PREFIX = 'event-rsvp-nudge-';
 
 export type RsvpStatus = 'going' | 'cancelled' | null;
 
+export function canParticipateInSceneEvent(
+  sceneEnabled: boolean,
+  communitiesEnabled: boolean,
+  communityId: string | null | undefined,
+): boolean {
+  return sceneEnabled && (
+    communityId === null ||
+    (communitiesEnabled && typeof communityId === 'string')
+  );
+}
+
+export function isCommunityEventReleaseBlocked(
+  communitiesEnabled: boolean,
+  communityId: string | null | undefined,
+): boolean {
+  return Boolean(communityId) && !communitiesEnabled;
+}
+
 export async function getMyRsvp(eventId: string): Promise<RsvpStatus> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;

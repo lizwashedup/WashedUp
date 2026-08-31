@@ -118,6 +118,7 @@ Deno.serve(async (req) => {
         headers: {
           Authorization: `Bearer ${RESEND_API_KEY}`,
           'Content-Type': 'application/json',
+          'Idempotency-Key': `plan-posted/${plan.id}`,
         },
         body: JSON.stringify({
           from: 'WashedUp Plans <plans@washedup.app>',

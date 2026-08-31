@@ -20,7 +20,7 @@ import { hapticLight, hapticSuccess } from '../../../lib/haptics';
 import ProfileButton from '../../../components/ProfileButton';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
-import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, SCENE_DISCOVERY_ENABLED } from '../../../constants/FeatureFlags';
 import { SceneDiscovery } from '../../../components/scene/SceneDiscovery';
 import { markSceneStageSeen, SCENE_BADGE_KEY } from '../../../lib/sceneStage';
 
@@ -33,9 +33,9 @@ const SHARE_MESSAGE = `washedup is looking for founding partners, the people who
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-// COMMUNITIES_ENABLED is a compile-time constant, so this branch is stable
-// for the app's lifetime: flag off ships the coming-soon page; flag on ships
-// discovery (doc 10 phase 5).
+// Scene discovery and the broader Communities release are deliberately
+// separate. The events destination can launch while unfinished Community
+// routes remain behind COMMUNITIES_ENABLED.
 export default function ScenePage() {
   const queryClient = useQueryClient();
 
@@ -50,7 +50,9 @@ export default function ScenePage() {
     }, [queryClient]),
   );
 
-  if (COMMUNITIES_ENABLED) return <SceneDiscovery />;
+  if (SCENE_DISCOVERY_ENABLED) {
+    return <SceneDiscovery communitiesEnabled={COMMUNITIES_ENABLED} />;
+  }
   return <SceneComingSoon />;
 }
 

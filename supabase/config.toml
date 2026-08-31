@@ -1,0 +1,11 @@
+[functions.add-to-resend-audience]
+verify_jwt = true
+
+[functions.audience-sync-drain]
+verify_jwt = false
+
+[functions.resend-suppression-webhook]
+verify_jwt = false
+
+[functions.transactional-email-drain]
+verify_jwt = false

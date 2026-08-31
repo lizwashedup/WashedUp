@@ -1,8 +1,14 @@
 {
   "format": 3,
-  "migration_count": 236,
-  "inventory_sha256": "ecc8c4f139dce99d9cbca710e7207883e40d4945a3480acb57aaa90be22e5efa",
-  "side_effect_union_count": 71,
+  "migration_count": 240,
+  "inventory_sha256": "6533027843b6b4cb636091f5324e61de2e9fb3666e90714400cae1403166bf0b",
+  "approved_untracked_migrations": [
+    "20260830120000_free_rsvp_confirmation_outbox.sql",
+    "20260830130000_audience_sync_outbox_and_suppression.sql",
+    "20260831160000_reduce_background_job_io.sql",
+    "20260831170000_schedule_delivery_workers_seed_only.sql"
+  ],
+  "side_effect_union_count": 73,
   "approved_legacy_secret_literals": [
     {
       "file": "20260505000000_albums_processor_webhook.sql",
@@ -11,7 +17,7 @@
     }
   ],
   "classification_counts": {
-    "scheduler": 8,
+    "scheduler": 10,
     "top_level_dml": 24,
     "do_fixture_dml": 39,
     "irreversible_ddl": 1,
@@ -35,7 +41,9 @@
       "20260707120000_event_chat_model.sql",
       "20260712035429_fix_batch_28_s1_s2_s3_s5.sql",
       "20260814140100_schedule_release_expired_ticket_holds.sql",
-      "20260819030000_fix_event_chat_archive_timer.sql"
+      "20260819030000_fix_event_chat_archive_timer.sql",
+      "20260831160000_reduce_background_job_io.sql",
+      "20260831170000_schedule_delivery_workers_seed_only.sql"
     ],
     "top_level_dml": [
       "20260323000000_launch_party_unlimited_capacity.sql",

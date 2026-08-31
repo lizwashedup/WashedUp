@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getAdminAlertEmail } from '../_shared/alertRecipient.ts';
+import { diagnosePushFailures } from '../_shared/pushFailureDiagnosis.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -61,6 +62,7 @@ Deno.serve(async (req) => {
     const failureRows = failures ?? [];
     result.failures = failureRows.length;
     if (failureRows.length > 0) {
+      const diagnosis = diagnosePushFailures(failureRows);
       const sampleHtml = failureRows.slice(0, 5)
         .map((f: any) => `<li><strong>${esc(f.created)}</strong>: HTTP ${esc(f.status_code)} <code>${esc(String(f.content ?? '').slice(0, 200))}</code></li>`)
         .join('');
@@ -68,9 +70,9 @@ Deno.serve(async (req) => {
         <div style="font-family:-apple-system,sans-serif;max-width:600px">
           <h2 style="color:#C43D2E;margin:0 0 4px 0">Push pipeline alert</h2>
           <p>Detected <strong>${failureRows.length}</strong> failed edge function call(s) from Postgres triggers in the last 15 minutes.</p>
-          <p>Usually a DB-trigger edge fn (<code>send-push-notifications</code> / <code>notify-plan-posted</code>) rejecting with 4xx/5xx, most often <code>verify_jwt</code> flipped to <code>true</code> on a redeploy.</p>
+          <p><strong>Diagnosis:</strong> ${esc(diagnosis.summary)}</p>
           <h3>Sample failures</h3><ul>${sampleHtml}</ul>
-          <p>If <code>verify_jwt</code> is true, redeploy with <code>--no-verify-jwt</code>.</p>
+          <p><strong>Next action:</strong> ${esc(diagnosis.action)}</p>
         </div>`.trim();
       result.failuresAlerted = await sendAlert(alertEmail, `[ALERT] Push pipeline failing: ${failureRows.length} errors in last 15min`, html);
     }

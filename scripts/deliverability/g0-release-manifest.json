@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "activation_default": "quarantined",
+  "files": {
+    "supabase/migrations/20260830120000_free_rsvp_confirmation_outbox.sql": "22e27722070fde4549a104bde778d78011b6aad6f9499950f5d62d2c05dc5f57",
+    "supabase/migrations/20260830130000_audience_sync_outbox_and_suppression.sql": "89a520903c2528118b414aa8d95df3e1813c8bfe28098ef2ead73a27300002f1",
+    "supabase/migrations/20260831170000_schedule_delivery_workers_seed_only.sql": "cb7d19d77c68993528656fcf1461844dff41f0f1e26e6af70cf7fb7651d3dc53",
+    "supabase/config.toml": "c30a0f7860f7fecf6e4500ef9d8178b02bf12d1616f62dd7c49628b41c54b541",
+    "supabase/functions/add-to-resend-audience/index.ts": "406c2749b7bc2accfd3658a6b49307e2f6e32bd456b4941013910518056e92ee",
+    "supabase/functions/audience-sync-drain/index.ts": "2335c20d347b164b65ad725f1e5310ea1fa6fbf7d5eafa0f833315c59bdac7c6",
+    "supabase/functions/resend-suppression-webhook/index.ts": "71c356d3a3213787ede8962ba06c3d120194ba9a243bfacbdb4750823f013721",
+    "supabase/functions/transactional-email-drain/index.ts": "973db644c07eb2bd7485efe159f1eb7cddc8c51593688ae6b8e69478ce9c16d8",
+    "supabase/functions/_shared/suppressionPayload.ts": "8f45a8fc2cf4bf2d353d5d54948c09bf963132284d43b65a2039bfbdd1ad2dd1",
+    "scripts/deliverability/g0-rescue.sql": "f7ce850d56a69a948547026c17c41e08f97daa42d1b6b2ea9ab7f19e16171b95",
+    "scripts/deliverability/check-consent-sync-wiring.mjs": "c6e66c2ff67681716493624778c2a7566320fa93ddb2cce8132f2df6b1d5bef0",
+    "supabase/tests/contracts/130_deliverability_fixture.sql": "5d2ba6f9cd6672bfe56bae856132b392af0c39bd48e28a95468ca52eebe32b37",
+    "supabase/tests/contracts/131_deliverability_contract.sql": "e46b3ff53e8c4a7b9c78c93462ab37f0b07f158dd176696029a3af51c056cd18",
+    "supabase/tests/contracts/140_consent_sync_fixture.sql": "155a48d6e7ce81c90a6bcd44bfff326e4b9bd9ae9327dfba75d13ed38d13282c",
+    "supabase/tests/contracts/141_consent_sync_contract.sql": "e047e28316de3e48c01b95c3f292ff0e263aa18d63d08e97ba6b0dd6f871d64c",
+    "supabase/tests/contracts/160_delivery_scheduler_fixture.sql": "73692a7fa452bb1417f841d8ee5a5c9bcac7d36b93ab32f0fb7dbab11553f70e",
+    "supabase/tests/contracts/161_delivery_scheduler_contract.sql": "318ce09c1654688e66a4cfd6e272d6bca661285c37cf2c06d205e46d0bc93e21",
+    "supabase/tests/contracts/162_delivery_rescue_contract.sql": "91a1c6ef9a3622ff6323416585f59ae399a88fe9e77215ab871e435798337616"
+  }
+}

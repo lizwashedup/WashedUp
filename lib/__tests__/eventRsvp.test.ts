@@ -4,7 +4,40 @@ jest.mock('../supabase', () => ({
   supabase: { auth: { getUser: mockGetUser }, from: mockFrom, rpc: jest.fn() },
 }));
 
-const { getMyRsvp, setRsvp, getRsvpCount } = require('../eventRsvp');
+const {
+  canParticipateInSceneEvent,
+  isCommunityEventReleaseBlocked,
+  getMyRsvp,
+  setRsvp,
+  getRsvpCount,
+} = require('../eventRsvp');
+
+describe('canParticipateInSceneEvent', () => {
+  it('allows standalone Scene events while Communities remains closed', () => {
+    expect(canParticipateInSceneEvent(true, false, null)).toBe(true);
+  });
+
+  it('blocks a direct community-event link while Communities remains closed', () => {
+    expect(canParticipateInSceneEvent(true, false, 'community-1')).toBe(false);
+  });
+
+  it('stays closed until the event record has loaded', () => {
+    expect(canParticipateInSceneEvent(true, false, undefined)).toBe(false);
+  });
+
+  it('allows a community event only when both releases are open', () => {
+    expect(canParticipateInSceneEvent(true, true, 'community-1')).toBe(true);
+    expect(canParticipateInSceneEvent(false, true, 'community-1')).toBe(false);
+  });
+});
+
+describe('isCommunityEventReleaseBlocked', () => {
+  it('blocks a direct community-event detail route until Communities opens', () => {
+    expect(isCommunityEventReleaseBlocked(false, 'community-1')).toBe(true);
+    expect(isCommunityEventReleaseBlocked(true, 'community-1')).toBe(false);
+    expect(isCommunityEventReleaseBlocked(false, null)).toBe(false);
+  });
+});
 
 beforeEach(() => {
   mockGetUser.mockReset();

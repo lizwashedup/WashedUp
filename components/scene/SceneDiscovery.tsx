@@ -21,7 +21,8 @@
  * SC-02 is design-pass work under item 10, deferred to Liz's next design
  * pass per that item's own OPEN_QUESTIONS. Not invented here.
  *
- * Behind COMMUNITIES_ENABLED via the ScenePage export.
+ * The ScenePage owns release gating. Its events destination can ship while the
+ * Communities destination remains hidden behind COMMUNITIES_ENABLED.
  */
 
 import React, { useState } from 'react';
@@ -62,7 +63,7 @@ const DESTINATIONS: ReadonlyArray<readonly [SceneDestination, string]> = [
 // size follows importance: this many lead events render full-size
 const FULL_SIZE_COUNT = 3;
 
-export function SceneDiscovery() {
+export function SceneDiscovery({ communitiesEnabled = false }: { communitiesEnabled?: boolean }) {
   // SC-01: one shared shell, two destination states, retained selection —
   // plain component state is enough (the tab navigator keeps Scene mounted
   // across a bottom-tab switch); Events leads by default (item 04/07: "join
@@ -86,7 +87,7 @@ export function SceneDiscovery() {
           Loading/empty/error inside either destination preserve this shell
           (SC-01). */}
       <View style={styles.destinationRow}>
-        {DESTINATIONS.map(([key, label]) => {
+        {DESTINATIONS.filter(([key]) => key !== 'communities' || communitiesEnabled).map(([key, label]) => {
           const on = destination === key;
           return (
             <TouchableOpacity
@@ -115,10 +116,10 @@ export function SceneDiscovery() {
 
       {visited.has('events') && (
         <View style={[styles.destinationBody, destination !== 'events' && styles.destinationBodyHidden]}>
-          <EventsDestination />
+          <EventsDestination communitiesEnabled={communitiesEnabled} />
         </View>
       )}
-      {visited.has('communities') && (
+      {communitiesEnabled && visited.has('communities') && (
         <View style={[styles.destinationBody, destination !== 'communities' && styles.destinationBodyHidden]}>
           <CommunitiesDestination />
         </View>
@@ -129,14 +130,14 @@ export function SceneDiscovery() {
 
 // ─── Events destination (SC-02) ──────────────────────────────────────────
 
-function EventsDestination() {
+function EventsDestination({ communitiesEnabled }: { communitiesEnabled: boolean }) {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const [category, setCategory] = useState<string | null>(null);
 
   const { data: events = [], isError, error, refetch, isRefetching } = useQuery({
-    queryKey: ['scene-events'],
-    queryFn: getSceneEvents,
+    queryKey: ['scene-events', communitiesEnabled ? 'all' : 'standalone'],
+    queryFn: () => getSceneEvents(communitiesEnabled),
   });
 
   // pilot-era rows carry capitalized categories ('Community'); compare and
@@ -209,7 +210,7 @@ function EventsDestination() {
         </>
       )}
 
-      <CreatorRecruitCard />
+      {communitiesEnabled && <CreatorRecruitCard />}
     </ScrollView>
   );
 }

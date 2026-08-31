@@ -23,6 +23,7 @@ import { withTimeout } from '../../../lib/withTimeout';
 import { getUserBounded } from '../../../lib/authGate';
 import { unauthedRoute } from '../../../lib/authRouting';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
+import { requestResendAudienceSync } from '../../../lib/deliverability/consentSync';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 import ProgressHead from '../../../components/onboarding/ProgressHead';
@@ -260,16 +261,15 @@ export default function OnboardingBasicsScreen() {
         .update(updates)
         .eq('id', user.id);
       if (error) throw error;
-      // Fire-and-forget Resend audience sync. The column is the source of
-      // truth; if this fails the address is still persisted and a future
-      // settings-page sync (or retry on next submit) can pick it up.
-      if (marketingOptIn && trimmedEmail) {
-        supabase.functions
-          .invoke('add-to-resend-audience')
-          .catch((err: unknown) => {
-            console.warn('[basics] add-to-resend-audience failed:', err);
-          });
-      }
+      // Fire-and-forget Resend audience sync. The edge function reads the
+      // persisted profile, so it must run for opt-in, opt-out, and blank-email
+      // updates alike. Never delay navigation on marketing fanout.
+      requestResendAudienceSync(
+        () => supabase.functions.invoke('add-to-resend-audience'),
+        (err: unknown) => {
+          console.warn('[basics] add-to-resend-audience failed:', err);
+        },
+      );
       hapticLight();
       router.replace('/onboarding/la-check');
     } catch (e: unknown) {

@@ -1,0 +1,15 @@
+{
+  "local_migrations": [
+    "20260801000000_tracked.sql",
+    "20260802000000_local_only.sql",
+    "20260803000000_held.sql",
+    "not-a-migration.sql"
+  ],
+  "remote_migrations": [
+    "20260801000000_tracked.sql",
+    "20260803000000_held.sql",
+    "20260804000000_remote_only.sql",
+    "remote-object-without-version"
+  ],
+  "held_migrations": ["20260803000000_held.sql"]
+}
