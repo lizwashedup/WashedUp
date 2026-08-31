@@ -40,5 +40,8 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Prepare production-parity PostgreSQL image
+        run: docker pull postgres:17-alpine
+
       - name: Run mandatory regression lock
         run: npm run qa:all
