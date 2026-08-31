@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
-import { formatDisplay, stripDigits } from '../../lib/phoneFormat';
+import { formatDisplay, normalizeUSPhoneInput } from '../../lib/phoneFormat';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 
 type Props = {
@@ -35,7 +35,7 @@ export const PhoneInput = forwardRef<PhoneInputHandle, Props>(function PhoneInpu
   const hasError = !!error;
 
   const handleChange = (text: string) => {
-    const digits = stripDigits(text).slice(0, 10);
+    const digits = normalizeUSPhoneInput(text);
     onChangeText(digits);
   };
 
@@ -64,7 +64,7 @@ export const PhoneInput = forwardRef<PhoneInputHandle, Props>(function PhoneInpu
           autoComplete="tel"
           autoFocus={autoFocus}
           editable={editable}
-          maxLength={14}
+          maxLength={32}
           returnKeyType="done"
           selectionColor={Colors.brand}
           inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}

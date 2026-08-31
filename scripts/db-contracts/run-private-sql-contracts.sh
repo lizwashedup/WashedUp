@@ -27,6 +27,8 @@ THRESHOLD_CHAT_MIGRATION="$REPO_ROOT/supabase/migrations/20260828200000_communit
 THRESHOLD_RECEIPT_MIGRATION="$REPO_ROOT/supabase/migrations/20260829210000_ticket_receipt_resend_rate_limit.sql"
 DELIVERABILITY_MIGRATION="$REPO_ROOT/supabase/migrations/20260830120000_free_rsvp_confirmation_outbox.sql"
 CONSENT_SYNC_MIGRATION="$REPO_ROOT/supabase/migrations/20260830130000_audience_sync_outbox_and_suppression.sql"
+CONSENT_SYNC_ACL_MIGRATION="$REPO_ROOT/supabase/migrations/20260831180000_revoke_service_role_low_level_suppression.sql"
+CONSENT_SYNC_PGCRYPTO_REPAIR_MIGRATION="$REPO_ROOT/supabase/migrations/20260831190000_fix_pgcrypto_search_path_for_signup.sql"
 DELIVERY_SCHEDULER_MIGRATION="$REPO_ROOT/supabase/migrations/20260831170000_schedule_delivery_workers_seed_only.sql"
 DELIVERY_RESCUE_SQL="$REPO_ROOT/scripts/deliverability/g0-rescue.sql"
 CONTRACT_FILES="$CONTRACT_ROOT/supabase/tests/contracts"
@@ -57,6 +59,8 @@ for required_file in \
   "$THRESHOLD_RECEIPT_MIGRATION" \
   "$DELIVERABILITY_MIGRATION" \
   "$CONSENT_SYNC_MIGRATION" \
+  "$CONSENT_SYNC_ACL_MIGRATION" \
+  "$CONSENT_SYNC_PGCRYPTO_REPAIR_MIGRATION" \
   "$DELIVERY_SCHEDULER_MIGRATION" \
   "$DELIVERY_RESCUE_SQL" \
   "$CONTRACT_FILES/00_account_deletion_fixture.sql" \
@@ -147,6 +151,8 @@ CONTAINER_ID=$(docker run \
   --volume "$THRESHOLD_RECEIPT_MIGRATION:/migrations/threshold-receipt.sql:ro" \
   --volume "$DELIVERABILITY_MIGRATION:/migrations/deliverability.sql:ro" \
   --volume "$CONSENT_SYNC_MIGRATION:/migrations/consent-sync.sql:ro" \
+  --volume "$CONSENT_SYNC_ACL_MIGRATION:/migrations/consent-sync-acl.sql:ro" \
+  --volume "$CONSENT_SYNC_PGCRYPTO_REPAIR_MIGRATION:/migrations/consent-sync-pgcrypto-repair.sql:ro" \
   --volume "$DELIVERY_SCHEDULER_MIGRATION:/migrations/delivery-scheduler.sql:ro" \
   --volume "$DELIVERY_RESCUE_SQL:/g0-rescue.sql:ro" \
   --volume "$CONTRACT_FILES:/contracts:ro" \
@@ -208,6 +214,12 @@ run_consent_sync_contract() {
   psql_file consent_sync_contract /contracts/140_consent_sync_fixture.sql
   psql_file consent_sync_contract /migrations/deliverability.sql
   psql_file consent_sync_contract /migrations/consent-sync.sql
+  docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d consent_sync_contract -c \
+    "GRANT EXECUTE ON FUNCTION public.record_audience_suppression(text, text, text) TO service_role;"
+  psql_file consent_sync_contract /migrations/consent-sync-acl.sql
+  psql_file consent_sync_contract /migrations/consent-sync-acl.sql
+  psql_file consent_sync_contract /migrations/consent-sync-pgcrypto-repair.sql
+  psql_file consent_sync_contract /migrations/consent-sync-pgcrypto-repair.sql
   psql_file consent_sync_contract /contracts/141_consent_sync_contract.sql
 }
 

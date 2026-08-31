@@ -180,6 +180,28 @@ function checkVaultFunctionLiterals(files) {
   }
 }
 
+function checkPgcryptoQualification(files) {
+  const safeSearchPathAfter = new Map();
+  for (const file of files) {
+    const sql = readFileSync(join(migrationsDir, file), 'utf8');
+    for (const match of sql.matchAll(
+      /ALTER\s+FUNCTION\s+(?:public\.)?([a-z_][a-z0-9_]*)\s*\([^;]*?\)\s+SET\s+search_path\s+(?:TO|=)\s+public\s*,\s*extensions\s*;/gi,
+    )) {
+      safeSearchPathAfter.set(match[1].toLowerCase(), file);
+    }
+  }
+  for (const file of files) {
+    const sql = readFileSync(join(migrationsDir, file), 'utf8');
+    for (const fn of functionBodies(sql)) {
+      const repairFile = safeSearchPathAfter.get(fn.name);
+      const repairedLater = repairFile && repairFile > file;
+      if (/(^|[^.a-z0-9_])digest\s*\(/i.test(fn.body) && !repairedLater) {
+        error(`${file}: function ${fn.name} uses unqualified digest(); use extensions.digest()`);
+      }
+    }
+  }
+}
+
 function checkProvenance(provenance, duplicateVersions) {
   if (!provenance) return;
   if (provenance.schema_provenance !== 'incomplete') {
@@ -464,6 +486,7 @@ if (contracts) {
 }
 
 checkVaultFunctionLiterals(files);
+checkPgcryptoQualification(files);
 checkNotificationHandlers(files);
 checkPayoutContracts();
 checkProvenance(provenance, duplicateVersions);

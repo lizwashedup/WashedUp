@@ -10,13 +10,28 @@ export function stripDigits(input: string): string {
 }
 
 /**
+ * Normalize phone input to the ten national digits used by the UI.
+ *
+ * iOS and password managers commonly autofill US numbers as
+ * "+1 (213) 555-0123". A US area code cannot begin with 1, so a leading 1
+ * is the country code here and can be removed immediately. Doing this during
+ * incremental typing also prevents the formatted field from dropping the
+ * real final digit.
+ */
+export function normalizeUSPhoneInput(input: string): string {
+  const digits = stripDigits(input);
+  const national = digits.startsWith('1') ? digits.slice(1) : digits;
+  return national.slice(0, 10);
+}
+
+/**
  * Convert a 10-digit US number to E.164 ("+1XXXXXXXXXX").
  * Caller is expected to pass exactly 10 digits; non-digits are stripped
  * defensively. Behavior on != 10 digits is "best effort" — returns +1
  * prefixed by whatever digits were given.
  */
 export function formatToE164(digits10: string): string {
-  const d = stripDigits(digits10);
+  const d = normalizeUSPhoneInput(digits10);
   return `+1${d}`;
 }
 

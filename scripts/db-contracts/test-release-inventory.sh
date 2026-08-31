@@ -4,7 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 OUTPUT=$(node "$SCRIPT_DIR/static-contracts.mjs")
 printf '%s\n' "$OUTPUT"
-printf '%s\n' "$OUTPUT" | grep -F 'RELEASE_CANDIDATES: 240 active migration(s), held excluded' >/dev/null
+printf '%s\n' "$OUTPUT" | grep -F 'RELEASE_CANDIDATES: 242 active migration(s), held excluded' >/dev/null
 printf '%s\n' "$OUTPUT" | grep -F 'docs/database/review-only/community-join-policy-existing-text.sql' >/dev/null
 
 # Ordinary active-migration safety prose such as "DO NOT APPLY WITHOUT"

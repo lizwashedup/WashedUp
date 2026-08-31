@@ -1,12 +1,14 @@
 {
   "format": 3,
-  "migration_count": 240,
-  "inventory_sha256": "6533027843b6b4cb636091f5324e61de2e9fb3666e90714400cae1403166bf0b",
+  "migration_count": 242,
+  "inventory_sha256": "3324c0f0d549776c01d6297e31e5cfaf7e2657b3197839d687e3de922cab6261",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
     "20260831160000_reduce_background_job_io.sql",
-    "20260831170000_schedule_delivery_workers_seed_only.sql"
+    "20260831170000_schedule_delivery_workers_seed_only.sql",
+    "20260831180000_revoke_service_role_low_level_suppression.sql",
+    "20260831190000_fix_pgcrypto_search_path_for_signup.sql"
   ],
   "side_effect_union_count": 73,
   "approved_legacy_secret_literals": [

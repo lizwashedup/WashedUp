@@ -15,6 +15,12 @@ INSERT INTO public.profiles(id, email, marketing_opt_in) VALUES
   ('14000000-0000-4000-8000-000000000006', 'reversible@example.com', true),
   ('14000000-0000-4000-8000-000000000007', 'quarantine@example.com', true);
 RESET ROLE;
+INSERT INTO auth.users(id, email, phone, raw_user_meta_data) VALUES (
+  '14000000-0000-4000-8000-000000000008',
+  NULL,
+  '+12025550100',
+  '{}'::jsonb
+);
 SET ROLE service_role;
 DO $$ BEGIN
   IF (SELECT count(*) FROM public.audience_consent_events WHERE profile_id = '14000000-0000-4000-8000-000000000001') < 3 THEN RAISE EXCEPTION 'consent evidence missing'; END IF;
@@ -25,6 +31,23 @@ DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name IN ('audience_consent_events','audience_suppression_events') AND column_name IN ('email','normalized_email')) THEN RAISE EXCEPTION 'raw email evidence column present'; END IF;
   IF (SELECT count(*) FROM public.audience_consent_events WHERE profile_id = '14000000-0000-4000-8000-000000000003') <> 1 THEN RAISE EXCEPTION 'real signup did not create exactly one consent evidence row'; END IF;
   IF (SELECT count(*) FROM public.audience_sync_outbox WHERE profile_id = '14000000-0000-4000-8000-000000000003' AND normalized_email = 'signup@example.com') <> 1 THEN RAISE EXCEPTION 'real signup did not create exactly one desired-state row'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+     WHERE id = '14000000-0000-4000-8000-000000000008'
+       AND email IS NULL
+       AND phone_number = '+12025550100'
+       AND onboarding_status = 'pending'
+  ) THEN RAISE EXCEPTION 'phone-only auth signup did not create its profile'; END IF;
+  IF (SELECT count(*) FROM public.audience_consent_events
+       WHERE profile_id = '14000000-0000-4000-8000-000000000008'
+         AND email_hash IS NULL
+         AND email_consent = false) <> 1 THEN
+    RAISE EXCEPTION 'phone-only auth signup did not create null-email consent evidence';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.audience_sync_outbox
+     WHERE profile_id = '14000000-0000-4000-8000-000000000008'
+  ) THEN RAISE EXCEPTION 'phone-only auth signup incorrectly queued an email job'; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'profile_consent_metadata_guard_trigger' AND tgenabled = 'O')
      OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'profile_consent_evidence_enqueue_trigger' AND tgenabled = 'O') THEN
     RAISE EXCEPTION 'split consent triggers are not active';
