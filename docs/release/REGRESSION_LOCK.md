@@ -17,6 +17,8 @@ This gate protects the working auth and database paths before any release.
 
 The GitHub workflow publishes the required check `Regression Lock / release-gate`. Protect `main` so this check is required, direct pushes are blocked, and pull requests require an approving review. Until that branch rule is enabled, the workflow is visible evidence but not an absolute merge barrier.
 
+The native traceability manifest includes evidence paths in the private sibling repositories `washedup-web` and `washedup-world`. Local workspace QA continues to require those files. The single-repository GitHub runner explicitly defers only those external existence checks; it still validates the manifest and every WashedUp-native evidence path and runs the native behavioral suites.
+
 ## Production proof rule
 
 Passing CI proves the candidate. A production claim also requires fresh same-release evidence:

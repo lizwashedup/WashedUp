@@ -28,6 +28,9 @@ const expectedMaintenanceIds = Array.from(
   { length: 10 },
   (_, index) => `M${String(index + 1).padStart(2, '0')}`,
 );
+const deferExternalEvidence = process.env.TRACEABILITY_EXTERNAL_EVIDENCE === 'defer';
+const externalEvidenceRoots = ['../washedup-web/', '../washedup-world/'];
+let deferredExternalEvidence = 0;
 
 function fail(message) {
   process.stderr.write(`Traceability check failed: ${message}\n`);
@@ -42,6 +45,11 @@ function checkEvidence(requirement) {
       continue;
     }
     const resolved = path.resolve(__dirname, '..', evidence);
+    const isExternalEvidence = externalEvidenceRoots.some((root) => evidence.startsWith(root));
+    if (deferExternalEvidence && isExternalEvidence) {
+      deferredExternalEvidence += 1;
+      continue;
+    }
     if (!fs.existsSync(resolved)) fail(`${requirement.id} evidence is missing: ${evidence}`);
   }
 }
@@ -177,6 +185,7 @@ if (!process.exitCode) {
   process.stdout.write(
     `Traceability check passed: ${manifest.requirements.length} requirements, ` +
       `${counts.green} green, ${counts.yellow} yellow, ${counts.red} red; ` +
-      `${manifest.maintenanceRequirements.length} maintenance gates.\n`,
+      `${manifest.maintenanceRequirements.length} maintenance gates; ` +
+      `${deferredExternalEvidence} external evidence path(s) deferred.\n`,
   );
 }

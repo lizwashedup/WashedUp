@@ -20,6 +20,10 @@ jobs:
     timeout-minutes: 30
     env:
       RELEASE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      # The native traceability manifest also points at two private sibling
+      # repositories. Their existence is checked by local workspace QA; this
+      # single-repository runner defers only those explicit external paths.
+      TRACEABILITY_EXTERNAL_EVIDENCE: defer
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
