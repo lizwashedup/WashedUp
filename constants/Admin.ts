@@ -5,7 +5,7 @@
 
 const ADMIN_IDS = (process.env.EXPO_PUBLIC_ADMIN_USER_IDS ?? '')
   .split(',')
-  .map((s) => s.trim())
+  .map((s: string) => s.trim())
   .filter(Boolean);
 
 export function isAdmin(userId: string | null): boolean {
