@@ -185,8 +185,31 @@ psql_file() {
   docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d "$database" -f "$file"
 }
 
+create_contract_db() {
+  database=$1
+  case "$database" in
+    *[!a-z0-9_]*) echo "unsafe contract database name: $database" >&2; exit 2 ;;
+  esac
+  attempt=0
+  while [ "$attempt" -lt 15 ]; do
+    if docker exec "$CONTAINER_ID" createdb -U postgres "$database"; then
+      return
+    fi
+    existing=$(docker exec "$CONTAINER_ID" psql -U postgres -d postgres -Atqc \
+      "SELECT 1 FROM pg_database WHERE datname = '$database'" 2>/dev/null || true)
+    if [ "$existing" = "1" ]; then
+      return
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+  echo "PostgreSQL never became stable enough to create $database" >&2
+  docker logs --tail 50 "$CONTAINER_ID" >&2 || true
+  exit 2
+}
+
 run_release_blockers_contract() {
-  docker exec "$CONTAINER_ID" createdb -U postgres release_blockers_contract
+  create_contract_db release_blockers_contract
   psql_file release_blockers_contract /contracts/110_release_blockers_fixture.sql
   psql_file release_blockers_contract /migrations/event-members-public.sql
   psql_file release_blockers_contract /migrations/topic-album-hardening.sql
@@ -195,7 +218,7 @@ run_release_blockers_contract() {
 }
 
 run_threshold_75_contract() {
-  docker exec "$CONTAINER_ID" createdb -U postgres threshold_75_contract
+  create_contract_db threshold_75_contract
   psql_file threshold_75_contract /contracts/120_threshold_75_fixture.sql
   psql_file threshold_75_contract /migrations/threshold-chat.sql
   psql_file threshold_75_contract /migrations/threshold-receipt.sql
@@ -203,14 +226,14 @@ run_threshold_75_contract() {
 }
 
 run_deliverability_contract() {
-  docker exec "$CONTAINER_ID" createdb -U postgres deliverability_contract
+  create_contract_db deliverability_contract
   psql_file deliverability_contract /contracts/130_deliverability_fixture.sql
   psql_file deliverability_contract /migrations/deliverability.sql
   psql_file deliverability_contract /contracts/131_deliverability_contract.sql
 }
 
 run_consent_sync_contract() {
-  docker exec "$CONTAINER_ID" createdb -U postgres consent_sync_contract
+  create_contract_db consent_sync_contract
   psql_file consent_sync_contract /contracts/140_consent_sync_fixture.sql
   psql_file consent_sync_contract /migrations/deliverability.sql
   psql_file consent_sync_contract /migrations/consent-sync.sql
@@ -224,7 +247,7 @@ run_consent_sync_contract() {
 }
 
 run_delivery_scheduler_contract() {
-  docker exec "$CONTAINER_ID" createdb -U postgres delivery_scheduler_contract
+  create_contract_db delivery_scheduler_contract
   psql_file delivery_scheduler_contract /contracts/160_delivery_scheduler_fixture.sql
   set +e
   scheduler_missing_output=$(docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d delivery_scheduler_contract \
@@ -274,19 +297,19 @@ if [ "$CONTRACT_LANE" = "delivery-scheduler" ]; then
   exit 0
 fi
 
-docker exec "$CONTAINER_ID" createdb -U postgres deletion_contract
+create_contract_db deletion_contract
 psql_file deletion_contract /contracts/00_account_deletion_fixture.sql
 psql_file deletion_contract /migrations/deletion.sql
 psql_file deletion_contract /contracts/01_account_deletion_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres refund_contract
+create_contract_db refund_contract
 psql_file refund_contract /contracts/10_refund_fixture.sql
 awk '/fix 3: reconcile v3/{exit} {print}' \
   "$REFUND_MIGRATION" \
   | docker exec -i "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d refund_contract
 psql_file refund_contract /contracts/11_refund_two_session_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres vault_contract
+create_contract_db vault_contract
 psql_file vault_contract /contracts/20_vault_fixture.sql
 set +e
 vault_missing_output=$(docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d vault_contract \
@@ -303,47 +326,47 @@ docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d vault_contrac
 psql_file vault_contract /migrations/vault.sql
 psql_file vault_contract /contracts/21_vault_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres default_privileges_contract
+create_contract_db default_privileges_contract
 psql_file default_privileges_contract /contracts/30_default_privileges_fixture.sql
 psql_file default_privileges_contract /migrations/default-privileges.sql
 psql_file default_privileges_contract /contracts/31_default_privileges_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres payout_contract
+create_contract_db payout_contract
 psql_file payout_contract /contracts/40_payout_claim_fixture.sql
 psql_file payout_contract /migrations/payout-claim.sql
 psql_file payout_contract /contracts/41_payout_claim_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres people_dm_contract
+create_contract_db people_dm_contract
 psql_file people_dm_contract /contracts/50_people_dm_fixture.sql
 psql_file people_dm_contract /migrations/people-dm.sql
 psql_file people_dm_contract /contracts/51_people_dm_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres circle_trust_contract
+create_contract_db circle_trust_contract
 psql_file circle_trust_contract /contracts/52_circle_trust_fixture.sql
 psql_file circle_trust_contract /migrations/circle-trust.sql
 psql_file circle_trust_contract /contracts/53_circle_trust_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres chat_scale_contract
+create_contract_db chat_scale_contract
 psql_file chat_scale_contract /contracts/60_chat_scale_fixture.sql
 psql_file chat_scale_contract /migrations/chat-scale.sql
 psql_file chat_scale_contract /contracts/61_chat_scale_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres payout_block_contract
+create_contract_db payout_block_contract
 psql_file payout_block_contract /contracts/70_payout_block_fixture.sql
 psql_file payout_block_contract /migrations/payout-block.sql
 psql_file payout_block_contract /contracts/71_payout_block_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres circle_suggestions_contract
+create_contract_db circle_suggestions_contract
 psql_file circle_suggestions_contract /contracts/80_circle_suggestions_fixture.sql
 psql_file circle_suggestions_contract /migrations/circle-suggestions.sql
 psql_file circle_suggestions_contract /contracts/81_circle_suggestions_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres community_join_policy_contract
+create_contract_db community_join_policy_contract
 psql_file community_join_policy_contract /contracts/90_community_join_policy_fixture.sql
 psql_file community_join_policy_contract /migrations/community-join-policy.sql
 psql_file community_join_policy_contract /contracts/91_community_join_policy_contract.sql
 
-docker exec "$CONTAINER_ID" createdb -U postgres technical_database_hardening_contract
+create_contract_db technical_database_hardening_contract
 psql_file technical_database_hardening_contract /contracts/100_technical_database_hardening_fixture.sql
 psql_file technical_database_hardening_contract /migrations/technical-database-hardening.sql
 psql_file technical_database_hardening_contract /contracts/101_technical_database_hardening_contract.sql
