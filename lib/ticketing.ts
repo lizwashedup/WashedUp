@@ -161,9 +161,12 @@ export interface TierDraft {
   per_order_max: number | null;
   visibility: TierVisibility;
   status: TierStatus;
-  /** Build 35 Screen 23: null on either side means unrestricted on that side. */
-  sales_open_at: string | null;
-  sales_close_at: string | null;
+  /** Build 35 Screen 23: null on either side means unrestricted on that side.
+   *  Optional here only in this OTA-pinned copy: the shipping UI (TierEditorSheet)
+   *  doesn't set these yet, and createTier spreads `draft` straight into the
+   *  insert, so an omitted key just leaves the column at its DB default. */
+  sales_open_at?: string | null;
+  sales_close_at?: string | null;
 }
 
 export async function createTier(

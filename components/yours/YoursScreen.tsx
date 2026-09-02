@@ -9,12 +9,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { markRequestsSeen, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
-import {
-  hasSeenYoursIntro,
-  markYoursIntroSeen,
-  resolveYoursIntroVariant,
-  type YoursIntroVariant,
-} from '../../lib/yours/tabsIntroSeen';
 import { Plus, MessageCircle, CalendarPlus, Users, User } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -37,7 +31,6 @@ import MyPlansView from './screens/MyPlansView';
 import FreshStartView from './screens/FreshStartView';
 import NewUserEmptyView from './screens/NewUserEmptyView';
 import RequestBanner from './requests/RequestBanner';
-import YoursIntroPopup from './onboarding/YoursIntroPopup';
 import PathsSheet from './paths/PathsSheet';
 import ProfileCardSheet from './profile/ProfileCardSheet';
 import RequestStack from './requests/RequestStack';
@@ -78,7 +71,7 @@ export default function YoursScreen() {
   const uid = userId ?? '';
   const { data: people = [], isLoading: gridLoading } = useYoursGrid(userId);
   const { data: requests = [] } = useIncomingRequests(userId);
-  const { data: backlog = [], isLoading: backlogLoading } = usePlanHistoryBacklog(userId);
+  const { data: backlog = [] } = usePlanHistoryBacklog(userId);
   const { ensureReferralCode } = useReferral();
   const getOrCreateDm = useGetOrCreateDm();
 
@@ -113,7 +106,6 @@ export default function YoursScreen() {
   // deep-link at open time so it survives the URL param being cleared.
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [profileTarget, setProfileTarget] = useState<string | null>(null);
-  const [introVariant, setIntroVariant] = useState<YoursIntroVariant | null>(null);
   const queryClient = useQueryClient();
 
   // Opening the Requests surface marks the loop "seen": clears the Yours tab
@@ -193,32 +185,6 @@ export default function YoursScreen() {
     if (backlog.length > 0) return 'fresh';
     return 'empty';
   }, [userLoading, gridLoading, people.length, backlog.length]);
-
-  // One-time tabs education pop-up (spec section 6: "what moved" for
-  // existing users, a "join a plan first" guide for brand-new ones). Checked
-  // once per mount, only once `state` has settled into a real value (never
-  // against the 'loading' guess), and gated by a ref rather than re-running
-  // on every `state` change so tapping around after the first real check
-  // can never re-trigger it later in the same session.
-  const introCheckedRef = useRef(false);
-  useEffect(() => {
-    if (introCheckedRef.current) return;
-    if (!uid || state === 'loading') return;
-    // usePlanHistoryBacklog can still be in flight after `state` has already
-    // resolved to 'empty' (no loading term for it in that memo) -- without
-    // this guard, a user with plan history but zero People connections gets
-    // permanently stamped 'newUser' during that transient window, then a
-    // second, contradicting popup once backlog resolves to 'fresh'.
-    if (backlogLoading) return;
-    introCheckedRef.current = true;
-    const variant = resolveYoursIntroVariant(state);
-    if (!variant) return;
-    hasSeenYoursIntro(variant, uid).then((seen) => {
-      if (seen) return;
-      setIntroVariant(variant);
-      markYoursIntroSeen(variant, uid);
-    });
-  }, [uid, state]);
 
   // The "Your People" body for the active state. Albums tab and loading
   // are handled outside this function so the tabs stay visible.
@@ -373,19 +339,6 @@ export default function YoursScreen() {
           onClose={() => setProfileTarget(null)}
           userId={uid}
           targetId={profileTarget}
-        />
-      )}
-
-      {!!uid && (
-        <YoursIntroPopup
-          visible={introVariant !== null}
-          variant={introVariant ?? 'newUser'}
-          circlesEnabled={GROUPS_ENABLED}
-          onDismiss={() => setIntroVariant(null)}
-          onAddPeople={() => {
-            setIntroVariant(null);
-            setPathsOpen(true);
-          }}
         />
       )}
 
