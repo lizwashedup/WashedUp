@@ -15,8 +15,8 @@
     "scripts/deliverability/check-consent-sync-wiring.mjs": "c6e66c2ff67681716493624778c2a7566320fa93ddb2cce8132f2df6b1d5bef0",
     "supabase/tests/contracts/130_deliverability_fixture.sql": "5d2ba6f9cd6672bfe56bae856132b392af0c39bd48e28a95468ca52eebe32b37",
     "supabase/tests/contracts/131_deliverability_contract.sql": "e46b3ff53e8c4a7b9c78c93462ab37f0b07f158dd176696029a3af51c056cd18",
-    "supabase/tests/contracts/140_consent_sync_fixture.sql": "155a48d6e7ce81c90a6bcd44bfff326e4b9bd9ae9327dfba75d13ed38d13282c",
-    "supabase/tests/contracts/141_consent_sync_contract.sql": "e047e28316de3e48c01b95c3f292ff0e263aa18d63d08e97ba6b0dd6f871d64c",
+    "supabase/tests/contracts/140_consent_sync_fixture.sql": "0103441e5ad80a5c58017b37434bbe6860984e17c7cd486ce5d066dce08b58e5",
+    "supabase/tests/contracts/141_consent_sync_contract.sql": "854c0871e3f5e3277ee7d54054127b98845a6084c54e23047ea50876d9c9d4a8",
     "supabase/tests/contracts/160_delivery_scheduler_fixture.sql": "73692a7fa452bb1417f841d8ee5a5c9bcac7d36b93ab32f0fb7dbab11553f70e",
     "supabase/tests/contracts/161_delivery_scheduler_contract.sql": "318ce09c1654688e66a4cfd6e272d6bca661285c37cf2c06d205e46d0bc93e21",
     "supabase/tests/contracts/162_delivery_rescue_contract.sql": "91a1c6ef9a3622ff6323416585f59ae399a88fe9e77215ab871e435798337616"
