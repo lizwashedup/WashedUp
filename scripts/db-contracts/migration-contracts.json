@@ -1,7 +1,7 @@
 {
   "format": 3,
-  "migration_count": 256,
-  "inventory_sha256": "e02d8d949ddb5e0d970a501342859da44582cd5e7436238dc5ffd5fa3158b5b3",
+  "migration_count": 257,
+  "inventory_sha256": "c01099a2a1c3652f6f94f91bf87f2795522ce3f635f59bcbe652bbb2da15b2fd",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
@@ -22,9 +22,10 @@
     "20260901090000_gender_restricted_communities_plan_feed.sql",
     "20260901120000_gender_restricted_communities_scene_visibility.sql",
     "20260901130000_organizer_profile_city.sql",
-    "20260901140000_purge_community_organizer_follows.sql"
+    "20260901140000_purge_community_organizer_follows.sql",
+    "20260902190000_fix_ticket_webhook_events_confirmation_retry_id_format.sql"
   ],
-  "side_effect_union_count": 75,
+  "side_effect_union_count": 76,
   "approved_legacy_secret_literals": [
     {
       "file": "20260505000000_albums_processor_webhook.sql",
@@ -37,7 +38,7 @@
     "top_level_dml": 26,
     "do_fixture_dml": 39,
     "irreversible_ddl": 1,
-    "stateful_replacement": 9,
+    "stateful_replacement": 10,
     "default_privileges": 1
   },
   "classification_reasons": {
@@ -142,7 +143,8 @@
       "20260706150000_mvp_batch.sql",
       "20260708220000_open_composer.sql",
       "20260814120000_ticket_payouts_payout_id_shared_per_organizer.sql",
-      "20260828200000_community_topic_chat_parity_phase1.sql"
+      "20260828200000_community_topic_chat_parity_phase1.sql",
+      "20260902190000_fix_ticket_webhook_events_confirmation_retry_id_format.sql"
     ],
     "default_privileges": [
       "20260816121000_revoke_unsafe_default_function_execute.sql"

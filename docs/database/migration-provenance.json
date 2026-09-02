@@ -19,6 +19,12 @@
       "production_evidence": "docs/database/direct-apply-evidence-20260902-chat-parity.md: Josh ran the column-existence query directly in the Supabase SQL editor and reported all 3 columns already present",
       "apply_date": "2026-09-02",
       "approval_class": "verified_direct_apply"
+    },
+    {
+      "file": "20260902190000_fix_ticket_webhook_events_confirmation_retry_id_format.sql",
+      "production_evidence": "docs/database/direct-apply-evidence-20260902-ticket-webhook-id-format.md: Josh ran the migration directly in the Supabase SQL editor for a live stuck-checkout incident; verified after by direct read-only query showing the new constraint live and Liz's stuck order settled",
+      "apply_date": "2026-09-02",
+      "approval_class": "verified_direct_apply"
     }
   ],
   "held_migrations": [
@@ -36,6 +42,11 @@
       "file": "docs/database/review-only/technical-database-hardening.sql",
       "reason": "Technical hardening package is a review-only proposal and is excluded from automatic apply.",
       "source": "docs/database/review-only/technical-database-hardening.sql"
+    },
+    {
+      "file": "supabase/migrations/20260813192000_create_stripe_webhook_events_HELD_pending_deploy.sql",
+      "reason": "In-tree migration self-labeled HELD in its own filename and header, not a review-only proposal: creates stripe_webhook_events, and the moment that table exists stripe-webhook stops 500ing and replays queued Stripe events for real (confirmation emails, subscription cancels, refunds) against a real key. Must not apply until stripe-webhook gets the same test/live key gate create-checkout-session, cancel-my-membership, and cancel-contributor-subscription already have via stripeKeyIsTest(). Per Josh's 2026-08-13 instruction: assume the key is real, nothing may affect a real person without an explicit go. File stays in its correct sequence position in supabase/migrations/ pending that gate; this record exists only so automated release-candidate classification excludes it instead of silently counting it as active (the file's own header comment carries no automated weight by itself).",
+      "source": "supabase/migrations/20260813192000_create_stripe_webhook_events_HELD_pending_deploy.sql"
     }
   ],
   "unresolved_versions": [

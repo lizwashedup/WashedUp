@@ -40,6 +40,13 @@ import { MyCommunitiesList } from './communities/MyCommunitiesList';
 import MenuCard, { type AnchorRect } from '../menu/MenuCard';
 import { buildComposerWithPerson } from '../../lib/composerLink';
 import type { YoursGridPerson } from '../../lib/yours/types';
+import YoursIntroPopup from './onboarding/YoursIntroPopup';
+import {
+  resolveYoursIntroVariant,
+  hasSeenYoursIntro,
+  markYoursIntroSeen,
+  type YoursIntroVariant,
+} from '../../lib/yours/tabsIntroSeen';
 
 /**
  * Small "+ add" pill shown below the tabs when the populated People body
@@ -185,6 +192,28 @@ export default function YoursScreen() {
     if (backlog.length > 0) return 'fresh';
     return 'empty';
   }, [userLoading, gridLoading, people.length, backlog.length]);
+
+  // One-time Yours-tab education pop-up (see lib/yours/tabsIntroSeen.ts).
+  // Skipped while a requests deep-link is about to auto-open its own sheet,
+  // so the two bottom sheets never fight for the screen on first mount.
+  const [introVariant, setIntroVariant] = useState<YoursIntroVariant | null>(null);
+  useEffect(() => {
+    if (!uid || requestsOpen) return;
+    const variant = resolveYoursIntroVariant(state);
+    if (!variant) return;
+    let cancelled = false;
+    hasSeenYoursIntro(variant, uid).then((seen) => {
+      if (!cancelled && !seen) setIntroVariant(variant);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [state, uid, requestsOpen]);
+
+  const closeIntro = () => {
+    if (introVariant) markYoursIntroSeen(introVariant, uid);
+    setIntroVariant(null);
+  };
 
   // The "Your People" body for the active state. Albums tab and loading
   // are handled outside this function so the tabs stay visible.
@@ -339,6 +368,19 @@ export default function YoursScreen() {
           onClose={() => setProfileTarget(null)}
           userId={uid}
           targetId={profileTarget}
+        />
+      )}
+
+      {!!uid && (
+        <YoursIntroPopup
+          visible={!!introVariant}
+          variant={introVariant ?? 'newUser'}
+          circlesEnabled={GROUPS_ENABLED}
+          onDismiss={closeIntro}
+          onAddPeople={() => {
+            closeIntro();
+            setPathsOpen(true);
+          }}
         />
       )}
 
