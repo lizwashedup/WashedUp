@@ -56,6 +56,17 @@ export function isAdminTier(a: CreatorAccess | undefined | null): boolean {
   return a.ledCommunities.some((c) => c.role === 'leader' || c.role === 'co_leader' || c.role === 'admin');
 }
 
+/**
+ * Same admin-tier boundary as isAdminTier, scoped to a single role value
+ * instead of the whole CreatorAccess. isAdminTier answers "is this person
+ * admin-tier of ANY led community"; this answers it for ONE specific
+ * community (e.g. LedCommunity.role for the currently-selected community),
+ * which is the check an action scoped to that one community actually needs.
+ */
+export function isAdminTierRole(role: CommunityMemberRole): boolean {
+  return role === 'leader' || role === 'co_leader' || role === 'admin';
+}
+
 /** Admin+ (Owner/Admin) plus the Events tier: event CRUD/publish, tickets, check-in, attendees. */
 export function canManageEvents(a: CreatorAccess | undefined | null): boolean {
   if (!a) return false;
@@ -214,7 +225,8 @@ export async function getCreatorAccess(): Promise<CreatorAccess> {
  * Publish a draft community: status draft -> active through the leader-scoped
  * communities_update RLS policy. Only active communities are world-readable
  * (lock view, discovery, member pages); this is the one-way door that opens
- * the page. Archiving stays an admin conversation for now.
+ * the page. archiveCommunity (below) is the matching leader-gated closing
+ * door.
  */
 export async function publishCommunity(communityId: string): Promise<void> {
   const { error } = await supabase
@@ -223,6 +235,100 @@ export async function publishCommunity(communityId: string): Promise<void> {
     .eq('id', communityId)
     .eq('status', 'draft');
   if (error) throw error;
+}
+
+/**
+ * Archive a community: status -> archived, through the same leader-scoped
+ * communities_update RLS policy publishCommunity uses above
+ * (is_community_leader). SOFT-DELETE ONLY: no row is ever deleted, and no
+ * other status write happens here. communities_select and the topic/message
+ * RLS already carve out is_community_member regardless of status, so
+ * existing members keep their page, chat history, and roster; the
+ * discovery/browse RPC already filters to status = 'active', so an archived
+ * community stops surfacing there with no further change needed. Reachable
+ * from either 'draft' or 'active' (not only 'active'): a leader can also put
+ * away a stale draft they never published. Guarded against re-archiving an
+ * already-archived row.
+ */
+export async function archiveCommunity(communityId: string): Promise<void> {
+  const { error, count } = await supabase
+    .from('communities')
+    .update({ status: 'archived' }, { count: 'exact' })
+    .eq('id', communityId)
+    .neq('status', 'archived');
+  if (error) throw error;
+  if (!count) throw new Error('Could not archive that community.');
+}
+
+/**
+ * Unpublish a live community: status active -> draft, the exact reverse of
+ * publishCommunity() through the same leader-scoped communities_update RLS
+ * policy. Screen 14 (public page control center)'s one-way-door-in-reverse
+ * action, DIFFERENT from archiveCommunity() above: draft is a fully
+ * reversible, still-editable state a leader can re-publish anytime, not the
+ * soft-delete/wind-down archiveCommunity is for. Does not touch
+ * discoverable -- an unpublished community is already excluded from
+ * get_discoverable_communities() via status alone, see
+ * getCommunityDiscoverable() below.
+ */
+export async function unpublishCommunity(communityId: string): Promise<void> {
+  const { error } = await supabase
+    .from('communities')
+    .update({ status: 'draft' })
+    .eq('id', communityId)
+    .eq('status', 'active');
+  if (error) throw error;
+}
+
+/**
+ * The community's shareable public link (Screen 14). washedup.app/c/<handle>
+ * is the live web route (web:src/app/c/[handle]/page.tsx per the delta
+ * matrix), the same format already shown as copy in setup-community.tsx.
+ * Pure formatting, no network -- same shape as lib/yours/invite.ts's
+ * referral-link builder.
+ */
+export function buildCommunityPublicLink(handle: string): string {
+  return `https://washedup.app/c/${handle}`;
+}
+
+/**
+ * Whether the community appears in general browse/search (Screen 14's
+ * discovery toggle), backed by communities.discoverable
+ * (supabase/migrations/20260901030000, DRAFT -- not applied). SELF-FLIPPING,
+ * same mechanism as getJoinPolicy: until that migration applies, the select
+ * errors with 42703 and this returns null, so the toggle stays hidden -- no
+ * dead control. The moment it applies, the real value flows and the toggle
+ * wakes.
+ */
+export async function getCommunityDiscoverable(communityId: string): Promise<boolean | null> {
+  const { data, error } = await supabase
+    .from('communities')
+    .select('discoverable')
+    .eq('id', communityId)
+    .single();
+  if (error || !data) return null; // column absent (42703) or unreadable = dormant
+  const v = (data as { discoverable?: unknown }).discoverable;
+  return typeof v === 'boolean' ? v : null;
+}
+
+/**
+ * Leader-only by the existing communities_update RLS policy. No dedicated
+ * RPC -- unlike join_policy, flipping discoverable carries no side effect to
+ * guard (nothing else reads or reacts to it), so a plain update is the
+ * conservative choice, the same shape publishCommunity() already uses.
+ * Checks {count:'exact'} the same way archiveCommunity() and
+ * updateJoinGateSettings() do, so a denied write (not a leader) cannot
+ * silently report success while changing zero rows.
+ */
+export async function setCommunityDiscoverable(
+  communityId: string,
+  discoverable: boolean,
+): Promise<boolean> {
+  const { error, count } = await supabase
+    .from('communities')
+    .update({ discoverable }, { count: 'exact' })
+    .eq('id', communityId);
+  return !error && !!count;
 }
 
 export interface CommunityMemberRow {
@@ -604,7 +710,13 @@ export async function updateJoinGateSettings(
  * shows, nothing beyond what a leader can already see there.
  */
 export function membersToCsv(members: CommunityMemberRow[]): string {
-  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  // A member name or role starting with =, +, -, or @ would otherwise be
+  // interpreted as a formula by Excel/Sheets on open (CSV injection). Same
+  // guard as organizationPurchasesToCsv in lib/ticketing.ts.
+  const escape = (v: string) => {
+    const guarded = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+    return `"${guarded.replace(/"/g, '""')}"`;
+  };
   const rows = members
     .filter((m) => m.status === 'active')
     .map((m) => [
@@ -765,19 +877,40 @@ export async function getCreatorEvents(
 
 // -- stage 2: name your community (the creation wiring) -------------------------
 
+/** The two restriction choices the create form exposes (see RestrictedGender below for why non-binary isn't a third). */
+export type RestrictedGender = 'woman' | 'man';
+
 /**
  * The one client door to community creation (create_community RPC, live on
  * prod: grant-gated definer, born DRAFT, seats the leader membership, seeds
  * the five starter blocks). The publish control stays the existing
  * publish-your-page flow; nothing here opens a page.
+ *
+ * restrictedGender rides the SAME conditional pattern
+ * probeConfirmationMessage/createOperatorEvent already use for a
+ * migration-gated optional param (lib/creatorEvents.ts): omitted (undefined)
+ * means p_restricted_gender is never sent at all, so a call from a build with
+ * GENDER_RESTRICTED_COMMUNITIES_ENABLED off is byte-identical to today and
+ * safe against a database where
+ * supabase/migrations/20260901080000_gender_restricted_communities.sql has
+ * NOT been applied (the RPC's live signature still resolves). Only
+ * setup-community.tsx, gated by that flag, ever passes this.
  */
-export async function createCommunity(handle: string, name: string, city?: string, purpose?: string): Promise<string> {
+export async function createCommunity(
+  handle: string,
+  name: string,
+  city?: string,
+  purpose?: string,
+  restrictedGender?: RestrictedGender | null,
+): Promise<string> {
+  const restriction = restrictedGender !== undefined ? { p_restricted_gender: restrictedGender } : {};
   const { data, error } = await supabase.rpc('create_community', {
     p_handle: handle,
     p_name: name,
     p_description: null,
     p_city: city?.trim() || null,
     p_purpose: purpose?.trim() || null,
+    ...restriction,
   });
   if (error) throw error;
   return data as string;

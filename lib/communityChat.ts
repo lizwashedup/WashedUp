@@ -58,6 +58,19 @@ export interface CommunityChatCard {
   last_activity_at: string | null;
 }
 
+/** The community event chat's topic id, keyed by the event itself
+ *  (community_topics.explore_event_id) -- created at event publish time
+ *  (20260707120000_event_chat_model.sql), so any confirmed attendee can
+ *  look it up regardless of how they attended (RSVP or ticket purchase). */
+export async function getEventTopicId(eventId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('community_topics')
+    .select('id')
+    .eq('explore_event_id', eventId)
+    .maybeSingle();
+  return (data?.id as string | undefined) ?? null;
+}
+
 export async function getCommunityChatPayload(): Promise<CommunityChatPayload> {
   const { data, error } = await supabase.rpc('get_my_community_chat_cards');
   if (error) throw error;
@@ -729,21 +742,22 @@ export async function setTopicNotifications(topicId: string, on: boolean): Promi
 }
 
 /**
- * Leaders-only creation (RLS enforced; member-created topics stay a Liz
- * call). The creator is subscribed to their own room on the spot: the tour
- * found a leader's new room absent from her chat lists until she joined it
- * from the page like a stranger.
+ * RETIRED (founder product policy, 2026-09-01): general-purpose room
+ * creation is off going forward. This was leaders-only creation (RLS
+ * enforced; member-created topics stayed a Liz call), wired to the "open
+ * the room" action on the creator community screen (app/(creator)/
+ * community.tsx). That UI entry point is removed; this function is kept as
+ * the single choke point for the community_topics insert it used to do, so
+ * it now refuses outright instead of being deleted -- any other caller gets
+ * the same clear failure rather than a silent resurrection of the feature.
+ * Existing rooms are untouched: they stay listed, reachable, and usable
+ * exactly as before (see getCommunityRooms below). Event-scoped topics are
+ * a separate path, created automatically at event-publish time by the
+ * operator_create_explore_event / operator_update_explore_event RPCs, and
+ * are unaffected by this.
  */
-export async function createTopic(communityId: string, name: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in');
-  const { data, error } = await supabase
-    .from('community_topics')
-    .insert({ community_id: communityId, name: name.trim(), created_by: user.id })
-    .select('id')
-    .single();
-  if (error) throw error;
-  if (data?.id) await joinTopic(data.id);
+export async function createTopic(_communityId: string, _name: string): Promise<void> {
+  throw new Error('Creating new rooms is no longer available.');
 }
 
 /** The community's open rooms (never event topics), for the creator's list. */

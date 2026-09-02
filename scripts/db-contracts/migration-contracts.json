@@ -1,16 +1,30 @@
 {
   "format": 3,
-  "migration_count": 242,
-  "inventory_sha256": "3324c0f0d549776c01d6297e31e5cfaf7e2657b3197839d687e3de922cab6261",
+  "migration_count": 256,
+  "inventory_sha256": "e02d8d949ddb5e0d970a501342859da44582cd5e7436238dc5ffd5fa3158b5b3",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
     "20260831160000_reduce_background_job_io.sql",
     "20260831170000_schedule_delivery_workers_seed_only.sql",
     "20260831180000_revoke_service_role_low_level_suppression.sql",
-    "20260831190000_fix_pgcrypto_search_path_for_signup.sql"
+    "20260831190000_fix_pgcrypto_search_path_for_signup.sql",
+    "20260831234500_reassert_safe_event_status_milestone_trigger.sql",
+    "20260901000000_build35_community_role_reconciliation.sql",
+    "20260901010000_build35_event_ownership.sql",
+    "20260901020000_build35_screen56_member_invites.sql",
+    "20260901030000_build35_screen14_public_page_control.sql",
+    "20260901040000_community_archive_member_access.sql",
+    "20260901050000_community_event_plan_page_routing.sql",
+    "20260901060000_fix_ambiguous_title_link_to_explore_event.sql",
+    "20260901070000_ticket_checkin_duplicate_admitted_at.sql",
+    "20260901080000_gender_restricted_communities.sql",
+    "20260901090000_gender_restricted_communities_plan_feed.sql",
+    "20260901120000_gender_restricted_communities_scene_visibility.sql",
+    "20260901130000_organizer_profile_city.sql",
+    "20260901140000_purge_community_organizer_follows.sql"
   ],
-  "side_effect_union_count": 73,
+  "side_effect_union_count": 75,
   "approved_legacy_secret_literals": [
     {
       "file": "20260505000000_albums_processor_webhook.sql",
@@ -20,7 +34,7 @@
   ],
   "classification_counts": {
     "scheduler": 10,
-    "top_level_dml": 24,
+    "top_level_dml": 26,
     "do_fixture_dml": 39,
     "irreversible_ddl": 1,
     "stateful_replacement": 9,
@@ -71,7 +85,9 @@
       "20260814151000_one_reaction_per_person_v2.sql",
       "20260818170000_event_chat_topic_albums.sql",
       "20260824211000_harden_topic_album_upload_metadata.sql",
-      "20260825110000_centralize_admin_alert_recipient.sql"
+      "20260825110000_centralize_admin_alert_recipient.sql",
+      "20260901000000_build35_community_role_reconciliation.sql",
+      "20260901010000_build35_event_ownership.sql"
     ],
     "do_fixture_dml": [
       "20260608000100_decline_soft.sql",

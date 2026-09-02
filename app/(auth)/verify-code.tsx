@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
@@ -65,6 +66,27 @@ export default function VerifyCodeScreen() {
   const scrollToBottomOnFocus = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
   }, []);
+  // Android: edgeToEdgeEnabled + newArchEnabled make the Keyboard.addListener
+  // height that KeyboardAvoidingView's 'height' mode relies on stale/zero
+  // (same failure mode ChatThread.tsx already found and fixed). Read the
+  // keyboard height directly via Reanimated instead, and re-run the existing
+  // scroll-to-bottom helper on the real 0-to-positive transition.
+  const animatedKeyboard = useAnimatedKeyboard();
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+  useAnimatedReaction(
+    () => animatedKeyboard.height.value,
+    (h) => { runOnJS(setAndroidKeyboardHeight)(h); },
+    [],
+  );
+  const wasAndroidKeyboardOpenRef = useRef(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const isOpen = androidKeyboardHeight > 0;
+    if (isOpen && !wasAndroidKeyboardOpenRef.current) {
+      scrollToBottomOnFocus();
+    }
+    wasAndroidKeyboardOpenRef.current = isOpen;
+  }, [androidKeyboardHeight, scrollToBottomOnFocus]);
   // Track the post-verify hold timer so we can cancel on unmount and avoid
   // setState-on-unmounted warnings if the user backs out mid-animation.
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -362,15 +384,20 @@ export default function VerifyCodeScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           // Android: edgeToEdgeEnabled makes windowSoftInputMode=adjustResize
-          // ineffective, so a bare KAV (behavior=undefined) left the OTP cells
-          // under the keyboard (worse here: OtpInput autoFocuses on mount).
-          // 'height' shrinks the KAV by the IME height so the cells stay visible.
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          // ineffective, AND edgeToEdgeEnabled + newArchEnabled together make
+          // KAV's own Keyboard.addListener-based 'height' mode unreliable (the
+          // same broken listener ChatThread.tsx already found and replaced).
+          // So 'height' becomes a no-op passthrough on Android; the real fix is
+          // the Reanimated-driven androidKeyboardHeight padding below instead.
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.kav}
         >
           <ScrollView
             ref={scrollRef}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[
+              styles.scrollContent,
+              Platform.OS === 'android' && { paddingBottom: androidKeyboardHeight },
+            ]}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}

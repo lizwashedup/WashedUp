@@ -125,6 +125,9 @@ function OrderRefund({ order }: { order: MyOrder }) {
     queryKey: ['ticket-refund-preview', order.id],
     queryFn: () => previewRefund(order.id),
     staleTime: 30_000,
+    // Only a paid order can ever be refundable; skip the call entirely for an
+    // already-refunded order instead of firing a permanently-useless request.
+    enabled: order.status === 'paid',
   });
 
   const refund = useMutation({
@@ -169,13 +172,15 @@ function OrderRefund({ order }: { order: MyOrder }) {
         onPress={confirmRefund}
         disabled={refund.isPending}
         accessibilityRole="button"
-        accessibilityLabel="refund this order"
+        accessibilityLabel="refund this purchase"
       >
         {refund.isPending ? (
           <ActivityIndicator size="small" color={EventAction.secondaryLabel} />
         ) : (
-          /* LIZ COPY (web's trigger label, mirrored) */
-          <Text style={styles.refundButtonText}>refund this order</Text>
+          /* LIZ COPY (web's trigger label, mirrored) — updated 2026-09-01: "order" -> "purchase"
+             per Scene handoff §14 (no backend vocab in copy); web may still say "order", check
+             before assuming parity */
+          <Text style={styles.refundButtonText}>refund this purchase</Text>
         )}
       </TouchableOpacity>
     </View>
@@ -271,7 +276,7 @@ export default function YourTicketsScreen() {
                       <Text style={styles.cardMeta}>{formatEventDateLA(o.event_date)}</Text>
                     )}
                     <Text style={styles.cardMeta}>
-                      {o.qty} {o.qty === 1 ? 'ticket' : 'tickets'} · {o.total_cents === 0 ? 'free' : formatCents(o.total_cents)}
+                      {o.qty} {o.qty === 1 ? 'ticket' : 'tickets'} · {o.total_cents === 0 ? 'free' : formatCents(o.total_cents)}{o.status === 'refunded' ? ' · refunded' : ''}
                     </Text>
                     {!!byline.name && (
                       <View style={styles.cardCreatorRow}>
@@ -284,7 +289,7 @@ export default function YourTicketsScreen() {
                     )}
                   </View>
                 </View>
-                <OrganizerNote eventId={o.event_id} />
+                {o.status === 'paid' && <OrganizerNote eventId={o.event_id} />}
                 {o.seats.map((seat) => (
                   <SeatTicket
                     key={seat.id}

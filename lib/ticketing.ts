@@ -13,7 +13,7 @@
 import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
 import type { PriceQuote } from './ticketPromosAddons';
-import { getEventAttendees, isLiveSeat } from './ticketAttendees';
+import { countAttendees, getEventAttendees, getEventMoneySummary, isLiveSeat, sumRefundedCentsOnPaidOrders } from './ticketAttendees';
 
 /** PostgREST "relation does not exist": the proposal is not applied. */
 function isMissingSchema(code: string | undefined): boolean {
@@ -161,6 +161,9 @@ export interface TierDraft {
   per_order_max: number | null;
   visibility: TierVisibility;
   status: TierStatus;
+  /** Build 35 Screen 23: null on either side means unrestricted on that side. */
+  sales_open_at: string | null;
+  sales_close_at: string | null;
 }
 
 export async function createTier(
@@ -346,6 +349,232 @@ export async function getPayoutSummary(communityIds: string[], userId: string): 
     refundedCents,
     netToYouCents: grossFaceCents - commissionCents - refundedCents,
   };
+}
+
+export interface FailedPayout {
+  eventId: string;
+  eventTitle: string;
+  failureMessage: string | null;
+}
+
+/**
+ * Build 35 Screen 01 exception surfacing: this organizer's events whose
+ * ticket_payouts row is status='failed' (ticket-payout-release retries these
+ * automatically, but a creator should see money that hasn't moved). Same
+ * event-ownership scoping as getPayoutSummary. 'held' is not a real status --
+ * the live check constraint is pending/released/paid/failed -- 'failed' is
+ * the actual exception state.
+ */
+export async function getFailedPayouts(communityIds: string[], userId: string): Promise<FailedPayout[]> {
+  const ors: string[] = [`host_user_id.eq.${userId}`];
+  if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
+  const { data: eventRows } = await supabase.from('explore_events').select('id, title').or(ors.join(','));
+  const events = (eventRows ?? []) as { id: string; title: string }[];
+  if (events.length === 0) return [];
+
+  const { data: payoutRows } = await supabase
+    .from('ticket_payouts')
+    .select('event_id, failure_message')
+    .in('event_id', events.map((e) => e.id))
+    .eq('status', 'failed');
+  const payouts = (payoutRows ?? []) as { event_id: string; failure_message: string | null }[];
+  if (payouts.length === 0) return [];
+
+  const titleById = new Map(events.map((e) => [e.id, e.title]));
+  return payouts.map((p) => ({
+    eventId: p.event_id,
+    eventTitle: titleById.get(p.event_id) ?? 'an event',
+    failureMessage: p.failure_message,
+  }));
+}
+
+// ─── Build 35 Screen 10: organization-level ticket sales & payouts ───────
+// (the ledger: purchase search, CSV export, and a per-event reconciliation
+// rolling up to one Organization total). Same event-ownership scoping as
+// getPayoutSummary/getFailedPayouts above -- no schema change, no new RPC.
+// The reconciliation reads deliberately reuse Screen 07's own functions
+// (getEventMoneySummary, getEventAttendees + sumRefundedCentsOnPaidOrders/
+// countAttendees) per event rather than a parallel aggregate query, so the
+// two screens can never disagree about what a given event's numbers are.
+
+export interface OrganizationPurchase {
+  orderId: string;
+  eventId: string;
+  eventTitle: string;
+  buyerName: string;
+  tierName: string | null;
+  qty: number;
+  totalCents: number;
+  refundedCents: number;
+  status: string;
+  createdAt: string;
+}
+
+/**
+ * Every purchase across this organizer's events, NOT filtered to 'paid'
+ * (unlike getPayoutSummary/getEventMoneySummary): this screen's job is
+ * letting an organizer find a stuck pending order or a cancellation, not
+ * just add up completed sales.
+ */
+export async function getOrganizationPurchases(
+  communityIds: string[],
+  userId: string,
+): Promise<OrganizationPurchase[]> {
+  const ors: string[] = [`host_user_id.eq.${userId}`];
+  if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
+  const { data: eventRows } = await supabase.from('explore_events').select('id, title').or(ors.join(','));
+  const events = (eventRows ?? []) as { id: string; title: string }[];
+  if (events.length === 0) return [];
+  const titleById = new Map(events.map((e) => [e.id, e.title]));
+
+  const { data, error } = await supabase
+    .from('ticket_orders')
+    .select('id, event_id, buyer_name_snapshot, qty, total_cents, refunded_cents, status, created_at, ticket_tiers ( name )')
+    .in('event_id', events.map((e) => e.id))
+    .order('created_at', { ascending: false });
+  if (error) return [];
+
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((o) => ({
+    orderId: o.id as string,
+    eventId: o.event_id as string,
+    eventTitle: titleById.get(o.event_id as string) ?? 'an event',
+    buyerName: (o.buyer_name_snapshot as string | null)?.trim() || 'guest',
+    tierName: (o.ticket_tiers as { name?: string } | null)?.name ?? null,
+    qty: (o.qty as number) ?? 0,
+    totalCents: (o.total_cents as number) ?? 0,
+    refundedCents: (o.refunded_cents as number) ?? 0,
+    status: (o.status as string) ?? 'pending',
+    createdAt: o.created_at as string,
+  }));
+}
+
+/**
+ * A purchase's real state for display. 'refunded' means the WHOLE order
+ * flipped (the ticket_orders CHECK-constraint status); a still-'paid' order
+ * with a nonzero refunded_cents is a partial refund, a real, distinct state
+ * the raw status column alone can't tell apart -- same partial-vs-full
+ * distinction sumRefundedCentsOnPaidOrders already treats as load-bearing.
+ * There is no 'failed'/'disputed'/'chargeback' order status in the live
+ * CHECK constraint (pending/paid/canceled/refunded); this deliberately does
+ * not invent one.
+ */
+export type PurchaseStatusLabel = 'paid' | 'pending' | 'canceled' | 'partial' | 'refunded';
+
+export function purchaseStatusLabel(p: Pick<OrganizationPurchase, 'status' | 'refundedCents'>): PurchaseStatusLabel {
+  if (p.status === 'refunded') return 'refunded';
+  if (p.status === 'canceled') return 'canceled';
+  if (p.status === 'pending') return 'pending';
+  return p.refundedCents > 0 ? 'partial' : 'paid';
+}
+
+/** Buyer name, event title, or tier name -- substring, case-insensitive, no network. */
+export function searchOrganizationPurchases(
+  purchases: OrganizationPurchase[],
+  query: string,
+): OrganizationPurchase[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return purchases;
+  return purchases.filter(
+    (p) =>
+      p.buyerName.toLowerCase().includes(q) ||
+      p.eventTitle.toLowerCase().includes(q) ||
+      (p.tierName ?? '').toLowerCase().includes(q),
+  );
+}
+
+/**
+ * CSV export (inventory pattern: membersToCsv in lib/creatorMode.ts, same
+ * escape+header shape). Always the full set the caller has, never the
+ * currently-searched/filtered subset -- same convention as the member
+ * roster export.
+ */
+export function organizationPurchasesToCsv(purchases: OrganizationPurchase[]): string {
+  // A buyer name or event title starting with =, +, -, or @ would otherwise
+  // be interpreted as a formula by Excel/Sheets on open (CSV injection).
+  const escape = (v: string) => {
+    const guarded = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+    return `"${guarded.replace(/"/g, '""')}"`;
+  };
+  const rows = purchases.map((p) =>
+    [
+      escape(p.createdAt.slice(0, 10)),
+      escape(p.eventTitle),
+      escape(p.buyerName),
+      escape(p.tierName ?? ''),
+      String(p.qty),
+      (p.totalCents / 100).toFixed(2),
+      escape(purchaseStatusLabel(p)),
+      (p.refundedCents / 100).toFixed(2),
+    ].join(','),
+  );
+  return ['date,event,buyer,tier,qty,total,status,refunded', ...rows].join('\n');
+}
+
+export interface EventReconciliationRow {
+  eventId: string;
+  eventTitle: string;
+  ticketsSold: number;
+  grossFaceCents: number;
+  processingCents: number;
+  commissionCents: number;
+  refundedCents: number;
+  netToYouCents: number;
+  payoutStatus: string | null;
+}
+
+/** Pure rollup, no network -- one event's row shape summed into the org total. */
+export function sumReconciliationRows(rows: EventReconciliationRow[]): PayoutSummary {
+  return rows.reduce<PayoutSummary>(
+    (t, r) => ({
+      eventsCount: t.eventsCount + 1,
+      ticketsSold: t.ticketsSold + r.ticketsSold,
+      grossFaceCents: t.grossFaceCents + r.grossFaceCents,
+      processingCents: t.processingCents + r.processingCents,
+      commissionCents: t.commissionCents + r.commissionCents,
+      refundedCents: t.refundedCents + r.refundedCents,
+      netToYouCents: t.netToYouCents + r.netToYouCents,
+    }),
+    { ...EMPTY_PAYOUT_SUMMARY },
+  );
+}
+
+/**
+ * Per-event breakdown rolled up to one Organization total (Screen 10's
+ * reconciliation view). N events fan out to a Promise.all of 2 reads each
+ * (getEventMoneySummary + getEventAttendees), the same per-item fan-out
+ * shape as getTierAvailability/getPublicTicketSummary elsewhere in this file.
+ */
+export async function getOrganizationReconciliation(
+  communityIds: string[],
+  userId: string,
+): Promise<{ rows: EventReconciliationRow[]; totals: PayoutSummary }> {
+  const ors: string[] = [`host_user_id.eq.${userId}`];
+  if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
+  const { data: eventRows } = await supabase.from('explore_events').select('id, title').or(ors.join(','));
+  const events = (eventRows ?? []) as { id: string; title: string }[];
+  if (events.length === 0) return { rows: [], totals: EMPTY_PAYOUT_SUMMARY };
+
+  const rows = await Promise.all(
+    events.map(async (e): Promise<EventReconciliationRow> => {
+      const [money, attendees] = await Promise.all([getEventMoneySummary(e.id), getEventAttendees(e.id)]);
+      const refundedCents = sumRefundedCentsOnPaidOrders(attendees);
+      return {
+        eventId: e.id,
+        eventTitle: e.title,
+        ticketsSold: countAttendees(attendees).sold,
+        grossFaceCents: money.grossFaceCents,
+        processingCents: money.processingCents,
+        commissionCents: money.commissionCents,
+        refundedCents,
+        // same first-order formula as MoneySummaryCard.computeNetToYouCents:
+        // face minus our 4% minus refunds
+        netToYouCents: money.grossFaceCents - money.commissionCents - refundedCents,
+        payoutStatus: money.payoutStatus,
+      };
+    }),
+  );
+
+  return { rows, totals: sumReconciliationRows(rows) };
 }
 
 /**
@@ -868,28 +1097,37 @@ export interface MyOrder {
   created_at: string;
   event_title: string | null;
   event_date: string | null;
+  /** Scene handoff §06/07: the calendar-prompt-then-branch-nudge sequence
+   *  needs a real start time, not just the date. */
+  event_start_time: string | null;
   /** Scene spec 05: carries creator branding through confirmation + wallet. */
   event_image: string | null;
   event_venue: string | null;
   /** public_name override wins over the creator's own profile (byline law). */
   event_public_name: string | null;
   event_host_user_id: string | null;
+  /** Scene handoff §07/09: null for organization events; set for community
+   *  events, which route the post-purchase nudge to the event chat instead
+   *  of the find-people flow. */
+  event_community_id: string | null;
   seats: MySeat[];
 }
 
 const ORDER_SELECT =
   'id, event_id, qty, total_cents, status, created_at, ' +
-  'explore_events(title, event_date, venue, image_url, public_name, host_user_id), ' +
+  'explore_events(title, event_date, start_time, venue, image_url, public_name, host_user_id, community_id), ' +
   'ticket_order_positions(id, position_index, reference_code, voided_at, ticket_checkins(result))';
 
 /** the embedded explore_events row shape ORDER_SELECT actually asks for. */
 interface EmbeddedEvent {
   title?: string;
   event_date?: string;
+  start_time?: string | null;
   venue?: string | null;
   image_url?: string | null;
   public_name?: string | null;
   host_user_id?: string | null;
+  community_id?: string | null;
 }
 
 function mapSeats(o: Record<string, unknown>): MySeat[] {
@@ -919,9 +1157,10 @@ export async function getMyOrders(): Promise<MyOrder[]> {
     .eq('buyer_user_id', user.id)
     // a settled order (free or paid) is 'paid'; 'confirmed'/'free' are not valid
     // statuses (the CHECK is pending/paid/canceled/refunded), so filtering on
-    // them silently dropped real tickets. This screen shows no refund state, so
-    // refunded orders are excluded rather than rendered as if valid.
-    .eq('status', 'paid')
+    // them silently dropped real tickets. Refunded orders are included (web's
+    // getMyTickets does the same) so a buyer can still see a refunded order in
+    // their wallet; SeatTicket already renders the refunded/voided state.
+    .in('status', ['paid', 'refunded'])
     .order('created_at', { ascending: false });
   if (error) return [];
   // supabase-js cannot infer the multi-embed row shape, so it widens to its
@@ -937,10 +1176,12 @@ export async function getMyOrders(): Promise<MyOrder[]> {
       created_at: o.created_at as string,
       event_title: ev?.title ?? null,
       event_date: ev?.event_date ?? null,
+      event_start_time: ev?.start_time ?? null,
       event_image: ev?.image_url ?? null,
       event_venue: ev?.venue ?? null,
       event_public_name: ev?.public_name ?? null,
       event_host_user_id: ev?.host_user_id ?? null,
+      event_community_id: ev?.community_id ?? null,
       seats: mapSeats(o),
     };
   });
@@ -961,8 +1202,10 @@ export async function getOrder(orderId: string): Promise<MyOrder | null> {
     qty: row.qty as number, total_cents: row.total_cents as number,
     status: row.status as string, created_at: row.created_at as string,
     event_title: ev?.title ?? null, event_date: ev?.event_date ?? null,
+    event_start_time: ev?.start_time ?? null,
     event_image: ev?.image_url ?? null, event_venue: ev?.venue ?? null,
     event_public_name: ev?.public_name ?? null, event_host_user_id: ev?.host_user_id ?? null,
+    event_community_id: ev?.community_id ?? null,
     seats: mapSeats(row),
   };
 }
@@ -1091,6 +1334,37 @@ async function invokeRefund(
     return { data: null, raw: raw ?? error.message ?? null };
   }
   return { data: (data ?? null) as Record<string, unknown> | null, raw: null };
+}
+
+/** Mirrors the ticket-refund edge function's own organizer resolution exactly
+    (host_user_id, falling back to the owning community's created_by) --
+    narrower than "can view this attendee list" (RLS's organizer-tier read),
+    which co_leaders and other event-manager roles also pass. */
+export async function getRefundOrganizerId(eventId: string): Promise<string | null> {
+  const { data: ev, error } = await supabase
+    .from('explore_events')
+    .select('host_user_id, community_id')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (error || !ev) return null;
+  if (ev.host_user_id) return ev.host_user_id;
+  if (!ev.community_id) return null;
+  const { data: comm } = await supabase
+    .from('communities')
+    .select('created_by')
+    .eq('id', ev.community_id)
+    .maybeSingle();
+  return comm?.created_by ?? null;
+}
+
+/** True only for the exact identity the refund function itself would accept.
+    Used to hide the refund action for anyone it would otherwise 403 (e.g. a
+    co_leader who can see the money but isn't the host or community creator). */
+export async function canCurrentUserRefundEvent(eventId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const organizerId = await getRefundOrganizerId(eventId);
+  return !!organizerId && organizerId === user.id;
 }
 
 /** action:"preview": no Stripe call, nothing recorded; the wallet and the

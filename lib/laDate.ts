@@ -61,6 +61,32 @@ export function laWallTimeToUTC(
   return new Date(utc);
 }
 
+export const DEFAULT_EVENT_START_TIME = '19:00:00';
+
+// A bare HH:MM[:SS] is an LA wall time. Handing `${date}T${time}` to
+// new Date parses on the DEVICE clock, which lands the calendar entry
+// hours off on a non-LA phone; pin through laWallTimeToUTC instead.
+export function laEventInstantIso(dateStr: string, timeStr: string): string | null {
+  const dm = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const tm = timeStr.match(/^(\d{1,2}):(\d{2})/);
+  if (!dm || !tm) return null;
+  return laWallTimeToUTC(
+    Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), Number(tm[1]), Number(tm[2]),
+  ).toISOString();
+}
+
+// start_time is a full ISO timestamp OR a plain HH:MM[:SS] string (see
+// formatFullDate); addToCalendar needs one parseable absolute datetime
+export function eventStartIso(dateStr: string | null, timeStr: string | null): string | null {
+  if (!dateStr) return null;
+  if (timeStr) {
+    const ts = new Date(timeStr);
+    if (!isNaN(ts.getTime()) && (timeStr.includes('T') || timeStr.includes(' '))) return timeStr;
+    return laEventInstantIso(dateStr, timeStr);
+  }
+  return laEventInstantIso(dateStr, DEFAULT_EVENT_START_TIME);
+}
+
 // LA-zone {y, m(0-indexed), d} for any instant. Mirrors getTodayInLA for an
 // arbitrary timestamp so callers can bucket plans by their LA calendar day
 // (used by the When-chip calendar to mark days that have plans).

@@ -34,6 +34,7 @@ import Animated, {
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { getPlanPinColor } from '../../lib/planColors';
 import { COPY } from '../yours/state/constants';
+import { getActivityFirstCompanionPhotos } from '../../lib/planCardLayout';
 
 
 // km -> miles for the card meta line. Under 10 mi shows one decimal ("1.2 mi"),
@@ -90,6 +91,7 @@ interface PlanCardProps {
   onBlock?: (planId: string) => void;
   onCreatorPress?: (creatorId: string) => void;
   isPast?: boolean;
+  layout?: 'creator-first' | 'activity-first';
 }
 
 function formatDateTimeForCard(dateString: string): string {
@@ -117,7 +119,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 // (badge spec: terracotta line icon, ~12pt).
 const CIRCLE_BADGE_GLYPH = 12;
 
-export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, onCreatorPress, isPast = false }) => {
+export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isWishlisted = false, onWishlist, onReport, onBlock, onCreatorPress, isPast = false, layout = 'creator-first' }) => {
   const router = useRouter();
   const [cardAlert, setCardAlert] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
 
@@ -273,6 +275,83 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   const creatorNote = plan.host_message
     ? `"${plan.host_message}"`
     : null;
+  const isActivityFirst = layout === 'activity-first';
+  const companionPhotos = getActivityFirstCompanionPhotos(
+    plan.attendees,
+    going,
+    plan.creator?.profile_photo_url ?? null,
+  );
+
+  const renderHeaderActions = () => (
+    <View style={styles.headerRight}>
+      {!isActivityFirst && showSpotsLeftBadge && (
+        <Animated.View style={pulseAnimatedStyle}>
+          <View style={styles.spotsLeftBadge}>
+            <Text style={styles.spotsLeftBadgeText}>{spotsLeft} left</Text>
+          </View>
+        </Animated.View>
+      )}
+      <TouchableOpacity
+        onPress={(e) => {
+          e.stopPropagation();
+          hapticLight();
+          const share = buildPlanShareContent(plan);
+          Share.share({ message: `${share.message}\n${share.url}` });
+        }}
+        style={styles.iconBtn}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityLabel="Share plan"
+      >
+        <Ionicons name="share-outline" size={18} color={Colors.asphalt} />
+      </TouchableOpacity>
+      {onWishlist && (
+        <TouchableOpacity
+          onPress={handleWishlist}
+          style={styles.iconBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel={isWishlisted ? 'Remove from saved' : 'Save plan'}
+        >
+          <Animated.View style={bookmarkAnimatedStyle}>
+            <Ionicons
+              name={isWishlisted ? 'bookmark' : 'bookmark-outline'}
+              size={18}
+              color={isWishlisted ? Colors.terracotta : Colors.asphalt}
+            />
+          </Animated.View>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  const renderCreatorAvatar = () => (
+    <TouchableOpacity
+      style={styles.activityCreatorPressable}
+      disabled={!onCreatorPress || !plan.creator?.id}
+      activeOpacity={onCreatorPress && plan.creator?.id ? 0.7 : 1}
+      onPress={(e) => {
+        if (onCreatorPress && plan.creator?.id) {
+          e.stopPropagation();
+          hapticLight();
+          onCreatorPress(plan.creator.id);
+        }
+      }}
+      accessibilityRole={onCreatorPress && plan.creator?.id ? 'button' : undefined}
+      accessibilityLabel="Open creator profile"
+    >
+      {plan.creator?.profile_photo_url ? (
+        <Image
+          source={{ uri: plan.creator.profile_photo_url }}
+          style={styles.activityCreatorAvatar}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+      ) : (
+        <View style={styles.activityCreatorPlaceholder}>
+          <Ionicons name="person-outline" size={16} color={Colors.tertiary} />
+        </View>
+      )}
+    </TouchableOpacity>
+  );
 
   return (
     <Animated.View entering={FadeInUp.duration(300).easing(Easing.out(Easing.ease))}>
@@ -285,7 +364,15 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
       accessibilityLabel={`${plan.title} plan`}
       accessibilityRole="button"
     >
-      {/* A. Creator row */}
+      {/* A. Identity-first control or activity-first experiment header. */}
+      {isActivityFirst ? (
+        <View style={styles.activityHeader}>
+          <Text style={[styles.title, styles.activityTitle]} numberOfLines={2}>
+            {plan.title}
+          </Text>
+          {renderHeaderActions()}
+        </View>
+      ) : (
       <View style={styles.creatorRow}>
         <TouchableOpacity
           style={styles.creatorLeft}
@@ -326,50 +413,16 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
             </View>
           </View>
         </TouchableOpacity>
-        <View style={styles.headerRight}>
-          {showSpotsLeftBadge && (
-            <Animated.View style={pulseAnimatedStyle}>
-              <View style={styles.spotsLeftBadge}>
-                <Text style={styles.spotsLeftBadgeText}>{spotsLeft} left</Text>
-              </View>
-            </Animated.View>
-          )}
-          <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              hapticLight();
-              const share = buildPlanShareContent(plan);
-              Share.share({ message: `${share.message}\n${share.url}` });
-            }}
-            style={styles.iconBtn}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityLabel="Share plan"
-          >
-            <Ionicons name="share-outline" size={18} color={Colors.asphalt} />
-          </TouchableOpacity>
-          {onWishlist && (
-            <TouchableOpacity
-              onPress={handleWishlist}
-              style={styles.iconBtn}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel={isWishlisted ? 'Remove from saved' : 'Save plan'}
-            >
-              <Animated.View style={bookmarkAnimatedStyle}>
-                <Ionicons
-                  name={isWishlisted ? 'bookmark' : 'bookmark-outline'}
-                  size={18}
-                  color={isWishlisted ? Colors.terracotta : Colors.asphalt}
-                />
-              </Animated.View>
-            </TouchableOpacity>
-          )}
-        </View>
+        {renderHeaderActions()}
       </View>
+      )}
 
       {/* B. Plan Title */}
-      <Text style={styles.title} numberOfLines={2}>
-        {plan.title}
-      </Text>
+      {!isActivityFirst && (
+        <Text style={styles.title} numberOfLines={2}>
+          {plan.title}
+        </Text>
+      )}
 
       {/* B2. Pills row — happening-now status (when live), then featured pill
           (gold "washedup event" or pink "birthday party") OR regular category
@@ -382,9 +435,12 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               <Text style={styles.happeningNowPillText}>happening now</Text>
             </View>
           )}
-          {/* Badge A (provenance): always present on a circle plan, in both
-              privacy states, per the badge spec. */}
-          {isCirclePlan && (
+          {/* Badge A (provenance): only when a circle plan has been opened to
+              others -- a Circle Only card never leaves the circle's own
+              screen (excluded from the public feed), where everyone already
+              knows it's a circle plan, so the "signal to outside browsers"
+              badge has nothing to signal there. */}
+          {isOpenCircle && (
             <View style={styles.fromCircleBadge}>
               <Users size={CIRCLE_BADGE_GLYPH} color={Colors.terracotta} strokeWidth={1.75} />
               <Text style={styles.fromCircleBadgeText}>{COPY.circlePlanFromBadge}</Text>
@@ -495,6 +551,33 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
           line ("Join if you're around.") instead of stranger-cap-incorrect
           spots math. */}
       <View style={styles.footer}>
+        {isActivityFirst && (
+          <View
+            style={[styles.activityAvatarStack, { width: 34 + companionPhotos.length * 12 }]}
+            accessibilityLabel={`${going} going`}
+            accessible
+          >
+            {companionPhotos.map((photoUrl, index) => (
+              photoUrl ? (
+                <Image
+                  key={`${photoUrl}-${index}`}
+                  source={{ uri: photoUrl }}
+                  style={[styles.activityCompanionAvatar, { left: (index + 1) * 12 }]}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                />
+              ) : (
+                <View
+                  key={`companion-${index}`}
+                  style={[styles.activityCompanionPlaceholder, { left: (index + 1) * 12 }]}
+                />
+              )
+            ))}
+            <View style={styles.activityCreatorLayer}>
+              {renderCreatorAvatar()}
+            </View>
+          </View>
+        )}
         {isCirclePlan ? (
           <Text style={styles.joinLine}>{COPY.circlePlanJoinLine}</Text>
         ) : !isBirthdayParty && (
@@ -503,6 +586,12 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
               <Text style={styles.spotsNumber}>{going}</Text>
               {' going'}
             </Text>
+          ) : isActivityFirst && showSpotsLeftBadge ? (
+            <Animated.View style={pulseAnimatedStyle}>
+              <View style={styles.spotsLeftBadge}>
+                <Text style={styles.spotsLeftBadgeText}>{spotsLeft} left</Text>
+              </View>
+            </Animated.View>
           ) : (
             <Text style={styles.spotsLabel}>
               {spotsLeft === 0 ? (
@@ -670,6 +759,16 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     padding: 4,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 6,
+  },
+  activityTitle: {
+    flex: 1,
+    marginBottom: 0,
   },
 
   // ── Body ──
@@ -856,6 +955,57 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.dividerWarm,
     paddingTop: 12,
     gap: 8,
+  },
+  activityAvatarStack: {
+    height: 34,
+    position: 'relative',
+  },
+  activityCompanionAvatar: {
+    position: 'absolute',
+    top: 5,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: Colors.cardBg,
+    opacity: 0.42,
+  },
+  activityCompanionPlaceholder: {
+    position: 'absolute',
+    top: 5,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: Colors.cardBg,
+    backgroundColor: Colors.borderWarm,
+    opacity: 0.56,
+  },
+  activityCreatorLayer: {
+    position: 'absolute',
+    top: 0,
+  },
+  activityCreatorPressable: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+  },
+  activityCreatorAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: Colors.cardBg,
+  },
+  activityCreatorPlaceholder: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: Colors.cardBg,
+    backgroundColor: Colors.accentSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   spotsLabel: {
     fontFamily: Fonts.sans,

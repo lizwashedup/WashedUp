@@ -43,10 +43,15 @@ import { Check } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { EventAction, EventSpacing, EventSurface } from '../../../constants/EventDesign';
+import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
 import { hapticLight, hapticSuccess, hapticError } from '../../../lib/haptics';
 import { logError } from '../../../lib/logger';
-import { formatEventDateLA } from '../../../lib/laDate';
+import { eventStartIso, formatEventDateLA } from '../../../lib/laDate';
+import { showAddToCalendar } from '../../../lib/addToCalendar';
+import { wasNudged, markNudged } from '../../../lib/eventRsvp';
+import { getEventTopicId } from '../../../lib/communityChat';
 import { getOrganizerProfiles } from '../../../lib/organizerProfile';
+import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import {
   formatCents,
   getAnsweredQuestionIds,
@@ -213,6 +218,7 @@ export default function OrderCompleteScreen() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const reduceMotion = useReduceMotionLocal();
   const [pendingStuck, setPendingStuck] = useState(false);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   // A card charge settles a beat after Stripe returns, and seats only exist
   // once it does. Now that a paid buyer is brought straight here (finding
@@ -239,6 +245,98 @@ export default function OrderCompleteScreen() {
     const t = setTimeout(() => setPendingStuck(true), PENDING_PATIENCE_MS);
     return () => clearTimeout(t);
   }, [view.kind, id]);
+
+  // Scene handoff §07/09: same community/organization split as the RSVP
+  // path (app/event/[id].tsx) -- a ticketed community event still routes
+  // the post-purchase nudge to the event chat, never to find-people.
+  const isCommunityEvent = COMMUNITIES_ENABLED && !!order?.event_community_id;
+  const { data: eventTopicId = null } = useQuery({
+    queryKey: ['event-topic', order?.event_id],
+    queryFn: () => getEventTopicId(order!.event_id),
+    enabled: isCommunityEvent && !!order?.event_id,
+    staleTime: 60_000,
+  });
+
+  // Scene handoff §06/07/09: "every confirmed event offers Add to calendar
+  // exactly once; then organization -> Find people, community -> Open event
+  // chat." The RSVP path (app/event/[id].tsx) already builds this sequence;
+  // ticket buyers land here instead of there, so this screen needs its own
+  // copy of the trigger, not a redirect. The organization branch below routes
+  // to the event page rather than re-opening the Plan chooser inline here --
+  // that sheet (PlanChooserSheet + its two supporting queries) already lives
+  // fully built on the event page, and duplicating it into a second screen
+  // for one alert button was judged not worth the maintenance surface for
+  // today's scope. Named here, not silently skipped.
+  const showBranchNudge = useCallback(() => {
+    if (!order) return;
+    if (isCommunityEvent) {
+      if (!eventTopicId) return;
+      // LIZ COPY
+      setAlertInfo({
+        title: "you're in",
+        message: 'the event chat is where the coordination happens.',
+        buttons: [
+          { text: 'open the chat', onPress: () => router.push(`/community-topic/${eventTopicId}` as never) },
+          { text: 'not now', style: 'cancel' },
+        ],
+      });
+      return;
+    }
+    // LIZ COPY
+    setAlertInfo({
+      title: 'want people to go with?',
+      message: "you're in either way. small groups form around events like this.",
+      buttons: [
+        { text: 'find people', onPress: () => router.push(`/event/${order.event_id}` as never) },
+        { text: 'just going', style: 'cancel' },
+      ],
+    });
+  }, [order, isCommunityEvent, eventTopicId]);
+
+  // Same 250ms-defer requirement as the RSVP path: BrandedAlert's button
+  // handler calls onPress then onClose synchronously in the same tick, so a
+  // setAlertInfo call made directly inside a button's onPress gets clobbered
+  // by that trailing onClose() in the same React batch without the defer.
+  const showPostConfirmationSequence = useCallback(() => {
+    if (!order) return;
+    const startIso = eventStartIso(order.event_date, order.event_start_time);
+    if (!startIso) {
+      showBranchNudge();
+      return;
+    }
+    // LIZ COPY
+    setAlertInfo({
+      title: 'add this to your calendar?',
+      message: 'get a reminder before it starts.',
+      buttons: [
+        {
+          text: 'add to calendar',
+          onPress: () => {
+            showAddToCalendar(order.event_title ?? 'your event', startIso, null, order.event_venue ?? undefined);
+            setTimeout(showBranchNudge, 250);
+          },
+        },
+        { text: 'not now', style: 'cancel', onPress: () => setTimeout(showBranchNudge, 250) },
+      ],
+    });
+  }, [order, showBranchNudge]);
+
+  // Fires once per event, the moment a purchase first reaches 'ready' --
+  // mirrors proceedWithRsvp's wasNudged/markNudged guard on the RSVP path,
+  // sharing the same AsyncStorage flag (keyed by event id, not order id) so
+  // an event only ever gets one nudge sequence regardless of which path
+  // (RSVP or purchase) confirmed it first.
+  useEffect(() => {
+    if (view.kind !== 'ready' || !order) return;
+    let cancelled = false;
+    (async () => {
+      if (await wasNudged(order.event_id)) return;
+      await markNudged(order.event_id);
+      if (!cancelled) showPostConfirmationSequence();
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.kind, order?.id]);
 
   const { data: questions = [] } = useQuery({
     queryKey: ['order-questions', order?.event_id],
@@ -342,7 +440,7 @@ export default function OrderCompleteScreen() {
              Never claim a real order failed when we simply cannot see one. */
           <StatusMessage
             /* copy to the taste gate */
-            title="we can't find this order"
+            title="we can't find this purchase"
             body="the link might be old, or something didn't save right."
           >
             <SupportLink />
@@ -363,7 +461,7 @@ export default function OrderCompleteScreen() {
         {view.kind === 'canceled' && (
           <StatusMessage
             /* copy to the taste gate */
-            title="this order didn't go through"
+            title="this purchase didn't go through"
             body="no charge went through here. you can try again anytime."
           >
             <TouchableOpacity
@@ -381,7 +479,7 @@ export default function OrderCompleteScreen() {
         {view.kind === 'refunded' && (
           <StatusMessage
             /* copy to the taste gate */
-            title="this order was refunded"
+            title="this purchase was refunded"
             body="check your card statement for the details."
           >
             <TouchableOpacity
@@ -522,6 +620,13 @@ export default function OrderCompleteScreen() {
           </>
         )}
       </ScrollView>
+      <BrandedAlert
+        visible={!!alertInfo}
+        title={alertInfo?.title ?? ''}
+        message={alertInfo?.message}
+        buttons={alertInfo?.buttons}
+        onClose={() => setAlertInfo(null)}
+      />
     </SafeAreaView>
   );
 }

@@ -82,6 +82,30 @@ export const COPY = {
   tabCommunities: 'Communities',
   tabAlbums: 'Albums',
 
+  // ── Yours tabs education pop-up (spec section 6, one-time, per account) ──
+  // Two independent variants, gated in lib/yours/tabsIntroSeen.ts:
+  //  - existingUser: returning users who already have people or plan
+  //    history. Names what moved (Plans, now under Yours) and points at the
+  //    new People/Circles tabs.
+  //  - newUser: a brand-new user with nothing yet. Different emphasis per
+  //    spec: encourage joining a plan first, frame the loop as "go do
+  //    something, then keep the people" rather than asking them to build a
+  //    People graph from nothing.
+  introExistingEyebrow: "WHAT'S NEW",
+  introExistingTitle: 'A few things moved.',
+  introExistingBody: (circles: boolean) =>
+    circles
+      ? "Your Plans lives under Yours now. Two new tabs sit next to it, for the people you've actually done things with, and for planning together as a group."
+      : "Your Plans lives under Yours now, with a new tab next to it for the people you've actually done things with.",
+  introExistingCta: 'Add people',
+  introExistingDismiss: 'Got it',
+
+  introNewEyebrow: 'HOW THIS WORKS',
+  introNewTitle: 'This page fills up as you go.',
+  introNewBody:
+    "The moment you show up to a plan, you can add the people you were just with. That's the fast way in, not starting from a blank list.",
+  introNewCta: 'Got it',
+
   // SIM-EYEBALL #3: request banner phrasing
   requestBannerOne: 'Someone wants to add you',
   requestBannerMany: (n: number) => `${n} people want to add you`,
@@ -455,6 +479,8 @@ export const COPY = {
   // Just-us recipients.
   circlePlanEveryone: (circle: string) => `Everyone in ${circle}`,
   circlePlanPickPeople: 'Pick people',
+  // Shown only while "Pick people" is chosen and nobody is checked yet.
+  circlePlanPickPeopleRequired: 'pick at least one person, or switch back to everyone in the circle.',
   circlePlanPickHelper:
     'Everyone keeps this in the circle chat. Pick a few and they get their own chat.',
   // Open-it-up stranger stepper.
@@ -480,7 +506,9 @@ export const COPY = {
     'this one is open to others. add a description so they know what to expect.',
   circlePlanDescriptionLabel: 'description',
   circlePlanDescriptionPlaceholder: 'what is the plan, who it is for, anything worth knowing',
-  // Audience binary (locked verbatim; "pick people" is cut, audience is the binary).
+  // Superseded by circlePlanJustUs/circlePlanOpenUp above (the spec's locked
+  // verbatim wording, section 4) once the "who exactly" picker landed. Left
+  // defined, unused, in case anything still imports these by name.
   circlePlanAudienceCircleOnly: (circle: string) => `${circle} only`,
   circlePlanAudienceCircleOnlySub: 'Stays here. Only the circle sees it.',
   circlePlanAudienceOpen: 'Open to others',
@@ -504,7 +532,7 @@ export const COPY = {
   circlePlanRecovery: "that didn't go through. your plan is here. tap post to try again.",
   // Posted-card framing.
   circlePlanJoinLine: "Join if you're around.",
-  circlePlanFromBadge: 'from a circle',
+  circlePlanFromBadge: 'Made from a circle',
   circlePlanPrivateTag: 'private to circle',
   // Badge B seats line on an opened-up circle plan card. N = stranger_cap (2-7).
   // "up to N others welcome", never "N spots left": an open door, not scarcity.

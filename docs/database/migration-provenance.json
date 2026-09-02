@@ -13,6 +13,12 @@
       "production_evidence": "docs/database/direct-apply-evidence-20260825.md: both effects directly applied and verified before local inventory repair",
       "apply_date": "2026-08-25",
       "approval_class": "verified_direct_apply"
+    },
+    {
+      "file": "20260828200000_community_topic_chat_parity_phase1.sql",
+      "production_evidence": "docs/database/direct-apply-evidence-20260902-chat-parity.md: Josh ran the column-existence query directly in the Supabase SQL editor and reported all 3 columns already present",
+      "apply_date": "2026-09-02",
+      "approval_class": "verified_direct_apply"
     }
   ],
   "held_migrations": [

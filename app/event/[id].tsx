@@ -8,6 +8,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Dimensions,
+  Linking,
   Platform,
   Share,
 } from 'react-native';
@@ -31,7 +32,7 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED, MEMBER_STATE_ENABLED, SCENE_DISCOVERY_ENABLED } from '../../constants/FeatureFlags';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 import { canParticipateInSceneEvent, getMyRsvp, getRsvpCount, isCommunityEventReleaseBlocked, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
-import { formatEventDateLA, getTodayInLA, laWallTimeToUTC } from '../../lib/laDate';
+import { eventStartIso, formatEventDateLA, getTodayInLA } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
 import {
@@ -64,9 +65,6 @@ const HERO_HEIGHT = 280;
 const HERO_CONTROLS_CLEARANCE = 56;
 // social proof threshold (doc 37): under this, never show a raw count
 const GOING_COUNT_THRESHOLD = 5;
-// a listing with a date but no time still deserves a calendar entry;
-// evening is the house default for LA events
-const DEFAULT_EVENT_START_TIME = '19:00:00';
 // §4c more-from rail: poster cards, soonest first
 const MORE_FROM_RAIL_LIMIT = 6;
 const MORE_CARD_WIDTH = 150;
@@ -140,30 +138,6 @@ function formatFullDate(dateStr: string | null, timeStr: string | null): string 
     return `${dayLabel} at ${t}`;
   }
   return dayLabel;
-}
-
-// A bare HH:MM[:SS] is an LA wall time. Handing `${date}T${time}` to
-// new Date parses on the DEVICE clock, which lands the calendar entry
-// hours off on a non-LA phone; pin through laWallTimeToUTC instead.
-function laEventInstantIso(dateStr: string, timeStr: string): string | null {
-  const dm = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  const tm = timeStr.match(/^(\d{1,2}):(\d{2})/);
-  if (!dm || !tm) return null;
-  return laWallTimeToUTC(
-    Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), Number(tm[1]), Number(tm[2]),
-  ).toISOString();
-}
-
-// start_time is a full ISO timestamp OR a plain HH:MM[:SS] string (see
-// formatFullDate); addToCalendar needs one parseable absolute datetime
-function eventStartIso(dateStr: string | null, timeStr: string | null): string | null {
-  if (!dateStr) return null;
-  if (timeStr) {
-    const ts = new Date(timeStr);
-    if (!isNaN(ts.getTime()) && (timeStr.includes('T') || timeStr.includes(' '))) return timeStr;
-    return laEventInstantIso(dateStr, timeStr);
-  }
-  return laEventInstantIso(dateStr, DEFAULT_EVENT_START_TIME);
 }
 
 interface MoreFromEvent {
@@ -449,10 +423,13 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
-  // §4c: the follow/rail entity is the FRONTING entity - the community,
-  // or the standalone organizer profile; a public_name override fronts
-  // as itself and carries neither follow nor rail (the proposal-36 grammar)
-  const frontingTarget: FollowTarget | null =
+  // §4c: the rail/track-record entity is the FRONTING entity - the
+  // community, or the standalone organizer profile; a public_name override
+  // fronts as itself and carries neither follow nor rail (proposal-36
+  // grammar). This is a broader union than FollowTarget on purpose: it also
+  // drives the more-from rail and track-record count for BOTH kinds, so it
+  // can't itself be typed as follow-only.
+  const frontingTarget: { kind: 'community' | 'organizer'; id: string } | null =
     !event || event.public_name
       ? null
       : event.community_id
@@ -460,6 +437,15 @@ export default function EventDetailScreen() {
         : event.host_user_id
           ? { kind: 'organizer', id: event.host_user_id }
           : null;
+
+  // Scene handoff §16 (2026-09-01 "IMPORTANT DATA CORRECTION"): follow is an
+  // ORGANIZATION-only action. frontingTarget above still carries both kinds
+  // for the rail/track-record plumbing; follow narrows to organizer only, so
+  // a community-fronted event's card resolves entirely through membership
+  // state (viewerIsMemberHere / viewerJoinPending / viewerCanJoinHere below)
+  // and never fetches or renders a follow pill or follower count.
+  const followTarget: FollowTarget | null =
+    frontingTarget?.kind === 'organizer' ? { kind: 'organizer', id: frontingTarget.id } : null;
 
   // §4c (doc 69 A6): more from the same fronting entity - upcoming Live
   // listings, soonest first, this one excluded
@@ -510,22 +496,34 @@ export default function EventDetailScreen() {
   });
 
   // §4c (doc 69 B1/B2): dormant until proposal 68 applies - a missing
-  // table reads as available:false and the affordance never renders
+  // table reads as available:false and the affordance never renders.
+  // Scoped to followTarget (organizer-only, Scene handoff §16) rather than
+  // frontingTarget: a community event must never fetch follow state or a
+  // follower count in the first place, not just hide it after the fact.
   const { data: followState } = useQuery({
-    queryKey: ['organizer-follow', frontingTarget?.kind, frontingTarget?.id, userId],
-    queryFn: () => getFollowState(frontingTarget!, userId!),
-    enabled: COMMUNITIES_ENABLED && !!frontingTarget && !!userId,
+    queryKey: ['organizer-follow', followTarget?.kind, followTarget?.id, userId],
+    queryFn: () => getFollowState(followTarget!, userId!),
+    enabled: COMMUNITIES_ENABLED && !!followTarget && !!userId,
     staleTime: 30_000,
   });
   const { data: followerCount = null } = useQuery({
-    queryKey: ['follower-count', frontingTarget?.kind, frontingTarget?.id],
-    queryFn: () => getFollowerCount(frontingTarget!),
-    enabled: COMMUNITIES_ENABLED && !!frontingTarget,
+    queryKey: ['follower-count', followTarget?.kind, followTarget?.id],
+    queryFn: () => getFollowerCount(followTarget!),
+    enabled: COMMUNITIES_ENABLED && !!followTarget,
     staleTime: 60_000,
   });
-  // T9 (doc 121): joining auto-follows DB-side, so an active member always
-  // reads as "following" on the pill. A member should see member state; the
-  // follow pill is for non-members. Own-row read (RLS user_id = auth.uid()).
+  // T9 (doc 121) at the time this was written: joining auto-follows
+  // DB-side, so an active member always read as "following" on the shared
+  // pill. Scene handoff §16 (2026-09-01) supersedes that model: a community
+  // never shows follow state at all now (see followTarget above), so this
+  // query's member/pending/join result is the ONLY thing that drives the
+  // community entity-card pill below, independent of organizer_follows.
+  // Follow-up for whoever owns that DB-side join trigger, if it is still
+  // live: it may still be inserting a community-kind organizer_follows row
+  // on every join, which is dead data no client reads anymore (the DRAFT
+  // migration filed alongside this fix cleans up what already exists, but a
+  // live trigger would keep recreating it going forward). Own-row read
+  // (RLS user_id = auth.uid()).
   const { data: viewerMembershipStatus = null } = useQuery({
     queryKey: ['community-membership', event?.community_id, userId],
     queryFn: async () => {
@@ -567,10 +565,10 @@ export default function EventDetailScreen() {
 
   const followMutation = useMutation({
     mutationFn: async () => {
-      if (!frontingTarget || !userId || !followState) throw new Error('not ready');
+      if (!followTarget || !userId || !followState) throw new Error('not ready');
       const ok = followState.following
-        ? await removeFollow(frontingTarget, userId)
-        : await recordFollow(frontingTarget, userId);
+        ? await removeFollow(followTarget, userId)
+        : await recordFollow(followTarget, userId);
       if (!ok) throw new Error('follow write failed');
     },
     onSuccess: () => {
@@ -645,6 +643,97 @@ export default function EventDetailScreen() {
     queryClient.invalidateQueries({ queryKey: ['event-topic', id] });
   }, [queryClient, id]);
 
+  // Scene handoff §07/09/13: the post-confirmation branch. Organization
+  // events promote Find people to go with (existing PL-01 behavior,
+  // unchanged); community events promote Open event chat instead (the chat
+  // law) and never offer Find people. eventTopicId is created at event
+  // publish time for every community event (20260707120000_event_chat_model
+  // .sql), so it should already be resolved by the time an RSVP succeeds;
+  // if it genuinely isn't, this step is skipped rather than shown broken --
+  // the calendar step above it already satisfied "exactly once."
+  const showBranchNudge = useCallback(() => {
+    if (!event) return;
+    if (isCommunityEvent) {
+      if (!eventTopicId) return;
+      // LIZ COPY
+      setAlertInfo({
+        title: "you're in",
+        message: 'the event chat is where the coordination happens.',
+        buttons: [
+          { text: 'open the chat', onPress: () => router.push(`/community-topic/${eventTopicId}`) },
+          { text: 'not now', style: 'cancel' },
+        ],
+      });
+      return;
+    }
+    const openPlans = getOpenLinkedPlans(
+      linkedPlans.map((p) => ({
+        id: p.id,
+        memberCount: memberCountsMap[p.id] ?? p.member_count,
+        maxInvites: p.max_invites,
+      })),
+    ).map((p) => linkedPlans.find((lp) => lp.id === p.id)!);
+    if (openPlans.length > 0) {
+      // PL-01: routes through goFindPeople so 2+ open Plans show the
+      // real chooser instead of silently guessing openPlans[0].
+      // LIZ COPY
+      setAlertInfo({
+        title: 'a group is forming for this',
+        message: 'want in? your spot at the event stands either way.',
+        buttons: [
+          { text: 'see the group', onPress: goFindPeople },
+          { text: 'just going', style: 'cancel' },
+        ],
+      });
+    } else {
+      // LIZ COPY
+      setAlertInfo({
+        title: 'want people to go with?',
+        message: "you're in either way. small groups form around events like this.",
+        buttons: [
+          { text: 'find people', onPress: goFindPeople },
+          { text: 'just going', style: 'cancel' },
+        ],
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event, isCommunityEvent, eventTopicId, linkedPlans, memberCountsMap, goFindPeople]);
+
+  // Scene handoff §06/§15: "every confirmed event offers Add to calendar
+  // exactly once"; Add and Not now both complete the flow (never gated on
+  // the native permission/picker outcome), then §07's branch nudge follows.
+  // The 250ms defer is load-bearing, not stylistic: BrandedAlert's own
+  // onPress wrapper calls btn.onPress() then onClose() synchronously in the
+  // same tick (components/BrandedAlert.tsx), so a setAlertInfo call made
+  // directly inside a button's onPress is immediately clobbered by that
+  // trailing onClose()'s setAlertInfo(null) in the same batch. Deferring past
+  // that tick (and past the fade-out) is what lets the second alert actually
+  // render instead of flashing and disappearing.
+  const showPostConfirmationSequence = useCallback(() => {
+    if (!event) return;
+    const startIso = eventStartIso(event.event_date, event.start_time);
+    if (!startIso) {
+      showBranchNudge();
+      return;
+    }
+    // LIZ COPY
+    setAlertInfo({
+      title: 'add this to your calendar?',
+      message: 'get a reminder before it starts.',
+      buttons: [
+        {
+          text: 'add to calendar',
+          onPress: () => {
+            showAddToCalendar(event.title, startIso, null, event.venue ?? undefined);
+            setTimeout(showBranchNudge, 250);
+          },
+        },
+        { text: 'not now', style: 'cancel', onPress: () => setTimeout(showBranchNudge, 250) },
+      ],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event, showBranchNudge]);
+
   const proceedWithRsvp = useCallback(async () => {
     if (!id) return;
     setRsvpBusy(true);
@@ -652,41 +741,15 @@ export default function EventDetailScreen() {
       await setRsvp(id, true);
       hapticSuccess();
       invalidateRsvp();
-      // the smart popup: one nudge per event, never again once answered.
-      // NEVER on a community event (the chat law): its conversation is
-      // the event chat the rsvp just enrolled them in, not a plan.
-      if (!isCommunityEvent && !(await wasNudged(id))) {
+      // Scene handoff §06/07/09: one nudge sequence per event, never again
+      // once answered. Previously excluded community events entirely (the
+      // old chat-law reading); the chat law only ever barred the FIND-PEOPLE
+      // half, not a post-confirmation nudge outright -- showBranchNudge
+      // above routes community events to Open event chat instead, never to
+      // Find people to go with.
+      if (!(await wasNudged(id))) {
         await markNudged(id);
-        const openPlans = getOpenLinkedPlans(
-          linkedPlans.map((p) => ({
-            id: p.id,
-            memberCount: memberCountsMap[p.id] ?? p.member_count,
-            maxInvites: p.max_invites,
-          })),
-        ).map((p) => linkedPlans.find((lp) => lp.id === p.id)!);
-        if (openPlans.length > 0) {
-          // PL-01: routes through goFindPeople so 2+ open Plans show the
-          // real chooser instead of silently guessing openPlans[0].
-          // LIZ COPY
-          setAlertInfo({
-            title: 'a group is forming for this',
-            message: 'want in? your spot at the event stands either way.',
-            buttons: [
-              { text: 'see the group', onPress: goFindPeople },
-              { text: 'just going', style: 'cancel' },
-            ],
-          });
-        } else {
-          // LIZ COPY
-          setAlertInfo({
-            title: 'want people to go with?',
-            message: "you're in either way. small groups form around events like this.",
-            buttons: [
-              { text: 'find people', onPress: goFindPeople },
-              { text: 'just going', style: 'cancel' },
-            ],
-          });
-        }
+        showPostConfirmationSequence();
       }
     } catch (err) {
       hapticError();
@@ -695,7 +758,7 @@ export default function EventDetailScreen() {
     } finally {
       setRsvpBusy(false);
     }
-  }, [id, isCommunityEvent, linkedPlans, memberCountsMap, invalidateRsvp, goFindPeople]);
+  }, [id, invalidateRsvp, showPostConfirmationSequence]);
 
   // the organizer name exactly as the byline renders it, for the notice and
   // its evidence snapshot (doc 13: show the organizer's display name)
@@ -803,6 +866,13 @@ export default function EventDetailScreen() {
 
   const ticketPrice = normalizeTicketPrice(event.ticket_price);
   const isFree = ticketPrice === null;
+  // Scene handoff §15 edge state "Event cancelled": explore_events.status
+  // 'Cancelled' is a real, live value (lib/organizerHome.ts, app/creator/
+  // event-summary.tsx, app/plan/[id].tsx, and app/community-topic/[id].tsx
+  // all already branch on it) but this, the public guest-facing page, had
+  // no handling at all -- a guest who could still load a cancelled event's
+  // page saw normal, live attendance buttons.
+  const isCancelled = event.status === 'Cancelled';
 
   // the byline grammar (slice 2): public_name override wins and wears
   // neither image; a community event fronts with the COMMUNITY name and
@@ -1040,47 +1110,72 @@ export default function EventDetailScreen() {
               viewer is signed in; the count obeys the doc-37 threshold. */}
           {COMMUNITIES_ENABLED && !!frontingTarget && !!bylineName && (
             <View style={styles.entityCard}>
-              {!!bylineFace && (
-                <Image source={{ uri: bylineFace }} style={styles.entityCardImage} contentFit="cover" />
-              )}
-              {!!bylineLogo && (
-                <Image source={{ uri: bylineLogo }} style={styles.entityCardImage} contentFit="cover" />
-              )}
-              {!bylineFace && !bylineLogo && (
-                <View style={[styles.entityCardImage, styles.entityCardImageFallback]}>
-                  <Text style={styles.entityCardInitial}>{bylineName[0]?.toUpperCase() ?? '?'}</Text>
+              {/* Scene handoff §12/13: tapping the organization identity
+                  opens its public profile page (app/organization/[id].tsx).
+                  followTarget is already organizer-only (see its definition
+                  above), so a community's identity here stays a plain,
+                  non-navigating row - §16 lists no public destination for
+                  a community identity, only for an organization's. */}
+              <TouchableOpacity
+                style={styles.entityCardIdentity}
+                activeOpacity={followTarget ? 0.7 : 1}
+                disabled={!followTarget}
+                onPress={() => {
+                  if (!followTarget) return;
+                  hapticLight();
+                  // Not yet in the generated route types (brand-new route,
+                  // same escape hatch this file already uses for
+                  // /tickets/order/[id] below).
+                  router.push(`/organization/${followTarget.id}` as never);
+                }}
+              >
+                {!!bylineFace && (
+                  <Image source={{ uri: bylineFace }} style={styles.entityCardImage} contentFit="cover" />
+                )}
+                {!!bylineLogo && (
+                  <Image source={{ uri: bylineLogo }} style={styles.entityCardImage} contentFit="cover" />
+                )}
+                {!bylineFace && !bylineLogo && (
+                  <View style={[styles.entityCardImage, styles.entityCardImageFallback]}>
+                    <Text style={styles.entityCardInitial}>{bylineName[0]?.toUpperCase() ?? '?'}</Text>
+                  </View>
+                )}
+                <View style={styles.entityCardBody}>
+                  {/* LIZ COPY (decision 16): put on by, never hosted by */}
+                  <Text style={styles.entityCardKicker}>put on by</Text>
+                  <Text style={styles.entityCardName}>{bylineName}</Text>
+                  {/* P4 (doc 78 §2.8): the trust bridge. A fronting entity
+                      exists only through the approved-operator flow, so this
+                      is application-reviewed by construction. Substance is
+                      locked by vocabulary law; the exact string goes to the
+                      taste gate. NOT terracotta - the CTA owns the accent. */}
+                  <View style={styles.badgeRow}>
+                    <BadgeCheck size={13} color={Colors.gold} strokeWidth={2.5} />
+                    <Text style={styles.badgeText}>application-reviewed founding partner</Text>
+                  </View>
+                  <View style={styles.entityCardMetaRow}>
+                    {trackRecordCount !== null && trackRecordCount > 0 && (
+                      /* copy to the taste gate: track record (doc 78 §2.8) */
+                      <Text style={styles.entityCardMeta}>
+                        {trackRecordCount} {trackRecordCount === 1 ? 'event' : 'events'}
+                      </Text>
+                    )}
+                    {followerCount !== null && followerCount >= GOING_COUNT_THRESHOLD && (
+                      /* copy to the taste gate (doc 69 Q5) */
+                      <Text style={styles.entityCardMeta}>{followerCount} following</Text>
+                    )}
+                  </View>
                 </View>
-              )}
-              <View style={styles.entityCardBody}>
-                {/* LIZ COPY (decision 16): put on by, never hosted by */}
-                <Text style={styles.entityCardKicker}>put on by</Text>
-                <Text style={styles.entityCardName}>{bylineName}</Text>
-                {/* P4 (doc 78 §2.8): the trust bridge. A fronting entity
-                    exists only through the approved-operator flow, so this
-                    is application-reviewed by construction. Substance is
-                    locked by vocabulary law; the exact string goes to the
-                    taste gate. NOT terracotta - the CTA owns the accent. */}
-                <View style={styles.badgeRow}>
-                  <BadgeCheck size={13} color={Colors.gold} strokeWidth={2.5} />
-                  <Text style={styles.badgeText}>application-reviewed founding partner</Text>
-                </View>
-                <View style={styles.entityCardMetaRow}>
-                  {trackRecordCount !== null && trackRecordCount > 0 && (
-                    /* copy to the taste gate: track record (doc 78 §2.8) */
-                    <Text style={styles.entityCardMeta}>
-                      {trackRecordCount} {trackRecordCount === 1 ? 'event' : 'events'}
-                    </Text>
-                  )}
-                  {followerCount !== null && followerCount >= GOING_COUNT_THRESHOLD && (
-                    /* copy to the taste gate (doc 69 Q5) */
-                    <Text style={styles.entityCardMeta}>{followerCount} following</Text>
-                  )}
-                </View>
-              </View>
-              {/* T9 (doc 121): member state outranks follow state. An active
-                  member of the fronting community never sees a follow pill,
-                  because join auto-follows and "following" reads as a demotion
-                  of what they actually are. */}
+              </TouchableOpacity>
+              {/* Scene handoff §16 data correction (2026-09-01): a community
+                  never shows Follow or a follower count, full stop -- this
+                  is no longer a priority ordering between member and follow
+                  state (T9/doc 121's original framing). followState only
+                  ever resolves for an organizer target (followTarget above),
+                  so the ": !!userId && !!followState?.available" branch
+                  below is structurally unreachable for a community event;
+                  member/pending/join here comes entirely from
+                  viewerMembershipStatus. */}
               <View style={styles.entityCardActions}>
                 {viewerIsMemberHere ? (
                   <View style={[styles.followPill, styles.followPillOn]}>
@@ -1297,6 +1392,27 @@ export default function EventDetailScreen() {
           </View>
         )}
         <View style={styles.stickyBar}>
+        {isCancelled ? (
+          // Scene handoff §15: "Replace attendance CTAs with Cancelled and
+          // show refund/contact information when relevant." Reuses the
+          // exact support channel already established in
+          // app/tickets/order/[id].tsx rather than inventing a new one.
+          <View style={styles.cancelledRow}>
+            <View style={[styles.rsvpButton, styles.cancelledPill]}>
+              {/* copy to the taste gate */}
+              <Text style={styles.cancelledPillText}>cancelled</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => Linking.openURL('mailto:hello@washedup.app')}
+              hitSlop={8}
+              accessibilityRole="button"
+            >
+              {/* copy to the taste gate */}
+              <Text style={styles.cancelledContactText}>paid for this? email us — hello@washedup.app</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+        <>
         {/* C1: a ticketed event's primary CTA is "get tickets" (the single
             terracotta fill), opening the tier selector -> checkout. rsvp is
             the going-signal for FREE/tierless events, so it steps aside when
@@ -1353,6 +1469,8 @@ export default function EventDetailScreen() {
           <TouchableOpacity style={styles.postPlanButton} onPress={goFindPeople}>
             <Text style={styles.postPlanButtonText}>find people to go with</Text>
           </TouchableOpacity>
+        )}
+        </>
         )}
         </View>
       </View>
@@ -1499,6 +1617,7 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 8,
   },
+  entityCardIdentity: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   entityCardImage: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' },
   entityCardImageFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
   entityCardInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta },
@@ -1611,6 +1730,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
+  // Scene handoff §15 "Event cancelled": a quiet disabled pill (same shape
+  // as rsvpButton, tierBlocked's opacity-only convention) replaces every
+  // attendance CTA, plus one calm contact line reusing the order-complete
+  // screen's established support channel.
+  cancelledRow: { flex: 1, gap: 8, alignItems: 'center' },
+  cancelledPill: { alignSelf: 'stretch', backgroundColor: Colors.border, borderColor: Colors.border },
+  cancelledPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.textMedium },
+  cancelledContactText: {
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textDecorationLine: 'underline',
+  },
   // RSVP is the primary CTA: the one terracotta fill. going = the
   // documented gold confirmed-state (fill + hairline gold border +
   // brandDeep label), the house success family, never green.
