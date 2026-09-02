@@ -31,6 +31,8 @@ CONSENT_SYNC_ACL_MIGRATION="$REPO_ROOT/supabase/migrations/20260831180000_revoke
 CONSENT_SYNC_PGCRYPTO_REPAIR_MIGRATION="$REPO_ROOT/supabase/migrations/20260831190000_fix_pgcrypto_search_path_for_signup.sql"
 DELIVERY_SCHEDULER_MIGRATION="$REPO_ROOT/supabase/migrations/20260831170000_schedule_delivery_workers_seed_only.sql"
 DELIVERY_RESCUE_SQL="$REPO_ROOT/scripts/deliverability/g0-rescue.sql"
+EVENT_OWNERSHIP_MIGRATION="$REPO_ROOT/supabase/migrations/20260901010000_build35_event_ownership.sql"
+ROLE_RECONCILIATION_MIGRATION="$REPO_ROOT/supabase/migrations/20260901000000_build35_community_role_reconciliation.sql"
 CONTRACT_FILES="$CONTRACT_ROOT/supabase/tests/contracts"
 CONTRACT_LANE=${DB_CONTRACT_LANE:-${1:-}}
 
@@ -63,6 +65,8 @@ for required_file in \
   "$CONSENT_SYNC_PGCRYPTO_REPAIR_MIGRATION" \
   "$DELIVERY_SCHEDULER_MIGRATION" \
   "$DELIVERY_RESCUE_SQL" \
+  "$EVENT_OWNERSHIP_MIGRATION" \
+  "$ROLE_RECONCILIATION_MIGRATION" \
   "$CONTRACT_FILES/00_account_deletion_fixture.sql" \
   "$CONTRACT_FILES/01_account_deletion_contract.sql" \
   "$CONTRACT_FILES/10_refund_fixture.sql" \
@@ -97,7 +101,13 @@ for required_file in \
   "$CONTRACT_FILES/141_consent_sync_contract.sql" \
   "$CONTRACT_FILES/160_delivery_scheduler_fixture.sql" \
   "$CONTRACT_FILES/161_delivery_scheduler_contract.sql" \
-  "$CONTRACT_FILES/162_delivery_rescue_contract.sql"
+  "$CONTRACT_FILES/162_delivery_rescue_contract.sql" \
+  "$CONTRACT_FILES/170_event_ownership_fixture.sql" \
+  "$CONTRACT_FILES/171_event_ownership_contract.sql" \
+  "$CONTRACT_FILES/172_event_ownership_rollback_contract.sql" \
+  "$CONTRACT_FILES/180_role_reconciliation_fixture.sql" \
+  "$CONTRACT_FILES/181_role_reconciliation_contract.sql" \
+  "$CONTRACT_FILES/182_role_reconciliation_idempotency_contract.sql"
 do
   if [ ! -f "$required_file" ]; then
     echo "required private contract file is missing: $required_file" >&2
@@ -155,6 +165,8 @@ CONTAINER_ID=$(docker run \
   --volume "$CONSENT_SYNC_PGCRYPTO_REPAIR_MIGRATION:/migrations/consent-sync-pgcrypto-repair.sql:ro" \
   --volume "$DELIVERY_SCHEDULER_MIGRATION:/migrations/delivery-scheduler.sql:ro" \
   --volume "$DELIVERY_RESCUE_SQL:/g0-rescue.sql:ro" \
+  --volume "$EVENT_OWNERSHIP_MIGRATION:/migrations/event-ownership.sql:ro" \
+  --volume "$ROLE_RECONCILIATION_MIGRATION:/migrations/role-reconciliation.sql:ro" \
   --volume "$CONTRACT_FILES:/contracts:ro" \
   "$IMAGE")
 invalid_id=$(printf '%s' "$CONTAINER_ID" | tr -d '0-9a-f')
@@ -267,6 +279,89 @@ run_delivery_scheduler_contract() {
   psql_file delivery_scheduler_contract /contracts/162_delivery_rescue_contract.sql
 }
 
+run_event_ownership_contract() {
+  create_contract_db event_ownership_contract
+  psql_file event_ownership_contract /contracts/170_event_ownership_fixture.sql
+  psql_file event_ownership_contract /migrations/event-ownership.sql
+  psql_file event_ownership_contract /contracts/171_event_ownership_contract.sql
+  # A1's REVERSAL is deliberately a comment in the migration header, not
+  # executable SQL, so it stays clear of scripts/release/migration-policy.mjs
+  # (see the migration's own note). Extract it verbatim from the real file
+  # -- not a hand-copied duplicate that could drift out of sync -- and run
+  # it for real against this same disposable database, exactly once, right
+  # after the invariant contract above.
+  awk '/policy check\):/{flag=1; next} flag && /^-- ---/{exit} flag' "$EVENT_OWNERSHIP_MIGRATION" \
+    | sed -E 's/^--[[:space:]]?//' \
+    | docker exec -i "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d event_ownership_contract
+  psql_file event_ownership_contract /contracts/172_event_ownership_rollback_contract.sql
+}
+
+run_role_reconciliation_contract() {
+  # Negative: the migration's own dependency guard must refuse to apply
+  # without public.community_members already present.
+  create_contract_db role_reconciliation_missing_dep
+  set +e
+  missing_dep_output=$(docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d role_reconciliation_missing_dep \
+    -f /migrations/role-reconciliation.sql 2>&1)
+  missing_dep_status=$?
+  set -e
+  if [ "$missing_dep_status" -eq 0 ]; then
+    echo "role reconciliation applied without its community_members dependency" >&2
+    exit 1
+  fi
+  echo "$missing_dep_output" | grep -F 'A3 dependency missing: public.community_members' >/dev/null
+
+  create_contract_db role_reconciliation_contract
+  psql_file role_reconciliation_contract /contracts/180_role_reconciliation_fixture.sql
+  psql_file role_reconciliation_contract /migrations/role-reconciliation.sql
+  psql_file role_reconciliation_contract /contracts/181_role_reconciliation_contract.sql
+
+  # Idempotency: edit a non-leader assignment between two applies of the
+  # SAME migration file, and prove ON CONFLICT DO NOTHING preserves it.
+  docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d role_reconciliation_contract -c \
+    "UPDATE public.community_role_assignments SET can_view_community_finance = false WHERE member_id = '60000000-0000-0000-0000-000000000008';"
+  psql_file role_reconciliation_contract /migrations/role-reconciliation.sql
+  psql_file role_reconciliation_contract /contracts/182_role_reconciliation_idempotency_contract.sql
+
+  # Real, verified limitation, pinned down rather than hidden (see
+  # 182's header comment): the migration's own trailing self-test
+  # unconditionally re-checks every source_role='leader' row on EVERY
+  # apply. Editing a leader-derived row's roster/finance toggle and
+  # re-running the migration must fail with this exact message, and the
+  # failed re-apply must roll back cleanly, leaving the edit exactly as a
+  # human left it rather than half-applying.
+  docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d role_reconciliation_contract -c \
+    "UPDATE public.community_role_assignments SET can_view_member_roster = false WHERE member_id = '60000000-0000-0000-0000-000000000001';"
+  set +e
+  leader_reapply_output=$(docker exec "$CONTAINER_ID" psql -v ON_ERROR_STOP=1 -U postgres -d role_reconciliation_contract \
+    -f /migrations/role-reconciliation.sql 2>&1)
+  leader_reapply_status=$?
+  set -e
+  if [ "$leader_reapply_status" -eq 0 ]; then
+    echo "role reconciliation re-apply silently accepted a downgraded leader row (expected its self-test to raise)" >&2
+    exit 1
+  fi
+  echo "$leader_reapply_output" | grep -F 'A3 self-test: 1 leader rows mapped to a reduced Creator' >/dev/null
+  still_downgraded=$(docker exec "$CONTAINER_ID" psql -U postgres -d role_reconciliation_contract -Atqc \
+    "SELECT can_view_member_roster FROM public.community_role_assignments WHERE member_id = '60000000-0000-0000-0000-000000000001'")
+  if [ "$still_downgraded" != "f" ]; then
+    echo "the failed re-apply did not roll back cleanly (leader roster flag now $still_downgraded)" >&2
+    exit 1
+  fi
+}
+
+if [ "$CONTRACT_LANE" = "event-ownership" ]; then
+  run_event_ownership_contract
+  echo "PASS: focused Build 35 A1 event ownership database contracts"
+  exit 0
+fi
+
+if [ "$CONTRACT_LANE" = "role-reconciliation" ]; then
+  run_role_reconciliation_contract
+  echo "PASS: focused Build 35 A3 community role reconciliation database contracts"
+  exit 0
+fi
+
 if [ "$CONTRACT_LANE" = "release-blockers" ]; then
   run_release_blockers_contract
   echo "PASS: focused release-blocker database contracts"
@@ -376,8 +471,10 @@ run_threshold_75_contract
 run_deliverability_contract
 run_consent_sync_contract
 run_delivery_scheduler_contract
+run_event_ownership_contract
+run_role_reconciliation_contract
 
-echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, identity-marks trigger safety, durable free RSVP confirmations, audience consent sync, and G0 scheduler rescue"
+echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, identity-marks trigger safety, durable free RSVP confirmations, audience consent sync, G0 scheduler rescue, Build 35 A1 event ownership (backfill, insert derivation, one-owner invariant, audit trail, both cascade re-homes, and a real header-comment rollback execution), and Build 35 A3 community role reconciliation (full seven-tier taxonomy mapping, fail-closed grants, and idempotent re-apply)"
 if [ "$static_status" -ne 0 ]; then
   echo "Release gate remains closed by static diagnostics"
   exit "$static_status"

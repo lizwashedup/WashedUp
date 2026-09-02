@@ -91,13 +91,17 @@ describe('native community page data contract', () => {
     expect(mockSupabase.rpc).toHaveBeenCalledWith('get_community_member_count', { p_community_id: 'community-requested' });
   });
 
-  it('projects only active memberships, preserves each active role, and reads visible covers for those communities only', async () => {
+  it('projects active and archived memberships (never a draft), preserves each membership role, and reads visible covers for those communities only', async () => {
     mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'viewer-1' } } });
     mockRows.community_members = {
       data: [
         { role: 'leader', communities: { id: 'c-lead', handle: 'lead', name: 'Lead', accent_color: null, status: 'active' } },
         { role: 'member', communities: { id: 'c-member', handle: 'member', name: 'Member', accent_color: null, status: 'active' } },
+        // archived stays visible under Yours: existing members/leaders keep
+        // access to what they already had, only new discovery closes.
         { role: 'co_leader', communities: { id: 'c-archived', handle: 'old', name: 'Old', accent_color: null, status: 'archived' } },
+        // a never-published draft is the one status still filtered out here.
+        { role: 'events', communities: { id: 'c-draft', handle: 'draft', name: 'Draft', accent_color: null, status: 'draft' } },
       ],
       error: null,
     };
@@ -114,6 +118,7 @@ describe('native community page data contract', () => {
     expect(result).toEqual([
       expect.objectContaining({ id: 'c-lead', role: 'leader', cover_image: 'leader-cover', member_count: 12 }),
       expect.objectContaining({ id: 'c-member', role: 'member', cover_image: 'member-cover', member_count: 12 }),
+      expect.objectContaining({ id: 'c-archived', role: 'co_leader', cover_image: null, member_count: 12 }),
     ]);
     expect(calls('community_members', 'eq')).toEqual(
       expect.arrayContaining([
@@ -121,7 +126,7 @@ describe('native community page data contract', () => {
         { table: 'community_members', method: 'eq', args: ['status', 'active'] },
       ]),
     );
-    expect(calls('community_blocks', 'in')).toContainEqual({ table: 'community_blocks', method: 'in', args: ['community_id', ['c-lead', 'c-member']] });
+    expect(calls('community_blocks', 'in')).toContainEqual({ table: 'community_blocks', method: 'in', args: ['community_id', ['c-lead', 'c-member', 'c-archived']] });
     expect(calls('community_blocks', 'eq')).toEqual(
       expect.arrayContaining([
         { table: 'community_blocks', method: 'eq', args: ['block_type', 'cover'] },

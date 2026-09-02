@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
+import { clearAllDrafts } from '../../../lib/onboardingDraft';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 
@@ -31,6 +32,7 @@ export default function OnboardingWaitlistedScreen() {
 
   const handleSignOut = async () => {
     hapticLight();
+    await clearAllDrafts();
     await supabase.auth.signOut();
   };
 

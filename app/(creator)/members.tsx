@@ -13,7 +13,7 @@ import { Image } from 'expo-image';
 import { Check, X, ChevronRight, Search } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { CO_CREATOR_INVITES_ENABLED } from '../../constants/FeatureFlags';
+import { CO_CREATOR_INVITES_ENABLED, MEMBER_INVITES_ENABLED } from '../../constants/FeatureFlags';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
@@ -173,6 +173,26 @@ export default function CreatorMembersScreen() {
               <View style={styles.coCreatorsCardText}>
                 <Text style={styles.coCreatorsCardTitle}>Co-creators</Text>
                 <Text style={styles.coCreatorsCardHint}>Invite someone to help run this community.</Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
+          )}
+
+          {/* Build 35 Screen 56: a genuinely separate entry point from
+              Co-creators above -- this invites a plain MEMBER, never team
+              access. Distinct route, distinct wiring, own flag. */}
+          {MEMBER_INVITES_ENABLED && (isLeaderAccess(access) || canManageMembers(access)) && (
+            <TouchableOpacity
+              style={styles.coCreatorsCard}
+              onPress={() => router.push('/creator/member-invites' as never)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Invite members"
+              accessibilityHint="Invite someone to join this community as a member."
+            >
+              <View style={styles.coCreatorsCardText}>
+                <Text style={styles.coCreatorsCardTitle}>Invite members</Text>
+                <Text style={styles.coCreatorsCardHint}>Invite someone to join this community.</Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
             </TouchableOpacity>

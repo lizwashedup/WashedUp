@@ -14,10 +14,25 @@ import { supabase } from './supabase';
 export type CheckinResult = 'admitted' | 'duplicate' | 'voided';
 
 export type CheckinOutcome =
-  | { kind: 'result'; result: CheckinResult; code: string }
+  | { kind: 'result'; result: CheckinResult; code: string; admittedAt: string | null }
   | { kind: 'unknown'; code: string }
   | { kind: 'queued'; code: string }
   | { kind: 'error'; message: string; code: string };
+
+/**
+ * record_ticket_checkin's return GREW from bare text to a small jsonb envelope
+ * {result, admitted_at} (Screen 30: a duplicate scan now carries the original
+ * admitted timestamp instead of nothing). Read both shapes rather than assume
+ * the new one -- a mobile rollout can leave some installed app builds talking
+ * to an already-migrated database for a while, and the reverse (this code
+ * against a not-yet-migrated database) is also possible mid-rollout; either
+ * way a bare-string legacy reply must still parse to a correct verdict.
+ */
+function parseCheckinPayload(data: unknown): { result: CheckinResult; admittedAt: string | null } {
+  if (typeof data === 'string') return { result: data as CheckinResult, admittedAt: null };
+  const obj = (data ?? {}) as { result?: CheckinResult; admitted_at?: string | null };
+  return { result: obj.result as CheckinResult, admittedAt: obj.admitted_at ?? null };
+}
 
 const QUEUE_KEY = 'ticket_checkin_queue_v1';
 const DEVICE_KEY_STORAGE = 'ticket_checkin_device_key_v1';
@@ -67,6 +82,15 @@ export async function queuedCount(): Promise<number> {
   return (await readQueue()).length;
 }
 
+export interface QueuedCheckinView { code: string; queuedAt: string; }
+
+/** The offline door list: every code still waiting on a sync, oldest first. Never exposes the signature. */
+export async function listQueued(): Promise<QueuedCheckinView[]> {
+  return (await readQueue())
+    .map(({ code, queuedAt }) => ({ code, queuedAt }))
+    .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt));
+}
+
 /**
  * One RPC attempt, WITHOUT touching the queue. A verdict (admitted/duplicate/
  * voided), a bad code (unknown), or an auth error is returned as-is; only a
@@ -75,7 +99,10 @@ export async function queuedCount(): Promise<number> {
 async function attempt(code: string): Promise<CheckinOutcome> {
   try {
     const { data, error } = await supabase.rpc('record_ticket_checkin', { p_reference_code: code });
-    if (!error) return { kind: 'result', result: data as CheckinResult, code };
+    if (!error) {
+      const { result, admittedAt } = parseCheckinPayload(data);
+      return { kind: 'result', result, code, admittedAt };
+    }
     const msg = (error.message ?? '').toLowerCase();
     if (msg.includes('unknown reference')) return { kind: 'unknown', code };
     if (msg.includes('organizer') || msg.includes('authenticated')) {

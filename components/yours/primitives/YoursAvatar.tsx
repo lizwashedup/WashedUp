@@ -148,6 +148,7 @@ function YoursAvatar({
                 source={{ uri: photoUrl }}
                 style={styles.fill}
                 contentFit="cover"
+                cachePolicy="memory-disk"
               />
             ) : (
               <View

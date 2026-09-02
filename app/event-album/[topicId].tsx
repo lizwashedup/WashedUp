@@ -125,7 +125,7 @@ export default function EventAlbumScreen() {
     hapticLight();
     setAlertInfo({
       title: 'Delete this photo?',
-      message: 'It disappears from the room for everyone.',
+      message: 'It disappears from the chat space for everyone.',
       buttons: [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -197,7 +197,7 @@ export default function EventAlbumScreen() {
           {isCreator ? (
             <>
               <Text style={styles.emptyTitle}>turn on photos for this event?</Text>
-              <Text style={styles.emptyBody}>anyone in the room can add what they took.</Text>
+              <Text style={styles.emptyBody}>anyone here can add what they took.</Text>
               <TouchableOpacity
                 style={[styles.addBtn, enabling && styles.addBtnBusy]}
                 onPress={handleEnableAlbum}
@@ -233,11 +233,11 @@ export default function EventAlbumScreen() {
           ListHeaderComponent={
             saveNotice ? (
               <View style={styles.saveNotice}>
-                <Text style={styles.saveNoticeText}>this room closes soon -- save what you want to keep.</Text>
+                <Text style={styles.saveNoticeText}>this chat space closes soon -- save what you want to keep.</Text>
               </View>
             ) : archived ? (
               <View style={styles.saveNotice}>
-                <Text style={styles.saveNoticeText}>this room is closed. photos are view-only.</Text>
+                <Text style={styles.saveNoticeText}>this chat space is closed. photos are view-only.</Text>
               </View>
             ) : null
           }
@@ -246,7 +246,7 @@ export default function EventAlbumScreen() {
               {archived ? (
                 <>
                   <Text style={styles.emptyTitle}>no photos were saved here.</Text>
-                  <Text style={styles.emptyBody}>this room is closed.</Text>
+                  <Text style={styles.emptyBody}>this chat space is closed.</Text>
                 </>
               ) : (
                 <>

@@ -22,6 +22,7 @@ import { supabase } from '../../../lib/supabase';
 import { withTimeout } from '../../../lib/withTimeout';
 import { getUserBounded } from '../../../lib/authGate';
 import { unauthedRoute } from '../../../lib/authRouting';
+import { saveDraft, loadDraft, clearDraft, cancelPendingSave, clearAllDrafts } from '../../../lib/onboardingDraft';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { requestResendAudienceSync } from '../../../lib/deliverability/consentSync';
 import Colors from '../../../constants/Colors';
@@ -38,6 +39,22 @@ const GENDER_TO_ENUM: Record<Gender, string> = {
   man: 'man',
   'non-binary': 'non_binary',
 };
+
+type BasicsDraft = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  marketingOptIn: boolean;
+  birthdayISO: string | null;
+  gender: Gender | null;
+};
+
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 const MONTHS = [
   'january', 'february', 'march', 'april', 'may', 'june',
@@ -72,6 +89,21 @@ export default function OnboardingBasicsScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
+  const [draftLoadAttempted, setDraftLoadAttempted] = useState(false);
+  // Real bug, found and fixed 2026-09-01: the 8s watchdog below intentionally
+  // lets the user start filling out the form before the bootstrap chain (up
+  // to ~16s: getUser + profile fetch + loadDraft's own bound) finishes. That
+  // chain kept running in the background regardless, and its setFirstName /
+  // setBirthday / etc calls landed straight over whatever the user had
+  // already typed once it eventually resolved. Per-field, not one shared
+  // flag: an earlier version used a single boolean, which meant editing ANY
+  // one field discarded the restore for the other five untouched ones too
+  // (and then the save-effect wrote those five blank over the real draft on
+  // disk) -- a smaller version of the same data-loss bug this exists to
+  // prevent. 'birthday' covers both birthday and dateError together, since
+  // confirmDate() always sets them as one atomic unit.
+  const editedFieldsRef = useRef<Set<string>>(new Set());
+  const markEdited = (field: string) => { editedFieldsRef.current.add(field); };
 
   const years = getYears();
   const [tempMonth, setTempMonth] = useState<number | null>(null);
@@ -101,43 +133,127 @@ export default function OnboardingBasicsScreen() {
           4000,
           { data: { user: null } } as any,
         );
-        if (!user) {
-          setBootstrapping(false);
-          return;
-        }
-        const { data: profile } = await withTimeout(
-          supabase
-            .from('profiles')
-            .select('first_name_display, last_name, birthday, gender, email, marketing_opt_in')
-            .eq('id', user.id)
-            .maybeSingle(),
-          4000,
-          { data: null } as any,
-        );
-        if (cancelled) return;
-        if (profile?.first_name_display) setFirstName(profile.first_name_display);
-        if (profile?.last_name) setLastName(profile.last_name);
-        if (profile?.email) setEmail(profile.email);
-        if (profile?.marketing_opt_in) setMarketingOptIn(true);
-        if (profile?.birthday) {
-          const [y, m, d] = profile.birthday.split('-').map(Number);
-          if (y && m && d) setBirthday(new Date(y, m - 1, d));
-        }
-        if (profile?.gender) {
-          const reverseGender: Record<string, Gender> = {
-            woman: 'woman',
-            man: 'man',
-            non_binary: 'non-binary',
-          };
-          const mapped = reverseGender[profile.gender];
-          if (mapped) setGender(mapped);
+        if (user) {
+          const { data: profile } = await withTimeout(
+            supabase
+              .from('profiles')
+              .select('first_name_display, last_name, birthday, gender, email, marketing_opt_in')
+              .eq('id', user.id)
+              .maybeSingle(),
+            4000,
+            { data: null } as any,
+          );
+          if (!cancelled) {
+            if (profile?.first_name_display && !editedFieldsRef.current.has('firstName')) {
+              setFirstName(profile.first_name_display);
+            }
+            if (profile?.last_name && !editedFieldsRef.current.has('lastName')) {
+              setLastName(profile.last_name);
+            }
+            if (profile?.email && !editedFieldsRef.current.has('email')) {
+              setEmail(profile.email);
+            }
+            if (profile?.marketing_opt_in && !editedFieldsRef.current.has('marketingOptIn')) {
+              setMarketingOptIn(true);
+            }
+            if (profile?.birthday && !editedFieldsRef.current.has('birthday')) {
+              const [y, m, d] = profile.birthday.split('-').map(Number);
+              if (y && m && d) {
+                const restored = new Date(y, m - 1, d);
+                setBirthday(restored);
+                // Same check confirmDate() runs on a fresh pick. profiles.birthday
+                // should only ever hold an already-validated date, but restoring
+                // it without re-running this would silently trust that guarantee
+                // forever instead of enforcing it here too.
+                setDateError(!is18Plus(restored) ? 'you must be 18 or older to use washedup.' : null);
+              }
+            }
+            if (profile?.gender && !editedFieldsRef.current.has('gender')) {
+              const reverseGender: Record<string, Gender> = {
+                woman: 'woman',
+                man: 'man',
+                non_binary: 'non-binary',
+              };
+              const mapped = reverseGender[profile.gender];
+              if (mapped) setGender(mapped);
+            }
+          }
         }
       } finally {
-        if (!cancelled) setBootstrapping(false);
+        // Always runs, whether the network read above succeeded, timed out, or
+        // never found a user -- loadDraft must be attempted on every path so
+        // draftLoadAttempted only ever flips true once it's genuinely safe for
+        // the save-effect below to run. Doing this any earlier (e.g. skipping
+        // straight to setBootstrapping(false) on the timeout branch, as before)
+        // let the save-effect fire once with every field still at its blank
+        // useState default and overwrite a real draft on disk -- exactly the
+        // data loss this feature exists to prevent, and worst on a flaky
+        // network, which is also when a user is likeliest to get backgrounded
+        // and killed.
+        if (!cancelled) {
+          const draft = await loadDraft<BasicsDraft>('basics');
+          if (!cancelled && draft) {
+            if (draft.firstName && !editedFieldsRef.current.has('firstName')) {
+              setFirstName(draft.firstName);
+            }
+            if (draft.lastName && !editedFieldsRef.current.has('lastName')) {
+              setLastName(draft.lastName);
+            }
+            if (draft.email && !editedFieldsRef.current.has('email')) {
+              setEmail(draft.email);
+            }
+            if (draft.marketingOptIn && !editedFieldsRef.current.has('marketingOptIn')) {
+              setMarketingOptIn(true);
+            }
+            if (draft.birthdayISO && !editedFieldsRef.current.has('birthday')) {
+              const [y, m, d] = draft.birthdayISO.split('-').map(Number);
+              if (y && m && d) {
+                const restored = new Date(y, m - 1, d);
+                setBirthday(restored);
+                // Real bug, found and fixed 2026-09-01: restoring a draft used to
+                // leave dateError at its default null regardless of what birthday
+                // came back, so an under-18 date picked before a kill silently
+                // passed canContinue on relaunch with no error shown. Same check
+                // confirmDate() runs on a fresh pick, applied here too.
+                setDateError(!is18Plus(restored) ? 'you must be 18 or older to use washedup.' : null);
+              }
+            }
+            // Validate against the real enum before trusting a value read back
+            // from disk -- a stale draft from a future/older build could carry
+            // a shape this build no longer recognizes.
+            if (
+              draft.gender &&
+              (GENDERS as readonly string[]).includes(draft.gender) &&
+              !editedFieldsRef.current.has('gender')
+            ) {
+              setGender(draft.gender as Gender);
+            }
+          }
+          setDraftLoadAttempted(true);
+          setBootstrapping(false);
+        }
       }
     })();
     return () => { cancelled = true; clearTimeout(watchdog); };
   }, []);
+
+  // Debounced local-only save of whatever's currently typed, so a kill mid-fill-out
+  // doesn't lose it. Gated on draftLoadAttempted, not bootstrapping: bootstrapping
+  // can also be forced false by the 8s watchdog above with the load never having
+  // run, and this must never fire with blank defaults before a real draft-load
+  // attempt actually happened.
+  useEffect(() => {
+    if (!draftLoadAttempted) return;
+    saveDraft<BasicsDraft>('basics', {
+      firstName,
+      lastName,
+      email,
+      marketingOptIn,
+      birthdayISO: birthday ? toISODate(birthday) : null,
+      gender,
+    });
+    return () => cancelPendingSave('basics');
+  }, [draftLoadAttempted, firstName, lastName, email, marketingOptIn, birthday, gender]);
 
   // Meta/Samsung in-app browsers inject `setContactAutofillValuesFromBridge`
   // to autofill contact fields. Against react-native-web inputs its element
@@ -201,6 +317,7 @@ export default function OnboardingBasicsScreen() {
 
   const confirmDate = () => {
     if (tempYear === null || tempMonth === null || tempDay === null) return;
+    markEdited('birthday');
     const d = new Date(tempYear, tempMonth, Math.min(tempDay, daysInMonth));
     setBirthday(d);
     setDateError(!is18Plus(d) ? 'you must be 18 or older to use washedup.' : null);
@@ -217,6 +334,15 @@ export default function OnboardingBasicsScreen() {
   const handleContinue = async () => {
     const nextEmailError = validateEmail(email);
     setEmailError(nextEmailError);
+    // Hard stop independent of canContinue/dateError: this is the one
+    // sequence-of-record for age verification (it writes birthday to
+    // profiles), so it must never trust that some earlier state update
+    // already ran this check correctly -- a restored draft is exactly the
+    // case where that assumption broke once already.
+    if (birthday && !is18Plus(birthday)) {
+      setDateError('you must be 18 or older to use washedup.');
+      return;
+    }
     if (!canContinue || nextEmailError || !birthday || !gender || loading) return;
     if (!submit.tryAcquire()) return;
     setSaveError(null);
@@ -231,13 +357,10 @@ export default function OnboardingBasicsScreen() {
           return;
         }
         setSaveError('session expired. signing you out…');
-        setTimeout(() => supabase.auth.signOut(), 1500);
+        setTimeout(() => { clearAllDrafts(); supabase.auth.signOut(); }, 1500);
         return;
       }
-      const y = birthday.getFullYear();
-      const m = String(birthday.getMonth() + 1).padStart(2, '0');
-      const d = String(birthday.getDate()).padStart(2, '0');
-      const isoBirthday = `${y}-${m}-${d}`;
+      const isoBirthday = toISODate(birthday);
       type ProfileUpdate = {
         birthday: string;
         gender: string;
@@ -261,6 +384,7 @@ export default function OnboardingBasicsScreen() {
         .update(updates)
         .eq('id', user.id);
       if (error) throw error;
+      clearDraft('basics');
       // Fire-and-forget Resend audience sync. The edge function reads the
       // persisted profile, so it must run for opt-in, opt-out, and blank-email
       // updates alike. Never delay navigation on marketing fanout.
@@ -284,6 +408,7 @@ export default function OnboardingBasicsScreen() {
   };
 
   const handleSignOut = async () => {
+    await clearAllDrafts();
     await supabase.auth.signOut();
   };
 
@@ -301,6 +426,7 @@ export default function OnboardingBasicsScreen() {
         escapingRef.current = false;
         return;
       }
+      await clearAllDrafts();
       await supabase.auth.signOut();
       router.replace(unauthedRoute() as never);
     } catch {
@@ -351,7 +477,7 @@ export default function OnboardingBasicsScreen() {
                 <TextInput
                   style={styles.input}
                   value={firstName}
-                  onChangeText={(t) => setFirstName(t ?? '')}
+                  onChangeText={(t) => { markEdited('firstName'); setFirstName(t ?? ''); }}
                   placeholder="first name"
                   placeholderTextColor={Colors.text3}
                   autoCapitalize="words"
@@ -366,7 +492,7 @@ export default function OnboardingBasicsScreen() {
                 <TextInput
                   style={styles.input}
                   value={lastName}
-                  onChangeText={(t) => setLastName(t ?? '')}
+                  onChangeText={(t) => { markEdited('lastName'); setLastName(t ?? ''); }}
                   placeholder="last name"
                   placeholderTextColor={Colors.text3}
                   autoCapitalize="words"
@@ -384,6 +510,7 @@ export default function OnboardingBasicsScreen() {
               style={[styles.input, emailError ? styles.inputError : null]}
               value={email}
               onChangeText={(t) => {
+                markEdited('email');
                 const nextEmail = t ?? '';
                 setEmail(nextEmail);
                 if (emailError) setEmailError(validateEmail(nextEmail));
@@ -409,6 +536,7 @@ export default function OnboardingBasicsScreen() {
               style={styles.optInRow}
               onPress={() => {
                 hapticLight();
+                markEdited('marketingOptIn');
                 setMarketingOptIn((v) => !v);
               }}
               accessibilityRole="checkbox"
@@ -453,6 +581,7 @@ export default function OnboardingBasicsScreen() {
                     style={[styles.pill, selected && styles.pillSelected]}
                     onPress={() => {
                       hapticLight();
+                      markEdited('gender');
                       setGender(g);
                     }}
                     activeOpacity={0.85}

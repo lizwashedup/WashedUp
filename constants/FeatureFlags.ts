@@ -194,6 +194,34 @@ export const CHAT_DELETE_ENABLED = process.env.EXPO_PUBLIC_CHAT_DELETE_ENABLED =
 export const CO_CREATOR_INVITES_ENABLED = process.env.EXPO_PUBLIC_CO_CREATOR_INVITES_ENABLED === 'true';
 
 /**
+ * Member invites (Build 35 Screen 56). A different feature from co-creator
+ * invites above: this grants plain community membership, not co-creator/admin
+ * access, and must stay visibly and functionally separate on the members
+ * screen (never reuses the co-creators button or its wiring).
+ *
+ * When false (default): nothing changes anywhere. No "invite members" entry
+ * on the members screen, and the /creator/member-invites and
+ * /invite/member/[token] routes are unreachable through any in-app
+ * affordance (a direct deep link still resolves the route, but the screen
+ * itself checks this flag too and renders nothing when it is off).
+ *
+ * When true: the members screen gets an "invite members" entry distinct from
+ * the co-creators one; any active leader or co_leader of the community can
+ * search an existing WashedUp profile, add an optional note, send a bound
+ * invite, and manage/revoke pending invites. V1 scope is existing-profile
+ * invites only -- phone-contact invites are an explicit open product
+ * decision (Screen 56 scope doc §4), not built here. Backed by
+ * supabase/migrations/20260901020000_build35_screen56_member_invites.sql
+ * (create_/preview_/accept_/revoke_member_invite RPCs, DRAFT -- do not flip
+ * on for a real build until that migration is reviewed and applied to prod).
+ *
+ * Local dev: set EXPO_PUBLIC_MEMBER_INVITES_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const MEMBER_INVITES_ENABLED = process.env.EXPO_PUBLIC_MEMBER_INVITES_ENABLED === 'true';
+
+/**
  * Member state on the event page's put-on-by card (doc 121 T9).
  *
  * When false (default): today's behavior. Joining a community auto-follows
@@ -247,3 +275,114 @@ export const CHAT_ENGINE_ENABLED = process.env.EXPO_PUBLIC_CHAT_ENGINE_ENABLED =
  * Never set it in the EAS production environment.
  */
 export const CHAT_PERF_HUD = process.env.EXPO_PUBLIC_CHAT_PERF_HUD === 'true';
+
+/**
+ * Activity-first plan cards on the main Plans discovery feed.
+ *
+ * This is a visual experiment only. The default is deliberately OFF so the
+ * current creator-first card remains unchanged in production, TestFlight, and
+ * CI unless a specific build opts in. The opened plan and every other card
+ * surface keep the established creator-first layout.
+ */
+export const PLAN_CARD_ACTIVITY_FIRST_ENABLED =
+  process.env.EXPO_PUBLIC_PLAN_CARD_ACTIVITY_FIRST_ENABLED === 'true';
+
+/**
+ * Event summary hub (Build 35 Screen 04): a single per-event landing screen
+ * showing title/date/venue/status plus attendee and money snapshots, with
+ * navigation into the existing Attendees and Money screens.
+ *
+ * When false (default): the events list links straight to Tickets/Attendees
+ * exactly as shipped today, byte-identical.
+ *
+ * When true: the events list also offers this hub as the landing point for
+ * an event, reusing getOperatorEvent/getEventAttendees/getEventMoneySummary
+ * as read-only data sources -- no new tables, no new RPCs. The Messages tab
+ * shows as coming soon with a stated reason rather than a working button:
+ * there is no send backend for attendee messages anywhere in this codebase
+ * yet (native or web), so wiring a button to it would be a fake affordance.
+ *
+ * Local dev: set EXPO_PUBLIC_EVENT_SUMMARY_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident. Built against
+ * today's host_user_id/community_id ownership pair, not the drafted
+ * owner_type/owner_id columns (migration 20260901010000, not applied to
+ * prod) -- ownership-derived filtering here should get a follow-up pass
+ * once that migration lands, but this hub does not need it to be useful.
+ */
+export const EVENT_SUMMARY_ENABLED = process.env.EXPO_PUBLIC_EVENT_SUMMARY_ENABLED === 'true';
+
+/**
+ * Community public page control center (Build 35 Screen 14): status, the
+ * shareable washedup.app/c/<handle> link, a discovery toggle, and unpublish
+ * -- reached from a new row on the existing "your page" card in
+ * app/(creator)/menu.tsx.
+ *
+ * When false (default): nothing changes anywhere. No "manage your public
+ * page" row on the menu screen, and /creator/public-page is unreachable
+ * through any in-app affordance (a direct deep link still resolves the
+ * route, but the screen itself checks this flag too and renders nothing
+ * when it is off).
+ *
+ * When true: the row appears, and the screen shows status + the shareable
+ * link and an unpublish action -- all read/write today's live
+ * communities.status/handle, no migration needed. The discovery toggle is
+ * gated a SECOND, independent way on top of this flag: it only renders once
+ * getCommunityDiscoverable() also succeeds, i.e. once
+ * supabase/migrations/20260901030000_build35_screen14_public_page_control.sql
+ * (DRAFT, not applied) actually lands -- the same double-gate shape
+ * JOIN_GATE_ENABLED uses, so neither this flag nor that migration alone can
+ * expose a dead control.
+ *
+ * Local dev: set EXPO_PUBLIC_PUBLIC_PAGE_CONTROL_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const PUBLIC_PAGE_CONTROL_ENABLED = process.env.EXPO_PUBLIC_PUBLIC_PAGE_CONTROL_ENABLED === 'true';
+
+/**
+ * Gender-restricted communities (Liz 2026-09-01, "Women of WashedUp"): a
+ * creator can restrict a new community to one gender at creation. A
+ * restricted community and its events are fully invisible to a non-matching
+ * viewer, not just join-blocked -- get_discoverable_communities(),
+ * communities_select RLS, explore_events' "Anyone can view live explore
+ * events" RLS policy, and get_filtered_feed() all filter it out, and a
+ * wrong-gender join attempt is rejected server-side in
+ * request_to_join_community(). Plans created inside a restricted community
+ * auto-inherit its restriction at creation: operator_create_explore_event()
+ * takes an added p_gender_rule param and computes the default itself. An
+ * inconsistent explicit override (e.g. men_only inside a women-only
+ * community) is rejected server-side by that same RPC; only the community's
+ * own restriction or 'mixed' (open to everyone, the Q4 override) are ever
+ * accepted.
+ *
+ * There is no UI for the per-plan override: the only screen that creates a
+ * community-scoped plan is app/creator/event-form.tsx (Screen 22), which is
+ * frozen. The backend param above is ready the moment that screen can be
+ * touched; until then every create call omits p_gender_rule and the RPC's
+ * own auto-inherit default is all that ever fires.
+ *
+ * When false (default): setup-community.tsx shows no restriction picker.
+ * Every community creates exactly as it does today, open to everyone.
+ *
+ * When true: the picker (everyone / women only / men only) appears on the
+ * create-community screen. createCommunity() only sends the new RPC param
+ * when a restriction is actually chosen, so leaving every community open
+ * stays byte-identical to today even before the migrations below land. Do
+ * not flip on for a real build until ALL THREE of
+ * supabase/migrations/20260901080000_gender_restricted_communities.sql,
+ * 20260901090000_gender_restricted_communities_plan_feed.sql, and
+ * 20260901120000_gender_restricted_communities_scene_visibility.sql (all
+ * DRAFT, not applied) are reviewed and applied to prod, in that order --
+ * the second closes a Plan-feed leak and the third closes a Scene-tab leak,
+ * both real "full invisibility" gaps on top of the first migration's
+ * schema/RLS/RPC work. Picking an actual restriction before the first one
+ * lands fails the create with a clear error (unknown RPC param), not a
+ * silent bad write.
+ *
+ * Local dev: set EXPO_PUBLIC_GENDER_RESTRICTED_COMMUNITIES_ENABLED=true in
+ * .env.local (gitignored). Env-driven and ships OFF wherever the var is
+ * unset (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const GENDER_RESTRICTED_COMMUNITIES_ENABLED =
+  process.env.EXPO_PUBLIC_GENDER_RESTRICTED_COMMUNITIES_ENABLED === 'true';

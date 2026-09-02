@@ -204,14 +204,14 @@ export function QuestionEditorSheet({ visible, question, busy, onSave, onClose }
 
             {/* scope */}
             <Text style={styles.label}>ask it</Text>
-            <Text style={styles.labelHint}>once per order, or once for every ticket in the order.</Text>
+            <Text style={styles.labelHint}>once per purchase, or once for every ticket in the purchase.</Text>
             <View style={styles.chipWrap}>
               <TouchableOpacity
                 style={[styles.chip, scope === 'per_order' && styles.chipOn]}
                 onPress={() => { hapticLight(); setScope('per_order'); }}
                 activeOpacity={0.85}
               >
-                <Text style={[styles.chipText, scope === 'per_order' && styles.chipTextOn]}>once per order</Text>
+                <Text style={[styles.chipText, scope === 'per_order' && styles.chipTextOn]}>once per purchase</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.chip, scope === 'per_attendee' && styles.chipOn]}

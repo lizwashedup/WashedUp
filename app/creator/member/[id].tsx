@@ -8,6 +8,33 @@
  * the same card). No notes-style field exists anywhere on a community
  * member (checked lib/creatorMode.ts and every migration for one), so
  * there is nothing to show there and nothing invented here.
+ *
+ * Screen 17 gap closure (consent + moderation history), read-only, no
+ * schema change:
+ *
+ * - Consent: real and shown below. `guidelines_accepted_at` is enforced
+ *   evidence -- request_to_join_community()/submit_join_request() raise
+ *   unless it's true -- and was already being fetched onto `answers` by
+ *   getJoinAnswerCards() (JoinAnswerCard.guidelines_accepted_at, see
+ *   creatorMode.ts) for the intro card above; it just wasn't rendered.
+ *   This adds the missing render only, same data, same query, no new RLS.
+ *
+ * - Moderation history: deliberately NOT added, flagged instead. There is
+ *   no community-scoped moderation record to show a leader for this
+ *   member. community_member_status has a 'banned' value in its enum, but
+ *   nothing ever writes it -- removeMember() below only ever sets
+ *   'removed', with no reason, no actor, and no history kept beyond the
+ *   row's generic updated_at. The only populated moderation-shaped tables
+ *   (moderation_actions, reports, banned_identifiers) are app-wide platform
+ *   bans -- written only by admin_ban_user() / auto_ban_reported_user(),
+ *   gated to is_admin()/has_role('admin') or the row's own user, unrelated
+ *   to community leadership, and out of scope for a community leader to
+ *   read regardless: moderation_actions.metadata was flagged by a live
+ *   security audit (docs/database/live-function-correctness-audit-
+ *   20260824.md, P1) for embedding an unbounded raw private-message
+ *   archive with no access-control minimization. Wiring a leader-facing
+ *   read into that table is a real access-policy call for Josh/Liz, not a
+ *   UI addition -- reported, not built.
  */
 
 import React, { useState } from 'react';
@@ -191,6 +218,15 @@ export default function MemberDetailScreen() {
             {!!answers.intro_answer && <Text style={styles.answerIntro}>{answers.intro_answer}</Text>}
             {!!answers.area && <Text style={styles.answerLine}>from {answers.area}</Text>}
           </View>
+        )}
+
+        {!!answers?.guidelines_accepted_at && (
+          <>
+            <Text style={styles.sectionLabel}>consent</Text>
+            <Text style={styles.answerLine}>
+              accepted the community guidelines on {formatEventDateLA(answers.guidelines_accepted_at)}
+            </Text>
+          </>
         )}
 
         <Text style={styles.sectionLabel}>event history</Text>

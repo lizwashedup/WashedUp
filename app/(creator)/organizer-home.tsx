@@ -29,17 +29,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { ChevronRight, Plus, ScanLine, Ticket, Users } from 'lucide-react-native';
+import { AlertTriangle, ChevronRight, Plus, ScanLine, Ticket, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { EventAction, EventSpacing, EventSurface, EventType } from '../../constants/EventDesign';
 import { FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCreatorEvents } from '../../lib/creatorMode';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { getFollowerCount } from '../../lib/organizerFollows';
-import { getTiers } from '../../lib/ticketing';
+import { getFailedPayouts, getTiers } from '../../lib/ticketing';
 import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { formatEventDateLA } from '../../lib/laDate';
-import { daysUntilLabel, inventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
+import { daysUntilLabel, failedPayoutLabel, inventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
 import { supabase } from '../../lib/supabase';
 
 export default function OrganizerHomeScreen() {
@@ -98,6 +98,16 @@ export default function OrganizerHomeScreen() {
     staleTime: 60_000,
   });
 
+  // Build 35 Screen 01 exception surfacing: ticket_payouts.status='failed'
+  // across this organizer's events. Empty array hides the card entirely,
+  // same "no fake zero" convention as followerCount above.
+  const { data: failedPayouts = [] } = useQuery({
+    queryKey: ['organizer-home-failed-payouts', userId, access?.ledCommunities.map((c) => c.id).join(',')],
+    queryFn: () => getFailedPayouts((access?.ledCommunities ?? []).map((c) => c.id), userId!),
+    enabled: !!userId && access != null,
+    staleTime: 30_000,
+  });
+
   const producerName = organizerProfile?.display_name?.toLowerCase() || 'your events';
 
   return (
@@ -106,6 +116,31 @@ export default function OrganizerHomeScreen() {
         {/* LIZ COPY */}
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>{producerName}</Text>
+
+        {/* Build 35 Screen 01: exception-first surfacing. Rises above the
+            routine next-event card on purpose -- a stuck payout matters
+            regardless of which event it's on. failure_message is an
+            internal Stripe/webhook string, never shown here verbatim. */}
+        {failedPayouts.length > 0 && (
+          <TouchableOpacity
+            style={styles.exceptionCard}
+            onPress={() => router.push('/creator/payouts' as never)}
+            activeOpacity={0.85}
+          >
+            <AlertTriangle size={20} color={EventAction.error} strokeWidth={2} />
+            <View style={styles.urgencyBody}>
+              {/* LIZ COPY */}
+              <Text style={styles.exceptionKicker}>payout issue</Text>
+              <Text style={styles.urgencyTitle}>{failedPayoutLabel(failedPayouts.length)}</Text>
+              <Text style={styles.urgencyMeta} numberOfLines={1}>
+                {failedPayouts.length === 1
+                  ? `${failedPayouts[0].eventTitle} · we're retrying automatically`
+                  : "we're retrying automatically · see getting paid"}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
+          </TouchableOpacity>
+        )}
 
         {eventsPending ? (
           <View style={[styles.emptyCard, styles.loadingCard]}>
@@ -208,9 +243,11 @@ export default function OrganizerHomeScreen() {
         <Text style={styles.sectionLabel}>money</Text>
         <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/creator/payouts' as never)} activeOpacity={0.8}>
           <View style={{ flex: 1 }}>
-            {/* LIZ COPY */}
+            {/* LIZ COPY — updated 2026-09-01: "orders" -> "purchases" per Scene handoff §14
+                (no backend vocab in copy); matches creator/payouts.tsx's own "purchases"
+                section label */}
             <Text style={styles.linkRowTitle}>getting paid</Text>
-            <Text style={styles.linkRowMeta}>orders, payouts, and stripe setup live here.</Text>
+            <Text style={styles.linkRowMeta}>purchases, payouts, and stripe setup live here.</Text>
           </View>
           <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
         </TouchableOpacity>
@@ -283,6 +320,24 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderWarm,
     padding: EventSpacing.md,
     marginTop: EventSpacing.xs,
+  },
+  exceptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: EventSpacing.sm,
+    backgroundColor: EventSurface.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: EventAction.error,
+    padding: EventSpacing.md,
+    marginTop: EventSpacing.xs,
+  },
+  exceptionKicker: {
+    fontFamily: EventType.bodyBold,
+    fontSize: FontSizes.caption,
+    color: EventAction.error,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   urgencyBody: { flex: 1, gap: 2 },
   urgencyWhen: {

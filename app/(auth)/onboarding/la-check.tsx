@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -19,21 +19,44 @@ import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
 import { getUserBounded } from '../../../lib/authGate';
+import { saveDraft, loadDraft, clearDraft, cancelPendingSave, clearAllDrafts } from '../../../lib/onboardingDraft';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 import ProgressHead from '../../../components/onboarding/ProgressHead';
 
+type LACheckDraft = { choseNo: boolean; city: string };
+
 export default function OnboardingLACheckScreen() {
   const [choseNo, setChoseNo] = useState(false);
   const [city, setCity] = useState('');
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{
     title: string;
     message: string;
     buttons?: BrandedAlertButton[];
   } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const draft = await loadDraft<LACheckDraft>('laCheck');
+      if (!cancelled && draft) {
+        if (draft.choseNo) setChoseNo(true);
+        if (draft.city) setCity(draft.city);
+      }
+      if (!cancelled) setDraftLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!draftLoaded) return;
+    saveDraft<LACheckDraft>('laCheck', { choseNo, city });
+    return () => cancelPendingSave('laCheck');
+  }, [draftLoaded, choseNo, city]);
 
   const submit = useSubmitGuard();
 
@@ -51,6 +74,7 @@ export default function OnboardingLACheckScreen() {
           return;
         }
         setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
+        await clearAllDrafts();
         await supabase.auth.signOut();
         return;
       }
@@ -66,6 +90,7 @@ export default function OnboardingLACheckScreen() {
         setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
         return;
       }
+      clearDraft('laCheck');
       router.replace('/onboarding/referral');
     } finally {
       submit.release();
@@ -92,6 +117,7 @@ export default function OnboardingLACheckScreen() {
           return;
         }
         setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
+        await clearAllDrafts();
         await supabase.auth.signOut();
         return;
       }
@@ -112,12 +138,33 @@ export default function OnboardingLACheckScreen() {
         setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
         return;
       }
+      clearDraft('laCheck');
       router.replace('/onboarding/waitlisted');
     } finally {
       submit.release();
       setLoading(false);
     }
   };
+
+  // Real bug, found and fixed 2026-09-01: this screen used to render and accept
+  // input immediately, with only the SAVE gated on draftLoaded. A slow auth
+  // resolution meant loadDraft() could land well after the user had already
+  // started answering, and its setChoseNo/setCity calls silently overwrote
+  // whatever they'd already typed. Gating render itself on draftLoaded closes
+  // that by construction: nothing can be typed before the restore has already
+  // had its say. (basics.tsx solves the same problem a different way -- it
+  // deliberately keeps its own watchdog-forced early render, so it instead
+  // tracks whether the user has edited anything and skips a late restore.)
+  if (!draftLoaded) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        <View style={styles.bootstrapWrap}>
+          <ActivityIndicator color={Colors.brand} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -228,6 +275,7 @@ export default function OnboardingLACheckScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.cream },
   kav: { flex: 1 },
+  bootstrapWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   container: { flex: 1, paddingHorizontal: 28, paddingTop: 4, paddingBottom: 16 },
 
   body: {

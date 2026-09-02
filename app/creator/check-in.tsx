@@ -35,7 +35,15 @@ import { EventAction, EventSpacing } from '../../constants/EventDesign';
 import { hapticSuccess, hapticError, hapticWarning, hapticLight } from '../../lib/haptics';
 import { getCreatorAccess, canManageEvents, creatorLandingRoute } from '../../lib/creatorMode';
 import { countAttendees, getEventAttendees } from '../../lib/ticketAttendees';
-import { normalizeCode, queuedCount, recordCheckin, syncQueuedCheckins, type CheckinOutcome } from '../../lib/ticketDoor';
+import { formatTimestampLA } from '../../lib/laDate';
+import {
+  listQueued,
+  normalizeCode,
+  recordCheckin,
+  syncQueuedCheckins,
+  type CheckinOutcome,
+  type QueuedCheckinView,
+} from '../../lib/ticketDoor';
 
 // the camera layer is lazy-loaded so the type path never imports expo-camera
 // (Cowork: scan must not block the door). It only functions in a build that
@@ -57,7 +65,16 @@ interface Verdict {
 function outcomeToVerdict(o: CheckinOutcome): Verdict {
   if (o.kind === 'result') {
     if (o.result === 'admitted') return { tone: 'pass', label: 'admitted', detail: o.code };
-    if (o.result === 'duplicate') return { tone: 'warn', label: 'already in', detail: `${o.code} was already checked in` };
+    if (o.result === 'duplicate') {
+      // Screen 30: show staff exactly when this seat first came in, instead
+      // of a bare "already checked in"
+      const at = o.admittedAt ? formatTimestampLA(o.admittedAt) : null;
+      return {
+        tone: 'warn',
+        label: 'already in',
+        detail: at ? `${o.code} was already checked in at ${at}` : `${o.code} was already checked in`,
+      };
+    }
     return { tone: 'fail', label: 'void ticket', detail: `${o.code} is refunded or canceled` };
   }
   if (o.kind === 'unknown') return { tone: 'fail', label: 'no ticket', detail: `no ticket with code ${o.code}` };
@@ -73,6 +90,8 @@ export default function CheckInScreen() {
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(0);
+  const [queuedList, setQueuedList] = useState<QueuedCheckinView[]>([]);
+  const [showQueuedList, setShowQueuedList] = useState(false);
   const lastScan = useRef<{ code: string; at: number }>({ code: '', at: 0 });
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
@@ -85,7 +104,11 @@ export default function CheckInScreen() {
   });
   const counts = countAttendees(attendees);
 
-  const refreshQueued = useCallback(async () => setQueued(await queuedCount()), []);
+  const refreshQueued = useCallback(async () => {
+    const list = await listQueued();
+    setQueuedList(list);
+    setQueued(list.length);
+  }, []);
 
   // on open: drain anything queued from a prior bad-signal spell, then refresh
   useEffect(() => {
@@ -170,11 +193,31 @@ export default function CheckInScreen() {
         <Text style={styles.countTotal}> / {counts.sold} checked in</Text>
       </View>
       {queued > 0 && (
-        <TouchableOpacity style={styles.queuedRow} onPress={syncNow} accessibilityRole="button">
-          <Clock size={14} color={Colors.terracotta} strokeWidth={2} />
-          {/* copy to the taste gate */}
-          <Text style={styles.queuedText}>{queued} saved offline. tap to sync.</Text>
-        </TouchableOpacity>
+        <>
+          <TouchableOpacity
+            style={styles.queuedRow}
+            onPress={() => setShowQueuedList((s) => !s)}
+            onLongPress={syncNow}
+            accessibilityRole="button"
+            accessibilityHint="shows the list of codes waiting to sync. long-press to sync now."
+          >
+            <Clock size={14} color={Colors.terracotta} strokeWidth={2} />
+            {/* copy to the taste gate */}
+            <Text style={styles.queuedText}>
+              {queued} saved offline. {showQueuedList ? 'hide list' : 'tap to view'}, long-press to sync.
+            </Text>
+          </TouchableOpacity>
+          {showQueuedList && (
+            <View style={styles.queuedListBox} accessibilityRole="list">
+              {queuedList.map((item) => (
+                <Text key={item.code} style={styles.queuedListRow}>{item.code}</Text>
+              ))}
+              <TouchableOpacity style={styles.queuedSyncBtn} onPress={syncNow} accessibilityRole="button">
+                <Text style={styles.queuedSyncBtnText}>sync now</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
       )}
 
       {/* the verdict: icon + text + colour, announced to screen readers */}
@@ -254,6 +297,22 @@ const styles = StyleSheet.create({
   countTotal: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textMedium },
   queuedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, minHeight: 44 },
   queuedText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  queuedListBox: {
+    marginHorizontal: 20,
+    marginBottom: EventSpacing.sm,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 14,
+    padding: EventSpacing.sm,
+    gap: 6,
+  },
+  queuedListRow: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    letterSpacing: 1,
+    color: Colors.asphalt,
+  },
+  queuedSyncBtn: { alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 4, minHeight: 44, justifyContent: 'center' },
+  queuedSyncBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   panel: {
     marginHorizontal: 20,
     marginVertical: EventSpacing.md,

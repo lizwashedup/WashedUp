@@ -1,6 +1,7 @@
 import {
   daysUntilLabel,
   deriveEventState,
+  failedPayoutLabel,
   hasUnpublishedTickets,
   inventoryLabel,
   needsAttention,
@@ -239,6 +240,16 @@ describe('needsAttention', () => {
     expect(needsAttention(event({ status: 'Cancelled', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
     expect(needsAttention(event({ status: 'Completed', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
     expect(needsAttention(event({ status: 'Archived', event_date: '2026-08-01T02:00:00.000Z' }), now)).toBe(false);
+  });
+});
+
+describe('failedPayoutLabel', () => {
+  it('singularizes one payout', () => {
+    expect(failedPayoutLabel(1)).toBe('1 payout needs attention');
+  });
+
+  it('pluralizes multiple payouts', () => {
+    expect(failedPayoutLabel(2)).toBe('2 payouts need attention');
   });
 });
 

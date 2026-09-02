@@ -172,7 +172,7 @@ export function AddonEditorSheet({ visible, addon, busy, onSave, onClose }: Addo
                   />
                 </View>
                 <View style={styles.pairCol}>
-                  <Text style={styles.label}>most per order (blank = no limit)</Text>
+                  <Text style={styles.label}>most per purchase (blank = no limit)</Text>
                   <TextInput
                     style={styles.input}
                     value={perOrderMaxText}

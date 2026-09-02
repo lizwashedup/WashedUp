@@ -35,15 +35,18 @@ import {
   getMyOrganizerProfile,
   pickAndUploadOrganizerLogo,
   upsertOrganizerProfile,
+  setOrganizerCity,
 } from '../../lib/organizerProfile';
 
 const LOGO_SIZE = 84;
+const CITY_MAX = 60;
 
 export default function OrganizerProfileScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
   const [displayName, setDisplayName] = useState('');
+  const [city, setCity] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [bio, setBio] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
@@ -61,6 +64,7 @@ export default function OrganizerProfileScreen() {
     if (!isLoading && !seeded) {
       if (profile) {
         setDisplayName(profile.display_name);
+        setCity(profile.city ?? '');
         setLogoUrl(profile.logo_url ?? '');
         setBio(profile.bio ?? '');
         setLinkUrl(profile.link_url ?? '');
@@ -95,6 +99,11 @@ export default function OrganizerProfileScreen() {
         bio: bio || null,
         link_url: linkUrl || null,
       });
+      // Isolated write (see lib/organizerProfile.ts): silently a no-op until
+      // the city column's DRAFT migration is applied, and requires the row
+      // upsertOrganizerProfile just guaranteed above to exist first - never
+      // blocks or errors the rest of this save either way.
+      await setOrganizerCity(city || null);
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['organizer-profile'] });
       router.back();
@@ -134,6 +143,23 @@ export default function OrganizerProfileScreen() {
               value={displayName}
               onChangeText={setDisplayName}
               maxLength={80}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
+
+            {/* Scene handoff §12: the public profile's minimum content
+                includes city. Optional here - the profile page simply
+                omits the line when it's unset, same as an unset link. */}
+            <Text style={styles.fieldLabel}>city</Text>
+            {/* LIZ COPY */}
+            <Text style={styles.fieldHint}>shows on your public page. optional.</Text>
+            <TextInput
+              style={styles.input}
+              value={city}
+              onChangeText={setCity}
+              maxLength={CITY_MAX}
+              autoCapitalize="words"
+              placeholder="Los Angeles"
+              placeholderTextColor={Colors.inkSoft}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 

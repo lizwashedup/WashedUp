@@ -47,9 +47,13 @@ interface Props {
   onClose: () => void;
   /** Fires after the request lands; the host flips to its pending state. */
   onRequested: () => void;
+  /** Screen 15: lets a leader see this exact popup, live, from the join-gate
+   *  editor before saving. Renders every field but never submits -- the send
+   *  button is replaced with an inert "applicants see this" banner. */
+  previewMode?: boolean;
 }
 
-export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onClose, onRequested }: Props) {
+export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onClose, onRequested, previewMode = false }: Props) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -108,6 +112,11 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
               <X size={22} color={Colors.asphalt} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
+          {previewMode && (
+            <View style={styles.previewBanner}>
+              <Text style={styles.previewBannerText}>preview -- this is exactly what applicants see. nothing here sends.</Text>
+            </View>
+          )}
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Text style={styles.title}>join {gate.name}</Text>
 
@@ -204,17 +213,23 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
 
             {!!problem && <Text style={styles.problem}>{problem}</Text>}
 
-            <TouchableOpacity
-              style={[styles.sendBtn, sending && styles.sendBtnBusy]}
-              onPress={handleSend}
-              disabled={sending}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
+            {previewMode ? (
+              <View style={[styles.sendBtn, styles.previewSendBtn]}>
                 <Text style={styles.sendBtnText}>{joinsInstantly ? 'join' : 'ask to join'}</Text>
-              )}
-            </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.sendBtn, sending && styles.sendBtnBusy]}
+                onPress={handleSend}
+                disabled={sending}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color={Colors.white} />
+                ) : (
+                  <Text style={styles.sendBtnText}>{joinsInstantly ? 'join' : 'ask to join'}</Text>
+                )}
+              </TouchableOpacity>
+            )}
             {/* LIZ COPY */}
             {/* LIZ COPY: the promise has to match the policy. Telling an
                 open community's visitor that a person reviews them would be
@@ -304,7 +319,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendBtnBusy: { opacity: 0.6 },
+  previewSendBtn: { opacity: 0.7 },
   sendBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
+  previewBanner: {
+    backgroundColor: Colors.inputBg,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  previewBannerText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.textMedium,
+    textAlign: 'center',
+  },
   gateNote: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.caption,

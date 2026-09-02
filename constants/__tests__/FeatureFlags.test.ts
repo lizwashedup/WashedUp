@@ -7,6 +7,7 @@ type NativeFlags = {
   CHAT_DELETE_ENABLED: boolean;
   MEMBER_STATE_ENABLED: boolean;
   CHAT_ENGINE_ENABLED: boolean;
+  PLAN_CARD_ACTIVITY_FIRST_ENABLED: boolean;
 };
 
 const envKeys = [
@@ -18,6 +19,7 @@ const envKeys = [
   'EXPO_PUBLIC_CHAT_DELETE_ENABLED',
   'EXPO_PUBLIC_MEMBER_STATE_ENABLED',
   'EXPO_PUBLIC_CHAT_ENGINE_ENABLED',
+  'EXPO_PUBLIC_PLAN_CARD_ACTIVITY_FIRST_ENABLED',
 ] as const;
 
 const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
@@ -58,6 +60,7 @@ describe('native feature flag contract', () => {
       CHAT_DELETE_ENABLED: false,
       MEMBER_STATE_ENABLED: false,
       CHAT_ENGINE_ENABLED: false,
+      PLAN_CARD_ACTIVITY_FIRST_ENABLED: false,
     });
   });
 
@@ -83,6 +86,7 @@ describe('native feature flag contract', () => {
     ['chat deletion', 'EXPO_PUBLIC_CHAT_DELETE_ENABLED', 'CHAT_DELETE_ENABLED'],
     ['member state', 'EXPO_PUBLIC_MEMBER_STATE_ENABLED', 'MEMBER_STATE_ENABLED'],
     ['chat engine', 'EXPO_PUBLIC_CHAT_ENGINE_ENABLED', 'CHAT_ENGINE_ENABLED'],
+    ['activity-first plan card', 'EXPO_PUBLIC_PLAN_CARD_ACTIVITY_FIRST_ENABLED', 'PLAN_CARD_ACTIVITY_FIRST_ENABLED'],
   ] as const)('%s opt-in flag', (_name, envKey, flagKey) => {
     it.each([
       ['true', true],

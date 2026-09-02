@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router } from 'expo-router';
 import { Image } from 'expo-image';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Calendar, Plus } from 'lucide-react-native';
+import { ChevronRight, Calendar, Megaphone, Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import {
@@ -125,6 +125,15 @@ export default function CreatorTodayScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Screen 11 gap: persistent active-community name. Outside the
+          ScrollView on purpose so it survives scrolling, unlike the big
+          title below which is the first-paint moment, not the ongoing
+          reminder of which community you're in. */}
+      {community && (
+        <View style={styles.stickyHeader}>
+          <Text style={styles.stickyHeaderText} numberOfLines={1}>{community.name.toLowerCase()}</Text>
+        </View>
+      )}
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetchMembers} tintColor={Colors.terracotta} />}
@@ -133,6 +142,33 @@ export default function CreatorTodayScreen() {
         <Text style={styles.title}>{community ? community.name.toLowerCase() : 'today'}</Text>
         <CommunitySwitcher access={access} />
         {!online && <OfflineBanner />}
+
+        {/* Screen 11 gap: fixed Create event / Broadcast / Invite quick-action
+            order. Invite (Screen 56) has no destination yet -- Master Plan v3
+            §4.2 -- so it's left out here rather than linking to nothing; add
+            it in this same order once that screen exists. */}
+        <View style={styles.quickActions}>
+          <TouchableOpacity
+            style={styles.quickAction}
+            onPress={() => router.push('/creator/event-form')}
+            accessibilityRole="button"
+            accessibilityLabel="Create event"
+            activeOpacity={0.85}
+          >
+            <Plus size={16} color={Colors.white} strokeWidth={2.5} />
+            <Text style={styles.quickActionText}>create event</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.quickAction, styles.quickActionSecondary]}
+            onPress={() => router.push('/(creator)/community')}
+            accessibilityRole="button"
+            accessibilityLabel="Broadcast"
+            activeOpacity={0.85}
+          >
+            <Megaphone size={16} color={Colors.terracotta} strokeWidth={2.5} />
+            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]}>broadcast</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* the one thing that needs attention first */}
         <TouchableOpacity
@@ -180,17 +216,6 @@ export default function CreatorTodayScreen() {
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.postBtn}
-          onPress={() => router.push('/creator/event-form')}
-          accessibilityRole="button"
-          accessibilityLabel="Put on an event"
-          activeOpacity={0.85}
-        >
-          <Plus size={16} color={Colors.white} strokeWidth={2.5} />
-          <Text style={styles.postBtnText}>put on an event</Text>
-        </TouchableOpacity>
-
         <TouchableOpacity style={styles.card} onPress={() => router.push('/(creator)/community')} activeOpacity={0.8}>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle}>
@@ -211,7 +236,7 @@ export default function CreatorTodayScreen() {
           >
             <View style={{ flex: 1 }}>
               <Text style={styles.cardTitle}>
-                {rooms.length === 1 ? rooms[0].name : `${rooms.length} rooms open`}
+                {rooms.length === 1 ? rooms[0].name : `${rooms.length} chat spaces open`}
               </Text>
               <Text style={styles.cardMeta} numberOfLines={1}>
                 the chat spaces members join. tap to open{rooms.length > 1 ? ' the first one' : ''}.
@@ -227,7 +252,37 @@ export default function CreatorTodayScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
+  stickyHeader: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    backgroundColor: Colors.parchment,
+  },
+  stickyHeaderText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.darkWarm,
+  },
   content: { padding: 20, gap: 12 },
+  quickActions: { flexDirection: 'row', gap: 10 },
+  quickAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 12,
+  },
+  quickActionSecondary: {
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.terracotta,
+  },
+  quickActionText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
+  quickActionTextSecondary: { color: Colors.terracotta },
   kicker: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.caption,
@@ -271,16 +326,6 @@ const styles = StyleSheet.create({
   cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
   cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
   cardCounts: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, marginTop: 2 },
-  postBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 12,
-  },
-  postBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   cardThumb: { width: 48, height: 48, borderRadius: 10, backgroundColor: Colors.inputBg },
   cardThumbFallback: { alignItems: 'center', justifyContent: 'center' },
 });

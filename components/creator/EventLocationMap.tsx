@@ -13,7 +13,7 @@
  */
 
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { MapPin, MapPinOff } from 'lucide-react-native';
 // Extensionless import so Metro resolves MapView.web.tsx on web and
 // MapView.native.tsx on native. Hardcoding .native pulls native-only
@@ -47,7 +47,12 @@ export function EventLocationMap({ coords, geocodeMissed }: EventLocationMapProp
             latitudeDelta: PIN_DELTA,
             longitudeDelta: PIN_DELTA,
           }}
+          scrollEnabled={false}
+          zoomEnabled={false}
+          pitchEnabled={false}
+          rotateEnabled={false}
           toolbarEnabled={false}
+          liteMode={Platform.OS === 'android'}
           showsMyLocationButton={false}
           loadingEnabled
           loadingIndicatorColor={Colors.terracotta}

@@ -33,6 +33,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
+  ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -135,7 +136,13 @@ function EventsDestination({ communitiesEnabled }: { communitiesEnabled: boolean
   const { width } = useWindowDimensions();
   const [category, setCategory] = useState<string | null>(null);
 
-  const { data: events = [], isError, error, refetch, isRefetching } = useQuery({
+  // TODAY item G (8/27): isPending, not isLoading, is what actually gates the
+  // false "calendar is filling up" / recruit-card flash below -- isLoading in
+  // this query-client major version is isPending && isFetching, so it can go
+  // false mid-fetch (e.g. a paused/backgrounded request) while we still have
+  // no real data yet. isPending alone stays true for the whole gap. Same
+  // pattern already proven correct in (creator)/organizer-home.tsx S-02.
+  const { data: events = [], isPending, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['scene-events', communitiesEnabled ? 'all' : 'standalone'],
     queryFn: () => getSceneEvents(communitiesEnabled),
   });
@@ -186,7 +193,15 @@ function EventsDestination({ communitiesEnabled }: { communitiesEnabled: boolean
       )}
 
       <Text style={styles.sectionLabel}>happening in LA</Text>
-      {isError ? (
+      {isPending ? (
+        // Real content hasn't resolved yet -- show a plain loading state,
+        // never the "calendar is filling up" empty-state copy or the
+        // recruit card below, both of which claim to know there's nothing
+        // here when we simply haven't asked yet (TODAY item G, 8/27).
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={Colors.terracotta} />
+        </View>
+      ) : isError ? (
         <View style={styles.errorWrap}>
           <Text style={styles.errorText}>
             {friendlyError(error, "couldn't load what's happening. check your connection and try again.")}
@@ -210,7 +225,7 @@ function EventsDestination({ communitiesEnabled }: { communitiesEnabled: boolean
         </>
       )}
 
-      {communitiesEnabled && <CreatorRecruitCard />}
+      {!isPending && communitiesEnabled && <CreatorRecruitCard />}
     </ScrollView>
   );
 }
@@ -221,7 +236,11 @@ function CommunitiesDestination() {
   const router = useRouter();
   const { width } = useWindowDimensions();
 
-  const { data: communities = [], isError, error, refetch, isRefetching } = useQuery({
+  // isPending (not isLoading), same reasoning as EventsDestination above:
+  // it is what actually distinguishes "we haven't asked yet" from "we asked
+  // and there are zero communities" -- the second state is what earns the
+  // recruit-card invitation below, not the first (TODAY item G, 8/27).
+  const { data: communities = [], isPending, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['scene-communities'],
     queryFn: getDiscoverableCommunities,
   });
@@ -239,36 +258,49 @@ function CommunitiesDestination() {
         <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={Colors.terracotta} />
       }
     >
-      {isError && (
-        <View style={styles.errorWrap}>
-          <Text style={styles.errorText}>
-            {friendlyError(error, "couldn't load communities. check your connection and try again.")}
-          </Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()} accessibilityRole="button" accessibilityLabel="try again">
-            <Text style={styles.retryBtnText}>try again</Text>
-          </TouchableOpacity>
+      {isPending ? (
+        // Real content hasn't resolved yet -- a plain loading state, never
+        // the recruit-card invitation below, which is only earned once we
+        // actually know there are zero communities (TODAY item G, 8/27).
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
-      )}
+      ) : (
+        <>
+          {isError && (
+            <View style={styles.errorWrap}>
+              <Text style={styles.errorText}>
+                {friendlyError(error, "couldn't load communities. check your connection and try again.")}
+              </Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={() => refetch()} accessibilityRole="button" accessibilityLabel="try again">
+                <Text style={styles.retryBtnText}>try again</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-      {communities.length > 0 && (
-        <View style={styles.communitiesList}>
-          {communities.map((c) => (
-            <CommunityCard
-              key={c.id}
-              community={c}
-              leaderCard={leaderCards.get(c.id) ?? null}
-              width={width - 40}
-              onPress={() => router.push(`/community/${c.id}` as never)}
-            />
-          ))}
-        </View>
-      )}
+          {communities.length > 0 && (
+            <View style={styles.communitiesList}>
+              {communities.map((c) => (
+                <CommunityCard
+                  key={c.id}
+                  community={c}
+                  leaderCard={leaderCards.get(c.id) ?? null}
+                  width={width - 40}
+                  onPress={() => router.push(`/community/${c.id}` as never)}
+                />
+              ))}
+            </View>
+          )}
 
-      {/* THE EMPTY-STATE RULE (Liz, 2026-07-15, carried over from the old
-          combined feed): zero ACTIVE communities never shows a bare "no
-          communities" line — the recruiting card below is the invitation
-          and it always renders, so the destination is never a dead end. */}
-      <CreatorRecruitCard />
+          {/* THE EMPTY-STATE RULE (Liz, 2026-07-15, carried over from the old
+              combined feed): zero ACTIVE communities never shows a bare "no
+              communities" line — the recruiting card below is the invitation
+              and it always renders, so the destination is never a dead end.
+              "Always" means once we know the real state, not during the
+              isPending window above. */}
+          <CreatorRecruitCard />
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -324,6 +356,7 @@ const styles = StyleSheet.create({
   destinationBody: { flex: 1 },
   destinationBodyHidden: { display: 'none' },
   errorWrap: { alignItems: 'center', paddingVertical: 8, marginBottom: 4, gap: 10 },
+  loadingWrap: { alignItems: 'center', paddingVertical: 40 },
   errorText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, lineHeight: LineHeights.bodyMD, textAlign: 'center' },
   retryBtn: { borderRadius: 999, borderWidth: 1.5, borderColor: Colors.terracotta, paddingHorizontal: 20, paddingVertical: 9 },
   retryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },

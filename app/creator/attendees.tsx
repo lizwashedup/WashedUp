@@ -27,7 +27,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
-import { executeRefund, formatCents, previewRefund } from '../../lib/ticketing';
+import { canCurrentUserRefundEvent, executeRefund, formatCents, previewRefund } from '../../lib/ticketing';
 import { countAttendees, getEventAttendees, getEventMoneySummary, isLiveSeat, sumRefundedCentsOnPaidOrders, type DoorAttendee } from '../../lib/ticketAttendees';
 import { MoneySummaryCard } from '../../components/creator/MoneySummaryCard';
 
@@ -52,6 +52,14 @@ export default function AttendeesScreen() {
     queryFn: () => getEventMoneySummary(id!),
     enabled: !!id,
     staleTime: 10_000,
+  });
+  // Safe default while loading and for anyone who isn't the exact organizer
+  // identity the refund function checks (e.g. a co_leader): no button.
+  const { data: canRefund = false } = useQuery({
+    queryKey: ['event-refund-organizer', id],
+    queryFn: () => canCurrentUserRefundEvent(id!),
+    enabled: !!id,
+    staleTime: 60_000,
   });
 
   const counts = countAttendees(attendees);
@@ -105,14 +113,16 @@ export default function AttendeesScreen() {
     const preview = await previewRefund(a.orderId, target);
     setRefundingId(null);
     if (!preview || !preview.allowed) {
-      /* LIZ COPY (web's shipped string, mirrored) */
-      Alert.alert('about that refund', "that refund isn't available for this order.");
+      /* LIZ COPY (web's shipped string, mirrored) — updated 2026-09-01: "order" -> "purchase"
+         per Scene handoff §14 (no backend vocab in copy); web may still say "order", check
+         before assuming parity */
+      Alert.alert('about that refund', "that refund isn't available for this purchase.");
       return;
     }
     Alert.alert(
       /* LIZ COPY: the previewed amount is the fact being confirmed */
       `refund ${formatCents(preview.refundAmountCents)} to the buyer?`,
-      mode === 'seat' ? `this seat only, for ${a.buyerName}.` : `${a.buyerName}'s whole remaining order.`,
+      mode === 'seat' ? `this seat only, for ${a.buyerName}.` : `${a.buyerName}'s whole remaining purchase.`,
       [
         { text: 'never mind', style: 'cancel' },
         { text: 'yes, refund it', style: 'destructive', onPress: () => runRefund(a, target) },
@@ -148,7 +158,7 @@ export default function AttendeesScreen() {
       [
         { text: 'never mind', style: 'cancel' },
         { text: 'this seat', onPress: () => chooseRefund(a, 'seat') },
-        { text: 'whole order', onPress: () => chooseRefund(a, 'order') },
+        { text: 'whole purchase', onPress: () => chooseRefund(a, 'order') },
       ],
     );
   };
@@ -249,8 +259,8 @@ export default function AttendeesScreen() {
                       {line}
                     </Text>
                   </View>
-                  {/* refund lives on live seats only; the fn re-checks server-side */}
-                  {isLiveSeat(a) && (
+                  {/* refund lives on live seats only, for the real organizer only; the fn re-checks server-side */}
+                  {isLiveSeat(a) && canRefund && (
                     <TouchableOpacity
                       style={styles.refundPill}
                       onPress={() => startRefund(a)}

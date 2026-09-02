@@ -10,6 +10,18 @@ The word "host" and all its variants (hosting, hosted, isHost, hostRow, etc.) ar
 
 Database column names (host_id, host_message, creator_user_id) must never be changed.
 
+**Backend vocabulary in copy** (source: `WashedUp_The_Scene_User_Facing_Implementation_Handoff.pdf`, §14 "Avoid"): words like "orders", "entities", or "rooms" must never appear in creator- or user-facing copy (rendered `<Text>`, `Alert` titles/messages, `accessibilityLabel`/`accessibilityHint` — anything a user reads or a screen reader speaks). This is narrower than the "host" rule above: it governs copy only, not internal variable names, function names, query keys, style keys, or route segments (e.g. `getCommunityRooms()`, the `rooms` state variable, `styles.roomRow`, and the `/community-topic/` route all stay exactly as they are — same precedent as `host_id` staying under the host rule).
+
+Established replacements already shipped elsewhere in this app, reuse them instead of inventing new ones:
+- "room" / "rooms" → "chat space" / "chat spaces" (already used descriptively in `app/(creator)/today.tsx` and `app/(creator)/community.tsx`: "the chat spaces members join").
+- "order" / "orders" (as in a ticket purchase) → "purchase" / "purchases" (already the section label and data-shape name in `app/creator/payouts.tsx`).
+
+Not a violation: `COPY.circleRoomTitle` / `COPY.circleRoomSub` ("the room" / "the room is listening") in `components/yours/state/constants.ts` and `components/circles/RoomSlot.tsx` are the literal, spec-named title of a real feature — `WashedUp_Circles_Functional_Spec.md` §3 names it "The Room" verbatim, the same way "The Scene" is a named section, not implementation jargon. Do not "fix" this one; it is a name, not backend vocabulary leaking into copy.
+
+Known open violation, cannot fix here: `app/creator/event-form.tsx` (Screen 22) lines ~1288-1307 say "The room" / "this event's room" in an accessibilityLabel, a Text title, and two hints. That file is permanently frozen (do not edit, under any circumstance, per this repo's build rules) — this is a real, live violation of the rule above that stays open until Josh does the edit himself or lifts the freeze.
+
+Fixed 2026-09-01: `app/community/[id].tsx`, `app/(creator)/community.tsx`, `app/(creator)/today.tsx`, `app/community-topic/[id].tsx`, `app/invite/co-creator/[token].tsx`, `app/event-album/[topicId].tsx` (all "room(s)" in copy); `app/tickets/index.tsx`, `app/creator/attendees.tsx`, `app/tickets/order/[id].tsx`, `app/(creator)/organizer-home.tsx`, `components/creator/QuestionEditorSheet.tsx`, `components/creator/TierEditorSheet.tsx`, `components/creator/AddonEditorSheet.tsx` (all "order(s)" in copy). `repos/washedup-web` was not touched (out of scope for this repo's CLAUDE.md) and may still say "order"/"room" in mirrored strings — check it before assuming parity.
+
 ## The Golden Hour Design System
 
 Every color in the app must come from constants/Colors.ts. Every font family, size, and weight must come from constants/Typography.ts. There are zero exceptions. No hardcoded hex values. No hardcoded fontFamily strings.

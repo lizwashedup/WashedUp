@@ -482,7 +482,7 @@ export default function CommunityPageScreen() {
 
           {isMember && rooms.length > 0 && (
             <View style={styles.block}>
-              <Text style={styles.blockLabel}>rooms</Text>
+              <Text style={styles.blockLabel}>chat spaces</Text>
               {rooms.map((t) => (
                 <View key={t.id} style={styles.roomRow}>
                   <Text style={styles.roomName} numberOfLines={1}>{t.name}</Text>

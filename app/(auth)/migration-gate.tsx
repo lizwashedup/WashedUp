@@ -23,6 +23,7 @@ import PhoneInput from '../../components/auth/PhoneInput';
 import { useSubmitGuard } from '../../hooks/useSubmitGuard';
 import { PHONE_CANONICAL_ENABLED } from '../../constants/FeatureFlags';
 import { reconcileAccountByPhone } from '../../lib/reconcileAccount';
+import { clearAllDrafts } from '../../lib/onboardingDraft';
 import { unauthedRoute } from '../../lib/authRouting';
 import { lastUnauthRedirectAt } from '../../lib/navState';
 
@@ -58,6 +59,7 @@ export default function MigrationGateScreen() {
           // SIGNED_OUT listener does not auto-bounce us to the unauthed landing;
           // navigation here is deterministic and owned by this flow.
           lastUnauthRedirectAt.ts = Date.now();
+          await clearAllDrafts();
           await supabase.auth.signOut();
           const { error: otpError } = await supabase.auth.signInWithOtp({ phone: e164 });
           if (otpError) {

@@ -27,6 +27,7 @@ import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { invalidateAuthProfile } from '../../../hooks/useProfile';
 import { supabase } from '../../../lib/supabase';
 import { getUserBounded } from '../../../lib/authGate';
+import { clearAllDrafts } from '../../../lib/onboardingDraft';
 import { friendlyError } from '../../../lib/friendlyError';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
@@ -155,6 +156,7 @@ export default function OnboardingPhotoScreen() {
           return;
         }
         setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
+        clearAllDrafts();
         supabase.auth.signOut();
         return;
       }

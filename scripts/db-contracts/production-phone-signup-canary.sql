@@ -5,7 +5,7 @@
 BEGIN;
 
 INSERT INTO auth.users(id, phone)
-VALUES ('14000000-0000-4000-8000-000000000099', '+12025550199');
+VALUES ('14000000-0000-4000-8000-000000000099', '12025550199');
 
 DO $canary$
 BEGIN
@@ -13,7 +13,7 @@ BEGIN
     SELECT 1 FROM public.profiles
      WHERE id = '14000000-0000-4000-8000-000000000099'::uuid
        AND email IS NULL
-       AND phone_number = '+12025550199'
+       AND phone_number = '12025550199'
   ) THEN
     RAISE EXCEPTION 'signup profile trigger failed';
   END IF;

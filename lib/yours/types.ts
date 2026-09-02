@@ -11,6 +11,15 @@ export type RingBucket = 'full' | '75' | '50' | '25' | 'none';
 
 export type ConnectionContext = 'plan_history' | 'handle_lookup' | 'referral_invite';
 
+/**
+ * Return value of add_or_accept_person (THE HANDSHAKE, see
+ * supabase/migrations/20260611000000_add_or_accept_person.sql). 'now_connected'
+ * is the mutual-request / same-instant-race resolution: an incoming pending
+ * request existed (or a concurrent caller just created one), so this call
+ * accepted it instead of inserting a crossed counter-request.
+ */
+export type AddOrAcceptOutcome = 'requested' | 'now_connected' | 'already_connected';
+
 /** State of a person row inside the plan-history backlog list. */
 export type BacklogState = 'none' | 'requested';
 

@@ -13,6 +13,7 @@
  * Screens are functionally minimal per decision 15a: logic before design.
  */
 
+import { useEffect } from 'react';
 import { Redirect, Tabs, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActivityIndicator, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -23,6 +24,8 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { getCreatorAccess, hasCreatorAccess, creatorShellKind } from '../../lib/creatorMode';
+import { hydrateSelectedCommunity } from '../../lib/selectedCommunity';
+import { hydrateWorkspace } from '../../lib/workspaceContext';
 import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
 
 export default function CreatorLayout() {
@@ -34,6 +37,17 @@ export default function CreatorLayout() {
     queryFn: getCreatorAccess,
     staleTime: 30_000,
   });
+
+  // Restore the persisted community selection and product-level workspace
+  // (master plan §5.1 A4) the moment the creator shell mounts -- once per
+  // mount, not per access-refetch. Fire-and-forget: each hydrate function is
+  // already best-effort internally (see lib/selectedCommunity.ts,
+  // lib/workspaceContext.ts) and simply leaves state at its safe default on
+  // any failure.
+  useEffect(() => {
+    void hydrateSelectedCommunity();
+    void hydrateWorkspace();
+  }, []);
 
   if (isLoading) {
     return (

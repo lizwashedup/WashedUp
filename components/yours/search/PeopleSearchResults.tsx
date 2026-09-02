@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, Alert, StyleSheet } from 'react-native';
+import { View, Text, Alert, ActivityIndicator, StyleSheet } from 'react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { COPY } from '../state/constants';
@@ -51,7 +51,7 @@ export default function PeopleSearchResults({
     [people, q, handleQuery],
   );
 
-  const { data: remoteRaw = [] } = usePeopleSearch(userId, query);
+  const { data: remoteRaw = [], isFetching: remoteSearching } = usePeopleSearch(userId, query);
   const localIds = useMemo(
     () => new Set(people.map((p) => p.user_id)),
     [people],
@@ -80,6 +80,17 @@ export default function PeopleSearchResults({
     },
     [sendRequest],
   );
+
+  // A handle lookup in flight must never render as "no results" -- that read
+  // as the app being broken/slow when the real match was still one debounce
+  // + round-trip away from arriving.
+  if (local.length === 0 && remote.length === 0 && remoteSearching) {
+    return (
+      <View style={styles.empty}>
+        <ActivityIndicator color={Colors.terracotta} />
+      </View>
+    );
+  }
 
   if (local.length === 0 && remote.length === 0) {
     return (

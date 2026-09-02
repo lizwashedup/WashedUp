@@ -96,7 +96,10 @@ export async function getMyCommunities(): Promise<MyCommunity[]> {
   if (error) throw error;
   const memberships = (rows ?? [])
     .map((r: any) => ({ role: r.role, c: r.communities }))
-    .filter((r: any) => r.c && r.c.status === 'active');
+    // archived stays visible here (existing members keep what they already
+    // had, per the archive product rule); only a never-published draft is
+    // filtered out, same as before archiving existed.
+    .filter((r: any) => r.c && (r.c.status === 'active' || r.c.status === 'archived'));
   if (memberships.length === 0) return [];
 
   const ids = memberships.map((m: any) => m.c.id);

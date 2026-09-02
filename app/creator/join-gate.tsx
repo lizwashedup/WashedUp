@@ -32,6 +32,7 @@ import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import { getCreatorAccess, canManageMembers, creatorLandingRoute, getJoinGateSettings, updateJoinGateSettings, getJoinPolicy, setJoinPolicy, getCommunityMemberCounts, type JoinPolicy } from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { JOIN_GATE_ENABLED } from '../../constants/FeatureFlags';
+import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
 
 export default function JoinGateScreen() {
   const router = useRouter();
@@ -65,6 +66,7 @@ export default function JoinGateScreen() {
     enabled: !!community,
   });
   const [joinPolicy, setJoinPolicyState] = useState<JoinPolicy | null>(null);
+  const [previewVisible, setPreviewVisible] = useState(false);
   useEffect(() => { setJoinPolicyState(fetchedPolicy); }, [fetchedPolicy]);
 
   // inventory C-08: live counts next to the picker, and the source for the
@@ -278,6 +280,10 @@ export default function JoinGateScreen() {
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
+            <TouchableOpacity style={styles.previewBtn} onPress={() => { hapticLight(); setPreviewVisible(true); }}>
+              <Text style={styles.previewBtnText}>preview</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnBusy]} onPress={handleSave} disabled={saving}>
               {saving ? (
                 <ActivityIndicator size="small" color={Colors.white} />
@@ -288,6 +294,23 @@ export default function JoinGateScreen() {
           </ScrollView>
         )}
       </KeyboardAvoidingView>
+
+      {community && (
+        <JoinCommunityPopup
+          visible={previewVisible}
+          previewMode
+          gate={{
+            communityId: community.id,
+            name: community.name,
+            welcomeMessage: welcome || null,
+            introQuestion: question || null,
+            guidelinesUrl: guidelines || null,
+          }}
+          joinsInstantly={joinPolicy === 'open'}
+          onClose={() => setPreviewVisible(false)}
+          onRequested={() => setPreviewVisible(false)}
+        />
+      )}
 
       <BrandedAlert
         visible={!!alertInfo}
@@ -368,4 +391,15 @@ const styles = StyleSheet.create({
   },
   saveBtnBusy: { opacity: 0.6 },
   saveBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
+  previewBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: Colors.terracotta,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  previewBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
 });

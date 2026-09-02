@@ -45,7 +45,12 @@ export function SharePlanModal({
   const handleShare = async () => {
     hapticMedium();
     try {
-      await Share.share({ message: shareText, url: shareUrl });
+      // message alone, no separate `url` field: passing url as its own key
+      // relies on the receiving app to insert a separator, which WhatsApp's
+      // share extension does not do -- it glues the URL directly onto the
+      // preceding text with no space or line break, so it never linkifies
+      // (confirmed live, Liz 2026-08-27; same rule as lib/sharePlan.ts).
+      await Share.share({ message: shareText });
     } catch {}
   };
 

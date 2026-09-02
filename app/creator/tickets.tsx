@@ -83,6 +83,13 @@ export default function TicketSetupScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [editingTier, setEditingTier] = useState<TicketTier | null>(null);
+  // Build 35 guinea pig: pre-fills the name field when a creator taps "add a
+  // free rsvp" instead of the generic "add a ticket" button. Reuses the
+  // exact same createTier path a manually-typed $0 tier already goes
+  // through (TierEditorSheet's own "price blank or 0 = free" field) -- this
+  // only makes that already-shipped free path an explicit, named choice
+  // instead of something a creator has to discover by leaving price blank.
+  const [newTierPreset, setNewTierPreset] = useState<string | undefined>(undefined);
   const [questionEditorVisible, setQuestionEditorVisible] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<TicketQuestion | null>(null);
   const [onboardBusy, setOnboardBusy] = useState(false);
@@ -352,6 +359,7 @@ export default function TicketSetupScreen() {
       hapticSuccess();
       setEditorVisible(false);
       setEditingTier(null);
+      setNewTierPreset(undefined);
       invalidateTiers();
     },
     onError: (e: any) => {
@@ -586,6 +594,7 @@ export default function TicketSetupScreen() {
             if (tiersFull) return;
             hapticLight();
             setEditingTier(null);
+            setNewTierPreset(undefined);
             setEditorVisible(true);
           }}
           disabled={tiersFull}
@@ -594,6 +603,23 @@ export default function TicketSetupScreen() {
           <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
           {/* copy to the taste gate */}
           <Text style={styles.addBtnText}>add a ticket</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.addBtn, tiersFull && styles.addBtnDisabled]}
+          onPress={() => {
+            if (tiersFull) return;
+            hapticLight();
+            setEditingTier(null);
+            setNewTierPreset('Free RSVP');
+            setEditorVisible(true);
+          }}
+          disabled={tiersFull}
+          activeOpacity={0.85}
+        >
+          <Plus size={18} color={EventAction.secondaryLabel} strokeWidth={2.5} />
+          {/* copy to the taste gate */}
+          <Text style={styles.addBtnText}>add an rsvp</Text>
         </TouchableOpacity>
 
         {tiersFull && (
@@ -852,10 +878,12 @@ export default function TicketSetupScreen() {
         tier={editingTier}
         commissionBps={payout?.commissionBps ?? 400}
         busy={saveTierMutation.isPending}
+        initialName={newTierPreset}
         onSave={(draft) => saveTierMutation.mutate(draft)}
         onClose={() => {
           setEditorVisible(false);
           setEditingTier(null);
+          setNewTierPreset(undefined);
         }}
       />
 

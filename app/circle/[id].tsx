@@ -27,6 +27,7 @@ import { useLeaveCircle } from '../../hooks/useLeaveCircle';
 import { circleDisplay } from '../../lib/circles/display';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import CircleNoticeboard from '../../components/circles/CircleNoticeboard';
+import RoomSlot from '../../components/circles/RoomSlot';
 import AddPeopleSheet from '../../components/circles/AddPeopleSheet';
 import NameCircleSheet from '../../components/circles/NameCircleSheet';
 import CirclePlanComposer from '../../components/circles/plan/CirclePlanComposer';
@@ -142,6 +143,13 @@ function CircleDetail({ circleId }: { circleId: string }) {
                   }
                 : undefined
             }
+          />
+          {/* Reserved slot for The Room (spec section 3, "reserve space, do not
+              build"): display-only placeholder tile, no Room logic. */}
+          <RoomSlot
+            circleId={circleId}
+            roomEnabled={data.circle.room_enabled}
+            isAdmin={myRole === 'admin'}
           />
         </ScrollView>
       )}

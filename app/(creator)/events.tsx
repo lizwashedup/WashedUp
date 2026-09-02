@@ -29,6 +29,7 @@ import { deriveEventState, hasUnpublishedTickets, needsAttention, pickNextUpcomi
 import { formatEventDateLA } from '../../lib/laDate';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
+import { EVENT_SUMMARY_ENABLED } from '../../constants/FeatureFlags';
 
 type Segment = 'attention' | 'next' | 'drafts' | 'later' | 'past' | 'templates';
 
@@ -215,6 +216,17 @@ export default function CreatorEventsScreen() {
             {/* LIZ COPY -- decorative label, not itself interactive; the
                 real "manage" affordance is the title/meta region above */}
             <Text style={styles.cardActionQuiet}>{opts?.draft ? 'keep shaping it' : 'manage'}</Text>
+            {EVENT_SUMMARY_ENABLED && !opts?.draft && (
+              <TouchableOpacity
+                onPress={() => router.push(`/creator/event-summary?id=${e.id}` as never)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Summary for ${e.title}`}
+              >
+                {/* copy to the taste gate */}
+                <Text style={styles.cardAction}>summary</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               onPress={() => router.push(`/creator/tickets?id=${e.id}` as never)}
               hitSlop={8}
@@ -244,6 +256,17 @@ export default function CreatorEventsScreen() {
                   {/* copy to the taste gate (spec 100 P0 #5). O-09: was "at the door" */}
                   <Text style={styles.cardAction}>check in</Text>
                 </TouchableOpacity>
+                {EVENT_SUMMARY_ENABLED && (
+                  <TouchableOpacity
+                    onPress={() => router.push(`/creator/event-money?id=${e.id}` as never)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Money for ${e.title}`}
+                  >
+                    {/* copy to the taste gate (Build 35 Screen 07) */}
+                    <Text style={styles.cardAction}>money</Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
           </View>

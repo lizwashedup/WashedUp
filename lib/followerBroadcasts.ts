@@ -4,6 +4,24 @@
  * members, never email/SMS (no provider configured). Native sends
  * immediately only; scheduling is web-only (see washedup-web's mirror of
  * this file).
+ *
+ * Scene handoff §16 data correction (2026-09-01): follow is an
+ * organization-only action now (lib/organizerFollows.ts's FollowTarget no
+ * longer accepts 'community'). The `{ kind: 'community'; communityId }`
+ * branch below is kept as-is on purpose -- follower_broadcasts has its own
+ * committed schema (20260818180000_follower_broadcasts_o03.sql) with a real
+ * "exactly one target" CHECK constraint and RLS built for both kinds, and no
+ * UI in this repo currently constructs a community-kind call (grepped
+ * 2026-09-01: only app/(creator)/organizer-broadcast.tsx calls
+ * sendFollowerBroadcast, hardcoded to `{ kind: 'organizer' }`). Ripping the
+ * type out would be a schema-adjacent change this ticket didn't ask for and
+ * isn't needed to fix the bug. Net effect of the organizer_follows change:
+ * a community-kind call here is not broken, just permanently inert --
+ * organizer_follows will never contain a community_id row again, so
+ * getMyFollowerBroadcastHistory's audience for one is correctly always
+ * empty. Do not wire a "message your community's followers" UI to this
+ * branch; a community's audience is its members (community_broadcasts),
+ * never its followers.
  */
 
 import { supabase } from './supabase';

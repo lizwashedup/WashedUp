@@ -537,7 +537,7 @@ export default function ProfileScreen() {
     // actually applied ('embedded' = it has never taken one).
     {
       icon: 'information-circle-outline',
-      label: `${Updates.channel ?? 'no channel'} · ${Updates.updateId?.slice(0, 8) ?? 'embedded'}`,
+      label: `App build: ${Updates.channel ?? 'no channel'} · ${Updates.updateId?.slice(0, 8) ?? 'embedded'}`,
       onPress: () => {},
     },
   ];

@@ -21,6 +21,7 @@ import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import { supabase } from '../../../lib/supabase';
 import { getUserBounded } from '../../../lib/authGate';
+import { saveDraft, loadDraft, clearDraft, cancelPendingSave, clearAllDrafts } from '../../../lib/onboardingDraft';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
@@ -52,9 +53,12 @@ const OPTIONS: Option[] = [
   { label: 'other', value: 'other' },
 ];
 
+type ReferralDraft = { selected: string | null; otherText: string };
+
 export default function OnboardingReferralScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [otherText, setOtherText] = useState('');
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{
     title: string;
@@ -80,6 +84,31 @@ export default function OnboardingReferralScreen() {
     }
   }, [isOther]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const draft = await loadDraft<ReferralDraft>('referral');
+      if (!cancelled && draft) {
+        // Validate against the real option list before trusting a value read
+        // back from disk: `selected` skips content filtering for every value
+        // except 'other' (see handleContinue), so an unrecognized restored
+        // value must never reach that branch un-checked.
+        if (draft.selected && OPTIONS.some((o) => o.value === draft.selected)) {
+          setSelected(draft.selected);
+        }
+        if (draft.otherText) setOtherText(draft.otherText);
+      }
+      if (!cancelled) setDraftLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!draftLoaded) return;
+    saveDraft<ReferralDraft>('referral', { selected, otherText });
+    return () => cancelPendingSave('referral');
+  }, [draftLoaded, selected, otherText]);
+
   const submit = useSubmitGuard();
 
   const handleContinue = async () => {
@@ -102,6 +131,7 @@ export default function OnboardingReferralScreen() {
           title: 'session expired',
           message: 'please sign in again.',
         });
+        await clearAllDrafts();
         await supabase.auth.signOut();
         return;
       }
@@ -146,12 +176,34 @@ export default function OnboardingReferralScreen() {
         });
         return;
       }
+      clearDraft('referral');
       router.replace('/onboarding/photo');
     } finally {
       submit.release();
       setLoading(false);
     }
   };
+
+  // Real bug, found and fixed 2026-09-01: this screen used to render and accept
+  // input immediately, with only the SAVE gated on draftLoaded. A slow auth
+  // resolution meant loadDraft() could land well after the user had already
+  // picked an option, and its setSelected/setOtherText calls silently
+  // overwrote whatever they'd already chosen. Gating render itself on
+  // draftLoaded closes that by construction: nothing can be picked before the
+  // restore has already had its say. (basics.tsx solves the same problem a
+  // different way -- it deliberately keeps its own watchdog-forced early
+  // render, so it instead tracks whether the user has edited anything and
+  // skips a late restore.)
+  if (!draftLoaded) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        <View style={styles.bootstrapWrap}>
+          <ActivityIndicator color={Colors.brand} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -246,6 +298,7 @@ export default function OnboardingReferralScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.cream },
   kav: { flex: 1 },
+  bootstrapWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   container: { flex: 1, paddingHorizontal: 28, paddingBottom: 16 },
 
   scroll: { flex: 1 },

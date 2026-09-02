@@ -13,6 +13,7 @@ import { ChevronRight, LifeBuoy } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { isAdmin } from '../../constants/Admin';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { PUBLIC_PAGE_CONTROL_ENABLED } from '../../constants/FeatureFlags';
 import { getCreatorAccess, getCommunityMembers, getBroadcasts } from '../../lib/creatorMode';
 import { getLeaderCards } from '../../lib/communityLeader';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
@@ -161,6 +162,23 @@ export default function CreatorMenuScreen() {
                 <Text style={styles.previewText}>see it as a member</Text>
                 <ChevronRight size={16} color={Colors.warmGray} strokeWidth={2} />
               </TouchableOpacity>
+              {/* Build 35 Screen 14: status, link, discovery toggle, unpublish.
+                  Behind PUBLIC_PAGE_CONTROL_ENABLED, off by default -- see
+                  app/creator/public-page.tsx. */}
+              {PUBLIC_PAGE_CONTROL_ENABLED && (
+                <>
+                  <View style={styles.previewDivider} />
+                  <TouchableOpacity
+                    style={styles.previewRow}
+                    onPress={() => router.push('/creator/public-page' as never)}
+                    activeOpacity={0.7}
+                  >
+                    {/* LIZ COPY */}
+                    <Text style={styles.previewText}>manage your public page</Text>
+                    <ChevronRight size={16} color={Colors.warmGray} strokeWidth={2} />
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
 
             <Text style={styles.sectionLabel}>numbers</Text>

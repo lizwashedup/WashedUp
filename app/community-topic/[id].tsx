@@ -35,13 +35,14 @@ import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import LinkifiedText from '../../components/LinkifiedText';
 import LinkPreviewCard from '../../components/chat/LinkPreviewCard';
 import MiniProfileCard from '../../components/MiniProfileCard';
+import ReactionEmojiPicker from '../../components/chat/ReactionEmojiPicker';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import { getCreatorAccess, isLeaderAccess } from '../../lib/creatorMode';
 import { getMyMembership } from '../../lib/communityJoin';
 import { setEventChatWelcomeMessage } from '../../lib/creatorEvents';
 import { formatEventDateLA, formatTimestampLA } from '../../lib/laDate';
-import { extractFirstUrl } from '../../lib/url';
+import { extractFirstUrl, openUrl, soleUrlIn } from '../../lib/url';
 import { formatChatDay, insertMentionAt, isSameChatDay, mentionQueryAt } from '../../lib/communityChatUi';
 import { pickAndUploadChatPhoto } from '../../lib/pickChatPhoto';
 import {
@@ -79,6 +80,7 @@ export default function CommunityTopicScreen() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [showReport, setShowReport] = useState(false);
+  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
   const { blockUser } = useBlock();
 
   const {
@@ -332,6 +334,7 @@ export default function CommunityTopicScreen() {
     setAlertInfo({
       title: name,
       buttons: [
+        { text: 'react', onPress: () => setReactionPickerMsgId(message.id) },
         { text: 'reply', onPress: () => beginReply(message) },
         { text: 'report', onPress: () => { setReportTarget({ id: userId, name }); setShowReport(true); } },
         { text: 'block', style: 'destructive', onPress: () => blockUser(userId, name, () => refreshMessages()) },
@@ -349,6 +352,7 @@ export default function CommunityTopicScreen() {
     setAlertInfo({
       title: 'Your message',
       buttons: [
+        { text: 'react', onPress: () => setReactionPickerMsgId(message.id) },
         { text: 'reply', onPress: () => beginReply(message) },
         ...(message.body ? [{ text: 'edit', onPress: () => beginEdit(message) }] : []),
         { text: 'delete this message', style: 'destructive', onPress: () => handleDeleteMessage(message.id, true) },
@@ -408,6 +412,12 @@ export default function CommunityTopicScreen() {
     const grouped = !!previous && previous.sender_id === item.sender_id && isSameChatDay(previous.created_at, item.created_at);
     const showDay = !previous || !isSameChatDay(previous.created_at, item.created_at);
     const firstUrl = extractFirstUrl(item.body);
+    // Mirrors the Community chat / ChatThread bubbleUrl fix (8-02, restated
+    // live 2026-08-27): the bubble's own onLongPress claims the touch
+    // responder, which can swallow a nested LinkifiedText <Text onPress>
+    // before it fires. A message with exactly one link makes the whole
+    // bubble a second, ancestor-proof way into that link.
+    const bubbleUrl = soleUrlIn(item.body);
     return (
       <View>
         {showDay && <Text style={styles.daySeparator}>{formatChatDay(item.created_at)}</Text>}
@@ -426,6 +436,7 @@ export default function CommunityTopicScreen() {
           <View style={styles.bubbleWrap}>
             <TouchableOpacity
               activeOpacity={0.9}
+              onPress={bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
               onLongPress={() => (mine ? openOwnMessageMenu(item) : openMemberMenu(item))}
               style={[styles.bubble, mine && styles.bubbleMine]}
               accessibilityHint={mine ? 'hold for message actions' : 'hold for message actions'}
@@ -480,7 +491,7 @@ export default function CommunityTopicScreen() {
           <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
             <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle} numberOfLines={1}>{topic?.name ?? 'room'}</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{topic?.name ?? 'chat space'}</Text>
           {eventTopic && (
             <TouchableOpacity
               onPress={() => router.push(`/event-album/${id}` as never)}
@@ -495,7 +506,7 @@ export default function CommunityTopicScreen() {
             onPress={handleNotifications}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel={topic?.notifications_on ? 'Turn off notifications for this room' : 'Turn on notifications for this room'}
+            accessibilityLabel={topic?.notifications_on ? 'Turn off notifications for this chat space' : 'Turn on notifications for this chat space'}
             accessibilityState={{ selected: !!topic?.notifications_on }}
           >
             {topic?.notifications_on ? (
@@ -515,7 +526,7 @@ export default function CommunityTopicScreen() {
             )}
             {!!roomExpiry && (
               /* copy to the taste gate */
-              <Text style={styles.expiryText}>room closes {formatTimestampLA(roomExpiry.toISOString())}</Text>
+              <Text style={styles.expiryText}>chat space closes {formatTimestampLA(roomExpiry.toISOString())}</Text>
             )}
           </View>
         )}
@@ -546,7 +557,7 @@ export default function CommunityTopicScreen() {
                 multiline
                 maxLength={4000}
                 autoFocus
-                accessibilityLabel="Welcome message for this room"
+                accessibilityLabel="Welcome message for this chat space"
               />
               <View style={styles.welcomeComposerActions}>
                 <TouchableOpacity
@@ -578,9 +589,9 @@ export default function CommunityTopicScreen() {
               style={styles.welcomePrompt}
               onPress={() => { hapticLight(); setWelcomeComposerOpen(true); }}
               accessibilityRole="button"
-              accessibilityLabel="Add a welcome message for this room"
+              accessibilityLabel="Add a welcome message for this chat space"
             >
-              <Text style={styles.welcomePromptText}>+ add a welcome message for your room</Text>
+              <Text style={styles.welcomePromptText}>+ add a welcome message for your chat space</Text>
             </TouchableOpacity>
           )
         )}
@@ -649,8 +660,8 @@ export default function CommunityTopicScreen() {
             {/* copy to the taste gate */}
             <Text style={styles.closedText}>
               {topicMeta?.explore_events?.status === 'Cancelled'
-                ? 'this room is closed. the event was cancelled.'
-                : 'this room is closed. the event has passed.'}
+                ? 'this chat space is closed. the event was cancelled.'
+                : 'this chat space is closed. the event has passed.'}
             </Text>
           </View>
         ) : (
@@ -784,6 +795,15 @@ export default function CommunityTopicScreen() {
           setProfileUserId(null);
           blockUser(userId, userName, () => refreshMessages());
         }}
+      />
+      <ReactionEmojiPicker
+        visible={!!reactionPickerMsgId}
+        onSelect={(emoji) => {
+          const reactionKey = emoji === '❤️' ? 'heart' : emoji;
+          if (reactionPickerMsgId) toggleReaction(reactionPickerMsgId, reactionKey);
+          setReactionPickerMsgId(null);
+        }}
+        onClose={() => setReactionPickerMsgId(null)}
       />
     </SafeAreaView>
   );

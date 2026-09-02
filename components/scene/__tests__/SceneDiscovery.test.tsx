@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Text } from 'react-native';
+import { ActivityIndicator, Text } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -92,4 +92,52 @@ it('the creator recruiting card is always reachable on the Communities destinati
     .findAllByType(Text)
     .some((n) => n.props.children === 'tell us about it');
   expect(hasRecruitCopy).toBe(true);
+});
+
+// TODAY item G (8/27 call guide): Scene briefly flashed the recruit-card
+// invitation / "calendar is filling up" empty-state copy before the real
+// query result was in, because both destinations treated useQuery's default
+// `data: []` the same as a real zero-result answer. These two tests fail
+// against the pre-fix code (isPending unread, both messages render
+// immediately) and pass now that both destinations gate on isPending first.
+it('shows a loading indicator, not the empty-state copy or the recruit card, while the events query is pending', () => {
+  (useQuery as jest.Mock).mockReturnValue({
+    data: [],
+    refetch: jest.fn(),
+    isRefetching: false,
+    isPending: true,
+  });
+
+  let tree: ReturnType<typeof create>;
+  act(() => {
+    tree = create(<SceneDiscovery communitiesEnabled />);
+  });
+
+  const textChildren = tree!.root.findAllByType(Text).map((n) => n.props.children);
+  expect(textChildren).not.toContain('the calendar is filling up. check back in a beat.');
+  expect(textChildren).not.toContain('tell us about it');
+  expect(tree!.root.findAllByType(ActivityIndicator).length).toBeGreaterThan(0);
+});
+
+it('shows a loading indicator, not the recruit card, while the communities query is pending', () => {
+  (useQuery as jest.Mock).mockReturnValue({
+    data: [],
+    refetch: jest.fn(),
+    isRefetching: false,
+    isPending: true,
+  });
+
+  let tree: ReturnType<typeof create>;
+  act(() => {
+    tree = create(<SceneDiscovery communitiesEnabled />);
+  });
+  act(() => {
+    tree!.root.findByProps({ accessibilityLabel: 'communities' }).props.onPress();
+  });
+
+  const hasRecruitCopy = tree!.root
+    .findAllByType(Text)
+    .some((n) => n.props.children === 'tell us about it');
+  expect(hasRecruitCopy).toBe(false);
+  expect(tree!.root.findAllByType(ActivityIndicator).length).toBeGreaterThan(0);
 });

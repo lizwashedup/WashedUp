@@ -61,6 +61,8 @@ import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
 import LinkifiedText from '../../components/LinkifiedText';
 import { friendlyError } from '../../lib/friendlyError';
+import { logError } from '../../lib/logger';
+import { joinErrorSurface } from '../../lib/planJoinSafety';
 import {
   acceptWaitlistException,
   declineWaitlistException,
@@ -433,6 +435,8 @@ export default function PlanDetailScreen() {
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [shareAfterJoinPending, setShareAfterJoinPending] = useState(false);
   const [noticePending, setNoticePending] = useState<
     { action: 'join'; message?: string } | { action: 'exception' } | null
   >(null);
@@ -959,15 +963,16 @@ export default function PlanDetailScreen() {
       }
 
       try {
-        const { data: canJoinGender } = await supabase.rpc('can_join_event_gender', {
+        const { data: canJoinGender, error: eligibilityError } = await supabase.rpc('can_join_event_gender', {
           p_user_id: currentUserId,
           p_event_id: id,
         });
+        if (eligibilityError) throw eligibilityError;
         if (canJoinGender === false) {
           throw new Error('This plan is restricted and you are not eligible to join.');
         }
-      } catch (eligibilityError: any) {
-        if (eligibilityError.message?.includes('not eligible')) throw eligibilityError;
+      } catch (eligibilityError) {
+        throw eligibilityError;
       }
 
       const { data, error } = await supabase.rpc('join_event_atomic', {
@@ -977,23 +982,9 @@ export default function PlanDetailScreen() {
         p_gender_at_join: userGender ?? null,
       });
 
-      const rpcUnavailable = error && (error.message?.includes('does not exist') || (error as any).code === '42883');
-
-      if (!rpcUnavailable && error) throw error;
-      if (!rpcUnavailable && data === 'full') throw new Error('This plan is full. Try joining the waitlist.');
-      if (!rpcUnavailable && data === 'not_found') throw new Error('This plan no longer exists.');
-
-      if (rpcUnavailable) {
-        // Fallback when join_event_atomic RPC not deployed
-        const { data: existing } = await supabase.from('event_members').select('id').eq('event_id', id).eq('user_id', currentUserId).maybeSingle();
-        if (existing) {
-          const { error: updateError } = await supabase.from('event_members').update({ status: 'joined', role: 'guest' }).eq('event_id', id).eq('user_id', currentUserId);
-          if (updateError) throw updateError;
-        } else {
-          const { error: insertError } = await supabase.from('event_members').insert({ event_id: id, user_id: currentUserId, role: 'guest', status: 'joined' });
-          if (insertError) throw insertError;
-        }
-      }
+      if (error) throw error;
+      if (data === 'full') throw new Error('This plan is full. Try joining the waitlist.');
+      if (data === 'not_found') throw new Error('This plan no longer exists.');
 
       const { error: sysError } = await supabase.from('messages').insert({
         event_id: id,
@@ -1015,7 +1006,7 @@ export default function PlanDetailScreen() {
     },
     onSuccess: () => {
       hapticSuccess();
-      setJoinModalVisible(false);
+      setJoinError(null);
       setJoinMessage('');
       setJoinConfirmed(false);
       queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
@@ -1031,10 +1022,25 @@ export default function PlanDetailScreen() {
       setIsOnWaitlist(false);
       setWaitlistNotified(false);
 
-      setShareAfterJoinVisible(true);
+      if (Platform.OS === 'ios' && joinModalVisible) {
+        // Native iOS cannot reliably replace one sibling Modal with another in
+        // the same render. Open the share sheet only from the join sheet's
+        // dismissal callback.
+        setShareAfterJoinPending(true);
+        setJoinModalVisible(false);
+      } else {
+        setJoinModalVisible(false);
+        setShareAfterJoinVisible(true);
+      }
     },
     onError: (error: any) => {
-      setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
+      logError(error, 'plan.join');
+      const message = friendlyError(error, 'Something went wrong.');
+      if (joinErrorSurface(joinModalVisible) === 'inline') {
+        setJoinError(message);
+      } else {
+        setBrandedAlert({ visible: true, title: 'Oops', message });
+      }
     },
   });
 
@@ -1650,7 +1656,7 @@ export default function PlanDetailScreen() {
         {plan.host_message && (
           <View style={styles.noteBox}>
             <Text style={styles.noteLabel}>{`${plan.creator?.first_name_display ?? 'CREATOR'}'S NOTE`}</Text>
-            <Text style={styles.noteText}>{plan.host_message}</Text>
+            <LinkifiedText text={plan.host_message} style={styles.noteText} />
           </View>
         )}
 
@@ -2087,6 +2093,7 @@ export default function PlanDetailScreen() {
               if (isCirclePlan && circleViewerIsMember) {
                 requestJoin(undefined);
               } else {
+                setJoinError(null);
                 setJoinModalVisible(true);
               }
             }}
@@ -2098,12 +2105,28 @@ export default function PlanDetailScreen() {
       </View>
 
       {/* Join Confirmation Modal */}
-      <Modal visible={joinModalVisible} transparent animationType="fade" onRequestClose={() => setJoinModalVisible(false)} statusBarTranslucent>
-        <Pressable style={joinStyles.overlay} onPress={() => { Keyboard.dismiss(); setJoinModalVisible(false); }}>
+      <Modal
+        visible={joinModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!joinMutation.isPending) setJoinModalVisible(false); }}
+        onDismiss={() => {
+          if (shareAfterJoinPending) {
+            setShareAfterJoinPending(false);
+            setShareAfterJoinVisible(true);
+          }
+        }}
+        statusBarTranslucent
+      >
+        <Pressable style={joinStyles.overlay} onPress={() => {
+          Keyboard.dismiss();
+          if (!joinMutation.isPending) setJoinModalVisible(false);
+        }}>
           <Pressable style={joinStyles.sheet} onPress={() => Keyboard.dismiss()}>
             <TouchableOpacity
               style={joinStyles.closeButton}
               onPress={() => setJoinModalVisible(false)}
+              disabled={joinMutation.isPending}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
               <Text style={joinStyles.closeX}>✕</Text>
@@ -2126,12 +2149,14 @@ export default function PlanDetailScreen() {
               placeholder="Hey everyone! Can't wait"
               placeholderTextColor={Colors.textLight}
               value={joinMessage}
-              onChangeText={setJoinMessage}
+              onChangeText={(value) => { setJoinMessage(value); setJoinError(null); }}
               multiline
               maxLength={200}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <Text style={joinStyles.hint}>This will be posted to the chat when you join</Text>
+
+            {joinError ? <Text style={joinStyles.error}>{joinError}</Text> : null}
 
             <TouchableOpacity
               style={joinStyles.checkRow}
@@ -3546,6 +3571,13 @@ const joinStyles = StyleSheet.create({
     color: Colors.textLight,
     marginTop: 6,
     marginBottom: 20,
+  },
+  error: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.errorRed,
+    marginTop: -10,
+    marginBottom: 16,
   },
   checkRow: {
     flexDirection: 'row',

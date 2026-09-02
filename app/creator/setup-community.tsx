@@ -30,9 +30,11 @@ import {
   createCommunity,
   suggestHandle,
   HANDLE_SHAPE,
+  type RestrictedGender,
 } from '../../lib/creatorMode';
 import { isHouseCommunity } from '../../lib/houseCommunity';
 import { hapticSuccess, hapticError } from '../../lib/haptics';
+import { GENDER_RESTRICTED_COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 
 const NAME_MIN = 2;
 const NAME_MAX = 60;
@@ -40,6 +42,15 @@ const HANDLE_MAX = 40;
 const CITY_MAX = 60;
 const PURPOSE_MIN = 10;
 const PURPOSE_MAX = 140;
+
+// Liz 2026-09-01: symmetric women-only/men-only, creator's choice at
+// creation, never editable after (see the migration's own column comment).
+// `null` is "everyone" -- today's only behavior, and the default here.
+const RESTRICTION_CHOICES: { value: RestrictedGender | null; label: string }[] = [
+  { value: null, label: 'everyone' },
+  { value: 'woman', label: 'women only' },
+  { value: 'man', label: 'men only' },
+];
 
 export default function SetupCommunityScreen() {
   const queryClient = useQueryClient();
@@ -50,6 +61,7 @@ export default function SetupCommunityScreen() {
   const [handleTouched, setHandleTouched] = useState(false);
   const [city, setCity] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [restrictedGender, setRestrictedGender] = useState<RestrictedGender | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -75,7 +87,15 @@ export default function SetupCommunityScreen() {
     setBusy(true);
     setProblem(null);
     try {
-      await createCommunity(handle, name.trim(), city.trim(), purpose.trim());
+      // Flag off -> undefined -> createCommunity never sends p_restricted_gender
+      // at all, so this call is byte-identical to before this feature existed.
+      await createCommunity(
+        handle,
+        name.trim(),
+        city.trim(),
+        purpose.trim(),
+        GENDER_RESTRICTED_COMMUNITIES_ENABLED ? restrictedGender : undefined,
+      );
       hapticSuccess();
       await queryClient.invalidateQueries({ queryKey: ['creator-access'] });
       router.replace('/(creator)/today');
@@ -158,6 +178,35 @@ export default function SetupCommunityScreen() {
             {!!purpose && !purposeValid && (
               /* LIZ COPY */
               <Text style={styles.problem}>needs at least {PURPOSE_MIN} characters.</Text>
+            )}
+
+            {GENDER_RESTRICTED_COMMUNITIES_ENABLED && (
+              <>
+                {/* LIZ COPY */}
+                <Text style={styles.fieldLabel}>who's it for</Text>
+                <View style={styles.restrictionRow}>
+                  {RESTRICTION_CHOICES.map((choice) => {
+                    const selected = restrictedGender === choice.value;
+                    return (
+                      <TouchableOpacity
+                        key={choice.label}
+                        style={[styles.restrictionPill, selected && styles.restrictionPillSelected]}
+                        onPress={() => setRestrictedGender(choice.value)}
+                      >
+                        <Text style={[styles.restrictionPillText, selected && styles.restrictionPillTextSelected]}>
+                          {choice.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {restrictedGender != null && (
+                  /* LIZ COPY */
+                  <Text style={styles.quietNote}>
+                    this can't be changed later. people who aren't {restrictedGender === 'woman' ? 'women' : 'men'} won't be able to find or join this community.
+                  </Text>
+                )}
+              </>
             )}
 
             {/* LIZ COPY */}
@@ -250,6 +299,33 @@ const styles = StyleSheet.create({
   inputMultiline: {
     minHeight: 64,
     textAlignVertical: 'top',
+  },
+  restrictionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  restrictionPill: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  restrictionPillSelected: {
+    backgroundColor: Colors.brandSoft,
+    borderColor: Colors.terracotta,
+  },
+  restrictionPillText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+  },
+  restrictionPillTextSelected: {
+    fontFamily: Fonts.sansBold,
+    color: Colors.terracotta,
   },
   handlePreview: {
     fontFamily: Fonts.sans,

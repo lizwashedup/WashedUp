@@ -27,9 +27,9 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
-import { hapticSuccess } from '../../lib/haptics';
-import { getCreatorAccess, getBroadcasts, isLeaderAccess, creatorLandingRoute, publishCommunity, sendBroadcast } from '../../lib/creatorMode';
-import { createTopic, getCommunityRooms } from '../../lib/communityChat';
+import { hapticSuccess, hapticWarning } from '../../lib/haptics';
+import { getCreatorAccess, getBroadcasts, isLeaderAccess, isAdminTierRole, creatorLandingRoute, publishCommunity, archiveCommunity, sendBroadcast } from '../../lib/creatorMode';
+import { getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
@@ -39,8 +39,6 @@ export default function CreatorCommunityScreen() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const [roomDraft, setRoomDraft] = useState('');
-  const [roomBusy, setRoomBusy] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
@@ -57,29 +55,8 @@ export default function CreatorCommunityScreen() {
     enabled: !!community,
   });
 
-  const handleCreateRoom = async () => {
-    if (!community || !roomDraft.trim() || roomBusy) return;
-    const name = roomDraft.trim();
-    setRoomBusy(true);
-    try {
-      await createTopic(community.id, name);
-      hapticSuccess();
-      setRoomDraft('');
-      queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
-      queryClient.invalidateQueries({ queryKey: ['creator-rooms', community.id] });
-      // LIZ COPY
-      setAlertInfo({
-        title: 'the room is open',
-        message: `${name} is on your page and in your chats. members join from the page.`,
-      });
-    } catch (e) {
-      setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
-    } finally {
-      setRoomBusy(false);
-    }
-  };
-
   const [publishing, setPublishing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const handlePublish = () => {
     if (!community || publishing) return;
     // LIZ COPY
@@ -100,6 +77,40 @@ export default function CreatorCommunityScreen() {
               setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
             } finally {
               setPublishing(false);
+            }
+          },
+        },
+      ],
+    });
+  };
+
+  // leader/admin tier only (isAdminTierRole), scoped to THIS led community's
+  // own role, not "admin-tier of any led community" -- a person who is only
+  // events/member_care/finance here must never see this, even if they lead
+  // a different community elsewhere as admin.
+  const canArchive = !!community && isAdminTierRole(community.role);
+
+  const handleArchive = () => {
+    if (!community || archiving) return;
+    // LIZ COPY
+    setAlertInfo({
+      title: 'archive this community?',
+      message: 'no one new can find it or join. your current members keep their chat and everything they already have.',
+      buttons: [
+        { text: 'not yet', style: 'cancel' },
+        {
+          text: 'archive it',
+          style: 'destructive',
+          onPress: async () => {
+            setArchiving(true);
+            try {
+              await archiveCommunity(community.id);
+              hapticWarning();
+              queryClient.invalidateQueries({ queryKey: ['creator-access'] });
+            } catch (e) {
+              setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
+            } finally {
+              setArchiving(false);
             }
           },
         },
@@ -241,50 +252,64 @@ export default function CreatorCommunityScreen() {
             <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
           </TouchableOpacity>
 
-          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>rooms</Text>
+          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>chat spaces</Text>
           <Text style={styles.hint}>
-            the chat spaces members can join. you make them, members find them
-            on your page.
+            the chat spaces members can join, found on your page.
           </Text>
-          {rooms.map((r) => (
-            <TouchableOpacity
-              key={r.id}
-              style={styles.roomRow}
-              onPress={() => router.push(`/community-topic/${r.id}` as never)}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel={`Open room: ${r.name}`}
-            >
-              <Text style={styles.roomRowName} numberOfLines={1}>{r.name}</Text>
-              <Text style={styles.roomRowOpen}>open</Text>
-            </TouchableOpacity>
-          ))}
-          <View style={[styles.composer, styles.lastCard]}>
-            <TextInput
-              style={styles.roomInput}
-              value={roomDraft}
-              onChangeText={setRoomDraft}
-              placeholder="name a new room"
-              placeholderTextColor={Colors.inkSoft}
-              maxLength={60}
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              accessibilityLabel="New room name"
-            />
-            <TouchableOpacity
-              style={[styles.sendBtn, (!roomDraft.trim() || roomBusy) && { opacity: 0.4 }]}
-              onPress={handleCreateRoom}
-              disabled={!roomDraft.trim() || roomBusy}
-              accessibilityRole="button"
-              accessibilityLabel="Open the room"
-              accessibilityState={{ disabled: !roomDraft.trim() || roomBusy, busy: roomBusy }}
-            >
-              {roomBusy ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
-                <Text style={styles.sendBtnText}>open the room</Text>
-              )}
-            </TouchableOpacity>
+          <View style={styles.lastCard}>
+            {rooms.map((r) => (
+              <TouchableOpacity
+                key={r.id}
+                style={styles.roomRow}
+                onPress={() => router.push(`/community-topic/${r.id}` as never)}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={`Open chat space: ${r.name}`}
+              >
+                <Text style={styles.roomRowName} numberOfLines={1}>{r.name}</Text>
+                <Text style={styles.roomRowOpen}>open</Text>
+              </TouchableOpacity>
+            ))}
           </View>
+
+          {canArchive && (
+            <View style={styles.archiveSection}>
+              <Text style={styles.sectionLabel}>archive</Text>
+              {community?.status === 'archived' ? (
+                <View style={styles.archivedBanner}>
+                  {/* LIZ COPY */}
+                  <Text style={styles.archivedBannerTitle}>this community is archived</Text>
+                  <Text style={styles.archivedBannerBody}>
+                    it&apos;s hidden from discovery and closed to new members. your
+                    current members keep their chat and everything they already have.
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.hint}>
+                    hides your page from discovery and closes the door to new
+                    members. your current members keep their chat and
+                    everything they already have. this can&apos;t be undone
+                    from here.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.archiveBtn, archiving && styles.archiveBtnBusy]}
+                    onPress={handleArchive}
+                    disabled={archiving}
+                    accessibilityRole="button"
+                    accessibilityLabel="Archive this community"
+                    accessibilityState={{ disabled: archiving, busy: archiving }}
+                  >
+                    {archiving ? (
+                      <ActivityIndicator size="small" color={Colors.errorRed} />
+                    ) : (
+                      <Text style={styles.archiveBtnText}>archive this community</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -410,12 +435,38 @@ const styles = StyleSheet.create({
     color: Colors.darkWarm,
   },
   roomRowOpen: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  roomInput: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.darkWarm,
-  },
   editPageTextWrap: { flex: 1, gap: 2 },
   editPageTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   editPageHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
+  archiveSection: { marginTop: 24, marginBottom: 40 },
+  archiveBtn: {
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.errorRed,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  archiveBtnBusy: { opacity: 0.6 },
+  archiveBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.errorRed },
+  archivedBanner: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.errorBrand,
+    padding: 14,
+  },
+  archivedBannerTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+    marginBottom: 4,
+  },
+  archivedBannerBody: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    lineHeight: LineHeights.bodySM,
+  },
 });

@@ -4,6 +4,7 @@ const mockRpc = jest.fn();
 jest.mock('../supabase', () => ({ supabase: { rpc: mockRpc } }));
 
 const {
+  listQueued,
   normalizeCode,
   queuedCount,
   recordCheckin,
@@ -21,11 +22,28 @@ describe('ticket door offline contract', () => {
   it('normalizes and sends only the seat reference code', async () => {
     mockRpc.mockResolvedValue({ data: 'admitted', error: null });
     await expect(recordCheckin('  seat-code  ')).resolves.toEqual({
-      kind: 'result', result: 'admitted', code: 'SEAT-CODE',
+      kind: 'result', result: 'admitted', code: 'SEAT-CODE', admittedAt: null,
     });
     expect(normalizeCode(' a-b ')).toBe('A-B');
     expect(mockRpc).toHaveBeenCalledWith('record_ticket_checkin', {
       p_reference_code: 'SEAT-CODE',
+    });
+  });
+
+  it('reads the grown {result, admitted_at} jsonb shape and threads the timestamp through', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { result: 'duplicate', admitted_at: '2026-09-01T20:47:00-07:00' },
+      error: null,
+    });
+    await expect(recordCheckin('seat-two')).resolves.toEqual({
+      kind: 'result', result: 'duplicate', code: 'SEAT-TWO', admittedAt: '2026-09-01T20:47:00-07:00',
+    });
+  });
+
+  it('still reads a pre-upgrade bare-string reply correctly (rollout-lag fallback)', async () => {
+    mockRpc.mockResolvedValueOnce({ data: 'duplicate', error: null });
+    await expect(recordCheckin('seat-three')).resolves.toEqual({
+      kind: 'result', result: 'duplicate', code: 'SEAT-THREE', admittedAt: null,
     });
   });
 
@@ -96,5 +114,25 @@ describe('ticket door offline contract', () => {
     ]);
     expect(summary.remaining).toBe(0);
     await expect(queuedCount()).resolves.toBe(0);
+  });
+
+  it('lists queued codes oldest-first without leaking the signature, for the offline door list UI', async () => {
+    mockRpc
+      .mockResolvedValueOnce({ data: null, error: { message: 'offline' } })
+      .mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+    await recordCheckin('later');
+    await recordCheckin('earlier');
+    // force a queuedAt ordering independent of call order, since both queue in the same tick
+    const stored = JSON.parse((await AsyncStorage.getItem(QUEUE_KEY)) ?? '[]');
+    stored[0].queuedAt = '2026-09-01T12:00:00Z';
+    stored[1].queuedAt = '2026-09-01T09:00:00Z';
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(stored));
+
+    const list = await listQueued();
+    expect(list).toEqual([
+      { code: 'EARLIER', queuedAt: '2026-09-01T09:00:00Z' },
+      { code: 'LATER', queuedAt: '2026-09-01T12:00:00Z' },
+    ]);
+    expect(list.every((item: Record<string, unknown>) => !('signature' in item))).toBe(true);
   });
 });

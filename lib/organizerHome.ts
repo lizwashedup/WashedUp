@@ -64,6 +64,15 @@ export function inventoryLabel(sold: number, capacity: number | null): string {
   return `${sold} of ${capacity} tickets sold`;
 }
 
+/**
+ * "1 payout needs attention" / "N payouts need attention" -- Overview
+ * exception-card copy for a count of ticket_payouts rows with status
+ * 'failed' across this organizer's events (see getFailedPayouts).
+ */
+export function failedPayoutLabel(count: number): string {
+  return count === 1 ? '1 payout needs attention' : `${count} payouts need attention`;
+}
+
 /** Calendar days from now to eventDateISO, LA-day-boundary aware. Negative = past. */
 function dayDiff(eventDateISO: string, nowISO: string): number {
   const now = getLADayParts(nowISO);

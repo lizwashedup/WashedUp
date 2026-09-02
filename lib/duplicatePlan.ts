@@ -112,9 +112,12 @@ export function buildDuplicatePostParams(
     prefillGenderPref: event?.gender_rule ?? 'mixed',
     prefillGroupSize: event?.max_invites != null ? String(event.max_invites) : '',
     prefillTicketsUrl: event?.tickets_url ?? '',
-    // Carry the explore-event link explicitly. The DB title-match trigger
-    // (auto_link_explore_event) only guesses when this is null, and with
-    // duplicate titles it guesses wrong (the tour's spawn mislink).
+    // Carry the explore-event link explicitly rather than leaving it for
+    // the DB trigger to guess. auto_link_explore_event only fires when this
+    // is null, and (until supabase/migrations/20260901060000_fix_ambiguous_title_link_to_explore_event.sql
+    // is ever applied) it can guess WRONG when 2+ Live explore_events share
+    // a title (the tour's spawn mislink) -- passing the real id here skips
+    // the guess entirely regardless of that fix's status.
     prefillExploreEventId: event?.explore_event_id ?? '',
     duplicatedFromEventId: eventId ?? '',
   };

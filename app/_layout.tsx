@@ -487,11 +487,25 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
       // Album notifications: prompt/reminder/no-uploads-nudge open the upload
       // flow; ready/someone-uploaded/more-photos-added/hearts-batched open the
-      // album detail view.
-      if (type === 'album_upload_prompt' || type === 'album_upload_reminder' || type === 'album_creator_no_uploads_nudge') {
-        if (data?.eventId) safePush(`/album/upload/${data.eventId}`);
-      } else if (type === 'album_ready' || type === 'album_someone_uploaded' || type === 'album_more_photos_added' || type === 'album_hearts_batched') {
-        if (data?.eventId) safePush(`/album/${data.eventId}`);
+      // album detail view. eventId now lives in the same outer condition as
+      // every other type-specific branch below (waitlist/plan/etc.), not a
+      // nested check inside the branch body: previously a type match with no
+      // eventId (malformed payload, future shape change) fell into the `if`
+      // with nothing to push, which ended the whole if/else-if chain right
+      // there -- the tap did literally nothing, instead of falling through
+      // to the generic id-based fallback chain like every other type
+      // already does. Consistency fix so no notification type can silently
+      // no-op on tap.
+      if (
+        (type === 'album_upload_prompt' || type === 'album_upload_reminder' || type === 'album_creator_no_uploads_nudge') &&
+        data?.eventId
+      ) {
+        safePush(`/album/upload/${data.eventId}`);
+      } else if (
+        (type === 'album_ready' || type === 'album_someone_uploaded' || type === 'album_more_photos_added' || type === 'album_hearts_batched') &&
+        data?.eventId
+      ) {
+        safePush(`/album/${data.eventId}`);
       } else if (
         (type === 'waitlist_request' || type === 'exception_slot_refunded') &&
         data?.eventId
@@ -1041,6 +1055,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="tickets/index" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="tickets/order/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community/[id]" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="organization/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community-thread/[id]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="community-topic/[id]" options={{ headerShown: false, gestureEnabled: true }} />
       </Stack>

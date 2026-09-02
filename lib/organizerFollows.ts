@@ -1,9 +1,18 @@
 /**
  * §4c follow mechanic client (doc 69 B1, proposal 68): a follow attaches
- * to a community OR a standalone organizer profile, never both. Follow is
- * NOT membership - no chat, no member count change; joining implies
- * following DB-side (68's trigger), so the client never writes a follow
- * on join.
+ * to a standalone organizer profile ONLY. Follow is NOT membership - no
+ * chat, no member count change.
+ *
+ * Scene handoff §16 (WashedUp_The_Scene_User_Facing_Implementation_Handoff.pdf,
+ * "IMPORTANT DATA CORRECTION", 2026-09-01): "The generic fronting-target/follow
+ * implementation currently allows community follow state. Resolve event
+ * ownership first: community -> membership actions; organization -> follow
+ * actions." FollowTarget used to be `{ kind: 'community' | 'organizer' }`;
+ * it is organizer-only now, so a community target fails to type-check here
+ * rather than silently working. A community's ownership question resolves
+ * entirely through membership actions (join / ask to join / pending /
+ * member) in app/event/[id].tsx and community/[id].tsx, independent of this
+ * module.
  *
  * Self-flipping (house canon, the proposal-49 pattern): until proposal 68
  * applies, the table and the count RPC do not exist and every follow
@@ -20,11 +29,7 @@ function isMissingSchema(code: string | undefined): boolean {
   return code === '42P01' || code === 'PGRST205' || code === '42883' || code === 'PGRST202';
 }
 
-export type FollowTarget = { kind: 'community' | 'organizer'; id: string };
-
-function targetColumn(target: FollowTarget): 'community_id' | 'organizer_user_id' {
-  return target.kind === 'community' ? 'community_id' : 'organizer_user_id';
-}
+export type FollowTarget = { kind: 'organizer'; id: string };
 
 export interface FollowState {
   /** false until proposal 68 applies - hide the affordance entirely */
@@ -37,7 +42,7 @@ export async function getFollowState(target: FollowTarget, userId: string): Prom
     .from('organizer_follows')
     .select('id')
     .eq('follower_user_id', userId)
-    .eq(targetColumn(target), target.id)
+    .eq('organizer_user_id', target.id)
     .maybeSingle();
   if (error) {
     if (isMissingSchema(error.code)) return { available: false, following: false };
@@ -49,7 +54,7 @@ export async function getFollowState(target: FollowTarget, userId: string): Prom
 export async function recordFollow(target: FollowTarget, userId: string): Promise<boolean> {
   const { error } = await supabase.from('organizer_follows').insert({
     follower_user_id: userId,
-    [targetColumn(target)]: target.id,
+    organizer_user_id: target.id,
   });
   if (!error) return true;
   // 68's partial unique index makes a repeat follow a no-op, not a failure
@@ -61,7 +66,7 @@ export async function removeFollow(target: FollowTarget, userId: string): Promis
     .from('organizer_follows')
     .delete()
     .eq('follower_user_id', userId)
-    .eq(targetColumn(target), target.id);
+    .eq('organizer_user_id', target.id);
   return !error;
 }
 

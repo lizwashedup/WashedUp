@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { yoursKeys } from '../lib/yours/keys';
 import { INBOX_COUNT_KEY } from '../constants/QueryKeys';
-import type { ConnectionContext } from '../lib/yours/types';
+import { sendOrAcceptPeopleRequest } from '../lib/yours/connectionRequests';
 
 /** Map a raised Postgres exception to a warm, user-facing message. */
 export function friendlyConnectionError(err: unknown): string {
@@ -44,19 +44,13 @@ export function usePeopleConnectionMutations(
     qc.invalidateQueries({ queryKey: ['yours', 'person-profile'] });
   };
 
+  // THE HANDSHAKE (add_or_accept_person), not a raw send_people_request insert
+  // -- see lib/yours/connectionRequests.ts. Every "add a person" surface goes
+  // through this one mutation, so none of them can strand a same-instant
+  // mutual request as two crossed pending rows: mutateAsync resolves to
+  // 'now_connected' instead when the other side already got there first.
   const sendRequest = useMutation({
-    mutationFn: async (args: {
-      recipientId: string;
-      context: ConnectionContext;
-      contextEventId?: string | null;
-    }) => {
-      const { error } = await supabase.rpc('send_people_request', {
-        p_recipient: args.recipientId,
-        p_context: args.context,
-        p_context_event_id: args.contextEventId ?? null,
-      });
-      if (error) throw error;
-    },
+    mutationFn: sendOrAcceptPeopleRequest,
     onSuccess: invalidate,
   });
 

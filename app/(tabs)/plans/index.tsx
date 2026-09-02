@@ -40,6 +40,7 @@ import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Catego
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
+import { PLAN_CARD_ACTIVITY_FIRST_ENABLED } from '../../../constants/FeatureFlags';
 import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { toPlanCardPlan, type PlanCardPlan } from '../../../lib/creatorMarks';
 import { requestNearMeLocation, type NearMeCoords } from '../../../lib/location/nearMe';
@@ -953,6 +954,7 @@ export default function PlansScreen() {
       <View style={styles.cardWrap}>
         <PlanCard
           plan={toPlanCardPlan(item)}
+          layout={PLAN_CARD_ACTIVITY_FIRST_ENABLED ? 'activity-first' : 'creator-first'}
           isMember={!!memberIdSet[item.id]}
           isWishlisted={!!wishlistedSet[item.id]}
           onWishlist={(id, current) => {

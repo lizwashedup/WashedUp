@@ -7,14 +7,14 @@
  * one circle-specific question, WHO IS THIS FOR, which quietly sets both the
  * audience and whether the plan gets its own chat:
  *   Just us  + everyone  -> circle_only, lives in the circle chat (no new chat)
- *   Just us  + pick people-> circle_only, its own chat for the picked subset
+ *   Just us  + pick people -> circle_only, its own chat for the picked subset
  *   Open it up           -> open, posts to the public feed, its own chat
  *
  * v1 notes (see docs/circle-plans-build-notes.md): "Where" is free text (no
  * Places autocomplete / lat-lng); gender is not set here (all circle plans are
  * mixed, matching the spec's "inherited, not set here").
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -23,8 +23,9 @@ import {
   StyleSheet,
   TextInput,
 } from 'react-native';
+import { Image } from 'expo-image';
 import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
-import { Minus, Plus } from 'lucide-react-native';
+import { Check, Minus, Plus } from 'lucide-react-native';
 import { hapticSelection } from '../../../lib/haptics';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -75,6 +76,41 @@ function todayCalendarDay(): CalendarDay {
   return { year: t.y, month: t.m, day: t.d };
 }
 
+/** One row in the "pick people" multiselect: avatar, name, a terracotta check. */
+function PickMemberRow({
+  member,
+  selected,
+  onToggle,
+}: {
+  member: ComposerMember;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const name = member.first_name_display?.trim() || 'Someone';
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onToggle}
+      style={styles.memberRow}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: selected }}
+      accessibilityLabel={name}
+    >
+      {member.profile_photo_url ? (
+        <Image source={{ uri: member.profile_photo_url }} style={styles.memberAvatar} />
+      ) : (
+        <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
+          <Text style={styles.memberInitial}>{name[0]?.toUpperCase() ?? '?'}</Text>
+        </View>
+      )}
+      <Text style={styles.memberName} numberOfLines={1}>{name}</Text>
+      <View style={[styles.memberCheck, selected && styles.memberCheckOn]}>
+        {selected ? <Check size={12} color={Colors.white} strokeWidth={3} /> : null}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 export default function CirclePlanComposer({
   visible,
   onClose,
@@ -99,6 +135,11 @@ export default function CirclePlanComposer({
   const [period, setPeriod] = useState<'AM' | 'PM'>('PM');
   const [visibilityOpen, setVisibilityOpen] = useState(false); // false = circle only
   const [strangerCap, setStrangerCap] = useState(STRANGER_DEFAULT);
+  // "Who exactly" (Just-us only, hidden for a DM): the whole circle, or a
+  // picked subset. This is the chat-spawn signal, never surfaced as a "make a
+  // chat?" question of its own (see file header + spec section 4).
+  const [pickMode, setPickMode] = useState<'everyone' | 'subset'>('everyone');
+  const [pickedIds, setPickedIds] = useState<Set<string>>(new Set());
   // Non-destructive feedback, gold never red (moments Tier 3/4). `hint` is a
   // warm validation line shown on a blocked post attempt; `recoveryActive` is
   // the Tier-4 soft recovery after a post failed (mirrors PlanComposerV2).
@@ -116,6 +157,8 @@ export default function CirclePlanComposer({
     setPeriod('PM');
     setVisibilityOpen(false);
     setStrangerCap(STRANGER_DEFAULT);
+    setPickMode('everyone');
+    setPickedIds(new Set());
     setHint(null);
     setRecoveryActive(false);
   };
@@ -123,6 +166,28 @@ export default function CirclePlanComposer({
   const close = () => {
     reset();
     onClose();
+  };
+
+  // Circle members other than the poster themselves -- the pickable list. A
+  // circle chat (isDm false) is always 3+ real members by definition, so this
+  // is never empty when the "pick people" chip is even reachable.
+  const otherMembers = useMemo(
+    () => members.filter((m) => m.user_id !== myUserId),
+    [members, myUserId],
+  );
+  // True only when the subset path is both reachable (real circle, Just us)
+  // and actually chosen. Open it up and a DM never reach "subset".
+  const pickingSubset = !isDm && !visibilityOpen && pickMode === 'subset';
+  const subsetEmpty = pickingSubset && pickedIds.size === 0;
+
+  const togglePicked = (id: string) => {
+    hapticSelection();
+    setPickedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const selectQuick = (k: 'tonight' | 'tomorrow') => {
@@ -178,10 +243,11 @@ export default function CirclePlanComposer({
         startTime: start.toISOString(),
         visibility: visibilityOpen ? 'open' : 'circle_only',
         strangerCap: visibilityOpen ? strangerCap : null,
-        // "Pick people" is cut: the whole circle is always the audience. An open
-        // plan still gets its own chat (RPC: has_own_chat keys on visibility,
-        // not on member ids), so the chat-spawn machinery is unaffected.
-        memberUserIds: null,
+        // null/empty = the whole circle; a picked subset spawns its own chat
+        // for exactly those people (create_circle_plan already handles both
+        // server-side). Only reachable for a real circle's Just-us plan --
+        // Open it up and a DM (isDm) always pass null here.
+        memberUserIds: pickingSubset ? Array.from(pickedIds) : null,
         locationText: where.trim() || null,
         primaryVibe: category?.toLowerCase() ?? null,
         description: visibilityOpen ? (description.trim() || null) : null,
@@ -195,7 +261,11 @@ export default function CirclePlanComposer({
     }
   };
 
-  const postDisabled = createPlan.isPending || !title.trim() || (visibilityOpen && !description.trim());
+  const postDisabled =
+    createPlan.isPending ||
+    !title.trim() ||
+    (visibilityOpen && !description.trim()) ||
+    subsetEmpty;
 
   return (
     <BottomSheet visible={visible} onClose={close} heightPct={CIRCLE_PLAN.sheetHeightPct} springMotion>
@@ -267,10 +337,12 @@ export default function CirclePlanComposer({
           {nudge === 'tonight' && !hint ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
         </View>
 
-        {/* WHO IS THIS FOR - the audience binary. "Pick people" is cut. */}
+        {/* WHO IS THIS FOR - the audience choice. Just us reveals a second,
+            secondary choice (progressive disclosure): the whole circle, or a
+            picked subset that quietly gets its own chat. See spec section 4. */}
         <Text style={styles.sectionLabel}>{COPY.circlePlanWhoLabel}</Text>
 
-        {/* Circle only */}
+        {/* Just us */}
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => { hapticSelection(); setVisibilityOpen(false); }}
@@ -278,16 +350,65 @@ export default function CirclePlanComposer({
         >
           <View style={styles.audTop}>
             <View style={styles.audTextWrap}>
-              <Text style={styles.audName}>{COPY.circlePlanAudienceCircleOnly(circleName)}</Text>
-              <Text style={styles.audSub}>{COPY.circlePlanAudienceCircleOnlySub}</Text>
+              <Text style={styles.audName}>{COPY.circlePlanJustUs}</Text>
+              <Text style={styles.audSub}>{COPY.circlePlanJustUsSub(circleName)}</Text>
             </View>
             <View style={[styles.radio, !visibilityOpen && styles.radioOn]}>
               {!visibilityOpen ? <Animated.View entering={ZoomIn.springify().mass(0.5).damping(24).stiffness(500)} style={styles.radioDot} /> : null}
             </View>
           </View>
+
+          {/* Who exactly (the chat-spawn signal). A DM is already exactly the
+              2 people in it, so there is no one else to pick -- hidden. */}
+          {!visibilityOpen && !isDm ? (
+            <Animated.View
+              entering={FadeInDown.springify().mass(0.7).damping(28).stiffness(350)}
+              style={styles.recipientBlock}
+            >
+              <View style={styles.chipRow}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => { hapticSelection(); setPickMode('everyone'); }}
+                  style={[styles.recipientChip, pickMode === 'everyone' && styles.recipientChipOn]}
+                >
+                  <Text
+                    style={[styles.recipientChipText, pickMode === 'everyone' && styles.recipientChipTextOn]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {COPY.circlePlanEveryone(circleName)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => { hapticSelection(); setPickMode('subset'); }}
+                  style={[styles.recipientChipGhost, pickMode === 'subset' && styles.recipientChipOn]}
+                >
+                  <Text style={[styles.recipientChipGhostText, pickMode === 'subset' && styles.recipientChipTextOn]}>
+                    {COPY.circlePlanPickPeople}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.helper}>{COPY.circlePlanPickHelper}</Text>
+
+              {pickMode === 'subset' ? (
+                <View style={styles.memberList}>
+                  {otherMembers.map((m) => (
+                    <PickMemberRow
+                      key={m.user_id}
+                      member={m}
+                      selected={pickedIds.has(m.user_id)}
+                      onToggle={() => togglePicked(m.user_id)}
+                    />
+                  ))}
+                </View>
+              ) : null}
+              {subsetEmpty ? <InlineNudge text={COPY.circlePlanPickPeopleRequired} /> : null}
+            </Animated.View>
+          ) : null}
         </TouchableOpacity>
 
-        {/* Open to others (+ stranger stepper reveal + capacity truth) */}
+        {/* Open it up (+ stranger stepper reveal + capacity truth) */}
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => { hapticSelection(); setVisibilityOpen(true); }}
@@ -295,8 +416,8 @@ export default function CirclePlanComposer({
         >
           <View style={styles.audTop}>
             <View style={styles.audTextWrap}>
-              <Text style={styles.audName}>{COPY.circlePlanAudienceOpen}</Text>
-              <Text style={styles.audSub}>{COPY.circlePlanAudienceOpenSub(strangerCap)}</Text>
+              <Text style={styles.audName}>{COPY.circlePlanOpenUp}</Text>
+              <Text style={styles.audSub}>{COPY.circlePlanOpenUpSub}</Text>
             </View>
             <View style={[styles.radio, visibilityOpen && styles.radioOn]}>
               {visibilityOpen ? <Animated.View entering={ZoomIn.springify().mass(0.5).damping(24).stiffness(500)} style={styles.radioDot} /> : null}
@@ -308,7 +429,7 @@ export default function CirclePlanComposer({
               entering={FadeInDown.springify().mass(0.7).damping(28).stiffness(350)}
               style={styles.stepperReveal}
             >
-              <Text style={styles.stepperRevealLabel}>{COPY.circlePlanSpotsForOthers}</Text>
+              <Text style={styles.stepperRevealLabel}>{COPY.circlePlanStepperLabel}</Text>
               <View style={styles.stepperInline}>
                 <TouchableOpacity
                   activeOpacity={0.7}
@@ -490,13 +611,24 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   audienceSub: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
-  recipientBlock: { marginBottom: CIRCLE_PLAN.cardGap },
+  recipientBlock: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: Colors.overlayWarm,
+    marginBottom: CIRCLE_PLAN.cardGap,
+  },
   chipRow: { flexDirection: 'row', gap: CIRCLE_PLAN.chipGap, marginBottom: CIRCLE_PLAN.labelGap },
   recipientChip: {
     paddingHorizontal: CIRCLE_PLAN.chipPadH,
     paddingVertical: CIRCLE_PLAN.chipPadV,
     borderRadius: CIRCLE_PLAN.chipRadius,
     backgroundColor: Colors.inputBg,
+    // "Everyone in {circle}" carries a variable-length name (an unnamed
+    // circle falls back to a member-list title); shrink + ellipsize rather
+    // than overflow the row or squeeze the "Pick people" chip beside it.
+    flexShrink: 1,
+    minWidth: 0,
   },
   recipientChipGhost: {
     paddingHorizontal: CIRCLE_PLAN.chipPadH,
@@ -504,6 +636,7 @@ const styles = StyleSheet.create({
     borderRadius: CIRCLE_PLAN.chipRadius,
     borderWidth: CIRCLE_PLAN.cardBorder,
     borderColor: Colors.border,
+    flexShrink: 0,
   },
   recipientChipOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
   recipientChipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },

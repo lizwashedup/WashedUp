@@ -35,6 +35,7 @@ import { OfflineBanner, PermissionState } from '../../components/state/StateView
 import LinkifiedText from '../../components/LinkifiedText';
 import LinkPreviewCard from '../../components/chat/LinkPreviewCard';
 import MiniProfileCard from '../../components/MiniProfileCard';
+import ReactionEmojiPicker from '../../components/chat/ReactionEmojiPicker';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
@@ -49,11 +50,12 @@ import {
   editCommunityMessage,
   sendCommunityMessage,
   setBroadcastMute,
+  toggleBroadcastReaction,
   type CommunityBroadcast,
 } from '../../lib/communityChat';
 import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
 import { formatEventDateLA } from '../../lib/laDate';
-import { extractFirstUrl } from '../../lib/url';
+import { extractFirstUrl, openUrl, soleUrlIn } from '../../lib/url';
 import { formatChatDay, insertMentionAt, isSameChatDay, mentionQueryAt } from '../../lib/communityChatUi';
 import { pickAndUploadChatPhoto } from '../../lib/pickChatPhoto';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
@@ -74,6 +76,7 @@ export default function CommunityThreadScreen() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
   const draftRef = useRef('');
   const { blockUser } = useBlock();
@@ -84,12 +87,13 @@ export default function CommunityThreadScreen() {
 
   // report / block a member from a long-press on their message (mirrors chat).
   // Blocking refetches so their messages drop out via the block filter.
-  const openMemberMenu = (userId: string, name: string) => {
+  const openMemberMenu = (userId: string, name: string, messageId: string) => {
     if (!userId || userId === myId) return;
     hapticLight();
     setAlertInfo({
       title: name,
       buttons: [
+        { text: 'react', onPress: () => setReactionPickerMsgId(messageId) },
         { text: 'report', onPress: () => { setReportTarget({ id: userId, name }); setShowReport(true); } },
         { text: 'block', style: 'destructive', onPress: () => blockUser(userId, name, () => queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] })) },
         { text: 'cancel', style: 'cancel' },
@@ -240,11 +244,40 @@ export default function CommunityThreadScreen() {
     setAlertInfo({
       title: 'Your message',
       buttons: [
+        { text: 'react', onPress: () => setReactionPickerMsgId(message.id) },
         ...(message.body ? [{ text: 'edit', onPress: () => { setDraft(message.body); draftRef.current = message.body; setEditingMessageId(message.id); } }] : []),
         { text: 'delete this message', style: 'destructive', onPress: () => handleDeleteMessage(message.id) },
         { text: 'cancel', style: 'cancel' },
       ],
     });
+  };
+
+  // Reactions live in community_broadcast_reactions, keyed (broadcast_id,
+  // user_id, emoji) -- unlike community_topic_message_reactions (UNIQUE
+  // message_id, user_id), the table itself does not stop one user holding
+  // several different emoji on the same message. useTopicChat's toggleReaction
+  // enforces one-reaction-per-user by replacing whatever row is already
+  // there; mirrored here at the call-site instead, so both screens read the
+  // same to a member: picking a new emoji clears any other reaction this user
+  // already has on the message first, and re-picking the one they have turns
+  // it off. Raw emoji characters are used as the stored value throughout (no
+  // 'heart' string substitution) to stay consistent with how BroadcastCard's
+  // existing quick-react chips already write to this same table.
+  const handleSelectReaction = async (messageId: string, emoji: string) => {
+    const message = broadcasts.find((b) => b.id === messageId);
+    const mineReaction = message?.reactions.find((r) => r.mine);
+    try {
+      hapticLight();
+      if (mineReaction?.emoji === emoji) {
+        await toggleBroadcastReaction(messageId, emoji, false);
+      } else {
+        if (mineReaction) await toggleBroadcastReaction(messageId, mineReaction.emoji, false);
+        await toggleBroadcastReaction(messageId, emoji, true);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] });
+    } catch (e) {
+      showError('That did not land', friendlyError(e, 'Try again in a moment.'));
+    }
   };
 
   const handlePickPhoto = async () => {
@@ -341,6 +374,14 @@ export default function CommunityThreadScreen() {
               && isSameChatDay(previous.created_at, item.created_at);
             const mine = item.sender_id === myId;
             const firstUrl = extractFirstUrl(item.body);
+            // A message carrying exactly one link makes the whole bubble a second
+            // way into that link (mirrors ChatThread's bubbleUrl fix, 8-02): the
+            // bubble TouchableOpacity claims the touch responder for onLongPress,
+            // which can swallow the nested LinkifiedText <Text onPress> before it
+            // ever fires (reported live 2026-08-27, links posted in Community
+            // chat not opening). The inline link Text stays the primary target;
+            // this is the path no ancestor can intercept.
+            const bubbleUrl = item.kind === 'message' ? soleUrlIn(item.body) : null;
             return (
               <View>
                 {showDay && <Text style={styles.daySeparator}>{formatChatDay(item.created_at)}</Text>}
@@ -359,9 +400,10 @@ export default function CommunityThreadScreen() {
                     ) : <View style={styles.faceSpacer} />)}
                     <TouchableOpacity
                       activeOpacity={0.9}
+                      onPress={bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
                       onLongPress={() => {
                         if (mine) openOwnMessageMenu(item);
-                        else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone');
+                        else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id);
                       }}
                       style={[styles.bubble, mine && styles.bubbleMine]}
                       accessibilityHint="hold for message actions"
@@ -529,6 +571,14 @@ export default function CommunityThreadScreen() {
           setProfileUserId(null);
           blockUser(userId, userName, () => queryClient.invalidateQueries({ queryKey: ['community-broadcasts', id] }));
         }}
+      />
+      <ReactionEmojiPicker
+        visible={!!reactionPickerMsgId}
+        onSelect={(emoji) => {
+          if (reactionPickerMsgId) handleSelectReaction(reactionPickerMsgId, emoji);
+          setReactionPickerMsgId(null);
+        }}
+        onClose={() => setReactionPickerMsgId(null)}
       />
     </SafeAreaView>
   );

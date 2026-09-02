@@ -43,11 +43,11 @@ function inviteRoleLabel(role: string | null | undefined): string {
 function roleAccessSummary(role: string | null | undefined): string {
   switch (role) {
     case 'events': return 'access to run events: create and edit them, tickets, and check-in.';
-    case 'member_care': return 'access to the member roster: review who wants in, and moderate the rooms.';
+    case 'member_care': return 'access to the member roster: review who wants in, and moderate the chat spaces.';
     case 'finance': return 'access to the payouts and earnings for this community.';
     case 'admin':
     case 'co_leader':
-    default: return 'full co-creator access: broadcasts, members, the page, and rooms.';
+    default: return 'full co-creator access: broadcasts, members, the page, and chat spaces.';
   }
 }
 
