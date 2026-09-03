@@ -91,6 +91,48 @@ while IFS= read -r var; do
   fi
 done < <(grep -oE '^EXPO_PUBLIC_[A-Z0-9_]+' .env.local)
 
+# 5. Every EXPO_PUBLIC_ var live in EAS's real "production" environment must
+#    also be declared in .env.local. `eas update` bundles from THIS shell's
+#    env, not from EAS's server-side environment the way `eas build` does --
+#    a var can be correctly set for the real native build and silently absent
+#    here, so an OTA published from this machine ships it empty even though
+#    the installed binary shipped it real. Unlike check 4 above (declared but
+#    blank), this catches a var that's missing from .env.local entirely.
+#    2026-09-02 incident: EXPO_PUBLIC_COMMUNITIES_ENABLED,
+#    EXPO_PUBLIC_JOIN_GATE_ENABLED, and EXPO_PUBLIC_ADMIN_USER_IDS were all
+#    live in EAS production but absent from .env.local -- three straight OTAs
+#    silently turned Communities (and the join gate, and admin access) off in
+#    production before Liz caught it and it got traced back to this gap.
+# `while read <<<` here, not `for var in $eas_prod_vars` -- an unquoted
+# multi-line expansion in a `for` only splits into separate words under a
+# shell that word-splits by default (real bash does; this repo's dev shells
+# include zsh, which does NOT unless SH_WORD_SPLIT is set). Under zsh, a
+# `for`-over-unquoted-multiline collapses to ONE iteration with the whole
+# blob as $var, and the grep below spuriously "finds" it against the last
+# real line in .env.local -- so the check silently never fires. `read` splits
+# on lines regardless of shell, so this stays correct under both.
+eas_prod_vars="$(npx eas-cli env:list production --format short 2>/dev/null | grep -oE '^EXPO_PUBLIC_[A-Z0-9_]+' || true)"
+if [ -z "$eas_prod_vars" ]; then
+  echo "⚠️  could not read EAS's production environment (offline, or eas-cli auth expired) — skipping the drift check against .env.local. Run 'npx eas-cli env:list production' by hand if you don't trust this OTA's flags." >&2
+else
+  missing=""
+  while IFS= read -r var; do
+    [ -z "$var" ] && continue
+    if ! grep -qE "^${var}=" .env.local; then
+      missing="$missing
+$var"
+    fi
+  done <<< "$eas_prod_vars"
+  if [ -n "$missing" ]; then
+    echo "EAS production has these set, but .env.local doesn't declare them at all:" >&2
+    while IFS= read -r var; do
+      [ -z "$var" ] && continue
+      echo "  $var" >&2
+    done <<< "$missing"
+    fail "the vars above are live in EAS's production environment but missing from .env.local — this OTA would silently ship them empty even though the real binary has them set. Add them to .env.local with the real value (check: npx eas-cli env:list production) before publishing."
+  fi
+fi
+
 # Warn (don't block) on source-referenced EXPO_PUBLIC_ vars not set anywhere —
 # these have shipped unset in every bundle to date; add them to .env.local to
 # promote them to hard-gated.
