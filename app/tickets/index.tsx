@@ -35,6 +35,12 @@ import {
   type MyOrder, type MySeat,
 } from '../../lib/ticketing';
 
+/** Screen 29 (Liz, Build 35 PDF): the wallet groups into Upcoming and Past,
+ *  not one flat list. Same boundary the per-seat "expired" note already uses. */
+function isEventEnded(o: Pick<MyOrder, 'event_date'>): boolean {
+  return !!o.event_date && new Date(o.event_date) < new Date();
+}
+
 /**
  * doc 111: the organizer's "after they buy" note stays on the tickets, the
  * documented gold-border quote treatment (the organizer speaking, no new
@@ -241,6 +247,62 @@ export default function YourTicketsScreen() {
     return { name: p?.display_name ?? null, logo: p?.logo_url ?? null };
   };
 
+  // Screen 29: grouped sections, not one flat list (Liz's Build 35 PDF).
+  // Each bucket keeps getMyOrders' own created_at-desc order untouched.
+  const { upcomingOrders, pastOrders } = React.useMemo(() => {
+    const upcoming: MyOrder[] = [];
+    const past: MyOrder[] = [];
+    for (const o of orders ?? []) {
+      (isEventEnded(o) ? past : upcoming).push(o);
+    }
+    return { upcomingOrders: upcoming, pastOrders: past };
+  }, [orders]);
+
+  const renderOrderCard = (o: MyOrder) => {
+    const byline = bylineFor(o);
+    return (
+      <View key={o.id} style={styles.card}>
+        <View style={styles.cardHeader}>
+          {o.event_image ? (
+            <Image source={{ uri: o.event_image }} style={styles.cardImage} contentFit="cover" />
+          ) : (
+            <View style={styles.cardIcon}>
+              <Ticket size={20} color={EventAction.primary} strokeWidth={2} />
+            </View>
+          )}
+          <View style={styles.cardBody}>
+            <Text style={styles.cardTitle} numberOfLines={1}>{o.event_title ?? 'your event'}</Text>
+            {!!o.event_date && (
+              <Text style={styles.cardMeta}>{formatEventDateLA(o.event_date)}</Text>
+            )}
+            <Text style={styles.cardMeta}>
+              {o.qty} {o.qty === 1 ? 'ticket' : 'tickets'} · {o.total_cents === 0 ? 'free' : formatCents(o.total_cents)}{o.status === 'refunded' ? ' · refunded' : ''}
+            </Text>
+            {!!byline.name && (
+              <View style={styles.cardCreatorRow}>
+                {!!byline.logo && (
+                  <Image source={{ uri: byline.logo }} style={styles.cardCreatorAvatar} contentFit="cover" />
+                )}
+                {/* LIZ COPY (decision 16): bylines say put on by, never hosted by */}
+                <Text style={styles.cardCreatorText} numberOfLines={1}>put on by {byline.name}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+        {o.status === 'paid' && <OrganizerNote eventId={o.event_id} />}
+        {o.seats.map((seat) => (
+          <SeatTicket
+            key={seat.id}
+            seat={seat}
+            qty={o.qty}
+            eventEnded={isEventEnded(o)}
+          />
+        ))}
+        <OrderRefund order={o} />
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.headerRow}>
@@ -258,50 +320,20 @@ export default function YourTicketsScreen() {
         ) : !orders || orders.length === 0 ? (
           <TicketsEmptyState />
         ) : (
-          orders.map((o) => {
-            const byline = bylineFor(o);
-            return (
-              <View key={o.id} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  {o.event_image ? (
-                    <Image source={{ uri: o.event_image }} style={styles.cardImage} contentFit="cover" />
-                  ) : (
-                    <View style={styles.cardIcon}>
-                      <Ticket size={20} color={EventAction.primary} strokeWidth={2} />
-                    </View>
-                  )}
-                  <View style={styles.cardBody}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>{o.event_title ?? 'your event'}</Text>
-                    {!!o.event_date && (
-                      <Text style={styles.cardMeta}>{formatEventDateLA(o.event_date)}</Text>
-                    )}
-                    <Text style={styles.cardMeta}>
-                      {o.qty} {o.qty === 1 ? 'ticket' : 'tickets'} · {o.total_cents === 0 ? 'free' : formatCents(o.total_cents)}{o.status === 'refunded' ? ' · refunded' : ''}
-                    </Text>
-                    {!!byline.name && (
-                      <View style={styles.cardCreatorRow}>
-                        {!!byline.logo && (
-                          <Image source={{ uri: byline.logo }} style={styles.cardCreatorAvatar} contentFit="cover" />
-                        )}
-                        {/* LIZ COPY (decision 16): bylines say put on by, never hosted by */}
-                        <Text style={styles.cardCreatorText} numberOfLines={1}>put on by {byline.name}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-                {o.status === 'paid' && <OrganizerNote eventId={o.event_id} />}
-                {o.seats.map((seat) => (
-                  <SeatTicket
-                    key={seat.id}
-                    seat={seat}
-                    qty={o.qty}
-                    eventEnded={!!o.event_date && new Date(o.event_date) < new Date()}
-                  />
-                ))}
-                <OrderRefund order={o} />
-              </View>
-            );
-          })
+          <>
+            {upcomingOrders.length > 0 && (
+              <>
+                <Text style={styles.sectionHeader}>Upcoming</Text>
+                {upcomingOrders.map(renderOrderCard)}
+              </>
+            )}
+            {pastOrders.length > 0 && (
+              <>
+                <Text style={styles.sectionHeader}>Past</Text>
+                {pastOrders.map(renderOrderCard)}
+              </>
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -314,6 +346,16 @@ const styles = StyleSheet.create({
   headerTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   headerSpacer: { flex: 1 },
   content: { padding: 20, gap: EventSpacing.md, flexGrow: 1 },
+  // Golden Hour section-header spec (CLAUDE.md): 11px, terracotta, uppercase,
+  // 1.5px tracking. No margins of its own -- content's own gap already spaces
+  // every direct child uniformly, headers included.
+  sectionHeader: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 11,
+    color: Colors.terracotta,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+  },
   loading: { marginTop: EventSpacing.xl },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 40 },
   emptyIconBubble: {
