@@ -133,6 +133,50 @@ $var"
   fi
 fi
 
+# 6. Google sign-in client ID vars, gated by reachability (2026-09-02 audit):
+#    EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID back
+#    Google sign-in (lib/socialAuth.ts) and are unset everywhere -- not in
+#    .env.local, not in EAS production -- with no source fallback (unlike
+#    lib/googleMapsKey.ts and lib/giphyInit.ts, which both ship a safe one).
+#    Harmless today: the only caller is app/(auth)/signup.tsx's Google button,
+#    and that whole pre-phone-auth screen is unreachable while
+#    constants/FeatureFlags.ts's PHONE_AUTH_ENABLED stays hardcoded `true`. The
+#    moment that flag goes back to `false`, the gap goes live: with the web
+#    client id unset, isGoogleAuthConfigured() returns false and the button
+#    never renders; with either unset, a forced call into signInWithGoogle()
+#    alerts "not available" or fails in the native SDK instead of signing
+#    anyone in. Same failure class as the 2026-06-30 Google Maps outage, just
+#    on a path that isn't reachable yet -- so this only hard-blocks once
+#    PHONE_AUTH_ENABLED actually makes the path reachable. While it reads
+#    `true`, these two get a named warning instead of riding along anonymously
+#    in the generic sweep below.
+phone_auth_value="$(grep -E '^export const PHONE_AUTH_ENABLED' constants/FeatureFlags.ts 2>/dev/null | grep -oE 'true|false' | head -1 || true)"
+if [ -z "$phone_auth_value" ]; then
+  echo "⚠️  could not read PHONE_AUTH_ENABLED out of constants/FeatureFlags.ts -- skipping the Google sign-in reachability check. If that flag or app/(auth)/signup.tsx moved, verify EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID / EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID by hand before publishing." >&2
+else
+  google_client_id_vars="EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID"
+  missing_google=""
+  while IFS= read -r var; do
+    if [ -z "${!var:-}" ]; then
+      if [ "$phone_auth_value" = "true" ]; then
+        echo "⚠️  $var is unset (Google sign-in). Currently harmless -- PHONE_AUTH_ENABLED is true, so app/(auth)/signup.tsx's Google button is unreachable. Set it before PHONE_AUTH_ENABLED ever goes back to false, or Google sign-in ships silently broken (lib/socialAuth.ts has no fallback)." >&2
+      else
+        missing_google="$missing_google
+$var"
+      fi
+    fi
+  done <<< "$google_client_id_vars"
+  if [ -n "$missing_google" ]; then
+    echo "PHONE_AUTH_ENABLED is not 'true' in constants/FeatureFlags.ts -- app/(auth)/signup.tsx's Google button is reachable, and these are unset:" >&2
+    while IFS= read -r var; do
+      [ -z "$var" ] && continue
+      echo "  $var" >&2
+    done <<< "$missing_google"
+    fail "the Google sign-in vars above are unset with the sign-in screen reachable (PHONE_AUTH_ENABLED != true) -- lib/socialAuth.ts has no fallback, so this OTA would ship Google sign-in silently broken. Set them in .env.local (check: npx eas-cli env:list production) before publishing."
+  fi
+fi
+
 # Warn (don't block) on source-referenced EXPO_PUBLIC_ vars not set anywhere —
 # these have shipped unset in every bundle to date; add them to .env.local to
 # promote them to hard-gated.

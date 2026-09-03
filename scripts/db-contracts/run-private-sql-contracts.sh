@@ -25,6 +25,7 @@ TOPIC_ALBUM_HARDENING_MIGRATION="$REPO_ROOT/supabase/migrations/20260824211000_h
 IDENTITY_MARKS_TRIGGER_MIGRATION="$REPO_ROOT/supabase/migrations/20260824212000_fix_event_members_identity_marks_trigger_safe.sql"
 THRESHOLD_CHAT_MIGRATION="$REPO_ROOT/supabase/migrations/20260828200000_community_topic_chat_parity_phase1.sql"
 THRESHOLD_RECEIPT_MIGRATION="$REPO_ROOT/supabase/migrations/20260829210000_ticket_receipt_resend_rate_limit.sql"
+TOPIC_PUSH_MIGRATION="$REPO_ROOT/supabase/migrations/20260827220000_community_topic_message_push.sql"
 DELIVERABILITY_MIGRATION="$REPO_ROOT/supabase/migrations/20260830120000_free_rsvp_confirmation_outbox.sql"
 CONSENT_SYNC_MIGRATION="$REPO_ROOT/supabase/migrations/20260830130000_audience_sync_outbox_and_suppression.sql"
 CONSENT_SYNC_ACL_MIGRATION="$REPO_ROOT/supabase/migrations/20260831180000_revoke_service_role_low_level_suppression.sql"
@@ -59,6 +60,7 @@ for required_file in \
   "$IDENTITY_MARKS_TRIGGER_MIGRATION" \
   "$THRESHOLD_CHAT_MIGRATION" \
   "$THRESHOLD_RECEIPT_MIGRATION" \
+  "$TOPIC_PUSH_MIGRATION" \
   "$DELIVERABILITY_MIGRATION" \
   "$CONSENT_SYNC_MIGRATION" \
   "$CONSENT_SYNC_ACL_MIGRATION" \
@@ -95,6 +97,8 @@ for required_file in \
   "$CONTRACT_FILES/111_release_blockers_contract.sql" \
   "$CONTRACT_FILES/120_threshold_75_fixture.sql" \
   "$CONTRACT_FILES/121_threshold_75_contract.sql" \
+  "$CONTRACT_FILES/190_topic_notifications_fixture.sql" \
+  "$CONTRACT_FILES/191_topic_notifications_contract.sql" \
   "$CONTRACT_FILES/130_deliverability_fixture.sql" \
   "$CONTRACT_FILES/131_deliverability_contract.sql" \
   "$CONTRACT_FILES/140_consent_sync_fixture.sql" \
@@ -130,7 +134,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 static_status=0
-if [ "$CONTRACT_LANE" != "threshold-75" ]; then
+if [ "$CONTRACT_LANE" != "threshold-75" ] && [ "$CONTRACT_LANE" != "topic-notifications" ]; then
   node "$REPO_ROOT/scripts/db-contracts/static-contracts.mjs" || static_status=$?
 fi
 
@@ -159,6 +163,7 @@ CONTAINER_ID=$(docker run \
   --volume "$IDENTITY_MARKS_TRIGGER_MIGRATION:/migrations/identity-marks-trigger.sql:ro" \
   --volume "$THRESHOLD_CHAT_MIGRATION:/migrations/threshold-chat.sql:ro" \
   --volume "$THRESHOLD_RECEIPT_MIGRATION:/migrations/threshold-receipt.sql:ro" \
+  --volume "$TOPIC_PUSH_MIGRATION:/migrations/topic-push.sql:ro" \
   --volume "$DELIVERABILITY_MIGRATION:/migrations/deliverability.sql:ro" \
   --volume "$CONSENT_SYNC_MIGRATION:/migrations/consent-sync.sql:ro" \
   --volume "$CONSENT_SYNC_ACL_MIGRATION:/migrations/consent-sync-acl.sql:ro" \
@@ -235,6 +240,13 @@ run_threshold_75_contract() {
   psql_file threshold_75_contract /migrations/threshold-chat.sql
   psql_file threshold_75_contract /migrations/threshold-receipt.sql
   psql_file threshold_75_contract /contracts/121_threshold_75_contract.sql
+}
+
+run_topic_notifications_contract() {
+  create_contract_db topic_notifications_contract
+  psql_file topic_notifications_contract /contracts/190_topic_notifications_fixture.sql
+  psql_file topic_notifications_contract /migrations/topic-push.sql
+  psql_file topic_notifications_contract /contracts/191_topic_notifications_contract.sql
 }
 
 run_deliverability_contract() {
@@ -374,6 +386,12 @@ if [ "$CONTRACT_LANE" = "threshold-75" ]; then
   exit 0
 fi
 
+if [ "$CONTRACT_LANE" = "topic-notifications" ]; then
+  run_topic_notifications_contract
+  echo "PASS: focused topic-notification body and cross-member-read database contracts"
+  exit 0
+fi
+
 if [ "$CONTRACT_LANE" = "deliverability" ]; then
   run_deliverability_contract
   echo "PASS: focused deliverability database contracts"
@@ -468,13 +486,14 @@ psql_file technical_database_hardening_contract /contracts/101_technical_databas
 
 run_release_blockers_contract
 run_threshold_75_contract
+run_topic_notifications_contract
 run_deliverability_contract
 run_consent_sync_contract
 run_delivery_scheduler_contract
 run_event_ownership_contract
 run_role_reconciliation_contract
 
-echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, identity-marks trigger safety, durable free RSVP confirmations, audience consent sync, G0 scheduler rescue, Build 35 A1 event ownership (backfill, insert derivation, one-owner invariant, audit trail, both cascade re-homes, and a real header-comment rollback execution), and Build 35 A3 community role reconciliation (full seven-tier taxonomy mapping, fail-closed grants, and idempotent re-apply)"
+echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, identity-marks trigger safety, durable free RSVP confirmations, topic-notification body and cross-member read, audience consent sync, G0 scheduler rescue, Build 35 A1 event ownership (backfill, insert derivation, one-owner invariant, audit trail, both cascade re-homes, and a real header-comment rollback execution), and Build 35 A3 community role reconciliation (full seven-tier taxonomy mapping, fail-closed grants, and idempotent re-apply)"
 if [ "$static_status" -ne 0 ]; then
   echo "Release gate remains closed by static diagnostics"
   exit "$static_status"
