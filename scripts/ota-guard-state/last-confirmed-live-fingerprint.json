@@ -1,0 +1,6 @@
+{
+  "fingerprint": "f7b65fdeaf835e022202134eb7313cdff37d9eaa",
+  "confirmed_live_build_number": "36",
+  "confirmed_live_note": "Build 36 (id 45dfae5b), submitted and live in TestFlight as of 2026-09-02. This is the last fingerprint with real confirmed-live status behind it.",
+  "how_to_update": "Only update this file's fingerprint after a NEW build is confirmed installed AND working (Communities/Scene visible) on a real device. Get the new value from: npx expo-updates fingerprint:generate --platform ios, read the top-level hash field. Never update this from a build succeeding alone -- a successful build/submit does not mean any real device has it yet."
+}

@@ -4,8 +4,8 @@
 #
 # Background (2026-05-27/28 incident): an `eas update` was published to runtime
 # 1.0.4 from a tree carrying native modules (expo-audio / Giphy) that the 1.0.4
-# App Store binary doesn't contain. Because runtimeVersion.policy is "appVersion"
-# (app.config.js), that OTA was still stamped "1.0.4" and got served to the live
+# App Store binary doesn't contain. runtimeVersion.policy was "appVersion" at
+# the time, so that OTA was still stamped "1.0.4" and got served to the live
 # binary, which crashed on launch with "Cannot find native module 'ExpoAudio'".
 # A prior "branch gate" only printed the branch and continued, so it didn't stop
 # the bad publish (the be08e8f9 accidental chat-tree publish).
@@ -21,9 +21,15 @@
 #      even with those packages installed in node_modules, the OTA is only unsafe
 #      if some `app/components/hooks/lib` source actually imports them.
 #
-# Layer-2 structural fix (not done here): switch runtimeVersion.policy to
-# "fingerprint" so EAS refuses to serve a native-incompatible OTA at all. That
-# must land with the next EAS build and is tracked separately.
+# Layer-2 structural fix: runtimeVersion.policy is now "fingerprint" (landed
+# ahead of build 37), so EAS will never serve a native-incompatible OTA to a
+# mismatched binary -- that closes the 2026-05-27/28 failure mode. It opens a
+# different one instead, which check 7 below exists for: the fingerprint hash
+# includes app.json/app.config.js content, so even a bare buildNumber bump
+# changes it. A publish stamped with a fingerprint nothing currently installed
+# matches reaches zero devices -- this guard would otherwise print its green
+# checkmark over a publish that helped nobody. Found 2026-09-03, the same day
+# a buildNumber bump did exactly this.
 
 set -euo pipefail
 
@@ -150,7 +156,14 @@ fi
 #    PHONE_AUTH_ENABLED actually makes the path reachable. While it reads
 #    `true`, these two get a named warning instead of riding along anonymously
 #    in the generic sweep below.
-phone_auth_value="$(grep -E '^export const PHONE_AUTH_ENABLED' constants/FeatureFlags.ts 2>/dev/null | grep -oE 'true|false' | head -1 || true)"
+phone_auth_line="$(grep -E '^export const PHONE_AUTH_ENABLED' constants/FeatureFlags.ts 2>/dev/null | head -1 || true)"
+if [ -z "$phone_auth_line" ]; then
+  phone_auth_value=""
+elif echo "$phone_auth_line" | grep -qE '^export const PHONE_AUTH_ENABLED[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*;[[:space:]]*$'; then
+  phone_auth_value="$(echo "$phone_auth_line" | grep -oE 'true|false')"
+else
+  fail "constants/FeatureFlags.ts's PHONE_AUTH_ENABLED is no longer a plain true/false literal (it's now: $phone_auth_line). Grabbing the first 'true'/'false' token out of a conditional expression guesses wrong in both directions -- this either wrongly blocks a safe publish or wrongly waves through a broken one. Fix this check to actually evaluate the expression, then publish."
+fi
 if [ -z "$phone_auth_value" ]; then
   echo "⚠️  could not read PHONE_AUTH_ENABLED out of constants/FeatureFlags.ts -- skipping the Google sign-in reachability check. If that flag or app/(auth)/signup.tsx moved, verify EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID / EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID by hand before publishing." >&2
 else
@@ -177,6 +190,31 @@ $var"
   fi
 fi
 
+# 7. Runtime fingerprint must match the last build confirmed installed and
+#    working on a real device (see scripts/ota-guard-state/last-confirmed-live-fingerprint.json).
+#    runtimeVersion.policy is "fingerprint" (app.config.js), and that hash is
+#    computed from more than JS source -- it includes app.json/app.config.js
+#    content, so even a bare buildNumber bump changes it. Publishing an OTA
+#    stamped with a fingerprint that matches zero currently-installed devices
+#    succeeds and prints a clean report while reaching nobody. Found 2026-09-03.
+PIN_FILE="scripts/ota-guard-state/last-confirmed-live-fingerprint.json"
+if [ ! -f "$PIN_FILE" ]; then
+  fail "$PIN_FILE is missing -- can't verify this publish reaches any real device. Restore it before publishing."
+fi
+pinned_fingerprint="$(node -p "require('./$PIN_FILE').fingerprint" 2>/dev/null || true)"
+if [ -z "$pinned_fingerprint" ]; then
+  fail "could not read a fingerprint out of $PIN_FILE -- fix or restore it before publishing."
+fi
+current_fingerprint="$(npx expo-updates fingerprint:generate --platform ios 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).hash" 2>/dev/null || true)"
+if [ -z "$current_fingerprint" ]; then
+  fail "could not compute this tree's runtime fingerprint (npx expo-updates fingerprint:generate failed). Don't publish blind -- fix the command and retry."
+fi
+if [ "$current_fingerprint" != "$pinned_fingerprint" ]; then
+  echo "This tree's runtime fingerprint: $current_fingerprint" >&2
+  echo "Last confirmed-live fingerprint: $pinned_fingerprint (see $PIN_FILE)" >&2
+  fail "runtime fingerprint doesn't match the last build confirmed live on a real device. Publishing now would ship an OTA matching nothing currently installed -- it would succeed and reach zero users. If a build with THIS fingerprint is confirmed installed and working on a real device, update $PIN_FILE's fingerprint to $current_fingerprint, then publish."
+fi
+
 # Warn (don't block) on source-referenced EXPO_PUBLIC_ vars not set anywhere —
 # these have shipped unset in every bundle to date; add them to .env.local to
 # promote them to hard-gated.
@@ -186,4 +224,4 @@ for var in $(grep -rhoE 'EXPO_PUBLIC_[A-Z0-9_]+' app components hooks lib consta
   fi
 done
 
-echo "✅ OTA guard passed — on main, clean tree, HEAD matches origin/main, commit $(git rev-parse --short HEAD), no forbidden native imports, .env.local keys all non-empty."
+echo "✅ OTA guard passed — on main, clean tree, HEAD matches origin/main, commit $(git rev-parse --short HEAD), no forbidden native imports, .env.local keys all non-empty, fingerprint matches last confirmed-live build."

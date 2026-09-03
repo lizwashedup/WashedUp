@@ -5,9 +5,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-local}"
 EXPECTED_TICKET_DRAIN_SHA="86592aed95f1f51412f93ca48cb4790455381a5aef95772e7a0bc85b363c2984"
 EXPECTED_TICKET_RESEND_SHA="fafb70d0774e427f3fea7aa7ec2b6b513dd2ac7d81827eba56446fb55e67e349"
-EXPECTED_BUILD_ID="45dfae5b-42db-450f-80be-ba1bccb344f1"
-EXPECTED_BUILD_COMMIT="4292513d312dda639220bddd6a5d571d22c3c6c2"
-EXPECTED_BUILD_NUMBER="36"
+# 2026-09-03: app.json moved to buildNumber 37 without this pin being updated,
+# so this script would have certified a stale build as "the" threshold build.
+# PENDING until 37 is confirmed installed and working on a real device -- fill
+# in its real build id and commit then, don't guess them now.
+EXPECTED_BUILD_ID="PENDING_BUILD"
+EXPECTED_BUILD_COMMIT="PENDING_COMMIT"
+EXPECTED_BUILD_NUMBER="37"
 
 pass() {
   echo "PASS: $1"
