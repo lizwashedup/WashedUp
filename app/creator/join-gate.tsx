@@ -193,7 +193,7 @@ export default function JoinGateScreen() {
               <>
                 <Text style={styles.fieldLabel}>who gets in</Text>
                 <Text style={styles.fieldHint}>
-                  approval means you review each request. open lets anyone join instantly.
+                  open lets anyone join instantly. approval means you review each request.
                 </Text>
                 {counts && (
                   <Text style={styles.policyPreview}>
@@ -243,7 +243,7 @@ export default function JoinGateScreen() {
                 </TouchableOpacity>
                 {joinPolicy === 'invite_only' && (
                   <Text style={styles.policyNote}>
-                    invite codes are not built yet -- for now this reviews every request yourself, same as "you approve them".
+                    invite codes aren't built yet. for now, this reviews every request yourself, same as "you approve them".
                   </Text>
                 )}
               </>
