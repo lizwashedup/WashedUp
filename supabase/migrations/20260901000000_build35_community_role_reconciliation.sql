@@ -1,9 +1,12 @@
--- DRAFT: DO NOT APPLY WITHOUT JOSH WORD
+-- APPLIED TO PRODUCTION 2026-09-02 (Josh's go). Verified same day: all 22
+-- explore_events rows carry an owner (see the twin migration's own check),
+-- 6 community_role_assignments rows backfilled. Kept in supabase/migrations/
+-- as the historical record; safe to re-run (idempotent, see below).
 --
 -- Build 35 / P3 batch A item A3: preserve every Community role assignment
 -- against the PDF's authority taxonomy, before any permission code is written.
 --
--- DRAFT: DO NOT APPLY WITHOUT JOSH'S WORD. Written for master plan v3 §5.1 A3
+-- Written for master plan v3 §5.1 A3
 -- (clients/washed-up/specs/washedup-MASTER-PLAN-v3-20260831.md) and resolving
 -- the Screen 41 "two live role taxonomies" conflict in
 -- clients/washed-up/specs/washedup-BUILD35-DELTA-MATRIX-20260831.md.

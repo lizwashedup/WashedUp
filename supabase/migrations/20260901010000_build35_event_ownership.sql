@@ -1,8 +1,10 @@
--- DRAFT: DO NOT APPLY WITHOUT JOSH WORD
+-- APPLIED TO PRODUCTION 2026-09-02 (Josh's go). Verified same day: 22/22
+-- explore_events rows carry a non-null owner_type, zero data loss. Kept in
+-- supabase/migrations/ as the historical record; safe to re-run (idempotent).
 --
 -- Build 35 / P3 batch A item A1: give every event a real, explicit, audited owner.
 --
--- DRAFT: DO NOT APPLY WITHOUT JOSH'S WORD. Written for master plan v3 §5.1 A1
+-- Written for master plan v3 §5.1 A1
 -- (clients/washed-up/specs/washedup-MASTER-PLAN-v3-20260831.md), under the A2
 -- decision of 2026-08-31 (Organization stays a single person; organizer_profiles
 -- stays keyed user_id).
