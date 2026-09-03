@@ -31,10 +31,14 @@ import {
   suggestHandle,
   HANDLE_SHAPE,
   type RestrictedGender,
+  type JoinPolicy,
 } from '../../lib/creatorMode';
 import { isHouseCommunity } from '../../lib/houseCommunity';
 import { hapticSuccess, hapticError } from '../../lib/haptics';
-import { GENDER_RESTRICTED_COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import {
+  GENDER_RESTRICTED_COMMUNITIES_ENABLED,
+  COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED,
+} from '../../constants/FeatureFlags';
 
 const NAME_MIN = 2;
 const NAME_MAX = 60;
@@ -52,6 +56,14 @@ const RESTRICTION_CHOICES: { value: RestrictedGender | null; label: string }[] =
   { value: 'man', label: 'men only' },
 ];
 
+// Josh 2026-09-02: explicit choice at creation, never editable after (same
+// "set once at create" pattern as the restriction choice above) until
+// set_community_join_policy() exists for a real after-the-fact edit surface.
+const JOIN_POLICY_CHOICES: { value: JoinPolicy; label: string }[] = [
+  { value: 'open', label: 'open' },
+  { value: 'approval_required', label: 'approval required' },
+];
+
 export default function SetupCommunityScreen() {
   const queryClient = useQueryClient();
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
@@ -62,6 +74,7 @@ export default function SetupCommunityScreen() {
   const [city, setCity] = useState('');
   const [purpose, setPurpose] = useState('');
   const [restrictedGender, setRestrictedGender] = useState<RestrictedGender | null>(null);
+  const [joinPolicy, setJoinPolicyChoice] = useState<JoinPolicy>('open');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -95,6 +108,7 @@ export default function SetupCommunityScreen() {
         city.trim(),
         purpose.trim(),
         GENDER_RESTRICTED_COMMUNITIES_ENABLED ? restrictedGender : undefined,
+        COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED ? joinPolicy : undefined,
       );
       hapticSuccess();
       await queryClient.invalidateQueries({ queryKey: ['creator-access'] });
@@ -206,6 +220,33 @@ export default function SetupCommunityScreen() {
                     this can't be changed later. people who aren't {restrictedGender === 'woman' ? 'women' : 'men'} won't be able to find or join this community.
                   </Text>
                 )}
+              </>
+            )}
+
+            {COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED && (
+              <>
+                {/* LIZ COPY */}
+                <Text style={styles.fieldLabel}>who gets in</Text>
+                <View style={styles.restrictionRow}>
+                  {JOIN_POLICY_CHOICES.map((choice) => {
+                    const selected = joinPolicy === choice.value;
+                    return (
+                      <TouchableOpacity
+                        key={choice.value}
+                        style={[styles.restrictionPill, selected && styles.restrictionPillSelected]}
+                        onPress={() => setJoinPolicyChoice(choice.value)}
+                      >
+                        <Text style={[styles.restrictionPillText, selected && styles.restrictionPillTextSelected]}>
+                          {choice.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {/* LIZ COPY */}
+                <Text style={styles.quietNote}>
+                  open lets anyone join instantly. approval required means you review each request before they're in.
+                </Text>
               </>
             )}
 

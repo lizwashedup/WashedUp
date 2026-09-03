@@ -886,15 +886,18 @@ export type RestrictedGender = 'woman' | 'man';
  * the five starter blocks). The publish control stays the existing
  * publish-your-page flow; nothing here opens a page.
  *
- * restrictedGender rides the SAME conditional pattern
+ * restrictedGender and joinPolicy each ride the SAME conditional pattern
  * probeConfirmationMessage/createOperatorEvent already use for a
  * migration-gated optional param (lib/creatorEvents.ts): omitted (undefined)
- * means p_restricted_gender is never sent at all, so a call from a build with
- * GENDER_RESTRICTED_COMMUNITIES_ENABLED off is byte-identical to today and
- * safe against a database where
- * supabase/migrations/20260901080000_gender_restricted_communities.sql has
- * NOT been applied (the RPC's live signature still resolves). Only
- * setup-community.tsx, gated by that flag, ever passes this.
+ * means the RPC param is never sent at all, so a call with the matching flag
+ * off is byte-identical to today and safe against a database where the
+ * backing migration has NOT been applied (the RPC's live signature still
+ * resolves). restrictedGender needs
+ * supabase/migrations/20260901080000_gender_restricted_communities.sql and is
+ * gated by GENDER_RESTRICTED_COMMUNITIES_ENABLED; joinPolicy needs
+ * supabase/migrations/20260902200000_community_join_policy_at_creation.sql
+ * and is gated by COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED. Only
+ * setup-community.tsx, gated by those flags, ever passes either.
  */
 export async function createCommunity(
   handle: string,
@@ -902,8 +905,10 @@ export async function createCommunity(
   city?: string,
   purpose?: string,
   restrictedGender?: RestrictedGender | null,
+  joinPolicy?: JoinPolicy,
 ): Promise<string> {
   const restriction = restrictedGender !== undefined ? { p_restricted_gender: restrictedGender } : {};
+  const policy = joinPolicy !== undefined ? { p_join_policy: joinPolicy } : {};
   const { data, error } = await supabase.rpc('create_community', {
     p_handle: handle,
     p_name: name,
@@ -911,6 +916,7 @@ export async function createCommunity(
     p_city: city?.trim() || null,
     p_purpose: purpose?.trim() || null,
     ...restriction,
+    ...policy,
   });
   if (error) throw error;
   return data as string;

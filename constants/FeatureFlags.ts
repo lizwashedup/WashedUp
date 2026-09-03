@@ -386,3 +386,23 @@ export const PUBLIC_PAGE_CONTROL_ENABLED = process.env.EXPO_PUBLIC_PUBLIC_PAGE_C
  */
 export const GENDER_RESTRICTED_COMMUNITIES_ENABLED =
   process.env.EXPO_PUBLIC_GENDER_RESTRICTED_COMMUNITIES_ENABLED === 'true';
+
+/**
+ * Explicit open-vs-approval-required choice at community creation (Josh
+ * 2026-09-02: grandfather the 5 pre-existing communities as open, build the
+ * real creator choice going forward). Same self-flipping-safe shape as
+ * GENDER_RESTRICTED_COMMUNITIES_ENABLED above: flag off means
+ * createCommunity() never sends p_join_policy at all, so every create stays
+ * byte-identical to today (defaults to open) even before the migration
+ * below lands. Do not flip on for a real build until
+ * supabase/migrations/20260902200000_community_join_policy_at_creation.sql
+ * (DRAFT, not applied) is reviewed and applied to prod -- picking
+ * approval_required before it lands fails the create with a clear error
+ * (unknown RPC param), not a silent bad write.
+ *
+ * Local dev: set EXPO_PUBLIC_COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED=true
+ * in .env.local (gitignored). Env-driven and ships OFF wherever the var is
+ * unset (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED =
+  process.env.EXPO_PUBLIC_COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED === 'true';
