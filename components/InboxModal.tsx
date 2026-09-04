@@ -21,7 +21,7 @@ import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { supabase } from '../lib/supabase';
 import { INBOX_COUNT_KEY, WAITLIST_MANAGER_KEY } from '../constants/QueryKeys';
-import { YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
+import { YOURS_PAGE_ENABLED, COMMUNITIES_ENABLED } from '../constants/FeatureFlags';
 import {
   acceptWaitlistException,
   declineWaitlistException,
@@ -199,9 +199,29 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         }
         return;
       }
+      // community_join_request (leader-only "someone wants in") and
+      // community_event ("[community] just posted [event]") never carry an
+      // event_id -- neither does the app_notifications row (see
+      // request_to_join_community / notify_community_event in
+      // 20260707200000_intro_blurb.sql + 20260706150000_mvp_batch.sql) nor
+      // the OneSignal push payload (app/_layout.tsx's click handler already
+      // routes both this same way: community_join_request -> the creator
+      // members/requests tab regardless of ids, community_event -> Scene
+      // "by design" per its own comment there). Mirrors that here so the
+      // in-app tap isn't a silent no-op while the push tap already works.
+      if (action === 'acted' && notifType === 'community_join_request') {
+        onClose();
+        router.push('/(creator)/members' as any);
+        return;
+      }
+      if (action === 'acted' && notifType === 'community_event' && COMMUNITIES_ENABLED) {
+        onClose();
+        router.push('/(tabs)/explore' as any);
+        return;
+      }
       if (action === 'acted' && eventId) {
         onClose();
-        if (notifType === 'member_joined' || notifType === 'invite_accepted') {
+        if (notifType === 'member_joined' || notifType === 'invite_accepted' || notifType === 'event_reminder') {
           router.push(`/(tabs)/chats/${eventId}` as any);
         } else if (notifType === 'waitlist_request' || notifType === 'exception_slot_refunded') {
           // The manager query has a 30s staleTime; force it fresh so the
@@ -209,6 +229,19 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
           // "someone wants in" / "slot opened back up" notification.
           queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(eventId) });
           router.push(`/waitlist/${eventId}` as any);
+        } else if (
+          notifType === 'album_upload_prompt' ||
+          notifType === 'album_upload_reminder' ||
+          notifType === 'album_creator_no_uploads_nudge'
+        ) {
+          router.push(`/album/upload/${eventId}` as any);
+        } else if (
+          notifType === 'album_ready' ||
+          notifType === 'album_someone_uploaded' ||
+          notifType === 'album_more_photos_added' ||
+          notifType === 'album_hearts_batched'
+        ) {
+          router.push(`/album/${eventId}` as any);
         } else {
           router.push(`/plan/${eventId}`);
         }
@@ -456,7 +489,13 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                 const isWaitlist = notif.type === 'waitlist_spot';
                 const isExceptionInvite = notif.type === 'exception_invite';
                 const goesToYours = YOURS_NOTIF_TYPES.has(notif.type);
-                const hasAction = goesToYours || ((
+                // Full audit against every type in app_notifications_type_check
+                // (supabase/migrations, last touched 20260706150000_mvp_batch.sql,
+                // 31 values total) found two more that route WITHOUT an event_id,
+                // the same way the Yours types above do -- see handleNotifAction.
+                const goesToCommunityRequests = notif.type === 'community_join_request';
+                const goesToCommunityEvent = COMMUNITIES_ENABLED && notif.type === 'community_event';
+                const hasAction = goesToYours || goesToCommunityRequests || goesToCommunityEvent || ((
                   notif.type === 'waitlist_spot' ||
                   notif.type === 'member_joined' ||
                   notif.type === 'invite_accepted' ||
@@ -476,7 +515,29 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                   // event_id the same way and had the same gap: the push-tap
                   // handler in app/_layout.tsx already routes this type to
                   // /plan/:eventId, but this in-app list did not.
-                  notif.type === 'interest_invite'
+                  notif.type === 'interest_invite' ||
+                  // "someone just posted a similar plan, join now instead of
+                  // waiting" -- carries the NEW plan's event_id
+                  // (notify_waitlist_duplicate_plan); push-tap already opens
+                  // it, this list did not.
+                  notif.type === 'duplicate_plan' ||
+                  // create_event_reminders() is dead code today (no cron job,
+                  // no app caller -- 20260814170000_lock_down_ban_oracle_and_-
+                  // cron_functions.sql), but the row shape already carries
+                  // event_id and push-tap already opens the chat for it; wired
+                  // here too so a future cron doesn't inherit the same gap.
+                  notif.type === 'event_reminder' ||
+                  // Album family (albums_v1_schema/albums_v1_cron/
+                  // albums_morning_pt_timing): every insert carries event_id.
+                  // Push-tap already splits these into upload vs. view targets
+                  // (app/_layout.tsx); this list previously routed none of them.
+                  notif.type === 'album_ready' ||
+                  notif.type === 'album_upload_prompt' ||
+                  notif.type === 'album_upload_reminder' ||
+                  notif.type === 'album_someone_uploaded' ||
+                  notif.type === 'album_more_photos_added' ||
+                  notif.type === 'album_creator_no_uploads_nudge' ||
+                  notif.type === 'album_hearts_batched'
                 ) && notif.event_id);
                 const timeLeft = notif.expires_at
                   ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))

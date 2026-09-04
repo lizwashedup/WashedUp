@@ -15,7 +15,7 @@ import {
     Ticket,
     Users
 } from 'lucide-react-native';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Dimensions,
@@ -912,6 +912,16 @@ export default function PlanDetailScreen() {
 
   // ─── Join ────────────────────────────────────────────────────────────────────
 
+  // Synchronous re-entrancy lock. join_circle_plan_atomic / join_event_atomic
+  // are UPSERTs that return a plain success value even on a redundant call
+  // from an already-joined member (no "already_member" signal for the client
+  // to catch), and the direct circle-join button below has no disabled-while-
+  // pending state to stop a fast double-tap. Without this, two concurrent
+  // mutationFn runs each insert their own "joined the plan" system message,
+  // i.e. a real duplicate chat message from one tap. Same pattern as
+  // PlanComposerV2's submittingRef / ChatThread's sendingRef.
+  const joiningRef = useRef(false);
+
   const joinMutation = useMutation({
     mutationFn: async (greeting?: string) => {
       if (!currentUserId || !id) throw new Error('Not authenticated');
@@ -1045,6 +1055,9 @@ export default function PlanDetailScreen() {
         setBrandedAlert({ visible: true, title: 'Oops', message });
       }
     },
+    onSettled: () => {
+      joiningRef.current = false;
+    },
   });
 
   // the creator name exactly as the byline renders it, for the notice and
@@ -1065,6 +1078,8 @@ export default function PlanDetailScreen() {
       setNoticePending({ action: 'join', message });
       return;
     }
+    if (joiningRef.current) return;
+    joiningRef.current = true;
     joinMutation.mutate(message);
   }, [joinMutation]);
 
@@ -1089,6 +1104,8 @@ export default function PlanDetailScreen() {
     if (!ok) return false;
     setNoticePending(null);
     if (noticePending.action === 'join') {
+      if (joiningRef.current) return true;
+      joiningRef.current = true;
       joinMutation.mutate(noticePending.message);
     } else {
       acceptExceptionMutation.mutate();

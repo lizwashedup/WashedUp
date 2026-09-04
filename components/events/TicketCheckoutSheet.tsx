@@ -17,7 +17,7 @@
  * action is pinned outside the scroll so it is always reachable.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -302,37 +302,52 @@ export function TicketCheckoutSheet({
     setCodeNote("we'll check this code at checkout.");
   };
 
+  // Synchronous re-entrancy lock alongside `busy`. `busy` is React state
+  // read through this closure, which is recreated fresh each render (this
+  // function isn't useCallback'd) -- two taps landing on the same rendered
+  // button before the setBusy(true) re-render commits both close over the
+  // same stale `busy === false` and both pass the check below. A double
+  // fire here means two create-ticket-checkout calls: two Stripe sessions
+  // for a paid tier, or two real duplicate orders for a free one. Same
+  // pattern as PlanComposerV2's submittingRef / ChatThread's sendingRef.
+  const goingRef = useRef(false);
+
   const handleGo = async () => {
-    if (!selected || busy) return;
+    if (!selected || busy || goingRef.current) return;
+    goingRef.current = true;
     hapticLight();
     setBusy(true);
     setProblem(null);
-    const result = await startTicketCheckout(selected.id, qty, {
-      promoCode: appliedCode,
-      addons: selections,
-      answers: buildCheckoutAnswers(questions, answers, qty),
-    });
-    setBusy(false);
-    if (result.kind === 'error') {
-      hapticError();
-      setProblem(result.message);
-      return;
-    }
-    if (result.kind === 'free') {
+    try {
+      const result = await startTicketCheckout(selected.id, qty, {
+        promoCode: appliedCode,
+        addons: selections,
+        answers: buildCheckoutAnswers(questions, answers, qty),
+      });
+      if (result.kind === 'error') {
+        hapticError();
+        setProblem(result.message);
+        return;
+      }
+      if (result.kind === 'free') {
+        hapticSuccess();
+        onFreeConfirmed(result.orderId);
+        return;
+      }
+      // Paid: hand off to hosted Stripe Checkout. The order id was being
+      // thrown away here, and Stripe's success page is a WEB url the app does
+      // not claim, so a buyer paid and then never returned into the app at
+      // all: no order-complete, no organizer questions, no sign anything
+      // happened (audit finding 2). Write the order down before we leave, and
+      // whoever sees the app come back takes them to it.
       hapticSuccess();
-      onFreeConfirmed(result.orderId);
-      return;
+      await stashPendingCheckout(result.orderId);
+      openUrl(result.url);
+      onClose();
+    } finally {
+      setBusy(false);
+      goingRef.current = false;
     }
-    // Paid: hand off to hosted Stripe Checkout. The order id was being
-    // thrown away here, and Stripe's success page is a WEB url the app does
-    // not claim, so a buyer paid and then never returned into the app at
-    // all: no order-complete, no organizer questions, no sign anything
-    // happened (audit finding 2). Write the order down before we leave, and
-    // whoever sees the app come back takes them to it.
-    hapticSuccess();
-    await stashPendingCheckout(result.orderId);
-    openUrl(result.url);
-    onClose();
   };
 
   const showFooter = tiers !== null && tiers.length > 0;

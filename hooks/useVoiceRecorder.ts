@@ -159,10 +159,28 @@ export function useVoiceRecorder() {
   }, [recorder, reset, releaseAudioMode]);
 
   // Safety net: if the screen unmounts mid-recording, tear the recorder down.
+  // Wrapped in try/catch: useAudioRecorder() is expo-audio's
+  // useReleasingSharedObject (same primitive useVideoPlayer uses), which
+  // registers its OWN unmount effect at the useAudioRecorder() call site
+  // above -- earlier in this hook's body than this effect. React runs
+  // effect cleanups in declaration order (not reversed) on unmount, so that
+  // internal effect can release the native recorder before this cleanup
+  // runs, making `recorder.isRecording` / `recorder.stop()` below a read on
+  // an already-released native object. Same bug class as the
+  // NativeSharedObjectNotFoundException fixed in components/VideoSplash.tsx
+  // (detachPlayerListeners) -- there the fix was to detach proactively at a
+  // guaranteed-earlier point; there's no equivalent deliberate "finish"
+  // moment here (this effect exists specifically to catch the *abnormal*
+  // unmount-while-recording case), so the safe minimal fix is to not let an
+  // already-released recorder throw out of an unmount cleanup uncaught.
   useEffect(() => {
     return () => {
-      if (recorder.isRecording) {
-        recorder.stop().catch(() => {});
+      try {
+        if (recorder.isRecording) {
+          recorder.stop().catch(() => {});
+        }
+      } catch {
+        // already released; nothing to tear down
       }
     };
   }, [recorder]);

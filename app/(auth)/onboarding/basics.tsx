@@ -24,6 +24,8 @@ import { getUserBounded } from '../../../lib/authGate';
 import { unauthedRoute } from '../../../lib/authRouting';
 import { saveDraft, loadDraft, clearDraft, cancelPendingSave, clearAllDrafts } from '../../../lib/onboardingDraft';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
+import { deliberateSignOutAt } from '../../../lib/navState';
+import { forgetAccount } from '../../../lib/knownAccount';
 import { requestResendAudienceSync } from '../../../lib/deliverability/consentSync';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
@@ -408,6 +410,15 @@ export default function OnboardingBasicsScreen() {
   };
 
   const handleSignOut = async () => {
+    // A chosen exit, same as profile.tsx's real Log Out: stamp BEFORE
+    // signOut() so app/_layout.tsx's auth listener reads this as deliberate,
+    // not "the session died under them". Found via Sentry (issue: recurring
+    // "auth: involuntary sign out" warning, 45+ users) -- this screen's two
+    // sign-out paths were the only ones in the app that never stamped
+    // deliberateSignOutAt, so every onboarding exit through here was
+    // miscategorized. The account itself isn't deleted on this path, so
+    // (unlike handleEscapeToLogin below) the device keeps remembering it.
+    deliberateSignOutAt.ts = Date.now();
     await clearAllDrafts();
     await supabase.auth.signOut();
   };
@@ -426,6 +437,19 @@ export default function OnboardingBasicsScreen() {
         escapingRef.current = false;
         return;
       }
+      // The account is gone (delete-ghost-account just removed it server
+      // side): same reasoning as profile.tsx's real account-delete flow --
+      // stamp deliberate AND forget the device directly (not just the stamp)
+      // so the next phone-entry screen is the cold one, never an offer to
+      // sign back into what was just deleted. Without this, the listener's
+      // "involuntary" branch ran instead (it never stamps, so it's always
+      // outside the 1.5s window), which skips forgetAccount() and leaves
+      // this device pointing at a phone number with no account behind it
+      // any more -- this is the same Sentry issue noted in handleSignOut
+      // above, but here the stale device pointer is a real dead-end, not
+      // just noise.
+      deliberateSignOutAt.ts = Date.now();
+      forgetAccount();
       await clearAllDrafts();
       await supabase.auth.signOut();
       router.replace(unauthedRoute() as never);
