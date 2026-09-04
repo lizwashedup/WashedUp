@@ -48,6 +48,9 @@ function VideoSplashImpl({ onFinish }: Props) {
   const calledRef = useRef(false);
   const mountedRef = useRef(true);
   const opacity = useSharedValue(1);
+  // Live player-event subscriptions. Held in a ref (not effect-local consts)
+  // so fadeAndFinish can detach them proactively -- see its comment below.
+  const subsRef = useRef<Array<{ remove?: () => void } | null | undefined>>([]);
 
   useEffect(() => {
     // Prevents a known Hermes crash: the fade's runOnJS callback firing
@@ -74,19 +77,50 @@ function VideoSplashImpl({ onFinish }: Props) {
     p.play();
   });
 
+  // try/catch-wrapped removal of whatever's currently in subsRef, then
+  // clears it. Shared by fadeAndFinish (the normal path) and the listener
+  // effect's own cleanup (the fallback path) below.
+  const detachPlayerListeners = useCallback(() => {
+    subsRef.current.forEach((s) => { try { s?.remove?.(); } catch {} });
+    subsRef.current = [];
+  }, []);
+
   const fadeAndFinish = useCallback(() => {
     if (calledRef.current) return;
     calledRef.current = true;
+
+    // Detach the player's event listeners HERE -- synchronously, before the
+    // fade/unmount sequence starts -- rather than leaving it to the listener
+    // effect's own unmount cleanup. useVideoPlayer() above is
+    // expo-modules-core's useReleasingSharedObject, which registers ITS OWN
+    // unmount effect at the useVideoPlayer(...) call site -- earlier in this
+    // component's hook order than the listener effect below. React runs a
+    // component's effect cleanups in declaration order (not reversed) on
+    // unmount, so that internal effect releases the native player BEFORE the
+    // listener effect's cleanup runs, meaning endSub/statusSub.remove() used
+    // to be called on subscriptions tied to an already-released native
+    // SharedObject. That is the exact shape of Sentry issue 7578055204
+    // (FunctionCallException: Calling the 'get' function has failed ->
+    // NativeSharedObjectNotFoundException), first seen 2026-06-26/28 and hit
+    // again 2026-09-03 navigating into Community. Detaching the listeners
+    // here, while the player is still guaranteed alive (fadeAndFinish always
+    // runs before onFinish()/the state update that unmounts this component),
+    // closes the race instead of trying to out-order it.
+    detachPlayerListeners();
 
     try { player?.pause?.(); } catch {}
 
     opacity.value = withTiming(0, { duration: FADE_MS }, (done) => {
       if (done) runOnJS(finishIfMounted)();
     });
-  }, [finishIfMounted, opacity, player]);
+  }, [detachPlayerListeners, finishIfMounted, opacity, player]);
 
   // Listen for the "playToEnd" event from the player — fires when the
-  // video finishes naturally. Also listen for status errors.
+  // video finishes naturally. Also listen for status errors. The cleanup
+  // here is a fallback only, for an unmount that happens without
+  // fadeAndFinish ever having run: the normal path above already detaches
+  // these via detachPlayerListeners, so subsRef is already empty by the
+  // time this fires and the fallback is a no-op.
   useEffect(() => {
     if (!player) return;
 
@@ -98,12 +132,10 @@ function VideoSplashImpl({ onFinish }: Props) {
         fadeAndFinish();
       }
     });
+    subsRef.current = [endSub, statusSub];
 
-    return () => {
-      try { endSub?.remove?.(); } catch {}
-      try { statusSub?.remove?.(); } catch {}
-    };
-  }, [player, fadeAndFinish]);
+    return detachPlayerListeners;
+  }, [player, fadeAndFinish, detachPlayerListeners]);
 
   // Safety timeout — never leave the user stuck
   useEffect(() => {

@@ -82,6 +82,44 @@ const timeoutFetch: typeof fetch = (input, init) => {
   );
 };
 
+// GoTrue's lock-acquire ceiling (ProcessLockAcquireTimeoutError, "Acquiring
+// process lock ... timed out") is hardcoded to 10s inside @supabase/auth-js
+// and is NOT reachable through createClient(): supabase-js's
+// _initSupabaseAuthClient only forwards autoRefreshToken, persistSession,
+// detectSessionInUrl, storage, userStorage, storageKey, flowType, lock,
+// debug, and throwOnError out of this auth config before constructing
+// GoTrueClient -- a lockAcquireTimeout passed here would be silently dropped
+// before it ever reached the client (verified against this repo's installed
+// @supabase/supabase-js 2.97.0 source).
+//
+// That fixed 10s is a per-CALLER budget, not a per-queue budget. processLock()
+// chains every call for the same lock name onto one module-level promise,
+// first-come-first-served -- and GoTrueClient's own _acquireLock() has a
+// check-then-act race on its lockAcquired flag (checked synchronously, only
+// set true inside the async callback handed to lock()), so two or more
+// auth-touching calls that fire in the same tick -- a realistic cold-start
+// pattern, e.g. getSession() plus a couple of REST calls each needing a
+// fresh token, and the root layout alone mounts well over a dozen effects --
+// can each independently call processLock() instead of queuing behind one
+// caller's gate. When that happens, a later caller's own 10s countdown
+// starts at ITS arrival, not at the front of the line, so it can still time
+// out while every individual holder ahead of it releases within the
+// AUTH_TOKEN_TIMEOUT_MS ceiling above, exactly as designed. Confirmed via
+// Sentry still recurring after the abort-timeout fix below shipped (e.g.
+// build 35, 2026-09-02) alongside concurrent XHRs in the same event's
+// breadcrumbs -- consistent with a stacked queue, not a single hung request.
+//
+// Fix: override the acquireTimeout GoTrue passes in, without touching how a
+// lock is acquired or released. 25s comfortably survives two stacked holders
+// at the worst-case AUTH_TOKEN_TIMEOUT_MS each plus slack, while still
+// failing well short of anything a user would sit through unexplained (the
+// 10s auth watchdog in app/_layout.tsx already stops blocking the UI on this
+// regardless -- see its own comment -- so a longer background ceiling here
+// only reduces spurious lock timeouts, it doesn't add new visible wait).
+const LOCK_ACQUIRE_TIMEOUT_MS = 25000;
+const queueTolerantLock: typeof processLock = (name, _acquireTimeout, fn) =>
+  processLock(name, LOCK_ACQUIRE_TIMEOUT_MS, fn);
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: AsyncStorage,
@@ -91,7 +129,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     // RN-safe in-process lock. Serializes auth operations so a refresh and a
     // getSession() can't interleave; paired with the abort-timeout fetch above,
     // a failed refresh now releases the lock instead of holding it forever.
-    lock: processLock,
+    // Wrapped to raise GoTrue's unconfigurable 10s acquire ceiling -- see
+    // queueTolerantLock above.
+    lock: queueTolerantLock,
   },
   global: {
     fetch: timeoutFetch,

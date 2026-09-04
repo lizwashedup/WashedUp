@@ -44,23 +44,31 @@ jest.mock('react-native-safe-area-context', () =>
   require('react-native-safe-area-context/jest/mock'),
 );
 
-jest.mock('expo-video', () => ({
-  useVideoPlayer: (_source: unknown, configure: (p: Record<string, unknown>) => void) => {
-    const player = {
-      play: jest.fn(),
-      pause: jest.fn(),
-      addListener: jest.fn(() => ({ remove: jest.fn() })),
-    };
-    configure(player);
-    return player;
-  },
-  VideoView: () => null,
-}));
+jest.mock('expo-video', () => {
+  let lastPlayer: any = null;
+  return {
+    useVideoPlayer: (_source: unknown, configure: (p: Record<string, unknown>) => void) => {
+      const player = {
+        play: jest.fn(),
+        pause: jest.fn(),
+        addListener: jest.fn(() => ({ remove: jest.fn() })),
+      };
+      configure(player);
+      lastPlayer = player;
+      return player;
+    },
+    VideoView: () => null,
+    __getLastPlayer: () => lastPlayer,
+  };
+});
 
 const reanimatedMock = jest.requireMock('react-native-reanimated') as {
   cancelAnimation: jest.Mock;
   __fireFadeCallback: (finished: boolean) => void;
   __hasFadeCallback: () => boolean;
+};
+const expoVideoMock = jest.requireMock('expo-video') as {
+  __getLastPlayer: () => { addListener: jest.Mock } | null;
 };
 
 describe('VideoSplash: fade-completes-after-unmount crash guard', () => {
@@ -114,5 +122,44 @@ describe('VideoSplash: fade-completes-after-unmount crash guard', () => {
     });
 
     expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
+  // Sentry issue 7578055204 (FunctionCallException: Calling the 'get'
+  // function has failed -> NativeSharedObjectNotFoundException), first seen
+  // 2026-06-26/28 and hit again 2026-09-03 navigating into Community. Root
+  // cause: useVideoPlayer's internal release effect (expo-modules-core's
+  // useReleasingSharedObject) is registered before this component's own
+  // playToEnd/statusChange listener effect, so on unmount React released the
+  // native player BEFORE the listener effect's cleanup called
+  // endSub/statusSub.remove() on subscriptions tied to it. The fix detaches
+  // the listeners proactively in fadeAndFinish, before the player can be
+  // released -- this guards that they are gone well before unmount, not
+  // merely that unmount itself is safe.
+  it('detaches the player event listeners before unmount, not only in the unmount cleanup', () => {
+    const onFinish = jest.fn();
+    let instance: ReturnType<typeof create>;
+    act(() => {
+      instance = create(<VideoSplash onFinish={onFinish} />);
+    });
+
+    const player = expoVideoMock.__getLastPlayer();
+    expect(player).not.toBeNull();
+    // One addListener call each for 'playToEnd' and 'statusChange'.
+    const subs = player!.addListener.mock.results.map((r) => r.value as { remove: jest.Mock });
+    expect(subs).toHaveLength(2);
+    subs.forEach((s) => expect(s.remove).not.toHaveBeenCalled());
+
+    // The 6s safety timeout drives fadeAndFinish, same trigger as the fade
+    // race test above. This is the moment the listeners must already be
+    // gone -- well before the later unmount that used to release the player.
+    act(() => {
+      jest.advanceTimersByTime(6000);
+    });
+    subs.forEach((s) => expect(s.remove).toHaveBeenCalledTimes(1));
+
+    // Unmounting afterward must not double-remove or throw: the listener
+    // effect's own cleanup is now a no-op fallback (subsRef already empty).
+    expect(() => act(() => { instance.unmount(); })).not.toThrow();
+    subs.forEach((s) => expect(s.remove).toHaveBeenCalledTimes(1));
   });
 });

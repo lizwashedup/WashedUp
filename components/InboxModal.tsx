@@ -469,7 +469,14 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                   // "X would go next time" always carries the plan's event_id
                   // too; was missing from this list, so tapping it silently
                   // just marked it read instead of opening the plan.
-                  notif.type === 'interest_signal'
+                  notif.type === 'interest_signal' ||
+                  // interest_invite ("[Creator] has a new plan" -- sent when a
+                  // creator invites someone who'd previously signaled interest,
+                  // see act_on_interest_signals) carries the new plan's
+                  // event_id the same way and had the same gap: the push-tap
+                  // handler in app/_layout.tsx already routes this type to
+                  // /plan/:eventId, but this in-app list did not.
+                  notif.type === 'interest_invite'
                 ) && notif.event_id);
                 const timeLeft = notif.expires_at
                   ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
