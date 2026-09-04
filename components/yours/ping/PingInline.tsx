@@ -103,26 +103,28 @@ export default function PingInline({
         onScrollBeginDrag={engage}
       >
         {top.map((p) => (
-          <Pressable
-            key={p.user_id}
-            style={styles.face}
-            onPress={() => {
-              engage();
-              hapticSelection();
-              setSel((s) => {
-                const n = new Set(s);
-                n.has(p.user_id) ? n.delete(p.user_id) : n.add(p.user_id);
-                return n;
-              });
-            }}
-          >
+          // A plain View, not a Pressable: YoursAvatar renders its own inner
+          // Pressable, and RN gives a touch to the innermost responder --
+          // wrapping it in a second Pressable here silently ate every tap
+          // (onPress never forwarded into YoursAvatar, so selection never
+          // updated and "Ping them" stayed permanently disabled).
+          <View key={p.user_id} style={styles.face}>
             <YoursAvatar
               name={p.first_name_display}
               photoUrl={p.profile_photo_url}
               size={52}
               bucket={sel.has(p.user_id) ? 'full' : 'none'}
+              onPress={() => {
+                engage();
+                hapticSelection();
+                setSel((s) => {
+                  const n = new Set(s);
+                  n.has(p.user_id) ? n.delete(p.user_id) : n.add(p.user_id);
+                  return n;
+                });
+              }}
             />
-          </Pressable>
+          </View>
         ))}
         <Pressable
           style={styles.seeAll}

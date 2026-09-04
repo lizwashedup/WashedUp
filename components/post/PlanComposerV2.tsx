@@ -254,6 +254,11 @@ export default function PlanComposerV2() {
   const [shareWanted, setShareWanted] = useState(false);
   const [recoveryNudge, setRecoveryNudge] = useState(false);
   const neverPostedRef = useRef(false);
+  // Synchronous lock against a real double-tap: `loading` state alone has a
+  // render-commit lag a fast second tap can beat (closure on the button's
+  // onPress still sees loading=false), which can double-insert the plan. A
+  // ref updates instantly, before React re-renders.
+  const submittingRef = useRef(false);
 
   // Has the creator seen the first-plan moment? Drives the elevated copy.
   useEffect(() => {
@@ -657,6 +662,7 @@ export default function PlanComposerV2() {
   // ── Submit (optimistic: the post moment shows instantly; the insert runs in
   // the background and recovers quietly in gold on failure). ──
   const handleSubmit = async () => {
+    if (submittingRef.current) return;
     if (loading || imageLoading || confirmVisible) return;
     const missing: string[] = [];
     if (title.trim().length === 0) missing.push('Title');
@@ -768,6 +774,8 @@ export default function PlanComposerV2() {
     // Background insert. `loading` tracks the real in-flight window so the post
     // button's spinner is reachable and `canPost`'s !loading is a true second
     // guard against a re-submit racing the insert (alongside confirmVisible).
+    // submittingRef is the synchronous guard above (see its declaration).
+    submittingRef.current = true;
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -861,6 +869,7 @@ export default function PlanComposerV2() {
       setRecoveryNudge(true);
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
   };
 

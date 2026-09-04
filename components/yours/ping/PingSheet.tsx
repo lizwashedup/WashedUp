@@ -46,6 +46,12 @@ export default function PingSheet({
               photoUrl={p.profile_photo_url}
               size={64}
               bucket={sel.has(p.user_id) ? 'full' : 'none'}
+              // Same handler as the outer Pressable: YoursAvatar's own inner
+              // Pressable wins the touch when tapped directly on the face
+              // (RN gives it to the innermost responder), so without this
+              // that tap was silently swallowed. Only one of the two ever
+              // fires per tap, so this can't double-toggle.
+              onPress={() => toggle(p.user_id)}
             />
             <Text style={styles.name} numberOfLines={1}>
               {p.first_name_display ?? ''}

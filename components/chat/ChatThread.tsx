@@ -1152,6 +1152,11 @@ function ChatThread(props: ChatThreadProps) {
   // Latest input text, synchronously, so onSelectionChange can detect a mention
   // against fresh text before React commits the state update.
   const inputTextRef = useRef('');
+  // Synchronous lock on the send button: setInputText('') below doesn't
+  // commit until the next render, so a fast real double-tap can fire
+  // handleSend twice reading the same pre-clear text -- two identical real
+  // messages, not a display glitch. A ref closes that window instantly.
+  const sendingRef = useRef(false);
   const handleInputChange = useCallback((text: string) => {
     setInputText(text);
     inputTextRef.current = text;
@@ -1277,16 +1282,18 @@ function ChatThread(props: ChatThreadProps) {
     Math.max(Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight, panelInset) + bottomDockHeight + SCROLL_BTN_GAP;
 
   const handleSend = useCallback(async () => {
+    if (sendingRef.current) return;
     const text = inputText.trim();
     if (!text || uploading) return;
+    sendingRef.current = true;
     setInputText('');
     setMentionQuery(null);
     stopTyping();
     if (editingMessageId) {
-      editMessage(editingMessageId, text);
+      editMessage(editingMessageId, text).finally(() => { sendingRef.current = false; });
       setEditingMessageId(null);
     } else {
-      sendMessage(text, undefined, replyingTo?.id);
+      sendMessage(text, undefined, replyingTo?.id).finally(() => { sendingRef.current = false; });
       setReplyingTo(null);
       scrollToBottom();
     }

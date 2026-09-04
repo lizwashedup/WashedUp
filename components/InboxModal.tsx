@@ -465,7 +465,11 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                   notif.type === 'exception_invite' ||
                   // A ping IS the plan: tap must open the plan detail (the
                   // handleNotifAction event_id fallthrough), not just mark read.
-                  notif.type === 'people_ping'
+                  notif.type === 'people_ping' ||
+                  // "X would go next time" always carries the plan's event_id
+                  // too; was missing from this list, so tapping it silently
+                  // just marked it read instead of opening the plan.
+                  notif.type === 'interest_signal'
                 ) && notif.event_id);
                 const timeLeft = notif.expires_at
                   ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
