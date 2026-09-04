@@ -76,6 +76,7 @@
             { "scheme": "https", "host": "washedup.app", "pathPrefix": "/e/" },
             { "scheme": "https", "host": "washedup.app", "pathPrefix": "/plans/" },
             { "scheme": "https", "host": "washedup.app", "pathPrefix": "/r/" },
+            { "scheme": "https", "host": "washedup.app", "pathPrefix": "/t/" },
             { "scheme": "https", "host": "washedup.app", "pathPrefix": "/app/" }
           ],
           "category": ["BROWSABLE", "DEFAULT"]

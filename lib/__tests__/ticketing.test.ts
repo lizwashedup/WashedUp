@@ -176,16 +176,22 @@ describe('isLowInventory', () => {
     expect(isLowInventory(5, 0)).toBe(false);
   });
 
-  it('uses the 3-seat floor on a small cap', () => {
-    // 20% of 10 is 2, but the floor is 3
-    expect(isLowInventory(3, 10)).toBe(true);
-    expect(isLowInventory(4, 10)).toBe(false);
+  it('flags at 90% sold (10% or fewer left) on a small cap', () => {
+    // Liz decision #16, 2026-09-03: 10% of 10 is 1
+    expect(isLowInventory(1, 10)).toBe(true);
+    expect(isLowInventory(2, 10)).toBe(false);
   });
 
-  it('scales past the floor on a large cap', () => {
-    // 20% of 100 is 20
-    expect(isLowInventory(20, 100)).toBe(true);
-    expect(isLowInventory(21, 100)).toBe(false);
+  it('flags at 90% sold (10% or fewer left) on a large cap', () => {
+    // 10% of 100 is 10
+    expect(isLowInventory(10, 100)).toBe(true);
+    expect(isLowInventory(11, 100)).toBe(false);
+  });
+
+  it('still gets a real low-inventory state on a very small cap, not a dead zone', () => {
+    // ceil(5 * 0.1) = 1, so a 5-cap event flags at 1 left rather than never
+    expect(isLowInventory(1, 5)).toBe(true);
+    expect(isLowInventory(2, 5)).toBe(false);
   });
 });
 

@@ -21,13 +21,16 @@ const OWN_LINK = /^https?:\/\/(?:www\.)?washedup\.app(\/[^?#\s]*)?(?:\?([^#\s]*)
 /**
  * Only paths with a real native route may be routed in app: app/e/[id].tsx
  * (the short link landing, which itself disambiguates plan from event),
- * app/plans/[slug].tsx, and app/r/[code].tsx (referral landing, S-05 fix
+ * app/plans/[slug].tsx, app/r/[code].tsx (referral landing, S-05 fix
  * 2026-08-25 -- handing /r/ to the OS was a DEAD TAP on iOS, because the OS
  * looks up the verified handler for washedup.app and hands the URL straight
- * back to this already-open app). Anything else on the domain still goes to
- * the browser because there is no screen to land on.
+ * back to this already-open app), and app/t/[code].tsx (ticket-transfer
+ * claim landing, item 15, 2026-09-04 -- same dead-tap risk as /r/ for any
+ * transfer link opened from inside the app, e.g. pasted into a chat).
+ * Anything else on the domain still goes to the browser because there is no
+ * screen to land on.
  */
-const OWN_ROUTE = /^\/(e|plans|r)\/([^/?#]+)\/?$/;
+const OWN_ROUTE = /^\/(e|plans|r|t)\/([^/?#]+)\/?$/;
 
 /**
  * An id or slug never legitimately ends in sentence punctuation, but the chat

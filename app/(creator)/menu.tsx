@@ -163,8 +163,14 @@ export default function CreatorMenuScreen() {
                 <ChevronRight size={16} color={Colors.warmGray} strokeWidth={2} />
               </TouchableOpacity>
               {/* Build 35 Screen 14: status, link, discovery toggle, unpublish.
-                  Behind PUBLIC_PAGE_CONTROL_ENABLED, off by default -- see
-                  app/creator/public-page.tsx. */}
+                  Behind PUBLIC_PAGE_CONTROL_ENABLED -- see
+                  app/creator/public-page.tsx. Renamed from "manage your
+                  public page" (Liz decision #5, 2026-09-03): that wording
+                  was nearly identical to the identity card's "view your
+                  public page" link above, which opens the page itself, not
+                  this control screen -- this row is the one that lets a
+                  creator with 2+ communities land in a screen scoped to
+                  the community selected via the switcher above. */}
               {PUBLIC_PAGE_CONTROL_ENABLED && (
                 <>
                   <View style={styles.previewDivider} />
@@ -174,7 +180,7 @@ export default function CreatorMenuScreen() {
                     activeOpacity={0.7}
                   >
                     {/* LIZ COPY */}
-                    <Text style={styles.previewText}>manage your public page</Text>
+                    <Text style={styles.previewText}>status, link &amp; settings</Text>
                     <ChevronRight size={16} color={Colors.warmGray} strokeWidth={2} />
                   </TouchableOpacity>
                 </>

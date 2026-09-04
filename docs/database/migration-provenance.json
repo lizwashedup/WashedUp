@@ -47,6 +47,21 @@
       "file": "supabase/migrations/20260813192000_create_stripe_webhook_events_HELD_pending_deploy.sql",
       "reason": "In-tree migration self-labeled HELD in its own filename and header, not a review-only proposal: creates stripe_webhook_events, and the moment that table exists stripe-webhook stops 500ing and replays queued Stripe events for real (confirmation emails, subscription cancels, refunds) against a real key. Must not apply until stripe-webhook gets the same test/live key gate create-checkout-session, cancel-my-membership, and cancel-contributor-subscription already have via stripeKeyIsTest(). Per Josh's 2026-08-13 instruction: assume the key is real, nothing may affect a real person without an explicit go. File stays in its correct sequence position in supabase/migrations/ pending that gate; this record exists only so automated release-candidate classification excludes it instead of silently counting it as active (the file's own header comment carries no automated weight by itself).",
       "source": "supabase/migrations/20260813192000_create_stripe_webhook_events_HELD_pending_deploy.sql"
+    },
+    {
+      "file": "supabase/migrations/20260904000000_community_member_removal_reason_and_restore.sql",
+      "reason": "2026-09-03 Liz decision #10 build: adds removed_reason/removed_at/removed_by to community_members plus leader-gated remove_community_member/restore_community_member RPCs. Written and typechecked but not applied or tested against any live Postgres (no local sandbox DB was available to the session that wrote it). Needs a real local or staging apply-and-test pass before Josh reviews it for production.",
+      "source": "supabase/migrations/20260904000000_community_member_removal_reason_and_restore.sql"
+    },
+    {
+      "file": "supabase/migrations/20260904010000_refund_authority_grants.sql",
+      "reason": "2026-09-03 Liz decision #14 build: real-money refund-delegation system (refund_authority_grants + refund_issuance_log tables, grant/revoke/check/record RPCs) wired into supabase/functions/ticket-refund/index.ts's authorization check. Self-tested for the community/creator-account scope only; the event scope's ownership check is documented but not exercised against a real row, and the actual refund-dollar-math functions (compute_ticket_refund/record_ticket_refund) are not in this repo's tracked SQL so this migration's interaction with them was never independently verified. Needs a real security/DB review before anywhere near production, per the build's own report.",
+      "source": "supabase/migrations/20260904010000_refund_authority_grants.sql"
+    },
+    {
+      "file": "supabase/migrations/20260904020000_ticket_transfer_draft.sql",
+      "reason": "2026-09-03 Liz decision #15 build: ticket transfer (current_holder_user_id, ticket_transfers audit table, start/cancel/preview/claim RPCs). claim_ticket_transfer re-collects required per-attendee questions fresh from the new holder, including any age-gate or waiver question -- Liz explicitly required real legal review of that specific handling before release, which has not happened. Also not tested against any live Postgres, and its one production-code touch (app/_layout.tsx post-sign-in routing for a stashed transfer code) lands in the same file implicated in the 2026-08-31 signup regression -- kept minimal on purpose but not yet proven via a real device walkthrough.",
+      "source": "supabase/migrations/20260904020000_ticket_transfer_draft.sql"
     }
   ],
   "unresolved_versions": [

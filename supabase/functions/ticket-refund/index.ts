@@ -51,6 +51,15 @@ import Stripe from 'npm:stripe@18';
  *     made whole to T) and may target position subsets.
  *   * ADMIN/support refunds do NOT ride this slug (unchanged from v4): they
  *     go through a direct service call to record_ticket_refund kind 'admin'.
+ *   * DELEGATE (2026-09-04, Liz's item 14): identity = a live, active row in
+ *     has_refund_authority(caller, order.event_id) -- see
+ *     20260904010000_refund_authority_grants.sql. A delegate is treated like
+ *     an organizer for kind/position resolution (they act on the event's
+ *     behalf, not as a constrained self-refund buyer), but is NEVER the
+ *     literal event/community owner, so issuer_is_owner is always false for
+ *     this path and body.reason becomes mandatory (validated here AND at the
+ *     DB layer in record_refund_issuance -- belt and suspenders, since this
+ *     moves real money).
  * PREVIEW (action 'preview') — how the wallet gets its answer, since the
  * RPCs are service-role-only and the client cannot ask them directly: no
  * Stripe call, no record; returns
@@ -192,20 +201,41 @@ Deno.serve(async (req)=>{
   }
   const isOrganizer = !!organizerId && organizerId === callerId;
   const isBuyer = order.buyer_user_id === callerId;
-  if (!isOrganizer && !isBuyer) return json(403, {
+  // delegate check (2026-09-04): a co-host/co-creator the real owner has
+  // explicitly granted refund authority to, scoped to this event or the
+  // event's community -- see has_refund_authority() and the migration
+  // header for why this is checked here rather than inside a DB RPC this
+  // file does not have visibility into.
+  const { data: hasAuthority, error: authorityErr } = await service.rpc('has_refund_authority', {
+    p_user_id: callerId,
+    p_event_id: order.event_id
+  });
+  if (authorityErr) {
+    console.error('ticket-refund: refund-authority check failed', orderId, authorityErr.code, authorityErr.message);
+  }
+  const isDelegate = !isOrganizer && hasAuthority === true;
+  if (!isOrganizer && !isBuyer && !isDelegate) return json(403, {
     error: 'not your order'
   });
   // resolve kind + targets by role
   let kind;
   let positionsArg;
   let canSelfRefund = false;
-  if (isOrganizer) {
+  if (isOrganizer || isDelegate) {
     kind = body.kind === 'organizer_cancel' ? 'organizer_cancel' : 'buyer_request';
     positionsArg = body.position_indexes ?? null;
   } else {
     // buyer: kind forced, whole-remaining-order only, §5 preset gate applies
     kind = 'buyer_request';
     positionsArg = null;
+  }
+  // a delegate is never the literal owner, so a reason is mandatory --
+  // record_refund_issuance enforces this again at the DB layer.
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  if (isDelegate && action === 'refund' && reason === '') {
+    return json(400, {
+      error: 'a reason is required when issuing a refund as a granted delegate, not the owner'
+    });
   }
   // dual identity (an organizer buying their own ticket): the §5 gate must
   // still be answered for the BUYER half, or the wallet never shows the
@@ -235,7 +265,7 @@ Deno.serve(async (req)=>{
       error: `order is ${order.status}, not refundable`
     });
   }
-  const allowed = isOrganizer || canSelfRefund;
+  const allowed = isOrganizer || isDelegate || canSelfRefund;
   // ═══ CONCURRENCY (fix 2): the claim is taken BEFORE compute and BEFORE any
   // Stripe call, so a second refund racing this one is refused while nothing
   // has moved. record_ticket_refund's own `for update` runs only AFTER Stripe,
@@ -486,6 +516,26 @@ Deno.serve(async (req)=>{
       error: 'refund succeeded at stripe but recording failed',
       stripe_refund_id: refundId
     });
+  }
+  // independent audit trail (2026-09-04, Liz's item 14): who issued this,
+  // whether they were the actual owner, the amount, the reason (mandatory
+  // for a delegate, validated again here at the DB layer), and the ticket.
+  // Never blocks the response -- the buyer's refund already succeeded and is
+  // already recorded above; a failure here is a logging gap, not a money
+  // problem, but it must never be silent.
+  const { error: auditErr } = await service.rpc('record_refund_issuance', {
+    p_order_id: orderId,
+    p_issued_by_user_id: callerId,
+    p_issuer_is_owner: isOrganizer,
+    p_reason: reason || null,
+    p_kind: kind,
+    p_position_indexes: positionsArg,
+    p_refund_amount_cents: c.refund_amount_cents,
+    p_stripe_refund_id: refundId
+  });
+  if (auditErr) {
+    console.error('ticket-refund: refund-issuance audit log failed', refundId, auditErr.code, auditErr.message);
+    warnings.push('refund_issuance_log_failed');
   }
   const payload = {
     ok: true,

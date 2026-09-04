@@ -142,12 +142,16 @@ export const SCENE_DISCOVERY_ENABLED =
  * on the same flag AND read so the two platforms flip in lockstep, not on
  * whichever one happens to see the column first.
  *
- * Local dev: set EXPO_PUBLIC_JOIN_GATE_ENABLED=true in .env.local (gitignored).
- * Env-driven and ships OFF wherever the var is unset (CI / prod / EAS), so it
- * cannot ship on by accident. Do not flip on for a real build until 91 is
- * applied to prod and Liz gives the word.
+ * LAUNCH: committed ON (Liz decision #11, 2026-09-03: "agree" to the
+ * join-policy model). Exact lowercase `false` is the emergency rollback. The
+ * double-gate above (flag AND live column read) means this is safe to flip
+ * regardless of whether proposal 91's migration has landed yet -- the toggle
+ * still cannot render before the column exists, so nothing is exposed early.
+ *
+ * Local dev: set EXPO_PUBLIC_JOIN_GATE_ENABLED=false in .env.local
+ * (gitignored) to force OFF; unset ships ON.
  */
-export const JOIN_GATE_ENABLED = process.env.EXPO_PUBLIC_JOIN_GATE_ENABLED === 'true';
+export const JOIN_GATE_ENABLED = process.env.EXPO_PUBLIC_JOIN_GATE_ENABLED !== 'false';
 
 /**
  * Delete a chat from the Chats list (doc 120).
@@ -161,12 +165,14 @@ export const JOIN_GATE_ENABLED = process.env.EXPO_PUBLIC_JOIN_GATE_ENABLED === '
  * your list; the other side keeps their copy; messaging again starts a
  * fresh thread.
  *
- * Local dev: set EXPO_PUBLIC_CHAT_DELETE_ENABLED=true in .env.local
- * (gitignored). Env-driven and ships OFF wherever the var is unset
- * (CI / prod / EAS), so it cannot ship on by accident. Do not flip on for
- * a real build until Liz rewrites the placeholder copy and gives the word.
+ * LAUNCH: committed ON. Liz approved the final copy and gave the word
+ * 2026-09-03 (decision #2: "please go ahead with the proposed copy and
+ * enable chat deletion"). Exact lowercase `false` is the emergency rollback.
+ *
+ * Local dev: set EXPO_PUBLIC_CHAT_DELETE_ENABLED=false in .env.local
+ * (gitignored) to force OFF; unset ships ON.
  */
-export const CHAT_DELETE_ENABLED = process.env.EXPO_PUBLIC_CHAT_DELETE_ENABLED === 'true';
+export const CHAT_DELETE_ENABLED = process.env.EXPO_PUBLIC_CHAT_DELETE_ENABLED !== 'false';
 
 /**
  * Co-creator invites (R21, qa/requirements.json: "Co-creators and multiple
@@ -232,11 +238,15 @@ export const MEMBER_INVITES_ENABLED = process.env.EXPO_PUBLIC_MEMBER_INVITES_ENA
  * instead of the follow pill; follow is for non-members only. The member
  * string is a LIZ COPY placeholder, so this stays off until she rewrites it.
  *
- * Local dev: set EXPO_PUBLIC_MEMBER_STATE_ENABLED=true in .env.local
- * (gitignored). Env-driven and ships OFF wherever the var is unset
- * (CI / prod / EAS), so it cannot ship on by accident.
+ * LAUNCH: committed ON. Liz approved the member-pill copy and gave the word
+ * 2026-09-03 (decision #2: "...and member status"). Exact lowercase `false`
+ * is the emergency rollback. Still inert wherever COMMUNITIES_ENABLED is
+ * off (see the `&&` above), so this alone cannot expose anything early.
+ *
+ * Local dev: set EXPO_PUBLIC_MEMBER_STATE_ENABLED=false in .env.local
+ * (gitignored) to force OFF; unset ships ON.
  */
-export const MEMBER_STATE_ENABLED = process.env.EXPO_PUBLIC_MEMBER_STATE_ENABLED === 'true';
+export const MEMBER_STATE_ENABLED = process.env.EXPO_PUBLIC_MEMBER_STATE_ENABLED !== 'false';
 
 /**
  * The one chat engine (doc 123).
@@ -334,11 +344,18 @@ export const EVENT_SUMMARY_ENABLED = process.env.EXPO_PUBLIC_EVENT_SUMMARY_ENABL
  * JOIN_GATE_ENABLED uses, so neither this flag nor that migration alone can
  * expose a dead control.
  *
- * Local dev: set EXPO_PUBLIC_PUBLIC_PAGE_CONTROL_ENABLED=true in .env.local
- * (gitignored). Env-driven and ships OFF wherever the var is unset
- * (CI / prod / EAS), so it cannot ship on by accident.
+ * LAUNCH: committed ON. Liz approved this 2026-09-03 (decision #5: "the
+ * Community tab should become the primary home base for the public creator
+ * page, with a clear live-status banner, shareable link, and management
+ * entry point"). The status/link/unpublish surface needs no migration, so
+ * this is safe to enable on today's schema; the discovery toggle stays
+ * inert behind its own separate gate above until its migration lands.
+ * Exact lowercase `false` is the emergency rollback.
+ *
+ * Local dev: set EXPO_PUBLIC_PUBLIC_PAGE_CONTROL_ENABLED=false in .env.local
+ * (gitignored) to force OFF; unset ships ON.
  */
-export const PUBLIC_PAGE_CONTROL_ENABLED = process.env.EXPO_PUBLIC_PUBLIC_PAGE_CONTROL_ENABLED === 'true';
+export const PUBLIC_PAGE_CONTROL_ENABLED = process.env.EXPO_PUBLIC_PUBLIC_PAGE_CONTROL_ENABLED !== 'false';
 
 /**
  * Gender-restricted communities (Liz 2026-09-01, "Women of WashedUp"): a
@@ -406,3 +423,84 @@ export const GENDER_RESTRICTED_COMMUNITIES_ENABLED =
  */
 export const COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED =
   process.env.EXPO_PUBLIC_COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED === 'true';
+
+/**
+ * Member removal reason + undo (Liz decision #10, 2026-09-03: "require a
+ * recorded reason and allow the leader to undo the removal"). See
+ * clients/washed-up/LIZ-OPEN-QUESTIONS.md item 10.
+ *
+ * When false (default): the members screen behaves exactly as shipped --
+ * tapping "remove" shows the existing plain confirm alert and calls
+ * removeMember() (no reason recorded, no undo). The removed-members list
+ * shows status only, no undo affordance.
+ *
+ * When true: tapping "remove" opens a reason-required prompt and calls the
+ * new remove_community_member RPC instead; a removed (not banned) row in the
+ * removed-members list gets an "undo" action calling restore_community_member.
+ * Both RPCs are defined in
+ * supabase/migrations/20260904000000_community_member_removal_reason_and_restore.sql
+ * (DRAFT, not applied) -- do not flip this on for a real build until that
+ * migration is reviewed and applied to prod.
+ *
+ * Local dev: set EXPO_PUBLIC_MEMBER_REMOVAL_REASON_ENABLED=true in
+ * .env.local (gitignored). Env-driven and ships OFF wherever the var is
+ * unset (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const MEMBER_REMOVAL_REASON_ENABLED =
+  process.env.EXPO_PUBLIC_MEMBER_REMOVAL_REASON_ENABLED === 'true';
+
+/**
+ * Invite audience (Liz decision #6, 2026-09-03, the net-new half -- see
+ * clients/washed-up/LIZ-OPEN-QUESTIONS.md item 6 and lib/inviteAudience.ts).
+ * Lets a creator invite past attendees, followers, or community members to
+ * a NEW event, distinct from "Message attendees" (people already
+ * registered for THIS event, which has no send backend anywhere and is
+ * out of scope here).
+ *
+ * When false (default): no new tab appears on the event summary hub; this
+ * repo's screens are byte-identical to today.
+ *
+ * When true: the hub offers a real "invite people" screen with live,
+ * real preview counts per audience (read-only queries, no new tables). The
+ * screen's Send action stays disabled with a stated reason regardless of
+ * this flag -- there is no send backend for this either yet, and the
+ * "past attendees" audience specifically has an unresolved legal question
+ * (see the long comment at the top of lib/inviteAudience.ts) that this
+ * flag does not answer. Flipping this on is safe to review; it does not
+ * make anything sendable.
+ *
+ * Local dev: set EXPO_PUBLIC_INVITE_AUDIENCE_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const INVITE_AUDIENCE_ENABLED =
+  process.env.EXPO_PUBLIC_INVITE_AUDIENCE_ENABLED === 'true';
+
+/**
+ * Ticket transfer (Liz decision #15, 2026-09-03: "agree with the proposed
+ * transfer model"). See clients/washed-up/LIZ-OPEN-QUESTIONS.md item 15 and
+ * lib/ticketTransfer.ts.
+ *
+ * When false (default): no "transfer this ticket" affordance anywhere in
+ * the tickets flow; app/t/[code].tsx and app/tickets/transfer/[positionId].tsx
+ * still resolve as routes (a direct deep link is not blocked) but each
+ * checks this flag itself and renders a plain "not available" state instead
+ * of doing anything, since the backing RPCs do not exist in prod yet and
+ * would just fail loudly otherwise.
+ *
+ * When true: the current holder of a seat can start a transfer from their
+ * ticket, share the resulting washedup.app/t/<code> link, and the recipient
+ * claims it (answering any required per-attendee questions fresh -- the
+ * original attendee's answers are never reused). Backed entirely by
+ * supabase/migrations/20260904010000_ticket_transfer_draft.sql (DRAFT, not
+ * applied) -- do not flip this on for a real build until that migration is
+ * reviewed, applied to prod, AND legal has signed off on re-collecting a
+ * waiver/age-gate style question from a transfer recipient (Liz's own
+ * condition, not yet met by anything in this codebase).
+ *
+ * Local dev: set EXPO_PUBLIC_TICKET_TRANSFER_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const TICKET_TRANSFER_ENABLED =
+  process.env.EXPO_PUBLIC_TICKET_TRANSFER_ENABLED === 'true';

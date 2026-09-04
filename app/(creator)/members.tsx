@@ -13,8 +13,9 @@ import { Image } from 'expo-image';
 import { Check, X, ChevronRight, Search } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { CO_CREATOR_INVITES_ENABLED, MEMBER_INVITES_ENABLED } from '../../constants/FeatureFlags';
+import { CO_CREATOR_INVITES_ENABLED, MEMBER_INVITES_ENABLED, MEMBER_REMOVAL_REASON_ENABLED } from '../../constants/FeatureFlags';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
+import { MemberRemovalReasonModal } from '../../components/creator/MemberRemovalReasonModal';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import { formatEventDateLA } from '../../lib/laDate';
@@ -31,6 +32,8 @@ import {
   coCreatorRoleTag,
   reviewJoinRequest,
   removeMember,
+  removeMemberWithReason,
+  restoreMember,
   membersToCsv,
   type CommunityMemberRow,
 } from '../../lib/creatorMode';
@@ -41,6 +44,7 @@ export default function CreatorMembersScreen() {
   const [actingId, setActingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [removalTarget, setRemovalTarget] = useState<CommunityMemberRow | null>(null);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const community = useLedCommunity(access);
@@ -130,14 +134,40 @@ export default function CreatorMembersScreen() {
     }
   };
 
+  // Liz decision #10 (2026-09-03): removal requires a recorded reason, once
+  // MEMBER_REMOVAL_REASON_ENABLED is on. Flag off keeps today's plain
+  // confirm alert, byte-identical.
   const confirmRemove = (m: CommunityMemberRow) => {
     hapticLight();
+    if (MEMBER_REMOVAL_REASON_ENABLED) {
+      setRemovalTarget(m);
+      return;
+    }
     setAlertInfo({
       title: `Remove ${m.name ?? 'this member'}?`,
       message: 'They lose access to the community and its chat.',
       buttons: [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', onPress: () => act(() => removeMember(m.id), m.id) },
+      ],
+    });
+  };
+
+  const handleRemovalSubmit = (reason: string) => {
+    const target = removalTarget;
+    if (!target) return;
+    setRemovalTarget(null);
+    void act(() => removeMemberWithReason(target.id, reason), target.id);
+  };
+
+  const confirmRestore = (m: CommunityMemberRow) => {
+    hapticLight();
+    setAlertInfo({
+      title: `Undo removing ${m.name ?? 'this member'}?`,
+      message: 'They get their access back, including the community chat.',
+      buttons: [
+        { text: 'Never mind', style: 'cancel' },
+        { text: 'Undo removal', onPress: () => act(() => restoreMember(m.id), m.id) },
       ],
     });
   };
@@ -366,6 +396,19 @@ export default function CreatorMembersScreen() {
                     <Text style={styles.rowName}>{m.name ?? 'someone'}</Text>
                     <Text style={styles.rowMeta}>{m.status === 'banned' ? 'banned' : 'removed'}</Text>
                   </View>
+                  {/* Liz decision #10: undo only applies to a leader-initiated
+                      removal, never a platform ban (its own separate,
+                      appealable action). */}
+                  {MEMBER_REMOVAL_REASON_ENABLED && m.status === 'removed' && (
+                    <TouchableOpacity
+                      onPress={() => confirmRestore(m)}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Undo removing ${m.name ?? 'this member'}`}
+                    >
+                      <Text style={styles.removeLink}>undo</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))}
             </>
@@ -387,6 +430,15 @@ export default function CreatorMembersScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+      {MEMBER_REMOVAL_REASON_ENABLED && (
+        <MemberRemovalReasonModal
+          visible={!!removalTarget}
+          memberName={removalTarget?.name ?? null}
+          submitting={actingId === removalTarget?.id}
+          onCancel={() => setRemovalTarget(null)}
+          onSubmit={handleRemovalSubmit}
+        />
+      )}
     </SafeAreaView>
   );
 }

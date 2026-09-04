@@ -64,6 +64,7 @@ import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
+import { pendingTransferRoute } from '../lib/ticketTransfer';
 import { clearPendingDestination, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
 import { forgetAccount, rememberAccount } from '../lib/knownAccount';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
@@ -878,6 +879,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       // contained and error-swallowed so it cannot affect routing below.
       if (YOURS_PAGE_ENABLED && event === 'SIGNED_IN') {
         consumePendingReferral();
+      }
+
+      // A ticket-transfer code stashed while signed out (item 15, draft,
+      // not yet backed by an applied migration) cannot resolve itself like
+      // a referral -- claiming needs the recipient's fresh answers first --
+      // so this only routes back to the claim screen, it does not push()
+      // the primary auth-destination replace() above. NOT verified against
+      // a real device: this touches the same auth-routing file responsible
+      // for the 2026-08-31 signup regression, so treat this block as
+      // needing its own real sign-in walkthrough before it ships, same bar
+      // as everything else in this function.
+      if (event === 'SIGNED_IN') {
+        pendingTransferRoute().then((route) => {
+          if (route) router.push(route as never);
+        }).catch(() => {});
       }
 
       // Remember that an account lives on this device (never a token, just

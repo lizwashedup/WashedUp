@@ -56,9 +56,9 @@ describe('native feature flag contract', () => {
       GROUPS_ENABLED: true,
       COMMUNITIES_ENABLED: false,
       SCENE_DISCOVERY_ENABLED: true,
-      JOIN_GATE_ENABLED: false,
-      CHAT_DELETE_ENABLED: false,
-      MEMBER_STATE_ENABLED: false,
+      JOIN_GATE_ENABLED: true,
+      CHAT_DELETE_ENABLED: true,
+      MEMBER_STATE_ENABLED: true,
       CHAT_ENGINE_ENABLED: false,
       PLAN_CARD_ACTIVITY_FIRST_ENABLED: false,
     });
@@ -68,6 +68,9 @@ describe('native feature flag contract', () => {
     ['Yours', 'EXPO_PUBLIC_YOURS_PAGE_ENABLED', 'YOURS_PAGE_ENABLED'],
     ['Groups', 'EXPO_PUBLIC_GROUPS_ENABLED', 'GROUPS_ENABLED'],
     ['Scene discovery', 'EXPO_PUBLIC_SCENE_DISCOVERY_ENABLED', 'SCENE_DISCOVERY_ENABLED'],
+    ['join gate', 'EXPO_PUBLIC_JOIN_GATE_ENABLED', 'JOIN_GATE_ENABLED'],
+    ['chat deletion', 'EXPO_PUBLIC_CHAT_DELETE_ENABLED', 'CHAT_DELETE_ENABLED'],
+    ['member state', 'EXPO_PUBLIC_MEMBER_STATE_ENABLED', 'MEMBER_STATE_ENABLED'],
   ] as const)('%s rollback flag', (_name, envKey, flagKey) => {
     it.each([
       ['true', true],
@@ -82,9 +85,6 @@ describe('native feature flag contract', () => {
 
   describe.each([
     ['Communities', 'EXPO_PUBLIC_COMMUNITIES_ENABLED', 'COMMUNITIES_ENABLED'],
-    ['join gate', 'EXPO_PUBLIC_JOIN_GATE_ENABLED', 'JOIN_GATE_ENABLED'],
-    ['chat deletion', 'EXPO_PUBLIC_CHAT_DELETE_ENABLED', 'CHAT_DELETE_ENABLED'],
-    ['member state', 'EXPO_PUBLIC_MEMBER_STATE_ENABLED', 'MEMBER_STATE_ENABLED'],
     ['chat engine', 'EXPO_PUBLIC_CHAT_ENGINE_ENABLED', 'CHAT_ENGINE_ENABLED'],
     ['activity-first plan card', 'EXPO_PUBLIC_PLAN_CARD_ACTIVITY_FIRST_ENABLED', 'PLAN_CARD_ACTIVITY_FIRST_ENABLED'],
   ] as const)('%s opt-in flag', (_name, envKey, flagKey) => {

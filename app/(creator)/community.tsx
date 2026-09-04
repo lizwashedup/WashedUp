@@ -28,7 +28,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticWarning } from '../../lib/haptics';
-import { getCreatorAccess, getBroadcasts, isLeaderAccess, isAdminTierRole, creatorLandingRoute, publishCommunity, archiveCommunity, sendBroadcast } from '../../lib/creatorMode';
+import { getCreatorAccess, getBroadcasts, isLeaderAccess, isAdminTierRole, creatorLandingRoute, publishCommunity, archiveCommunity, sendBroadcast, buildCommunityPublicLink } from '../../lib/creatorMode';
 import { getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
@@ -169,6 +169,31 @@ export default function CreatorCommunityScreen() {
                 ) : (
                   <Text style={styles.publishBtnText}>publish your page</Text>
                 )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Liz decision #5, 2026-09-03: Community becomes the real home
+              base for the public page, so the draft banner above needs a
+              persistent published counterpart instead of just disappearing
+              once a page goes live -- otherwise this tab goes quiet exactly
+              when a creator most needs to find their link. */}
+          {community?.status === 'active' && (
+            <View style={styles.liveBanner}>
+              {/* LIZ COPY */}
+              <Text style={styles.liveBannerTitle}>your page is live</Text>
+              <Text style={styles.liveBannerBody} numberOfLines={1}>
+                {buildCommunityPublicLink(community.handle).replace('https://', '')}. anyone with the
+                link can open it.
+              </Text>
+              <TouchableOpacity
+                onPress={() => router.push('/creator/public-page' as never)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Manage your page"
+              >
+                {/* LIZ COPY */}
+                <Text style={styles.liveBannerLink}>manage your page &rarr;</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -357,6 +382,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   publishBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  liveBanner: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.gold,
+    padding: 14,
+    marginBottom: 20,
+  },
+  liveBannerTitle: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.darkWarm,
+    marginBottom: 4,
+  },
+  liveBannerBody: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    color: Colors.secondary,
+    lineHeight: LineHeights.bodySM,
+    marginBottom: 10,
+  },
+  liveBannerLink: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   title: {
     fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,

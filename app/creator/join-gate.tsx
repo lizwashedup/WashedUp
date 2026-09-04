@@ -243,7 +243,7 @@ export default function JoinGateScreen() {
                 </TouchableOpacity>
                 {joinPolicy === 'invite_only' && (
                   <Text style={styles.policyNote}>
-                    invite codes aren't built yet. for now, this reviews every request yourself, same as "you approve them".
+                    invite codes aren't built yet. for now, invite only works like "you approve them": you review every request.
                   </Text>
                 )}
               </>

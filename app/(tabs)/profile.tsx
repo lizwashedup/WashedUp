@@ -1043,14 +1043,23 @@ export default function ProfileScreen() {
             label: string;
             sublabel?: string;
             accent?: boolean;
+            mark?: string;
             onPress: () => void;
           }[] = [];
+          // Liz, 2026-09-03: with 2+ led communities these rows read as
+          // near-identical (same accent color, same "switch to X & your
+          // events" phrasing) -- the community name was the only thing
+          // telling them apart, buried mid-sentence. Each community now
+          // carries its own small identity mark (same pattern as the
+          // Menu identity card) so the rows are distinguishable at a glance,
+          // not just on a careful read.
           creatorAccess?.ledCommunities.forEach((c) => {
             creatorRows.push({
               key: c.id,
               label: `switch to ${c.name.toLowerCase()} & your events`,
               sublabel: c.status !== 'active' ? c.status : undefined,
               accent: true,
+              mark: c.name.slice(0, 1).toLowerCase(),
               onPress: () => {
                 setSelectedCommunityId(c.id);
                 router.replace('/(creator)/today');
@@ -1096,6 +1105,11 @@ export default function ProfileScreen() {
                     onPress={row.onPress}
                     activeOpacity={0.7}
                   >
+                    {row.mark && (
+                      <View style={styles.creatorRowMark}>
+                        <Text style={styles.creatorRowMarkLetter}>{row.mark}</Text>
+                      </View>
+                    )}
                     <View style={styles.settingsLabelStack}>
                       <Text
                         style={[
@@ -1300,6 +1314,19 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.warmGray,
     textTransform: 'capitalize',
+  },
+  creatorRowMark: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: Colors.accentSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  creatorRowMarkLetter: {
+    fontFamily: Fonts.display,
+    fontSize: FontSizes.bodyMD,
+    color: Colors.terracotta,
   },
   deleteAccountLink: {
     ...bodyMedium,

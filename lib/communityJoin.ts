@@ -28,7 +28,8 @@ export interface JoinAnswers {
 
 // LIZ COPY: fallbacks when a leader has not set their gate up yet
 export const FALLBACK_INTRO_QUESTION = 'introduce yourself. what should this community know about you?';
-export const FALLBACK_GUIDELINES_URL = 'https://washedup.app/guidelines';
+// Liz decision #10 (2026-09-03): one v1.1 guidelines doc everywhere.
+export const FALLBACK_GUIDELINES_URL = 'https://washedup.app/community-guidelines';
 
 export async function getJoinGate(communityId: string): Promise<JoinGate | null> {
   const { data, error } = await supabase

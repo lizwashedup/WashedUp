@@ -22,7 +22,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Users, DollarSign, MessageCircle, ChevronRight } from 'lucide-react-native';
+import { ArrowLeft, Users, UserPlus, DollarSign, MessageCircle, ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
@@ -30,6 +30,7 @@ import { hapticLight } from '../../lib/haptics';
 import { getOperatorEvent } from '../../lib/creatorEvents';
 import { countAttendees, getEventAttendees, getEventMoneySummary } from '../../lib/ticketAttendees';
 import { formatCents } from '../../lib/ticketing';
+import { INVITE_AUDIENCE_ENABLED } from '../../constants/FeatureFlags';
 
 /** Simple, honest status line: the real stored status plus whether the date
  *  has passed. Not the richer on_sale/sold_out vocabulary in
@@ -131,6 +132,20 @@ export default function EventSummaryScreen() {
             <Text style={styles.tabLabel}>money</Text>
             <ChevronRight size={18} color={Colors.textLight} strokeWidth={2} />
           </TouchableOpacity>
+
+          {INVITE_AUDIENCE_ENABLED && (
+            <TouchableOpacity
+              style={styles.tabRow}
+              onPress={() => { hapticLight(); router.push(`/creator/invite-audience?id=${id}` as never); }}
+              accessibilityRole="button"
+              accessibilityLabel="invite people"
+            >
+              <UserPlus size={20} color={Colors.terracotta} strokeWidth={2} />
+              {/* copy to the taste gate */}
+              <Text style={styles.tabLabel}>invite people</Text>
+              <ChevronRight size={18} color={Colors.textLight} strokeWidth={2} />
+            </TouchableOpacity>
+          )}
 
           <View style={[styles.tabRow, styles.tabRowDisabled]}>
             <MessageCircle size={20} color={Colors.textLight} strokeWidth={2} />

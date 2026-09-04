@@ -43,7 +43,7 @@ import { Check } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { EventAction, EventSpacing, EventSurface } from '../../../constants/EventDesign';
-import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, TICKET_TRANSFER_ENABLED } from '../../../constants/FeatureFlags';
 import { hapticLight, hapticSuccess, hapticError } from '../../../lib/haptics';
 import { logError } from '../../../lib/logger';
 import { eventStartIso, formatEventDateLA } from '../../../lib/laDate';
@@ -566,10 +566,28 @@ export default function OrderCompleteScreen() {
             {/* the door checks each seat's reference_code, so those are the only
                 codes worth printing; the order id is not a ticket. */}
             {order!.seats.filter((s) => !s.voided).map((s) => (
-              <Text key={s.id} style={styles.ref}>
-                {/* copy to the taste gate: per-seat label */}
-                {order!.qty > 1 ? `ticket ${s.position_index} · ` : ''}{s.reference_code}
-              </Text>
+              <View key={s.id} style={styles.refRow}>
+                <Text style={styles.ref}>
+                  {/* copy to the taste gate: per-seat label */}
+                  {order!.qty > 1 ? `ticket ${s.position_index} · ` : ''}{s.reference_code}
+                </Text>
+                {/* item 15, 2026-09-04: TICKET_TRANSFER_ENABLED gates this off
+                    everywhere until the draft migration lands (see
+                    supabase/migrations/20260904010000_ticket_transfer_draft.sql) */}
+                {TICKET_TRANSFER_ENABLED && order!.status === 'paid' && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      hapticLight();
+                      router.push(`/tickets/transfer/${s.id}` as never);
+                    }}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                  >
+                    {/* copy to the taste gate */}
+                    <Text style={styles.transferLink}>transfer this ticket</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             ))}
 
             {!done && unansweredQuestions.length > 0 && (
@@ -679,6 +697,8 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginTop: 4,
   },
   ref: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginTop: EventSpacing.sm, letterSpacing: 1 },
+  refRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: EventSpacing.sm },
+  transferLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta, marginTop: EventSpacing.sm },
   settlingNote: {
     fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium,
     marginTop: EventSpacing.sm, textAlign: 'center',

@@ -295,12 +295,13 @@ export const COPY = {
   // the hood: it drops the chat from YOUR list only, the other person keeps
   // their copy, and messaging again starts a fresh thread. Every string in
   // this block is a placeholder.
-  dmDeleteTitle: 'Delete this chat?', // LIZ COPY
+  // Approved as drafted, Liz decision #2, 2026-09-03.
+  dmDeleteTitle: 'Delete this chat?',
   dmDeleteBody: (name: string) =>
-    `This deletes the chat from your list. ${name} keeps their copy. Messaging them again starts a new chat.`, // LIZ COPY
-  dmDeleteKeep: 'Keep it', // LIZ COPY
-  dmDeleteGo: 'Delete', // LIZ COPY
-  dmDeleteError: "Couldn't delete just now. Try again.", // LIZ COPY
+    `${name} keeps their copy of this chat. Message them again and it starts fresh.`,
+  dmDeleteKeep: 'Keep',
+  dmDeleteGo: 'Delete',
+  dmDeleteError: "Couldn't delete just now. Try again.",
   // Load failure.
   circleLoadError: "This circle didn't load.",
   // Circle chat (the shared chat surface) + its header.

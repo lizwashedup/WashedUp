@@ -15,7 +15,7 @@ const requiredText = ['tester', 'device', 'tested_at', 'app_version'];
 const authorizedTesters = new Set(['Josh', 'Liz']);
 const requiredArtifacts = ['testflight', 'chat_and_notifications', 'creator_and_tickets', 'ticket_email'];
 const requiredChecks = [
-  'testflight_build_35_visible',
+  'testflight_build_37_visible',
   'app_opens',
   'topic_text_seen_by_second_account',
   'topic_photo_seen_and_notification_nonblank',
@@ -38,7 +38,7 @@ const failures = [];
 for (const key of requiredText) {
   if (typeof evidence[key] !== 'string' || evidence[key].trim() === '') failures.push(`missing ${key}`);
 }
-if (evidence.build_number !== 35) failures.push('build_number must be 35');
+if (evidence.build_number !== 37) failures.push('build_number must be 37');
 if (evidence.app_version !== '1.0.6') failures.push('app_version must be 1.0.6');
 if (!authorizedTesters.has(evidence.tester)) failures.push('tester must be Josh or Liz');
 const testedAt = Date.parse(evidence.tested_at);

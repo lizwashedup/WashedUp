@@ -5,12 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-local}"
 EXPECTED_TICKET_DRAIN_SHA="86592aed95f1f51412f93ca48cb4790455381a5aef95772e7a0bc85b363c2984"
 EXPECTED_TICKET_RESEND_SHA="fafb70d0774e427f3fea7aa7ec2b6b513dd2ac7d81827eba56446fb55e67e349"
-# 2026-09-03: app.json moved to buildNumber 37 without this pin being updated,
-# so this script would have certified a stale build as "the" threshold build.
-# PENDING until 37 is confirmed installed and working on a real device -- fill
-# in its real build id and commit then, don't guess them now.
-EXPECTED_BUILD_ID="PENDING_BUILD"
-EXPECTED_BUILD_COMMIT="PENDING_COMMIT"
+# 2026-09-03: filled in from `eas build:view` against the real finished build 37
+# (started by jfreedm2026, finished 11:19 AM). Still PENDING on a human: nobody
+# has confirmed this build actually installs and works on a real device yet.
+EXPECTED_BUILD_ID="d8b6a051-d0a0-4d4c-ba95-eb0061a51661"
+EXPECTED_BUILD_COMMIT="d041805691b0f0514ba793d5cc5831a5b9a8d026"
 EXPECTED_BUILD_NUMBER="37"
 
 pass() {

@@ -953,17 +953,19 @@ export async function getPublicTicketSummary(eventId: string): Promise<PublicTic
  * "Low inventory" as its own honest state, not just a raw count (inventory
  * mapping pass 2026-08-19: getPublicTicketSummary computed real scarcity but
  * nothing rendered it as a DISTINCT state, only ever the plain "X of Y left"
- * line). Threshold mirrors the app's own existing urgency convention
- * (components/plans/PlanCard.tsx showSpotsLeftBadge: capped at 2 for a small
- * RSVP cap) but scales for ticket tiers, which can run into the hundreds: 20%
- * of cap or 3 seats, whichever is more forgiving, floor of 1 (0 is "sold
- * out", a different state entirely). LIZ COPY/threshold: proposed, not a
- * founder-gate item — same taste-gate convention as every other number and
- * string in this file.
+ * line). 0 is "sold out", a different state entirely, never "low".
+ *
+ * Threshold per Liz decision #16 (2026-09-03): "flag at 90% sold, then tune
+ * that threshold when real sales data exists" -- 10% or fewer left. No flag
+ * at all for uncapped events (callers should only pass capped tiers in, same
+ * as getTierAvailability's own contract below). Math.ceil rather than floor
+ * so a small cap (e.g. 5) still gets a real low-inventory state instead of a
+ * dead zone that never fires before sold-out -- a starting number, not a
+ * measured one, exactly as Liz's own approval frames it.
  */
 export function isLowInventory(left: number, cap: number): boolean {
   if (left <= 0 || cap <= 0) return false;
-  return left <= Math.max(3, Math.ceil(cap * 0.2));
+  return left <= Math.ceil(cap * 0.1);
 }
 
 /**

@@ -739,6 +739,35 @@ export async function removeMember(memberRowId: string): Promise<void> {
   if (!count) throw new Error('Could not remove that member.');
 }
 
+/**
+ * Liz decision #10 (2026-09-03): removal requires a recorded reason. Calls
+ * the remove_community_member RPC (supabase/migrations/20260904000000_*),
+ * which enforces the same active+member guard as removeMember() above plus
+ * a non-empty reason, and records reason/timestamp/actor server-side. Behind
+ * MEMBER_REMOVAL_REASON_ENABLED -- do not call unless that flag is on.
+ */
+export async function removeMemberWithReason(memberRowId: string, reason: string): Promise<void> {
+  const { error } = await supabase.rpc('remove_community_member', {
+    p_member_id: memberRowId,
+    p_reason: reason,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Liz decision #10 (2026-09-03): the leader can undo their own removal.
+ * Calls the restore_community_member RPC, which refuses anything that isn't
+ * a leader-initiated 'removed' row -- a platform ban never restores from
+ * here. Behind MEMBER_REMOVAL_REASON_ENABLED -- do not call unless that flag
+ * is on.
+ */
+export async function restoreMember(memberRowId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_community_member', {
+    p_member_id: memberRowId,
+  });
+  if (error) throw error;
+}
+
 // -- broadcasts ---------------------------------------------------------------
 
 export interface BroadcastRow {

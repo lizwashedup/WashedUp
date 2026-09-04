@@ -373,7 +373,9 @@ export default function SignupScreen() {
                     <Text style={styles.agreementLink}>privacy policy</Text>
                   </TouchableOpacity>
                   <Text style={styles.agreementText}>, and </Text>
-                  <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/guidelines'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+                  {/* Liz decision #10 (2026-09-03): one v1.1 guidelines doc
+                      everywhere, matching (auth)/phone-entry.tsx's link. */}
+                  <TouchableOpacity onPress={() => { Linking.openURL('https://washedup.app/community-guidelines'); triggerHaptic(); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
                     <Text style={styles.agreementLink}>community guidelines</Text>
                   </TouchableOpacity>
                   <Text style={styles.agreementText}>.</Text>

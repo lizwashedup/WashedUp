@@ -3,16 +3,16 @@
   "device": "physical iPhone model and iOS version",
   "tested_at": "2026-08-29T00:00:00.000Z",
   "app_version": "1.0.6",
-  "build_number": 35,
+  "build_number": 37,
   "test_order_id": "00000000-0000-4000-8000-000000000000",
   "artifacts": {
-    "testflight": "artifacts/testflight-build-35.png",
+    "testflight": "artifacts/testflight-build-37.png",
     "chat_and_notifications": "artifacts/chat-notification-walkthrough.mov",
     "creator_and_tickets": "artifacts/creator-ticket-walkthrough.mov",
     "ticket_email": "artifacts/ticket-email.png"
   },
   "checks": {
-    "testflight_build_35_visible": false,
+    "testflight_build_37_visible": false,
     "app_opens": false,
     "topic_text_seen_by_second_account": false,
     "topic_photo_seen_and_notification_nonblank": false,
