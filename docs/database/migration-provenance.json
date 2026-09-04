@@ -62,6 +62,11 @@
       "file": "supabase/migrations/20260904020000_ticket_transfer_draft.sql",
       "reason": "2026-09-03 Liz decision #15 build: ticket transfer (current_holder_user_id, ticket_transfers audit table, start/cancel/preview/claim RPCs). claim_ticket_transfer re-collects required per-attendee questions fresh from the new holder, including any age-gate or waiver question -- Liz explicitly required real legal review of that specific handling before release, which has not happened. Also not tested against any live Postgres, and its one production-code touch (app/_layout.tsx post-sign-in routing for a stashed transfer code) lands in the same file implicated in the 2026-08-31 signup regression -- kept minimal on purpose but not yet proven via a real device walkthrough.",
       "source": "supabase/migrations/20260904020000_ticket_transfer_draft.sql"
+    },
+    {
+      "file": "supabase/migrations/20260904030000_waitlist_priority_enforcement.sql",
+      "reason": "2026-09-04 real Liz bug report (WhatsApp): a freed plan spot was going straight to the general public instead of giving the waitlist real priority. Redefines join_event_atomic to reject a non-waitlisted caller while another user holds an active, unexpired waitlist_spot notification for that event, reusing the existing notify_waitlist_on_spot_open / create_waitlist_spot_notification pipeline unchanged. Ships with an in-migration self-test that exercises the real trigger chain against 4 real non-admin users, but has not been run against any live Postgres -- no local Supabase sandbox was available this session (auth.users/auth.uid() aren't provisioned by a bare disposable container). Needs a real local or staging apply-and-test pass before Josh reviews it for production.",
+      "source": "supabase/migrations/20260904030000_waitlist_priority_enforcement.sql"
     }
   ],
   "unresolved_versions": [

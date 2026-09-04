@@ -985,6 +985,9 @@ export default function PlanDetailScreen() {
       if (error) throw error;
       if (data === 'full') throw new Error('This plan is full. Try joining the waitlist.');
       if (data === 'not_found') throw new Error('This plan no longer exists.');
+      if (data === 'waitlist_priority') {
+        throw new Error("This spot's saved for the waitlist right now. Check back in a bit!");
+      }
 
       const { error: sysError } = await supabase.from('messages').insert({
         event_id: id,
