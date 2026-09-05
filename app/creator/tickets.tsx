@@ -41,8 +41,6 @@ import {
   getTiers,
   isLowInventory,
   isPayoutReady,
-  createQuestion,
-  updateQuestion,
   retireQuestion,
   questionTypeLabel,
   QUESTIONS_MAX,
@@ -72,7 +70,6 @@ import {
 } from '../../lib/ticketPromosAddons';
 import { PayoutsCard } from '../../components/creator/PayoutsCard';
 import { TierEditorSheet } from '../../components/creator/TierEditorSheet';
-import { QuestionEditorSheet, type QuestionDraft } from '../../components/creator/QuestionEditorSheet';
 import { PromotionEditorSheet } from '../../components/creator/PromotionEditorSheet';
 import { AddonEditorSheet } from '../../components/creator/AddonEditorSheet';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -90,8 +87,6 @@ export default function TicketSetupScreen() {
   // only makes that already-shipped free path an explicit, named choice
   // instead of something a creator has to discover by leaving price blank.
   const [newTierPreset, setNewTierPreset] = useState<string | undefined>(undefined);
-  const [questionEditorVisible, setQuestionEditorVisible] = useState(false);
-  const [editingQuestion, setEditingQuestion] = useState<TicketQuestion | null>(null);
   const [onboardBusy, setOnboardBusy] = useState(false);
   const [faqQuestion, setFaqQuestion] = useState('');
   const [faqAnswer, setFaqAnswer] = useState('');
@@ -191,25 +186,6 @@ export default function TicketSetupScreen() {
   const invalidateQuestions = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['ticket-questions', id] });
   }, [queryClient, id]);
-
-  const saveQuestionMutation = useMutation({
-    mutationFn: async (draft: QuestionDraft) => {
-      const result = editingQuestion
-        ? await updateQuestion(editingQuestion.id, draft)
-        : await createQuestion(id!, draft, questions.length);
-      if (!result.ok) throw new Error(result.message ?? 'save failed');
-    },
-    onSuccess: () => {
-      hapticSuccess();
-      setQuestionEditorVisible(false);
-      setEditingQuestion(null);
-      invalidateQuestions();
-    },
-    onError: (e: any) => {
-      hapticError();
-      setAlertInfo({ title: 'that did not save', message: e?.message ?? 'give it another try.' });
-    },
-  });
 
   const handleRemoveQuestion = useCallback((question: TicketQuestion) => {
     setAlertInfo({
@@ -812,8 +788,7 @@ export default function TicketSetupScreen() {
               style={styles.tierCard}
               onPress={() => {
                 hapticLight();
-                setEditingQuestion(q);
-                setQuestionEditorVisible(true);
+                router.push(`/creator/question-editor?id=${id}&questionId=${q.id}` as never);
               }}
               activeOpacity={0.85}
             >
@@ -833,8 +808,7 @@ export default function TicketSetupScreen() {
           onPress={() => {
             if (questionsFull) return;
             hapticLight();
-            setEditingQuestion(null);
-            setQuestionEditorVisible(true);
+            router.push(`/creator/question-editor?id=${id}&questionId=new` as never);
           }}
           disabled={questionsFull}
           activeOpacity={0.85}
@@ -884,17 +858,6 @@ export default function TicketSetupScreen() {
           setEditorVisible(false);
           setEditingTier(null);
           setNewTierPreset(undefined);
-        }}
-      />
-
-      <QuestionEditorSheet
-        visible={questionEditorVisible}
-        question={editingQuestion}
-        busy={saveQuestionMutation.isPending}
-        onSave={(draft) => saveQuestionMutation.mutate(draft)}
-        onClose={() => {
-          setQuestionEditorVisible(false);
-          setEditingQuestion(null);
         }}
       />
 
