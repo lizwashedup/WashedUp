@@ -25,6 +25,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { CONFIGURABLE_JOIN_QUESTIONS_ENABLED } from '../../constants/FeatureFlags';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
@@ -33,6 +34,7 @@ import {
   FALLBACK_INTRO_QUESTION,
   requestToJoinCommunity,
   validateJoinAnswers,
+  type JoinAnswers,
   type JoinGate,
 } from '../../lib/communityJoin';
 import { getLeaderCards } from '../../lib/communityLeader';
@@ -59,12 +61,28 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
   const [email, setEmail] = useState('');
   const [zip, setZip] = useState('');
   const [introAnswer, setIntroAnswer] = useState('');
+  const [reasonAnswer, setReasonAnswer] = useState('');
+  const [sourceAnswer, setSourceAnswer] = useState('');
+  const [rulesConfirmed, setRulesConfirmed] = useState(false);
+  const [openAnswer, setOpenAnswer] = useState('');
   const [accepted, setAccepted] = useState(false);
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const introQuestion = gate.introQuestion ?? FALLBACK_INTRO_QUESTION;
   const guidelinesUrl = gate.guidelinesUrl ?? FALLBACK_GUIDELINES_URL;
+
+  // Liz decision #11 (2026-09-03): the flag ANDs against every one of the
+  // community's toggles here, once, so the rest of this component (render,
+  // validate, submit) never has to check CONFIGURABLE_JOIN_QUESTIONS_ENABLED
+  // itself -- a community's saved config can never surface early just
+  // because the flag flips before the migration does, or vice versa.
+  const effectiveConfig = {
+    askReason: CONFIGURABLE_JOIN_QUESTIONS_ENABLED && gate.askReason,
+    askSource: CONFIGURABLE_JOIN_QUESTIONS_ENABLED && gate.askSource,
+    askRulesConfirm: CONFIGURABLE_JOIN_QUESTIONS_ENABLED && gate.askRulesConfirm,
+    openQuestion: CONFIGURABLE_JOIN_QUESTIONS_ENABLED ? gate.openQuestion : null,
+  };
 
   // the 30a v1.3 disclosure names the operator literally through the
   // proposal-41 leader card (world-callable, works pre-join); until 41 is
@@ -77,15 +95,19 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
   });
 
   const handleSend = async () => {
-    const answers = {
+    const answers: JoinAnswers = {
       first_name: firstName,
       last_name: lastName,
       email,
       zip,
       intro_answer: introAnswer,
       guidelines_accepted: accepted,
+      ...(effectiveConfig.askReason ? { reason_answer: reasonAnswer } : {}),
+      ...(effectiveConfig.askSource ? { source_answer: sourceAnswer } : {}),
+      ...(effectiveConfig.askRulesConfirm ? { rules_confirmed: rulesConfirmed } : {}),
+      ...(effectiveConfig.openQuestion ? { open_answer: openAnswer } : {}),
     };
-    const invalid = validateJoinAnswers(answers);
+    const invalid = validateJoinAnswers(answers, effectiveConfig);
     if (invalid) {
       setProblem(invalid);
       return;
@@ -176,6 +198,69 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
               placeholderTextColor={Colors.inkSoft}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
+
+            {/* Liz decision #11 (2026-09-03): up to 3 more questions, each
+                only rendered when this community has turned it on. These
+                answers are never posted to chat -- only intro_answer above
+                ever is (review_community_join, unchanged). */}
+            {effectiveConfig.askReason && (
+              <>
+                <Text style={styles.fieldLabel}>why do you want to join?</Text>
+                <TextInput
+                  style={[styles.input, styles.inputMultiline]}
+                  value={reasonAnswer}
+                  onChangeText={setReasonAnswer}
+                  multiline
+                  maxLength={1000}
+                  placeholder="your reason for joining"
+                  placeholderTextColor={Colors.inkSoft}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+              </>
+            )}
+
+            {effectiveConfig.askSource && (
+              <>
+                <Text style={styles.fieldLabel}>how did you hear about this community?</Text>
+                <TextInput
+                  style={styles.input}
+                  value={sourceAnswer}
+                  onChangeText={setSourceAnswer}
+                  maxLength={500}
+                  placeholder="wherever you found us"
+                  placeholderTextColor={Colors.inkSoft}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+              </>
+            )}
+
+            {effectiveConfig.askRulesConfirm && (
+              <TouchableOpacity
+                style={styles.checkboxRow}
+                onPress={() => { hapticLight(); setRulesConfirmed((v) => !v); }}
+              >
+                <View style={[styles.checkbox, rulesConfirmed && styles.checkboxOn]}>
+                  {rulesConfirmed && <Check size={14} color={Colors.white} strokeWidth={3} />}
+                </View>
+                <Text style={styles.checkboxText}>I meet this community&apos;s membership requirement</Text>
+              </TouchableOpacity>
+            )}
+
+            {!!effectiveConfig.openQuestion && (
+              <>
+                <Text style={styles.fieldLabel}>{effectiveConfig.openQuestion}</Text>
+                <TextInput
+                  style={[styles.input, styles.inputMultiline]}
+                  value={openAnswer}
+                  onChangeText={setOpenAnswer}
+                  multiline
+                  maxLength={1000}
+                  placeholder="your answer"
+                  placeholderTextColor={Colors.inkSoft}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+              </>
+            )}
 
             <TouchableOpacity
               style={styles.checkboxRow}

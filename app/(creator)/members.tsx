@@ -305,11 +305,39 @@ export default function CreatorMembersScreen() {
                             <Text style={styles.answerIntro}>{answers.intro_answer}</Text>
                           </>
                         )}
+                        {/* Liz decision #11 (2026-09-03): only rendered when
+                            this community actually asked -- private to
+                            reviewers, never posted to chat. */}
+                        {!!answers.reason_answer && (
+                          <>
+                            <Text style={styles.answerLabel}>why they want to join</Text>
+                            <Text style={styles.answerIntro}>{answers.reason_answer}</Text>
+                          </>
+                        )}
+                        {!!answers.source_answer && (
+                          <>
+                            <Text style={styles.answerLabel}>how they heard about it</Text>
+                            <Text style={styles.answerIntro}>{answers.source_answer}</Text>
+                          </>
+                        )}
+                        {answers.rules_confirmed !== null && (
+                          <Text style={styles.answerLine}>
+                            {answers.rules_confirmed
+                              ? 'confirmed they meet the membership requirement'
+                              : 'did not confirm the membership requirement'}
+                          </Text>
+                        )}
+                        {!!answers.open_answer && (
+                          <>
+                            <Text style={styles.answerLabel}>{answers.open_question ?? 'their answer'}</Text>
+                            <Text style={styles.answerIntro}>{answers.open_answer}</Text>
+                          </>
+                        )}
                         {/* email and raw zip never reach this view (Liz's
                             call, doc 13; server-enforced once proposal 42
-                            lands): name, AREA, and the intro only. Unknown
-                            zip -> the line simply does not render (the
-                            intro-card treatment). */}
+                            lands): name, AREA, and the join-question answers
+                            only. Unknown zip -> the line simply does not
+                            render (the intro-card treatment). */}
                         {!!answers.area && (
                           <Text style={styles.answerLine}>from {answers.area}</Text>
                         )}

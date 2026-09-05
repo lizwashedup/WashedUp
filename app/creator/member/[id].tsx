@@ -220,12 +220,44 @@ export default function MemberDetailScreen() {
           </View>
         )}
 
-        {!!answers?.guidelines_accepted_at && (
+        {/* Liz decision #11 (2026-09-03): only rendered when this community
+            actually asked -- private to reviewers, never posted to chat. */}
+        {!!answers?.reason_answer && (
+          <>
+            <Text style={styles.sectionLabel}>why they wanted to join</Text>
+            <Text style={styles.answerLine}>{answers.reason_answer}</Text>
+          </>
+        )}
+
+        {!!answers?.source_answer && (
+          <>
+            <Text style={styles.sectionLabel}>how they heard about it</Text>
+            <Text style={styles.answerLine}>{answers.source_answer}</Text>
+          </>
+        )}
+
+        {!!answers?.open_answer && (
+          <>
+            <Text style={styles.sectionLabel}>{answers.open_question ?? 'their answer'}</Text>
+            <Text style={styles.answerLine}>{answers.open_answer}</Text>
+          </>
+        )}
+
+        {(!!answers?.guidelines_accepted_at || answers?.rules_confirmed != null) && (
           <>
             <Text style={styles.sectionLabel}>consent</Text>
-            <Text style={styles.answerLine}>
-              accepted the community guidelines on {formatEventDateLA(answers.guidelines_accepted_at)}
-            </Text>
+            {!!answers?.guidelines_accepted_at && (
+              <Text style={styles.answerLine}>
+                accepted the community guidelines on {formatEventDateLA(answers.guidelines_accepted_at)}
+              </Text>
+            )}
+            {answers?.rules_confirmed != null && (
+              <Text style={[styles.answerLine, answers?.guidelines_accepted_at ? { marginTop: 4 } : undefined]}>
+                {answers.rules_confirmed
+                  ? 'confirmed they meet the membership requirement'
+                  : 'did not confirm the membership requirement'}
+              </Text>
+            )}
           </>
         )}
 

@@ -1,10 +1,17 @@
 /**
- * Creator mode: the join gate settings (doc 09). The three things a leader
- * writes once and every joiner sees: the welcome message at the top of the
- * join popup, the intro question whose answer becomes the newcomer's
+ * Creator mode: the join gate settings (doc 09). The three original things a
+ * leader writes once and every joiner sees: the welcome message at the top
+ * of the join popup, the intro question whose answer becomes the newcomer's
  * introduction in chat, and the guidelines link behind the required
  * checkbox. Saved straight to communities through leader RLS. Functionally
  * minimal per decision 15a.
+ *
+ * Liz decision #11 (2026-09-03) adds up to 3 more optional questions behind
+ * CONFIGURABLE_JOIN_QUESTIONS_ENABLED: a private reason-for-joining toggle, a
+ * private source toggle, a rules-confirmation toggle (only offered when this
+ * community has a real eligibility restriction), and one leader-authored
+ * open-ended question. Saved separately from the three original fields (see
+ * updateJoinQuestionsConfig) so an unmigrated column can never break them.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -29,9 +36,22 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
-import { getCreatorAccess, canManageMembers, creatorLandingRoute, getJoinGateSettings, updateJoinGateSettings, getJoinPolicy, setJoinPolicy, getCommunityMemberCounts, type JoinPolicy } from '../../lib/creatorMode';
+import {
+  getCreatorAccess,
+  canManageMembers,
+  creatorLandingRoute,
+  getJoinGateSettings,
+  updateJoinGateSettings,
+  getJoinPolicy,
+  setJoinPolicy,
+  getCommunityMemberCounts,
+  getJoinQuestionsConfig,
+  updateJoinQuestionsConfig,
+  getCommunityRestrictedGender,
+  type JoinPolicy,
+} from '../../lib/creatorMode';
 import { useLedCommunity } from '../../lib/selectedCommunity';
-import { JOIN_GATE_ENABLED } from '../../constants/FeatureFlags';
+import { JOIN_GATE_ENABLED, CONFIGURABLE_JOIN_QUESTIONS_ENABLED } from '../../constants/FeatureFlags';
 import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
 
 export default function JoinGateScreen() {
@@ -41,6 +61,12 @@ export default function JoinGateScreen() {
   const [question, setQuestion] = useState('');
   const [guidelines, setGuidelines] = useState('');
   const [seeded, setSeeded] = useState(false);
+  // Liz decision #11 (2026-09-03): up to 3 more optional questions.
+  const [askReason, setAskReason] = useState(false);
+  const [askSource, setAskSource] = useState(false);
+  const [askRulesConfirm, setAskRulesConfirm] = useState(false);
+  const [openQuestion, setOpenQuestion] = useState('');
+  const [questionsSeeded, setQuestionsSeeded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
@@ -75,6 +101,23 @@ export default function JoinGateScreen() {
     queryKey: ['creator-member-counts', community?.id],
     queryFn: () => getCommunityMemberCounts(community!.id),
     enabled: !!community,
+  });
+
+  // Liz decision #11 (2026-09-03): self-flipping, same double-gate shape as
+  // join_policy above -- hidden until both the flag is on AND the column
+  // read succeeds.
+  const { data: questionsConfig = null } = useQuery({
+    queryKey: ['join-questions-config', community?.id],
+    queryFn: () => getJoinQuestionsConfig(community!.id),
+    enabled: !!community && CONFIGURABLE_JOIN_QUESTIONS_ENABLED,
+  });
+
+  // Gates the rules-confirmation toggle: only offered when this community
+  // actually has a real eligibility restriction (Liz's own condition).
+  const { data: restrictedGender = null } = useQuery({
+    queryKey: ['community-restricted-gender', community?.id],
+    queryFn: () => getCommunityRestrictedGender(community!.id),
+    enabled: !!community && CONFIGURABLE_JOIN_QUESTIONS_ENABLED,
   });
 
   const commitJoinPolicy = async (policy: JoinPolicy) => {
@@ -118,6 +161,16 @@ export default function JoinGateScreen() {
     }
   }, [settings, seeded]);
 
+  useEffect(() => {
+    if (questionsConfig && !questionsSeeded) {
+      setAskReason(questionsConfig.askReason);
+      setAskSource(questionsConfig.askSource);
+      setAskRulesConfirm(questionsConfig.askRulesConfirm);
+      setOpenQuestion(questionsConfig.openQuestion ?? '');
+      setQuestionsSeeded(true);
+    }
+  }, [questionsConfig, questionsSeeded]);
+
   const handleSave = async () => {
     if (!community || saving) return;
     const url = guidelines.trim();
@@ -132,6 +185,20 @@ export default function JoinGateScreen() {
         join_intro_question: question,
         guidelines_url: guidelines,
       });
+      // Liz decision #11: a separate write (different columns, same table),
+      // only attempted once the section has actually loaded -- questionsConfig
+      // null means either the flag is off or the migration has not landed,
+      // and in both cases the section above never rendered so there is
+      // nothing here for the leader to have changed.
+      if (CONFIGURABLE_JOIN_QUESTIONS_ENABLED && questionsConfig) {
+        await updateJoinQuestionsConfig(community.id, {
+          askReason,
+          askSource,
+          askRulesConfirm,
+          openQuestion: openQuestion.trim() || null,
+        });
+        queryClient.invalidateQueries({ queryKey: ['join-questions-config', community.id] });
+      }
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: settingsKey });
       setAlertInfo({ title: 'saved', message: 'your join gate is set. every joiner sees it.' });
@@ -264,6 +331,65 @@ export default function JoinGateScreen() {
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
+            {/* Liz decision #11 (2026-09-03): up to 5 questions total,
+                counting the intro question above -- none of these are
+                required for every community. */}
+            {CONFIGURABLE_JOIN_QUESTIONS_ENABLED && questionsConfig !== null && (
+              <>
+                <Text style={styles.fieldLabel}>more questions</Text>
+                <Text style={styles.fieldHint}>
+                  up to 5 questions total, including your intro question above.
+                  turn on whichever ones you want -- none of these are required.
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.policyPill, styles.policyPillWide, askReason && styles.policyPillOn]}
+                  onPress={() => { hapticLight(); setAskReason((v) => !v); }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.policyText, askReason && styles.policyTextOn]}>
+                    ask their reason for joining
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.policyPill, styles.policyPillWide, askSource && styles.policyPillOn]}
+                  onPress={() => { hapticLight(); setAskSource((v) => !v); }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.policyText, askSource && styles.policyTextOn]}>
+                    ask how they heard about you
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Liz's own condition: only offered when this community has
+                    a genuine eligibility restriction. */}
+                {restrictedGender !== null && (
+                  <TouchableOpacity
+                    style={[styles.policyPill, styles.policyPillWide, askRulesConfirm && styles.policyPillOn]}
+                    onPress={() => { hapticLight(); setAskRulesConfirm((v) => !v); }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.policyText, askRulesConfirm && styles.policyTextOn]}>
+                      require a rules confirmation
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                <Text style={[styles.fieldLabel, { marginTop: 12 }]}>your own question</Text>
+                <Text style={styles.fieldHint}>write one more question, or leave this blank to skip it.</Text>
+                <TextInput
+                  style={styles.input}
+                  value={openQuestion}
+                  onChangeText={setOpenQuestion}
+                  maxLength={200}
+                  placeholder="ask anything else you want to know"
+                  placeholderTextColor={Colors.inkSoft}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+              </>
+            )}
+
             <Text style={styles.fieldLabel}>guidelines link</Text>
             <Text style={styles.fieldHint}>
               joiners accept these before they can ask. leave empty to use the
@@ -305,6 +431,10 @@ export default function JoinGateScreen() {
             welcomeMessage: welcome || null,
             introQuestion: question || null,
             guidelinesUrl: guidelines || null,
+            askReason,
+            askSource,
+            askRulesConfirm,
+            openQuestion: openQuestion.trim() || null,
           }}
           joinsInstantly={joinPolicy === 'open'}
           onClose={() => setPreviewVisible(false)}

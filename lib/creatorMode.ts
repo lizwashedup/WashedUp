@@ -331,6 +331,28 @@ export async function setCommunityDiscoverable(
   return !error && !!count;
 }
 
+/**
+ * Whether this community has a genuine eligibility restriction (Liz decision
+ * #11, 2026-09-03: the join gate's rules-confirmation question is only
+ * offered "when the community has a genuine eligibility restriction").
+ * Backed by communities.restricted_gender
+ * (supabase/migrations/20260901080000_gender_restricted_communities.sql,
+ * DRAFT -- not applied). SELF-FLIPPING, same mechanism as getJoinPolicy /
+ * getCommunityDiscoverable above: until that migration lands, the select
+ * errors (42703) and this returns null, so "no restriction" is simply true
+ * today -- no community can be restricted before the column exists.
+ */
+export async function getCommunityRestrictedGender(communityId: string): Promise<RestrictedGender | null> {
+  const { data, error } = await supabase
+    .from('communities')
+    .select('restricted_gender')
+    .eq('id', communityId)
+    .maybeSingle();
+  if (error || !data) return null; // column absent (42703) or unreadable = no restriction
+  const v = (data as { restricted_gender?: string | null }).restricted_gender;
+  return v === 'woman' || v === 'man' ? v : null;
+}
+
 export interface CommunityMemberRow {
   id: string;
   user_id: string;
@@ -575,6 +597,13 @@ export interface JoinAnswerCard {
   area: string | null;
   intro_answer: string | null;
   guidelines_accepted_at: string | null;
+  /** Liz decision #11 (2026-09-03): null on every card until a community turns a slot on. */
+  reason_answer: string | null;
+  source_answer: string | null;
+  rules_confirmed: boolean | null;
+  /** The leader's current custom prompt text, so a reviewer sees what was actually asked. */
+  open_question: string | null;
+  open_answer: string | null;
 }
 
 export async function getJoinAnswerCards(
@@ -593,11 +622,21 @@ export async function getJoinAnswerCards(
           area: c.area ?? null,
           intro_answer: c.intro_answer ?? null,
           guidelines_accepted_at: c.guidelines_accepted_at ?? null,
+          reason_answer: c.reason_answer ?? null,
+          source_answer: c.source_answer ?? null,
+          rules_confirmed: c.rules_confirmed ?? null,
+          open_question: c.open_question ?? null,
+          open_answer: c.open_answer ?? null,
         },
       ]),
     );
   }
-  // pre-42 fallback: the leader RLS table read still works; same card shape
+  // pre-42 fallback: the leader RLS table read still works; same card shape.
+  // open_question is always null here (no join to communities in this
+  // fallback path) -- a real gap only for an admin hitting this branch on a
+  // community with the custom question configured, harmless otherwise since
+  // this fallback is already dead for a non-admin leader post-42 (RLS narrows
+  // the raw table to the answer's own user or an admin).
   const { data: rows, error: tableError } = await supabase
     .from('community_member_answers')
     .select('member_id, answers')
@@ -605,15 +644,20 @@ export async function getJoinAnswerCards(
   if (tableError) throw tableError;
   return new Map(
     (rows ?? []).map((r: any) => {
-      const a = (r.answers ?? {}) as Record<string, string>;
+      const a = (r.answers ?? {}) as Record<string, unknown>;
       return [
         r.member_id,
         {
-          first_name: a.first_name ?? null,
-          last_name: a.last_name ?? null,
-          area: areaFromZip(a.zip),
-          intro_answer: a.intro_answer ?? null,
-          guidelines_accepted_at: a.guidelines_accepted_at ?? null,
+          first_name: (a.first_name as string) ?? null,
+          last_name: (a.last_name as string) ?? null,
+          area: areaFromZip(a.zip as string),
+          intro_answer: (a.intro_answer as string) ?? null,
+          guidelines_accepted_at: (a.guidelines_accepted_at as string) ?? null,
+          reason_answer: (a.reason_answer as string) ?? null,
+          source_answer: (a.source_answer as string) ?? null,
+          rules_confirmed: typeof a.rules_confirmed === 'boolean' ? a.rules_confirmed : null,
+          open_question: null,
+          open_answer: (a.open_answer as string) ?? null,
         },
       ];
     }),
@@ -701,6 +745,74 @@ export async function updateJoinGateSettings(
     .eq('id', communityId);
   if (error) throw error;
   if (!count) throw new Error('That did not save.');
+}
+
+// -- join questions config (Liz decision #11, 2026-09-03): up to 3 more
+// optional toggles plus a leader-authored open-ended prompt, on top of the
+// always-on intro question above --
+
+export interface JoinQuestionsConfig {
+  askReason: boolean;
+  askSource: boolean;
+  askRulesConfirm: boolean;
+  openQuestion: string | null;
+}
+
+/**
+ * SELF-FLIPPING, same mechanism as getJoinPolicy / getCommunityDiscoverable:
+ * until 20260904040000_configurable_join_questions.sql lands, the select
+ * errors (42703) and this returns null, so the join-gate screen's "more
+ * questions" section stays hidden -- no dead control. Kept separate from
+ * getJoinGateSettings' own select (rather than merged into one query) so a
+ * column-absent error here can never break reading the three fields that
+ * already ship today.
+ */
+export async function getJoinQuestionsConfig(communityId: string): Promise<JoinQuestionsConfig | null> {
+  const { data, error } = await supabase
+    .from('communities')
+    .select('join_ask_reason, join_ask_source, join_ask_rules_confirm, join_open_question')
+    .eq('id', communityId)
+    .maybeSingle();
+  if (error || !data) return null; // column absent (42703) or unreadable = dormant
+  const row = data as {
+    join_ask_reason?: boolean | null;
+    join_ask_source?: boolean | null;
+    join_ask_rules_confirm?: boolean | null;
+    join_open_question?: string | null;
+  };
+  return {
+    askReason: row.join_ask_reason === true,
+    askSource: row.join_ask_source === true,
+    askRulesConfirm: row.join_ask_rules_confirm === true,
+    openQuestion: row.join_open_question?.trim() || null,
+  };
+}
+
+/**
+ * Leader-only by the communities_update RLS policy -- same plain-update
+ * shape as updateJoinGateSettings/setCommunityDiscoverable (no column-level
+ * grant restricts these columns; confirmed by reading the actual
+ * communities_update policy, a leader-or-admin row check with no per-column
+ * carve-out). Empty question text clears the fifth slot, same "empty clears
+ * a field" convention updateJoinGateSettings already uses.
+ */
+export async function updateJoinQuestionsConfig(
+  communityId: string,
+  config: JoinQuestionsConfig,
+): Promise<boolean> {
+  const { error, count } = await supabase
+    .from('communities')
+    .update(
+      {
+        join_ask_reason: config.askReason,
+        join_ask_source: config.askSource,
+        join_ask_rules_confirm: config.askRulesConfirm,
+        join_open_question: config.openQuestion?.trim() || null,
+      },
+      { count: 'exact' },
+    )
+    .eq('id', communityId);
+  return !error && !!count;
 }
 
 /**

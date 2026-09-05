@@ -527,7 +527,7 @@ export default function ProfileScreen() {
   const legalRows = [
     { icon: 'shield-outline', label: 'Privacy Policy', onPress: () => openExternal('https://washedup.app/privacy', 'profile.openPrivacy') },
     { icon: 'document-text-outline', label: 'Terms of Service', onPress: () => openExternal('https://washedup.app/terms', 'profile.openTerms') },
-    { icon: 'people-outline', label: 'Community Guidelines', onPress: () => openExternal('https://washedup.app/guidelines', 'profile.openGuidelines') },
+    { icon: 'people-outline', label: 'Community Guidelines', onPress: () => openExternal('https://washedup.app/community-guidelines', 'profile.openGuidelines') },
   ];
   const supportRows = [
     { icon: 'mail-outline', label: 'Contact Us', onPress: () => openExternal('mailto:hello@washedup.app', 'profile.openMailto') },
@@ -1046,26 +1046,41 @@ export default function ProfileScreen() {
             mark?: string;
             onPress: () => void;
           }[] = [];
-          // Liz, 2026-09-03: with 2+ led communities these rows read as
-          // near-identical (same accent color, same "switch to X & your
-          // events" phrasing) -- the community name was the only thing
-          // telling them apart, buried mid-sentence. Each community now
-          // carries its own small identity mark (same pattern as the
-          // Menu identity card) so the rows are distinguishable at a glance,
-          // not just on a careful read.
-          creatorAccess?.ledCommunities.forEach((c) => {
+          // Liz, 2026-09-04 (live, over the per-community "identity mark" fix
+          // above): distinguishing the rows wasn't the actual problem -- with
+          // 2+ led communities, every row lands in the same creator shell
+          // anyway (the CommunitySwitcher pills inside it already handle
+          // switching), so having one row per community just reads as
+          // duplicate buttons to the same place. Her exact words: "we need
+          // one button that says go to your communities." Collapse to one
+          // row once there are 2+; a single community keeps its own named
+          // row since there's nothing to collapse and no ambiguity.
+          const led = creatorAccess?.ledCommunities ?? [];
+          if (led.length >= 2) {
             creatorRows.push({
-              key: c.id,
-              label: `switch to ${c.name.toLowerCase()} & your events`,
-              sublabel: c.status !== 'active' ? c.status : undefined,
+              key: 'communities',
+              label: 'go to your communities',
               accent: true,
-              mark: c.name.slice(0, 1).toLowerCase(),
               onPress: () => {
-                setSelectedCommunityId(c.id);
+                setSelectedCommunityId(led[0].id);
                 router.replace('/(creator)/today');
               },
             });
-          });
+          } else {
+            led.forEach((c) => {
+              creatorRows.push({
+                key: c.id,
+                label: `switch to ${c.name.toLowerCase()} & your events`,
+                sublabel: c.status !== 'active' ? c.status : undefined,
+                accent: true,
+                mark: c.name.slice(0, 1).toLowerCase(),
+                onPress: () => {
+                  setSelectedCommunityId(c.id);
+                  router.replace('/(creator)/today');
+                },
+              });
+            });
+          }
           if (creatorAccess?.hasEventHostGrant) {
             creatorRows.push({
               key: 'event-host',

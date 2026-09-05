@@ -504,3 +504,43 @@ export const INVITE_AUDIENCE_ENABLED =
  */
 export const TICKET_TRANSFER_ENABLED =
   process.env.EXPO_PUBLIC_TICKET_TRANSFER_ENABLED === 'true';
+
+/**
+ * Configurable community join questions (Liz decision #11, 2026-09-03:
+ * "Allow leaders to configure up to five questions rather than requiring all
+ * five for every community"). See
+ * clients/washed-up/LIZ-OPEN-QUESTIONS.md item 11 and lib/communityJoin.ts.
+ *
+ * When false (default): the join gate and join popup behave exactly as
+ * shipped today -- name/email/zip/intro/guidelines-accept, nothing else. The
+ * join-gate settings screen (app/creator/join-gate.tsx) shows none of the
+ * three new toggles or the custom-question field.
+ *
+ * When true: a leader can turn on up to three more questions (a private
+ * reason for joining, a private "how did you hear about this" source
+ * question, and a rules-confirmation question -- the last only offered when
+ * the community actually has a real eligibility restriction, i.e.
+ * communities.restricted_gender reads back non-null, see
+ * getCommunityRestrictedGender in lib/creatorMode.ts) plus write a custom
+ * prompt for one optional open-ended question. The join popup renders only
+ * the questions a community has actually enabled, in that order, with the
+ * existing public intro always present first. As today, only the intro
+ * answer is ever posted into the community's main chat on approval -- every
+ * other answer stays visible only to the same reviewers who already see join
+ * requests (lib/creatorMode.ts's getJoinAnswerCards).
+ *
+ * Double-gated the same way JOIN_GATE_ENABLED and PUBLIC_PAGE_CONTROL_ENABLED
+ * are: even with this flag on, each data read is self-flipping (a
+ * column-absent error reads as "off"/null), so the flag cannot expose a dead
+ * control before the migration lands, and the migration cannot expose the
+ * control before the flag does. Backed by
+ * supabase/migrations/20260904040000_configurable_join_questions.sql (DRAFT,
+ * not applied) -- do not flip this on for a real build until that migration
+ * is reviewed and applied to prod.
+ *
+ * Local dev: set EXPO_PUBLIC_CONFIGURABLE_JOIN_QUESTIONS_ENABLED=true in
+ * .env.local (gitignored). Env-driven and ships OFF wherever the var is
+ * unset (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const CONFIGURABLE_JOIN_QUESTIONS_ENABLED =
+  process.env.EXPO_PUBLIC_CONFIGURABLE_JOIN_QUESTIONS_ENABLED === 'true';
