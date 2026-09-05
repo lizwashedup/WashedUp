@@ -9,6 +9,7 @@
  */
 
 import { supabase } from './supabase';
+import type { QuestionType, QuestionScope } from './ticketing';
 
 export interface DoorAttendee {
   positionId: string;
@@ -22,6 +23,12 @@ export interface DoorAttendee {
   voided: boolean;
   refundedCents: number;
   checkedIn: boolean;
+  /** cents paid for this seat's tier (CSV export core column, web parity) */
+  pricePaidCents: number;
+  /** most recent ADMITTED scan time, if any (CSV export core column) */
+  checkedInAt: string | null;
+  /** the seat's order settlement time (CSV export core column) */
+  purchasedAt: string | null;
 }
 
 export interface AttendeeCounts {
@@ -40,8 +47,8 @@ export async function getEventAttendees(eventId: string): Promise<DoorAttendee[]
     .from('ticket_order_positions')
     .select(
       'id, position_index, reference_code, voided_at, refunded_cents, ' +
-      'ticket_orders!inner ( id, event_id, buyer_name_snapshot, status, ticket_tiers ( name ) ), ' +
-      'ticket_checkins ( result )',
+      'ticket_orders!inner ( id, event_id, buyer_name_snapshot, status, unit_face_cents, paid_at, ticket_tiers ( name ) ), ' +
+      'ticket_checkins ( result, scanned_at )',
     )
     .eq('ticket_orders.event_id', eventId)
     .order('position_index', { ascending: true });
@@ -55,9 +62,18 @@ export async function getEventAttendees(eventId: string): Promise<DoorAttendee[]
       id?: string;
       buyer_name_snapshot?: string;
       status?: string;
+      unit_face_cents?: number;
+      paid_at?: string | null;
       ticket_tiers?: { name?: string } | null;
     } | null;
-    const checkins = (row.ticket_checkins as { result?: string }[] | null) ?? [];
+    const checkins = (row.ticket_checkins as { result?: string; scanned_at?: string }[] | null) ?? [];
+    // most recent ADMITTED scan wins, kept consistent with this function's own
+    // checkedIn gate just below (result === 'admitted') -- web's equivalent
+    // (organizerData.ts:376-382) takes the latest scan of ANY result, a looser
+    // definition this file does not otherwise use.
+    const admitted = checkins
+      .filter((c) => c.result === 'admitted')
+      .sort((a, b) => (b.scanned_at ?? '').localeCompare(a.scanned_at ?? ''))[0];
     return {
       positionId: row.id as string,
       orderId: order?.id ?? '',
@@ -69,6 +85,9 @@ export async function getEventAttendees(eventId: string): Promise<DoorAttendee[]
       voided: row.voided_at != null,
       refundedCents: (row.refunded_cents as number) ?? 0,
       checkedIn: checkins.some((c) => c.result === 'admitted'),
+      pricePaidCents: order?.unit_face_cents ?? 0,
+      checkedInAt: admitted?.scanned_at ?? null,
+      purchasedAt: order?.paid_at ?? null,
     };
   });
 }
@@ -159,4 +178,123 @@ export async function getEventMoneySummary(eventId: string): Promise<EventMoneyS
     payoutReleasedAt: (payoutRow as { released_at?: string | null } | null)?.released_at ?? null,
     payoutPaidAt: (payoutRow as { paid_at?: string | null } | null)?.paid_at ?? null,
   };
+}
+
+// ─── Screen 54 addendum (2026-09-05 spec §5): organizer-side questionnaire
+// answers, native's one real gap vs. web. Kept as separate reads from
+// getEventAttendees above (not folded into its query) so screens that never
+// show answers -- check-in, event money, the reconciliation rollup -- never
+// pay for two extra queries per event. Mirrors web's organizerData.ts
+// (BR-1/BR-2/BR-3).
+
+export interface AttendeeQuestion {
+  id: string;
+  prompt: string;
+  qtype: QuestionType;
+  scope: QuestionScope;
+  sortOrder: number;
+}
+
+/** Fixed answer-value shapes (Cowork 2026-07-26), mirrors web's answerToString (organizerData.ts:124-143). */
+export function answerToString(qtype: QuestionType, value: unknown): string {
+  if (value == null || typeof value !== 'object') return '';
+  const v = value as Record<string, unknown>;
+  switch (qtype) {
+    case 'short_text':
+    case 'paragraph':
+      return typeof v.text === 'string' ? v.text : '';
+    case 'single_select':
+    case 'dropdown':
+      return typeof v.choice === 'string' ? v.choice : '';
+    case 'multi_select':
+      return Array.isArray(v.choices) ? (v.choices as unknown[]).filter((c) => typeof c === 'string').join(', ') : '';
+    case 'terms':
+      return v.accepted
+        ? `accepted${typeof v.accepted_at === 'string' ? ` ${v.accepted_at}` : ''}`
+        : 'not accepted';
+    default:
+      return '';
+  }
+}
+
+/**
+ * BR-2: only active questions, ordered for display -- the response-review
+ * reader. A separate purpose from ticketing.ts's getQuestions() (question
+ * authoring): same table, same is_active filter, same precedent this repo
+ * already has for two readers of one table serving two different jobs.
+ */
+export async function getEventQuestions(eventId: string): Promise<AttendeeQuestion[]> {
+  const { data, error } = await supabase
+    .from('ticket_questions')
+    .select('id, prompt, qtype, scope, sort_order')
+    .eq('event_id', eventId)
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true });
+  if (error) return [];
+  return (data ?? []).map((q: any) => ({
+    id: q.id as string,
+    prompt: q.prompt as string,
+    qtype: q.qtype as QuestionType,
+    scope: q.scope as QuestionScope,
+    sortOrder: q.sort_order as number,
+  }));
+}
+
+export interface RawTicketAnswer {
+  orderId: string;
+  questionId: string;
+  attendeeIndex: number | null;
+  value: unknown;
+}
+
+/**
+ * Raw ticket_answers rows for a set of orders. Callers attach them to seats
+ * via attachAnswers() below -- kept separate so it's a no-op (no network
+ * call) for an event with no active questions, see attendees.tsx's enabled
+ * gate.
+ */
+export async function getEventAnswers(orderIds: string[]): Promise<RawTicketAnswer[]> {
+  if (orderIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('ticket_answers')
+    .select('order_id, question_id, attendee_index, value')
+    .in('order_id', orderIds);
+  if (error) return [];
+  return (data ?? []).map((r: any) => ({
+    orderId: r.order_id as string,
+    questionId: r.question_id as string,
+    attendeeIndex: r.attendee_index as number | null,
+    value: r.value,
+  }));
+}
+
+export interface DoorAttendeeWithAnswers extends DoorAttendee {
+  /** this seat's answers, keyed by question id, already stringified */
+  answers: Record<string, string>;
+}
+
+/**
+ * BR-1 (answer scoping), pure and synchronous: a per_attendee answer belongs
+ * to the one seat whose position_index matches the answer's attendee_index; a
+ * per_order answer (attendee_index null) belongs to every seat of that order.
+ * Mirrors web's getEventAttendeeData (organizerData.ts:424-437) exactly.
+ */
+export function attachAnswers(
+  attendees: DoorAttendee[],
+  questions: AttendeeQuestion[],
+  answerRows: RawTicketAnswer[],
+): DoorAttendeeWithAnswers[] {
+  const qById = new Map(questions.map((q) => [q.id, q]));
+  return attendees.map((a) => {
+    const answers: Record<string, string> = {};
+    for (const row of answerRows) {
+      if (row.orderId !== a.orderId) continue;
+      const q = qById.get(row.questionId);
+      if (!q) continue;
+      const wanted = q.scope === 'per_attendee' ? a.positionIndex : null;
+      if (row.attendeeIndex !== wanted) continue;
+      answers[q.id] = answerToString(q.qtype, row.value);
+    }
+    return { ...a, answers };
+  });
 }

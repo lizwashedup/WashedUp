@@ -13,7 +13,15 @@
 import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
 import type { PriceQuote } from './ticketPromosAddons';
-import { countAttendees, getEventAttendees, getEventMoneySummary, isLiveSeat, sumRefundedCentsOnPaidOrders } from './ticketAttendees';
+import {
+  countAttendees,
+  getEventAttendees,
+  getEventMoneySummary,
+  isLiveSeat,
+  sumRefundedCentsOnPaidOrders,
+  type AttendeeQuestion,
+  type DoorAttendeeWithAnswers,
+} from './ticketAttendees';
 
 /** PostgREST "relation does not exist": the proposal is not applied. */
 function isMissingSchema(code: string | undefined): boolean {
@@ -511,6 +519,49 @@ export function organizationPurchasesToCsv(purchases: OrganizationPurchase[]): s
     ].join(','),
   );
   return ['date,event,buyer,tier,qty,total,status,refunded', ...rows].join('\n');
+}
+
+/**
+ * Build 35 Screen 54 addendum (2026-09-05 spec §5): the Attendees screen's
+ * CSV export. Same escape+injection-guard shape as organizationPurchasesToCsv
+ * above (BR-5) -- a questionnaire answer is guest-authored free text, exactly
+ * the input class the guard exists for. BR-6: callers pass the CURRENTLY
+ * FILTERED attendee list, not the full fetched set -- a deliberate departure
+ * from this file's own "always full set" convention (see the comment on
+ * organizationPurchasesToCsv above), because this screen's filters exist to
+ * narrow who an organizer is looking at, and an export that ignored them
+ * would hand back rows the organizer had just excluded.
+ */
+export function attendeesToCsv(attendees: DoorAttendeeWithAnswers[], questions: AttendeeQuestion[]): string {
+  // Same guard as organizationPurchasesToCsv/membersToCsv: a cell starting
+  // with =, +, -, or @ would otherwise be read as a formula by Excel/Sheets.
+  const escape = (v: string) => {
+    const guarded = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+    return `"${guarded.replace(/"/g, '""')}"`;
+  };
+  const header = [
+    // "purchase", never "order", in anything a creator reads (CLAUDE.md
+    // backend-vocabulary rule) -- organizationPurchasesToCsv above sets this
+    // same precedent, keeping "order" out of its own visible header.
+    'reference_code', 'attendee_name', 'tier', 'price_paid', 'purchase_status',
+    'checked_in', 'checked_in_at', 'refunded', 'purchased_at',
+    ...questions.map((q) => q.prompt),
+  ];
+  const rows = attendees.map((a) =>
+    [
+      escape(a.referenceCode),
+      escape(a.buyerName),
+      escape(a.tierName ?? ''),
+      (a.pricePaidCents / 100).toFixed(2),
+      escape(a.orderStatus),
+      a.checkedIn ? 'yes' : 'no',
+      escape(a.checkedInAt ?? ''),
+      a.refundedCents > 0 || a.voided ? 'yes' : 'no',
+      escape(a.purchasedAt ?? ''),
+      ...questions.map((q) => escape(a.answers[q.id] ?? '')),
+    ].join(','),
+  );
+  return [header.map(escape).join(','), ...rows].join('\n');
 }
 
 export interface EventReconciliationRow {

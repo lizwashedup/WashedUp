@@ -8,11 +8,12 @@
  * icon, never colour alone; real 44pt controls; every count has a text label.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -22,13 +23,23 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, Ban, ScanLine } from 'lucide-react-native';
+import { ArrowLeft, Ban, Check, ChevronDown, ChevronUp, ScanLine } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
-import { canCurrentUserRefundEvent, executeRefund, formatCents, previewRefund } from '../../lib/ticketing';
-import { countAttendees, getEventAttendees, getEventMoneySummary, isLiveSeat, sumRefundedCentsOnPaidOrders, type DoorAttendee } from '../../lib/ticketAttendees';
+import { attendeesToCsv, canCurrentUserRefundEvent, executeRefund, formatCents, previewRefund } from '../../lib/ticketing';
+import {
+  attachAnswers,
+  countAttendees,
+  getEventAnswers,
+  getEventAttendees,
+  getEventMoneySummary,
+  getEventQuestions,
+  isLiveSeat,
+  sumRefundedCentsOnPaidOrders,
+  type DoorAttendee,
+} from '../../lib/ticketAttendees';
 import { MoneySummaryCard } from '../../components/creator/MoneySummaryCard';
 
 type StatusFilter = 'all' | 'in' | 'notin' | 'refunded';
@@ -62,6 +73,35 @@ export default function AttendeesScreen() {
     staleTime: 60_000,
   });
 
+  // Screen 54 addendum: questionnaire answers, a separate read from
+  // getEventAttendees above so screens that never show answers don't pay for
+  // it (lib/ticketAttendees.ts). getEventAnswers only runs once there is both
+  // an active question and a real order to scope it to.
+  const { data: questions = [] } = useQuery({
+    queryKey: ['event-questions', id],
+    queryFn: () => getEventQuestions(id!),
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+  const orderIds = useMemo(() => Array.from(new Set(attendees.map((a) => a.orderId))), [attendees]);
+  const orderIdsKey = orderIds.join(',');
+  const { data: answerRows = [] } = useQuery({
+    queryKey: ['event-answers', id, orderIdsKey],
+    queryFn: () => getEventAnswers(orderIds),
+    enabled: !!id && questions.length > 0 && orderIds.length > 0,
+    staleTime: 10_000,
+  });
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const toggleAnswers = (positionId: string) => {
+    hapticLight();
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(positionId)) next.delete(positionId);
+      else next.add(positionId);
+      return next;
+    });
+  };
+
   const counts = countAttendees(attendees);
   // Only refunds on still-'paid' orders: fully-refunded orders are already
   // excluded from gross/commission by getEventMoneySummary, so counting their
@@ -83,6 +123,27 @@ export default function AttendeesScreen() {
       return true;
     });
   }, [attendees, query, status, tier]);
+
+  // BR-1 attachment is pure/synchronous, so it's cheap to recompute on every
+  // filter change; only the network read (answerRows) is cached/gated above.
+  const filteredWithAnswers = useMemo(
+    () => attachAnswers(filtered, questions, answerRows),
+    [filtered, questions, answerRows],
+  );
+
+  // native's own share sheet (mail, files, Messages, etc), same real-export
+  // pattern as payouts.tsx's handleExportPurchases -- BR-6: exports the
+  // CURRENTLY FILTERED view, not the unfiltered attendees array.
+  const handleExportAttendees = useCallback(async () => {
+    if (filteredWithAnswers.length === 0) return;
+    hapticLight();
+    try {
+      await Share.share({ message: attendeesToCsv(filteredWithAnswers, questions) });
+    } catch {
+      /* copy to the taste gate */
+      Alert.alert('that did not share', 'give it another try in a moment.');
+    }
+  }, [filteredWithAnswers, questions]);
 
   const statusChips: { key: StatusFilter; label: string }[] = [
     { key: 'all', label: 'everyone' },
@@ -231,50 +292,90 @@ export default function AttendeesScreen() {
         ))}
       </ScrollView>
 
+      {filtered.length > 0 && (
+        <View style={styles.exportRow}>
+          <TouchableOpacity onPress={handleExportAttendees} hitSlop={12} accessibilityRole="button" accessibilityLabel="export attendees">
+            {/* LIZ COPY */}
+            <Text style={styles.exportLink}>export</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {isLoading ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={Colors.terracotta} /></View>
       ) : (
         <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
-          {filtered.length === 0 ? (
+          {filteredWithAnswers.length === 0 ? (
             /* copy to the taste gate (empty-state) */
             <Text style={styles.empty}>no one here yet.</Text>
           ) : (
-            filtered.map((a) => {
+            filteredWithAnswers.map((a) => {
               const line = seatLine(a);
               const isIn = isLiveSeat(a) && a.checkedIn;
               const isRefunded = a.refundedCents > 0 || a.voided;
+              const hasAnswers = questions.length > 0;
+              const isExpanded = expandedIds.has(a.positionId);
               return (
-                <View key={a.positionId} style={styles.row}>
-                  <View style={styles.rowBody}>
-                    <Text style={styles.rowName} numberOfLines={1}>{a.buyerName}</Text>
-                    <Text style={styles.rowMeta} numberOfLines={1}>
-                      {a.referenceCode}{a.tierName ? ` · ${a.tierName}` : ''}
-                    </Text>
+                <View key={a.positionId} style={styles.rowGroup}>
+                  <View style={styles.row}>
+                    {hasAnswers && (
+                      <TouchableOpacity
+                        onPress={() => toggleAnswers(a.positionId)}
+                        hitSlop={12}
+                        accessibilityRole="button"
+                        accessibilityLabel={isExpanded ? `hide answers for ${a.buyerName}` : `show answers for ${a.buyerName}`}
+                        accessibilityState={{ expanded: isExpanded }}
+                      >
+                        {isExpanded ? (
+                          <ChevronUp size={16} color={Colors.textMedium} strokeWidth={2} />
+                        ) : (
+                          <ChevronDown size={16} color={Colors.textMedium} strokeWidth={2} />
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    <View style={styles.rowBody}>
+                      <Text style={styles.rowName} numberOfLines={1}>{a.buyerName}</Text>
+                      <Text style={styles.rowMeta} numberOfLines={1}>
+                        {a.referenceCode}{a.tierName ? ` · ${a.tierName}` : ''}
+                      </Text>
+                    </View>
+                    {/* status: icon + text, never colour alone (§8) */}
+                    <View style={styles.statusWrap}>
+                      {isIn && <Check size={15} color={Colors.brandDeep} strokeWidth={2.5} />}
+                      {isRefunded && <Ban size={14} color={Colors.textMedium} strokeWidth={2} />}
+                      <Text style={[styles.statusText, isIn && styles.statusIn, isRefunded && styles.statusRefunded]}>
+                        {line}
+                      </Text>
+                    </View>
+                    {/* refund lives on live seats only, for the real organizer only; the fn re-checks server-side */}
+                    {isLiveSeat(a) && canRefund && (
+                      <TouchableOpacity
+                        style={styles.refundPill}
+                        onPress={() => startRefund(a)}
+                        disabled={refundingId != null}
+                        accessibilityRole="button"
+                        accessibilityLabel={`refund ${a.buyerName}`}
+                      >
+                        {refundingId === a.positionId ? (
+                          <ActivityIndicator size="small" color={Colors.darkWarm} />
+                        ) : (
+                          /* copy to the taste gate */
+                          <Text style={styles.refundPillText}>refund</Text>
+                        )}
+                      </TouchableOpacity>
+                    )}
                   </View>
-                  {/* status: icon + text, never colour alone (§8) */}
-                  <View style={styles.statusWrap}>
-                    {isIn && <Check size={15} color={Colors.brandDeep} strokeWidth={2.5} />}
-                    {isRefunded && <Ban size={14} color={Colors.textMedium} strokeWidth={2} />}
-                    <Text style={[styles.statusText, isIn && styles.statusIn, isRefunded && styles.statusRefunded]}>
-                      {line}
-                    </Text>
-                  </View>
-                  {/* refund lives on live seats only, for the real organizer only; the fn re-checks server-side */}
-                  {isLiveSeat(a) && canRefund && (
-                    <TouchableOpacity
-                      style={styles.refundPill}
-                      onPress={() => startRefund(a)}
-                      disabled={refundingId != null}
-                      accessibilityRole="button"
-                      accessibilityLabel={`refund ${a.buyerName}`}
-                    >
-                      {refundingId === a.positionId ? (
-                        <ActivityIndicator size="small" color={Colors.darkWarm} />
-                      ) : (
-                        /* copy to the taste gate */
-                        <Text style={styles.refundPillText}>refund</Text>
-                      )}
-                    </TouchableOpacity>
+                  {isExpanded && hasAnswers && (
+                    <View style={styles.answersPanel}>
+                      {questions.map((q) => (
+                        <View key={q.id} style={styles.answerItem}>
+                          <Text style={styles.answerPrompt}>
+                            {q.prompt}{q.scope === 'per_order' ? ' · once per purchase' : ''}
+                          </Text>
+                          <Text style={styles.answerValue}>{a.answers[q.id] || '—'}</Text>
+                        </View>
+                      ))}
+                    </View>
                   )}
                 </View>
               );
@@ -308,12 +409,26 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { paddingHorizontal: 20, paddingBottom: 40, gap: 8 },
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center', marginTop: EventSpacing.xl },
+  exportRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, paddingBottom: EventSpacing.sm },
+  exportLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.textMedium },
+  rowGroup: {
+    backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
+    overflow: 'hidden',
+  },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
     paddingHorizontal: 14, paddingVertical: 12, minHeight: 44,
   },
   rowBody: { flex: 1, gap: 2 },
+  answersPanel: {
+    borderTopWidth: 1, borderTopColor: Colors.border,
+    paddingHorizontal: 14, paddingVertical: 12, gap: 10,
+  },
+  answerItem: { gap: 2 },
+  answerPrompt: {
+    fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.textMedium, letterSpacing: 0.3,
+  },
+  answerValue: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   rowName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   rowMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, letterSpacing: 0.3 },
   statusWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },

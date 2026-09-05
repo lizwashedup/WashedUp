@@ -4,6 +4,7 @@ jest.mock('../supabase', () => ({
 
 import { supabase } from '../supabase';
 import {
+  attendeesToCsv,
   buildCheckoutBreakdown,
   computeFeePreview,
   getFailedPayouts,
@@ -21,6 +22,7 @@ import {
   type OrganizationPurchase,
 } from '../ticketing';
 import type { PriceQuote } from '../ticketPromosAddons';
+import type { AttendeeQuestion, DoorAttendeeWithAnswers } from '../ticketAttendees';
 
 const mockRpc = supabase.rpc as jest.Mock;
 const mockFrom = supabase.from as jest.Mock;
@@ -397,6 +399,75 @@ describe('organizationPurchasesToCsv', () => {
     const [header, row] = csv.split('\n');
     expect(header).toBe('date,event,buyer,tier,qty,total,status,refunded');
     expect(row).toBe('"2026-08-20","Comedy Night","Jane ""JJ"" Doe","General",1,25.50,"partial",5.00');
+  });
+});
+
+describe('attendeesToCsv', () => {
+  function seat(overrides: Partial<DoorAttendeeWithAnswers> = {}): DoorAttendeeWithAnswers {
+    return {
+      positionId: 'position-1',
+      orderId: 'order-1',
+      positionIndex: 1,
+      referenceCode: 'SEAT-ONE',
+      buyerName: 'Ada Lovelace',
+      tierName: 'General',
+      orderStatus: 'paid',
+      voided: false,
+      refundedCents: 0,
+      checkedIn: true,
+      pricePaidCents: 2500,
+      checkedInAt: '2026-09-05T18:00:00Z',
+      purchasedAt: '2026-09-01T12:00:00Z',
+      answers: {},
+      ...overrides,
+    };
+  }
+  const questions: AttendeeQuestion[] = [
+    { id: 'q1', prompt: 'dietary restriction?', qtype: 'short_text', scope: 'per_attendee', sortOrder: 0 },
+  ];
+
+  it('emits a header row plus one escaped row per seat, with one column per active question', () => {
+    const csv = attendeesToCsv([seat({ answers: { q1: 'vegan' } })], questions);
+    const [header, row] = csv.split('\n');
+    expect(header).toBe(
+      '"reference_code","attendee_name","tier","price_paid","purchase_status","checked_in","checked_in_at","refunded","purchased_at","dietary restriction?"',
+    );
+    expect(row).toBe(
+      '"SEAT-ONE","Ada Lovelace","General",25.00,"paid",yes,"2026-09-05T18:00:00Z",no,"2026-09-01T12:00:00Z","vegan"',
+    );
+  });
+
+  it('leaves an unanswered active question blank rather than omitting the column', () => {
+    const csv = attendeesToCsv([seat()], questions);
+    const [, row] = csv.split('\n');
+    expect(row.endsWith(',""')).toBe(true);
+  });
+
+  it('marks refunded true when refundedCents is positive, independent of checked-in state', () => {
+    const csv = attendeesToCsv([seat({ refundedCents: 500, checkedIn: true })], []);
+    const [, row] = csv.split('\n');
+    expect(row).toBe(
+      '"SEAT-ONE","Ada Lovelace","General",25.00,"paid",yes,"2026-09-05T18:00:00Z",yes,"2026-09-01T12:00:00Z"',
+    );
+  });
+
+  it('marks refunded true for a voided seat even with zero refunded cents', () => {
+    const csv = attendeesToCsv([seat({ voided: true, refundedCents: 0 })], []);
+    const [, row] = csv.split('\n');
+    expect(row.split(',')[7]).toBe('yes');
+  });
+
+  it('BR-5: guards a guest-authored answer that looks like a spreadsheet formula', () => {
+    const csv = attendeesToCsv([seat({ answers: { q1: '=SUM(A1:A9)' } })], questions);
+    const [, row] = csv.split('\n');
+    expect(row).toContain('"\'=SUM(A1:A9)"');
+  });
+
+  it('BR-5: guards a buyer name or tier that starts with =, +, -, or @', () => {
+    const csv = attendeesToCsv([seat({ buyerName: '+1 234-5678', tierName: '@general' })], []);
+    const [, row] = csv.split('\n');
+    expect(row).toContain('"\'+1 234-5678"');
+    expect(row).toContain('"\'@general"');
   });
 });
 
