@@ -9,11 +9,13 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import {
     ArrowLeft,
     Calendar,
+    ImagePlus,
     MapPin,
     MessageCircle,
     MoreHorizontal,
     Ticket,
-    Users
+    Users,
+    X
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -33,6 +35,8 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
@@ -42,6 +46,7 @@ import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
+import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
 // Lazy so a circle component's module-scope code (its StyleSheet) is never
 // evaluated for non-circle users on this universally-reachable shipped screen.
@@ -59,10 +64,12 @@ import { checkContent } from '../../lib/contentFilter';
 import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
+import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import LinkifiedText from '../../components/LinkifiedText';
 import { friendlyError } from '../../lib/friendlyError';
 import { logError } from '../../lib/logger';
 import { joinErrorSurface } from '../../lib/planJoinSafety';
+import { resolveManagePlanImageUrl } from './plan-photo-edit';
 import {
   acceptWaitlistException,
   declineWaitlistException,
@@ -450,6 +457,9 @@ export default function PlanDetailScreen() {
   const [editLocationLat, setEditLocationLat] = useState<number | null>(null);
   const [editLocationLng, setEditLocationLng] = useState<number | null>(null);
   const [editTicketUrl, setEditTicketUrl] = useState('');
+  // Plan photo — mirrors PlanComposerV2's imageUrl/imageLoading pair
+  const [editImageUrl, setEditImageUrl] = useState<string | null>(null);
+  const [editImageLoading, setEditImageLoading] = useState(false);
   // Date / time editing — wheel picker state mirrors the post flow
   const [editDateMonth, setEditDateMonth] = useState(0);
   const [editDateDay, setEditDateDay] = useState(1);
@@ -1199,6 +1209,7 @@ export default function PlanDetailScreen() {
     setEditLocationLat(plan.location_lat ?? null);
     setEditLocationLng(plan.location_lng ?? null);
     setEditTicketUrl(plan.tickets_url ?? '');
+    setEditImageUrl(plan.image_url ?? null);
     setTimeout(() => {
       managePlacesRef.current?.setAddressText(plan.location_text ?? '');
     }, 100);
@@ -1272,8 +1283,57 @@ export default function PlanDetailScreen() {
     });
   };
 
+  // ── Manage Plan photo ── mirrors components/post/PlanComposerV2.tsx's
+  // pickImage/uploadPhoto pattern exactly (same expo-image-picker +
+  // expo-image-manipulator + uploadBase64ToStorage('event-images', ...)
+  // pipeline), so a posted plan's photo can be changed the same way it
+  // was picked at creation time.
+  const pickEditImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      setBrandedAlert({ visible: true, title: 'Permission needed', message: 'Go to Settings and allow photo access.' });
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 1,
+    });
+    if (!result.canceled && result.assets[0]) {
+      try {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          result.assets[0].uri,
+          [{ resize: { width: 1200 } }],
+          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+        );
+        setEditImageUrl(manipulated.uri);
+        if (manipulated.base64) uploadEditPhoto(manipulated.base64);
+        else { setEditImageUrl(null); setBrandedAlert({ visible: true, title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE }); }
+      } catch {
+        setEditImageUrl(null);
+        setBrandedAlert({ visible: true, title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
+      }
+    }
+  };
+
+  const uploadEditPhoto = async (base64: string) => {
+    setEditImageLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { error: refreshErr } = await supabase.auth.refreshSession();
+      if (refreshErr) throw refreshErr;
+      const fileName = `${user.id}/${Date.now()}.jpg`;
+      const publicUrl = await uploadBase64ToStorage('event-images', fileName, base64);
+      setEditImageUrl(publicUrl);
+    } catch {
+      setEditImageUrl(null);
+      setBrandedAlert({ visible: true, title: 'Upload failed', message: 'Could not upload photo. Try again.' });
+    } finally {
+      setEditImageLoading(false);
+    }
+  };
+
   const handleSaveEdit = async () => {
-    if (!plan || !currentUserId || editSaving) return;
+    if (!plan || !currentUserId || editSaving || editImageLoading) return;
 
     const fieldsToCheck = [editTitle, editDescription, editCreatorMessage, editLocation].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
@@ -1299,6 +1359,7 @@ export default function PlanDetailScreen() {
         location_lat: editLocationLat,
         location_lng: editLocationLng,
         tickets_url: editTicketUrl.trim() || null,
+        image_url: resolveManagePlanImageUrl(editImageUrl),
         primary_vibe: editCategory?.toLowerCase() ?? null,
         gender_rule: editGenderRule,
         target_age_min: editAgeBounds.min,
@@ -2384,6 +2445,28 @@ export default function PlanDetailScreen() {
                 inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
 
+              {/* Plan photo */}
+              <Text style={manageStyles.label}>Plan photo</Text>
+              <View style={manageStyles.photoRow}>
+                {editImageUrl ? (
+                  <View style={manageStyles.photoThumbWrap}>
+                    <Image source={{ uri: editImageUrl }} style={manageStyles.photoThumb} contentFit="cover" />
+                    {editImageLoading ? (
+                      <View style={manageStyles.photoThumbOverlay}><ActivityIndicator color={Colors.white} /></View>
+                    ) : (
+                      <TouchableOpacity style={manageStyles.photoRemove} onPress={() => { hapticLight(); setEditImageUrl(null); }} hitSlop={8}>
+                        <X size={13} color={Colors.white} strokeWidth={2.5} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : (
+                  <TouchableOpacity style={manageStyles.photoAdd} onPress={pickEditImage} activeOpacity={0.7}>
+                    <ImagePlus size={15} color={Colors.secondary} strokeWidth={2} />
+                    <Text style={manageStyles.photoAddText}>add a photo</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
               {/* Date & time */}
               <Text style={manageStyles.label}>Date & time</Text>
               <View style={manageStyles.dateTimeRow}>
@@ -2705,9 +2788,9 @@ export default function PlanDetailScreen() {
 
               {/* Save button */}
               <TouchableOpacity
-                style={[manageStyles.saveBtn, (editSaving || editTitle.trim().length === 0) && manageStyles.saveBtnDisabled]}
+                style={[manageStyles.saveBtn, (editSaving || editImageLoading || editTitle.trim().length === 0) && manageStyles.saveBtnDisabled]}
                 onPress={handleSaveEdit}
-                disabled={editSaving || editTitle.trim().length === 0}
+                disabled={editSaving || editImageLoading || editTitle.trim().length === 0}
                 activeOpacity={0.85}
               >
                 {editSaving ? (
@@ -3788,6 +3871,21 @@ const manageStyles = StyleSheet.create({
   creatorMessageInput: {
     minHeight: 50,
     textAlignVertical: 'top',
+  },
+  // Plan photo — same values as PlanComposerV2's photoRow/photoAdd/etc.
+  photoRow: { marginTop: 0 },
+  photoAdd: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
+  },
+  photoAddText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  photoThumbWrap: { width: 96, height: 60, borderRadius: 12, overflow: 'hidden' },
+  photoThumb: { width: '100%', height: '100%' },
+  photoThumbOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.overlayDark40 },
+  photoRemove: {
+    position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.overlayDark60,
   },
   hint: {
     fontFamily: Fonts.sans,
