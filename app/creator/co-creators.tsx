@@ -25,6 +25,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Share,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -33,7 +34,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Search, Mail, Phone, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { CO_CREATOR_INVITES_ENABLED } from '../../constants/FeatureFlags';
+import { CO_CREATOR_INVITES_ENABLED, REFUND_AUTHORITY_ENABLED } from '../../constants/FeatureFlags';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
@@ -52,6 +53,13 @@ import {
   type CoCreatorInviteRow,
   type ProfileSearchResult,
 } from '../../lib/coCreatorInvites';
+import {
+  grantCommunityRefundAuthority,
+  revokeRefundAuthority,
+  listCommunityRefundAuthorityGrants,
+  activeGrantForUser,
+  type RefundAuthorityGrant,
+} from '../../lib/refundAuthority';
 
 type ComposerMode = 'closed' | 'search' | 'contact';
 type ContactKind = 'email' | 'phone';
@@ -160,6 +168,71 @@ export default function CoCreatorsScreen() {
     .filter((m) => m.status === 'active' && m.role !== 'member')
     .sort((a, b) => (ROLE_RANK[a.role] ?? 9) - (ROLE_RANK[b.role] ?? 9));
 
+  // Liz decision #14 (2026-09-03): community-scoped refund authority. Active
+  // grants only -- Team rows below derive on/off purely from this list, see
+  // activeGrantForUser.
+  const grantsKey = ['refund-authority-grants', community?.id];
+  const { data: refundGrants = [] } = useQuery({
+    queryKey: grantsKey,
+    queryFn: () => listCommunityRefundAuthorityGrants(community!.id),
+    enabled: !!community && REFUND_AUTHORITY_ENABLED,
+  });
+  const [refundActionBusy, setRefundActionBusy] = useState<string | null>(null);
+
+  const confirmGrantRefundAuthority = (m: CommunityMemberRow) => {
+    if (!community) return;
+    hapticLight();
+    setAlertInfo({
+      title: 'Let them issue refunds?',
+      message: `${m.name ?? 'This person'} will be able to issue refunds for any of ${community.name}'s events. This permission can move real money. You can turn it off anytime.`,
+      buttons: [
+        { text: 'Not yet', style: 'cancel' },
+        {
+          text: 'Turn on',
+          onPress: async () => {
+            setRefundActionBusy(m.user_id);
+            try {
+              await grantCommunityRefundAuthority(community.id, m.user_id);
+              hapticSuccess();
+              queryClient.invalidateQueries({ queryKey: grantsKey });
+            } catch (e) {
+              setAlertInfo({ title: 'That did not work', message: friendlyError(e, 'Try again in a moment.') });
+            } finally {
+              setRefundActionBusy(null);
+            }
+          },
+        },
+      ],
+    });
+  };
+
+  const confirmRevokeRefundAuthority = (grant: RefundAuthorityGrant, m: CommunityMemberRow) => {
+    hapticLight();
+    setAlertInfo({
+      title: 'Turn off refund authority?',
+      message: `${m.name ?? 'This person'} will no longer be able to issue refunds for ${community?.name ?? 'this community'}.`,
+      buttons: [
+        { text: 'Keep it on', style: 'cancel' },
+        {
+          text: 'Turn off',
+          style: 'destructive',
+          onPress: async () => {
+            setRefundActionBusy(m.user_id);
+            try {
+              await revokeRefundAuthority(grant.id);
+              hapticSuccess();
+              queryClient.invalidateQueries({ queryKey: grantsKey });
+            } catch (e) {
+              setAlertInfo({ title: 'That did not work', message: friendlyError(e, 'Try again in a moment.') });
+            } finally {
+              setRefundActionBusy(null);
+            }
+          },
+        },
+      ],
+    });
+  };
+
   const [composer, setComposer] = useState<ComposerMode>('closed');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ProfileSearchResult[]>([]);
@@ -169,6 +242,7 @@ export default function CoCreatorsScreen() {
   const [inviting, setInviting] = useState<string | null>(null);
   const [resending, setResending] = useState<string | null>(null);
   const [inviteRole, setInviteRole] = useState<CoCreatorRole>('admin');
+  const [wantsRefundAuthority, setWantsRefundAuthority] = useState(false);
   const ROLE_OPTIONS: { value: CoCreatorRole; label: string }[] = [
     { value: 'admin', label: 'Admin' },
     { value: 'events', label: 'Events' },
@@ -181,6 +255,7 @@ export default function CoCreatorsScreen() {
     setSearchQuery('');
     setSearchResults([]);
     setContactValue('');
+    setWantsRefundAuthority(false);
   };
 
   const runSearch = async (q: string) => {
@@ -197,13 +272,21 @@ export default function CoCreatorsScreen() {
     }
   };
 
-  const afterInviteCreated = (link: string) => {
+  /**
+   * refundAuthorityRequested only ever changes the success message, never
+   * calls grant_refund_authority: the RPC requires an active co-creator, and
+   * this invitee is not one until they accept -- see
+   * REFUND_AUTHORITY_ENABLED's doc comment in constants/FeatureFlags.ts.
+   */
+  const afterInviteCreated = (link: string, refundAuthorityRequested: boolean) => {
     hapticSuccess();
     closeComposer();
     queryClient.invalidateQueries({ queryKey: invitesKey });
     setAlertInfo({
       title: 'Invite ready',
-      message: 'Share this link with them. It only works for the person it was sent to.',
+      message: refundAuthorityRequested
+        ? 'Share this link with them. It only works for the person it was sent to. Once they accept, come back here and turn on refund authority for them under Team.'
+        : 'Share this link with them. It only works for the person it was sent to.',
       buttons: [
         { text: 'Done', style: 'cancel' },
         { text: 'Share link', onPress: () => { Share.share({ message: link }).catch(() => {}); } },
@@ -213,10 +296,11 @@ export default function CoCreatorsScreen() {
 
   const inviteProfile = async (profile: ProfileSearchResult) => {
     if (!community || inviting) return;
+    const refundAuthorityRequested = wantsRefundAuthority;
     setInviting(profile.id);
     try {
       const result = await createCoCreatorInvite(community.id, { kind: 'profile', userId: profile.id }, inviteRole);
-      afterInviteCreated(buildCoCreatorInviteLink(result.rawToken));
+      afterInviteCreated(buildCoCreatorInviteLink(result.rawToken), refundAuthorityRequested);
     } catch (e) {
       setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
@@ -235,11 +319,12 @@ export default function CoCreatorsScreen() {
       });
       return;
     }
+    const refundAuthorityRequested = wantsRefundAuthority;
     setInviting('contact');
     try {
       const target = contactKind === 'email' ? ({ kind: 'email', email: value } as const) : ({ kind: 'phone', phone: value } as const);
       const result = await createCoCreatorInvite(community.id, target, inviteRole);
-      afterInviteCreated(buildCoCreatorInviteLink(result.rawToken));
+      afterInviteCreated(buildCoCreatorInviteLink(result.rawToken), refundAuthorityRequested);
     } catch (e) {
       setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
@@ -261,7 +346,7 @@ export default function CoCreatorsScreen() {
     setResending(row.id);
     try {
       const result = await createCoCreatorInvite(community.id, target, row.role);
-      afterInviteCreated(buildCoCreatorInviteLink(result.rawToken));
+      afterInviteCreated(buildCoCreatorInviteLink(result.rawToken), false);
     } catch (e) {
       setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
@@ -326,15 +411,49 @@ export default function CoCreatorsScreen() {
             ) : team.length > 0 ? (
               <>
                 <Text style={styles.sectionLabel}>Team</Text>
-                {team.map((m) => (
-                  <View key={m.id} style={styles.inviteCard}>
-                    <Avatar name={m.name ?? 'Someone'} photo={m.photo_url} size={40} />
-                    <View style={styles.inviteCardText}>
-                      <Text style={styles.inviteCardName}>{m.name ?? 'Someone'}</Text>
-                      <Text style={styles.inviteCardStatus}>{teamRoleLabel(m.role)}</Text>
+                {REFUND_AUTHORITY_ENABLED && (
+                  <TouchableOpacity
+                    onPress={() => router.push('/creator/refund-authority-log' as never)}
+                    style={styles.refundHistoryLink}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.refundHistoryLinkText}>View refund history →</Text>
+                  </TouchableOpacity>
+                )}
+                {team.map((m) => {
+                  const grant = REFUND_AUTHORITY_ENABLED ? activeGrantForUser(refundGrants, m.user_id) : null;
+                  const showRefundControl = REFUND_AUTHORITY_ENABLED && m.role !== 'leader';
+                  return (
+                    <View key={m.id} style={styles.inviteCard}>
+                      <Avatar name={m.name ?? 'Someone'} photo={m.photo_url} size={40} />
+                      <View style={styles.inviteCardText}>
+                        <Text style={styles.inviteCardName}>{m.name ?? 'Someone'}</Text>
+                        <Text style={styles.inviteCardStatus}>{teamRoleLabel(m.role)}</Text>
+                        {showRefundControl && (
+                          <Text style={styles.refundStatusText}>
+                            {grant ? 'Refund authority: On' : 'Refund authority: Off'}
+                          </Text>
+                        )}
+                      </View>
+                      {showRefundControl && isPrimaryLeader && (
+                        <TouchableOpacity
+                          onPress={() => (grant ? confirmRevokeRefundAuthority(grant, m) : confirmGrantRefundAuthority(m))}
+                          disabled={refundActionBusy === m.user_id}
+                          hitSlop={10}
+                          style={grant ? styles.revokeBtn : styles.resendBtn}
+                        >
+                          {refundActionBusy === m.user_id ? (
+                            <ActivityIndicator size="small" color={Colors.terracotta} />
+                          ) : (
+                            <Text style={grant ? styles.revokeBtnText : styles.resendBtnText}>
+                              {grant ? 'Revoke' : 'Turn on'}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </>
             ) : null}
 
@@ -383,6 +502,24 @@ export default function CoCreatorsScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+
+                {REFUND_AUTHORITY_ENABLED && (
+                  <View style={styles.refundToggleRow}>
+                    <View style={styles.refundToggleText}>
+                      <Text style={styles.refundToggleLabel}>Let them issue refunds</Text>
+                      <Text style={styles.refundToggleHint}>
+                        This permission can move real money. Off by default. Once they accept, you
+                        can turn it on or off anytime from the Team list below.
+                      </Text>
+                    </View>
+                    <Switch
+                      value={wantsRefundAuthority}
+                      onValueChange={setWantsRefundAuthority}
+                      trackColor={{ false: Colors.borderWarm, true: Colors.brand }}
+                      thumbColor={Colors.white}
+                    />
+                  </View>
+                )}
 
                 {composer === 'search' ? (
                   <>
@@ -654,4 +791,18 @@ const styles = StyleSheet.create({
   revokeBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorBrand },
   avatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.brandSoft },
   avatarInitial: { fontFamily: Fonts.sansBold, color: Colors.brand },
+  refundToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 8,
+    padding: 12,
+  },
+  refundToggleText: { flex: 1 },
+  refundToggleLabel: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodySM, color: Colors.text1 },
+  refundToggleHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.text3, lineHeight: LineHeights.caption, marginTop: 2 },
+  refundStatusText: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.text3, marginTop: 2 },
+  refundHistoryLink: { marginBottom: 8 },
+  refundHistoryLinkText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.brand },
 });

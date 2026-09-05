@@ -544,3 +544,54 @@ export const TICKET_TRANSFER_ENABLED =
  */
 export const CONFIGURABLE_JOIN_QUESTIONS_ENABLED =
   process.env.EXPO_PUBLIC_CONFIGURABLE_JOIN_QUESTIONS_ENABLED === 'true';
+
+/**
+ * Refund authority delegation (Liz decision #14, 2026-09-03: give the owner
+ * a clear choice, off by default, to let a co-creator issue refunds). See
+ * clients/washed-up/LIZ-OPEN-QUESTIONS.md item 14 and lib/refundAuthority.ts.
+ *
+ * COMMUNITY / CREATOR-ACCOUNT SCOPE ONLY. Liz's decision also describes a
+ * per-event co-host grant, but this app has no event co-host invite concept
+ * at all (explore_events has exactly one owner, host_user_id) -- building
+ * that is a separate, larger, still-undecided product question. Nothing
+ * here creates, gates, or implies an event-level grant UI.
+ *
+ * When false (default): nothing changes anywhere. No refund-authority
+ * controls on the co-creators screen, and /creator/refund-authority-log is
+ * unreachable through any in-app affordance (a direct deep link still
+ * resolves the route, but the screen itself checks this flag too and
+ * renders nothing when it is off).
+ *
+ * When true: the co-creators screen's invite composer asks whether the
+ * invitee may issue refunds (off by default, plain money-movement warning in
+ * Liz's own words), and the Team list gets a real grant/revoke control per
+ * active co-creator. TIMING: grant_refund_authority() requires the grantee
+ * to already be an active co-creator (server-enforced), which a brand-new
+ * invitee is not until they accept -- so the invite-time toggle sets
+ * expectations and the actual grant happens on the Team list once the
+ * person has really joined. It never calls the grant RPC against someone
+ * who cannot receive it yet; that would always fail, and swallowing the
+ * failure would be a fake affordance.
+ *
+ * A "refund history" screen lists the append-only issuance log (who,
+ * owner-or-delegate, amount, reason, date, affected order) for whatever this
+ * viewer's RLS grants them -- the real owner sees every refund on the
+ * community's events, a delegate sees only their own, per the migration's
+ * refund_issuance_log_select policy. The screen's copy says so; it never
+ * claims a wider view than what actually renders.
+ *
+ * Backed entirely by
+ * supabase/migrations/20260904010000_refund_authority_grants.sql (DRAFT, not
+ * applied) -- do not flip this on for a real build until that migration is
+ * reviewed and applied to prod. The server-side enforcement point in
+ * supabase/functions/ticket-refund/index.ts already shipped (2026-09-03) and
+ * degrades safely today -- an RPC-not-found error there just means no
+ * delegate is ever treated as authorized -- so this flag only gates the UI
+ * half described above.
+ *
+ * Local dev: set EXPO_PUBLIC_REFUND_AUTHORITY_ENABLED=true in .env.local
+ * (gitignored). Env-driven and ships OFF wherever the var is unset
+ * (CI / prod / EAS), so it cannot ship on by accident.
+ */
+export const REFUND_AUTHORITY_ENABLED =
+  process.env.EXPO_PUBLIC_REFUND_AUTHORITY_ENABLED === 'true';
