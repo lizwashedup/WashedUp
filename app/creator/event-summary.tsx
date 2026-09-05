@@ -11,10 +11,14 @@
  * own composer header says so directly), so it shows as coming soon with a
  * stated reason instead of a button that would go nowhere.
  *
- * Built against today's host_user_id/community_id ownership pair. The
- * drafted owner_type/owner_id columns (migration 20260901010000) are not
- * applied to prod; this hub does not need them to be useful today, but
- * should get a follow-up pass once that migration lands.
+ * Built against today's host_user_id/community_id ownership pair. Migration
+ * 20260901010000 (owner_type/owner_id) applied to prod 2026-09-02 (verified:
+ * 22/22 explore_events rows carry a populated owner_type, zero data loss --
+ * see docs/database/direct-apply-evidence-20260902-build35-batch-a.md), but
+ * this hub has not had its follow-up pass yet: it still reads host_user_id/
+ * community_id directly rather than the new owner_type/owner_id columns.
+ * Not a bug today (host_user_id/community_id are untouched and still
+ * correct), just a real remaining follow-up now that the migration is live.
  */
 
 import React from 'react';

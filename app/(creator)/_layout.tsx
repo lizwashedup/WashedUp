@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActivityIndicator, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Sun, CalendarDays, Megaphone, UsersRound, Menu, Ticket } from 'lucide-react-native';
+import { Sun, CalendarDays, Megaphone, UsersRound, Menu } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
@@ -83,7 +83,6 @@ export default function CreatorLayout() {
   const showToday = shellKind === 'full';
   const showOrganizerHome = shellKind === 'organizer' || shellKind === 'events';
   const showEvents = shellKind === 'full' || shellKind === 'organizer' || shellKind === 'events';
-  const showAttendees = shellKind === 'organizer' || shellKind === 'events';
   const showCommunity = shellKind === 'full';
   const showMembers = shellKind === 'full' || shellKind === 'member_care';
   const tabBarHeight = Platform.OS === 'ios' ? 52 + insets.bottom : 60;
@@ -135,18 +134,6 @@ export default function CreatorLayout() {
           title: 'Events',
           href: showEvents ? undefined : null,
           tabBarIcon: ({ color }) => <CalendarDays size={22} color={color} strokeWidth={2} />,
-        }}
-      />
-      <Tabs.Screen
-        name="attendees"
-        options={{
-          // O-01's own nav naming ("Today / Events / Attendees / More") --
-          // the event-host-only shell's tab. Leaders keep their own
-          // per-event attendee view reached from events/members instead,
-          // so this tab stays hidden for them, same pattern as organizer-home.
-          title: 'Attendees',
-          href: showAttendees ? undefined : null,
-          tabBarIcon: ({ color }) => <Ticket size={22} color={color} strokeWidth={2} />,
         }}
       />
       <Tabs.Screen
