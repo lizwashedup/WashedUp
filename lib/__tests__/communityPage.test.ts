@@ -14,6 +14,10 @@ function query(table: string) {
       mockCalls.push({ table, method: 'eq', args });
       return chain;
     },
+    gte: (...args: unknown[]) => {
+      mockCalls.push({ table, method: 'gte', args });
+      return chain;
+    },
     in: (...args: unknown[]) => {
       mockCalls.push({ table, method: 'in', args });
       return chain;
@@ -84,6 +88,11 @@ describe('native community page data contract', () => {
       expect.arrayContaining([
         { table: 'explore_events', method: 'eq', args: ['community_id', 'community-requested'] },
         { table: 'explore_events', method: 'eq', args: ['status', 'Live'] },
+      ]),
+    );
+    expect(calls('explore_events', 'gte')).toEqual(
+      expect.arrayContaining([
+        { table: 'explore_events', method: 'gte', args: ['event_date', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)] },
       ]),
     );
     expect(calls('explore_events', 'order')).toContainEqual({ table: 'explore_events', method: 'order', args: ['event_date', { ascending: true }] });

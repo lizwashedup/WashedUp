@@ -23,7 +23,6 @@ import { supabase } from '../../lib/supabase';
 import { friendlyError } from '../../lib/friendlyError';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { isAdmin } from '../../constants/Admin';
 import { Keyboard } from 'react-native';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 
@@ -41,6 +40,8 @@ export default function AdminUsersScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
+  // null = still checking, false = confirmed non-admin, true = confirmed admin.
+  const [isAdminVerified, setIsAdminVerified] = useState<boolean | null>(null);
   const [search, setSearch] = useState('');
   const [removing, setRemoving] = useState<string | null>(null);
   const [notifyingUser, setNotifyingUser] = useState<AdminUser | null>(null);
@@ -49,18 +50,49 @@ export default function AdminUsersScreen() {
   const [sendingNotification, setSendingNotification] = useState(false);
 
   React.useEffect(() => {
-    supabase.auth
-      .getUser()
-      .then(({ data }) => {
-        const uid = data.user?.id ?? null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const uid = authData.user?.id ?? null;
+        if (cancelled) return;
         setUserId(uid);
-        if (uid !== null && !isAdmin(uid)) router.back();
-      })
-      .catch(() => {});
+        if (!uid) {
+          setIsAdminVerified(false);
+          router.back();
+          return;
+        }
+        // Server-side, RLS-backed admin check. admin_users carries the policy
+        // admin_users_select_own (USING auth.uid() = user_id), so this select
+        // returns a row only when the caller is actually an admin -- the same
+        // source of truth the admin-manage-user edge function and the
+        // admin_send_user_notification RPC gate on. The old client-only
+        // isAdmin() env-list check could be spoofed and, worse, did not gate
+        // the profiles query below (which pulls every user's email).
+        const { data: adminRow, error: adminErr } = await supabase
+          .from('admin_users')
+          .select('user_id')
+          .eq('user_id', uid)
+          .maybeSingle();
+        if (cancelled) return;
+        const ok = !adminErr && !!adminRow;
+        setIsAdminVerified(ok);
+        if (!ok) router.back();
+      } catch {
+        if (cancelled) return;
+        setIsAdminVerified(false);
+        router.back();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   const { data: users = [], isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['admin-users'],
+    // Never issue the query until the server-side admin check has passed.
+    enabled: isAdminVerified === true,
     queryFn: async (): Promise<AdminUser[]> => {
       const { data, error } = await supabase
         .from('profiles')
@@ -199,7 +231,7 @@ export default function AdminUsersScreen() {
         />
       </View>
 
-      {isLoading ? (
+      {isAdminVerified !== true || isLoading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>

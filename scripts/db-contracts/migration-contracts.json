@@ -1,7 +1,7 @@
 {
   "format": 3,
-  "migration_count": 264,
-  "inventory_sha256": "33a3cbf56b672ef23ac8c970bf3fbabf539e7826d88edf09bd0bce961faa17a5",
+  "migration_count": 266,
+  "inventory_sha256": "b57e0aa5f1aea29206a411b4725ccad7d36811cd8eaa121a7f3a682d07bb7906",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
@@ -27,7 +27,9 @@
     "20260904000000_community_member_removal_reason_and_restore.sql",
     "20260904010000_refund_authority_grants.sql",
     "20260904020000_ticket_transfer_draft.sql",
-    "20260904030000_waitlist_priority_enforcement.sql"
+    "20260904030000_waitlist_priority_enforcement.sql",
+    "20260905020000_fix_member_invite_ambiguous_column.sql",
+    "20260905030000_fix_co_creator_invite_ambiguous_column.sql"
   ],
   "side_effect_union_count": 76,
   "approved_legacy_secret_literals": [

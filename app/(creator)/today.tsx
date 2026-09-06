@@ -21,6 +21,7 @@ import {
   creatorLandingRoute,
 } from '../../lib/creatorMode';
 import { getCommunityRooms } from '../../lib/communityChat';
+import { pickNextUpcomingEvent } from '../../lib/organizerHome';
 import { formatEventDateLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
@@ -64,7 +65,7 @@ export default function CreatorTodayScreen() {
 
   const pending = members.filter((m) => m.status === 'pending');
   const activeCount = members.filter((m) => m.status === 'active').length;
-  const nextEvent = events[0] ?? null;
+  const nextEvent = pickNextUpcomingEvent(events);
   const latestBroadcast = broadcasts[0] ?? null;
 
   const { online } = useNetworkStatus();

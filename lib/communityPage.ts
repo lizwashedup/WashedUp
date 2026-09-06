@@ -9,6 +9,7 @@
  */
 
 import { supabase } from './supabase';
+import { getTodayInLA } from './laDate';
 import type { CommunityBlock } from './communityBlocks';
 
 export interface CommunityPageCommunity {
@@ -48,6 +49,9 @@ export async function getCommunityPage(communityId: string): Promise<CommunityPa
   if (error) throw error;
   if (!community) return null;
 
+  const { y, m, d } = getTodayInLA();
+  const todayStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
   const [{ data: blocks }, { data: events }, { data: memberCount }] = await Promise.all([
     supabase
       .from('community_blocks')
@@ -60,6 +64,7 @@ export async function getCommunityPage(communityId: string): Promise<CommunityPa
       .select('id, title, event_date, venue, image_url, category, ticket_price, public_name')
       .eq('community_id', communityId)
       .eq('status', 'Live')
+      .gte('event_date', todayStr)
       .order('event_date', { ascending: true })
       .limit(6),
     supabase.rpc('get_community_member_count', { p_community_id: communityId }),
