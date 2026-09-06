@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { isAuthorizedRunToken } from '../_shared/runTokenAuth.ts';
 
 // Dual-send fanout: per-recipient routing between OneSignal and Expo Push.
 //
@@ -17,6 +18,24 @@ const EXPO_RECEIPTS_URL = 'https://exp.host/--/api/v2/push/getReceipts';
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } });
+  }
+
+  // Auth gate. This function holds the service-role key and is fired by the
+  // on_app_notification_inserted DB trigger. Before this check anyone who found
+  // the URL could POST here and drive a full push-send pass. Same dedicated
+  // run-token pattern as the sibling trigger-fired functions notify-plan-posted
+  // and notify-report (see _shared/runTokenAuth.ts).
+  //
+  // DEPLOY PREREQUISITE (or every push is rejected): (1) set the
+  // SEND_PUSH_RUN_TOKEN secret in Supabase, and (2) update the
+  // trigger_send_push_notifications() DB function to send that same value as an
+  // 'x-run-token' header (mirror 20260813210501_notify_plan_posted_run_token.sql).
+  // Do NOT deploy this function alone. See the fix log for the exact SQL.
+  if (!isAuthorizedRunToken(req.headers.get('x-run-token'), Deno.env.get('SEND_PUSH_RUN_TOKEN'))) {
+    return new Response(JSON.stringify({ error: 'forbidden' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   const supabase = createClient(
