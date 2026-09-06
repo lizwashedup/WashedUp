@@ -49,28 +49,48 @@ Deno.serve(async (req) => {
   await supabase.rpc('expire_stale_notifications');
 
   // Step 1: Discover both transport populations.
+  //
+  // PostgREST caps an unpaginated .select() at its default max-rows (1000).
+  // device_tokens alone has 2000+ rows, so a plain select was silently
+  // returning only the first page every single run -- roughly a third of
+  // real registered users were invisible to every send pass, with no error
+  // anywhere (a partial page isn't a failure as far as the client is
+  // concerned). Paginate with .range() until a short page confirms the end.
+  const PAGE_SIZE = 1000;
+
   // OneSignal-capable: any user_id present in device_tokens.
-  const { data: osRows, error: osErr } = await supabase
-    .from('device_tokens')
-    .select('user_id');
-  if (osErr) {
-    console.warn('[send-push] device_tokens read failed:', osErr.message);
+  const oneSignalUserIds = new Set<string>();
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const { data: osRows, error: osErr } = await supabase
+      .from('device_tokens')
+      .select('user_id')
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (osErr) {
+      console.warn('[send-push] device_tokens read failed:', osErr.message);
+      break;
+    }
+    for (const r of (osRows ?? []) as Array<{ user_id: string }>) {
+      oneSignalUserIds.add(r.user_id);
+    }
+    if (!osRows || osRows.length < PAGE_SIZE) break;
   }
-  const oneSignalUserIds = new Set<string>(
-    ((osRows ?? []) as Array<{ user_id: string }>).map((r) => r.user_id),
-  );
 
   // Expo-capable: any profile with a non-null expo_push_token.
-  const { data: expoRows, error: expoErr } = await supabase
-    .from('profiles')
-    .select('id, expo_push_token')
-    .not('expo_push_token', 'is', null);
-  if (expoErr) {
-    console.warn('[send-push] profiles read failed:', expoErr.message);
-  }
   const expoTokenByUser = new Map<string, string>();
-  for (const p of (expoRows ?? []) as Array<{ id: string; expo_push_token: string | null }>) {
-    if (p.expo_push_token) expoTokenByUser.set(p.id, p.expo_push_token);
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const { data: expoRows, error: expoErr } = await supabase
+      .from('profiles')
+      .select('id, expo_push_token')
+      .not('expo_push_token', 'is', null)
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (expoErr) {
+      console.warn('[send-push] profiles read failed:', expoErr.message);
+      break;
+    }
+    for (const p of (expoRows ?? []) as Array<{ id: string; expo_push_token: string | null }>) {
+      if (p.expo_push_token) expoTokenByUser.set(p.id, p.expo_push_token);
+    }
+    if (!expoRows || expoRows.length < PAGE_SIZE) break;
   }
 
   // Union for the claim. claim_pending_push_notifications only returns rows
@@ -162,6 +182,20 @@ Deno.serve(async (req) => {
   let expoSent = 0;
   const failedIds: string[] = [];
 
+  // Error samples for the response body. Capped so a bad batch can't bloat
+  // the response or leak more than a handful of examples; this exists
+  // because `supabase functions logs` is not a real subcommand on this CLI
+  // version, so the response body is the only place a failure reason is
+  // ever visible after the fact.
+  const MAX_ERROR_SAMPLES = 5;
+  const errorSamples: Array<{ channel: 'onesignal' | 'expo'; status?: number; detail: string }> = [];
+  function recordError(channel: 'onesignal' | 'expo', detail: string, status?: number) {
+    console.error(`[send-push] ${channel} failure${status ? ` (${status})` : ''}: ${detail}`);
+    if (errorSamples.length < MAX_ERROR_SAMPLES) {
+      errorSamples.push({ channel, status, detail: detail.slice(0, 300) });
+    }
+  }
+
   // Step 5a: OneSignal send. Per-row POST. Reverts claim on non-2xx so the
   // next trigger picks the row up again.
   for (const n of oneSignalQueue) {
@@ -187,9 +221,11 @@ Deno.serve(async (req) => {
         oneSignalSent += 1;
       } else {
         failedIds.push(n.id);
+        recordError('onesignal', await res.text().catch(() => '(no body)'), res.status);
       }
-    } catch {
+    } catch (err) {
       failedIds.push(n.id);
+      recordError('onesignal', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -251,7 +287,9 @@ Deno.serve(async (req) => {
             });
           } else if (ticket.status === 'error') {
             failedIds.push(batchNotifIds[j]);
-            if (ticket.details?.error === 'DeviceNotRegistered') {
+            const errCode = ticket.details?.error ?? 'unknown';
+            recordError('expo', `ticket error: ${errCode}`);
+            if (errCode === 'DeviceNotRegistered') {
               await supabase
                 .from('profiles')
                 .update({ expo_push_token: null })
@@ -263,10 +301,11 @@ Deno.serve(async (req) => {
           }
         }
       } else {
+        recordError('expo', await res.text().catch(() => '(no body)'), res.status);
         for (const id of batchNotifIds) failedIds.push(id);
       }
     } catch (err) {
-      console.error('[send-push] Expo send error:', err);
+      recordError('expo', err instanceof Error ? err.message : String(err));
       for (const id of batchNotifIds) failedIds.push(id);
     }
   }
@@ -329,6 +368,7 @@ Deno.serve(async (req) => {
       oneSignalSent,
       expoSent,
       failed: failedIds.length,
+      errorSamples,
     }),
     { headers: { 'Content-Type': 'application/json' } },
   );

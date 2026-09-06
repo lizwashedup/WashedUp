@@ -1,7 +1,7 @@
 {
   "format": 3,
-  "migration_count": 267,
-  "inventory_sha256": "aff02b0e4bb24d0249893b66dd383392b635a654d511e9794b180e926bdca92b",
+  "migration_count": 269,
+  "inventory_sha256": "fb0a12505a22e3ea84f621c5db8cddf8d09634d988d656e7b0f8f3180b22bae5",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
