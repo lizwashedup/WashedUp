@@ -103,6 +103,30 @@ export async function sendFollowerBroadcast(
   if (data?.id) await fanoutPushBestEffort(data.id);
 }
 
+/**
+ * Send-test-to-yourself: pushes the update to the caller's own account via
+ * the same OneSignal pipeline a real broadcast would use, without ever
+ * writing to follower_broadcasts itself -- that table's SELECT RLS would let
+ * a real follower read a test row once visible_at passes (see the RPC's own
+ * migration header). The RPC takes no audience parameter -- auth.uid() is
+ * the only possible recipient, re-verified server-side on every call.
+ */
+export async function sendFollowerBroadcastTestToSelf(
+  target: { kind: 'organizer' } | { kind: 'community'; communityId: string },
+  body: string,
+): Promise<void> {
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error('Message is empty');
+  if (trimmed.length > 2000) throw new Error('Message is too long');
+
+  const { error } = await supabase.rpc('send_follower_broadcast_test_to_self', {
+    p_target_kind: target.kind,
+    p_community_id: target.kind === 'community' ? target.communityId : null,
+    p_body: trimmed,
+  });
+  if (error) throw error;
+}
+
 /** My own sent history (sender always sees everything they sent, RLS-enforced). */
 export async function getMyFollowerBroadcastHistory(
   target: { kind: 'organizer' } | { kind: 'community'; communityId: string },

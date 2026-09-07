@@ -14,7 +14,7 @@
  *     exact key on refund so Attendees never goes stale behind it)
  *   - answers: getEventQuestions/getEventAnswers/attachAnswers (Screen 54's
  *     own reader), scoped to just this order's rows
- *   - refund: previewRefund/executeRefund/canCurrentUserRefundEvent, the
+ *   - refund: previewRefund/executeRefund/getRefundAccess, the
  *     exact functions attendees.tsx already calls -- this screen does not
  *     touch the ticket-refund edge function or refund_authority in any way.
  *
@@ -54,14 +54,16 @@ import { EventAction, EventSpacing } from '../../../constants/EventDesign';
 import { hapticLight } from '../../../lib/haptics';
 import { formatTimestampLA } from '../../../lib/laDate';
 import {
-  canCurrentUserRefundEvent,
   executeRefund,
   formatCents,
   getPurchaseDetail,
+  getRefundAccess,
   previewRefund,
   purchaseStatusLabel,
   REFUND_DISCLOSURE,
+  type RefundTarget,
 } from '../../../lib/ticketing';
+import { RefundReasonModal } from '../../../components/creator/RefundReasonModal';
 import {
   attachAnswers,
   answerToString,
@@ -108,12 +110,14 @@ export default function PurchaseDetailScreen() {
   });
   const seatsWithAnswers = useMemo(() => attachAnswers(seats, questions, answerRows), [seats, questions, answerRows]);
 
-  const { data: canRefund = false } = useQuery({
-    queryKey: ['event-refund-organizer', eventId],
-    queryFn: () => canCurrentUserRefundEvent(eventId!),
+  const { data: refundAccess } = useQuery({
+    queryKey: ['event-refund-access', eventId],
+    queryFn: () => getRefundAccess(eventId!),
     enabled: !!eventId,
     staleTime: 60_000,
   });
+  const canRefund = refundAccess?.canRefund ?? false;
+  const isRefundDelegate = refundAccess?.isDelegate ?? false;
 
   const invalidateAfterRefund = () => {
     queryClient.invalidateQueries({ queryKey: ['purchase-detail', id] });
@@ -125,10 +129,20 @@ export default function PurchaseDetailScreen() {
     queryClient.invalidateQueries({ queryKey: ['ledger-reconciliation'] });
   };
 
-  const runRefund = async (positionIndexes: number[] | null) => {
+  // Delegate-only reason step (Liz's item 14): opened from confirmRefund
+  // below once the preview confirms the refund is allowed.
+  const [reasonModal, setReasonModal] = useState<{
+    positionIndexes: number[] | null;
+    amountLabel: string;
+    scopeLabel: string;
+  } | null>(null);
+
+  const runRefund = async (positionIndexes: number[] | null, reason?: string) => {
     if (!id) return;
     setRefunding(true);
-    const outcome = await executeRefund(id, { kind: 'buyer_request', positionIndexes });
+    const target: RefundTarget = { kind: 'buyer_request', positionIndexes };
+    if (reason) target.reason = reason;
+    const outcome = await executeRefund(id, target);
     setRefunding(false);
     if (outcome.ok) {
       invalidateAfterRefund();
@@ -144,6 +158,13 @@ export default function PurchaseDetailScreen() {
     }
   };
 
+  const submitReasonRefund = async (reason: string) => {
+    if (!reasonModal) return;
+    const { positionIndexes } = reasonModal;
+    setReasonModal(null);
+    await runRefund(positionIndexes, reason);
+  };
+
   const confirmRefund = async (positionIndexes: number[] | null, scopeLabel: string) => {
     if (!id) return;
     setRefunding(true);
@@ -154,6 +175,17 @@ export default function PurchaseDetailScreen() {
       return;
     }
     hapticLight();
+    // A granted delegate (not the owner) must supply a reason -- the edge
+    // function and record_refund_issuance both require it, and the owner is
+    // never asked. See RefundReasonModal.
+    if (isRefundDelegate) {
+      setReasonModal({
+        positionIndexes,
+        amountLabel: formatCents(preview.refundAmountCents),
+        scopeLabel: `${scopeLabel} ${preview.positionCount === 1 ? 'this ticket becomes' : `these ${preview.positionCount} tickets become`} invalid immediately and can no longer check in. ${REFUND_DISCLOSURE}`,
+      });
+      return;
+    }
     Alert.alert(
       /* copy to the taste gate: every consequence named, not a bare "are you sure" */
       `refund ${formatCents(preview.refundAmountCents)}?`,
@@ -319,6 +351,14 @@ export default function PurchaseDetailScreen() {
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
+      />
+      <RefundReasonModal
+        visible={!!reasonModal}
+        amountLabel={reasonModal?.amountLabel ?? ''}
+        scopeLabel={reasonModal?.scopeLabel ?? ''}
+        submitting={refunding}
+        onCancel={() => setReasonModal(null)}
+        onSubmit={submitReasonRefund}
       />
     </SafeAreaView>
   );

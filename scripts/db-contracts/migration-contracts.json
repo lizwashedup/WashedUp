@@ -1,7 +1,7 @@
 {
   "format": 3,
-  "migration_count": 274,
-  "inventory_sha256": "3917fa487d29cd942e6ffc80347c9be09b42b4220848c4bd49b9021994d10724",
+  "migration_count": 277,
+  "inventory_sha256": "f093d8820c501d7f924c006ac6be844e21a1b54937b3c0bb0c6a2decff0ef027",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
@@ -29,9 +29,12 @@
     "20260904020000_ticket_transfer_draft.sql",
     "20260904030000_waitlist_priority_enforcement.sql",
     "20260905020000_fix_member_invite_ambiguous_column.sql",
-    "20260905030000_fix_co_creator_invite_ambiguous_column.sql"
+    "20260905030000_fix_co_creator_invite_ambiguous_column.sql",
+    "20260906221000_attendee_message_test_send.sql",
+    "20260906230000_refund_issuance_log_nullable_issuer.sql",
+    "20260906231000_has_refund_authority_self_only.sql"
   ],
-  "side_effect_union_count": 81,
+  "side_effect_union_count": 82,
   "approved_legacy_secret_literals": [
     {
       "file": "20260505000000_albums_processor_webhook.sql",
@@ -42,7 +45,7 @@
   "classification_counts": {
     "scheduler": 10,
     "top_level_dml": 27,
-    "do_fixture_dml": 44,
+    "do_fixture_dml": 45,
     "irreversible_ddl": 1,
     "stateful_replacement": 10,
     "default_privileges": 1
@@ -141,7 +144,8 @@
       "20260906180000_build35_screen48_community_handle_available.sql",
       "20260906190000_fix_operator_application_resubmit_after_withdraw.sql",
       "20260906200000_build35_screen37_main_chat_name.sql",
-      "20260906210000_backfill_community_leader_event_host_grant.sql"
+      "20260906210000_backfill_community_leader_event_host_grant.sql",
+      "20260906221000_attendee_message_test_send.sql"
     ],
     "irreversible_ddl": [
       "20260504200000_drop_album_v0.sql"

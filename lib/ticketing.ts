@@ -1458,6 +1458,11 @@ export type RefundTarget = {
   kind?: 'buyer_request' | 'organizer_cancel';
   /** 1-based seat subset (organizer); null/omitted = all remaining seats */
   positionIndexes?: number[] | null;
+  /** REQUIRED, server-enforced (ticket-refund/index.ts + record_refund_issuance),
+   *  when the caller is a granted delegate rather than the event's real owner
+   *  (Liz's item 14, 2026-09-04) -- the owner is never asked for one. Omit for
+   *  every other caller; a non-delegate value is ignored server-side. */
+  reason?: string;
 };
 
 async function invokeRefund(
@@ -1468,6 +1473,7 @@ async function invokeRefund(
   const body: Record<string, unknown> = { order_id: orderId, action };
   if (target.kind) body.kind = target.kind;
   if (target.positionIndexes !== undefined) body.position_indexes = target.positionIndexes;
+  if (target.reason) body.reason = target.reason.trim();
   const { data, error } = await supabase.functions.invoke('ticket-refund', { body });
   if (error) {
     // native functions.invoke carries the JSON body on error.context.body
@@ -1514,6 +1520,41 @@ export async function canCurrentUserRefundEvent(eventId: string): Promise<boolea
   if (!user) return false;
   const organizerId = await getRefundOrganizerId(eventId);
   return !!organizerId && organizerId === user.id;
+}
+
+export interface RefundAccess {
+  /** the exact identity ticket-refund/index.ts's isOrganizer check accepts. */
+  isOwner: boolean;
+  /** a live, active refund-authority grant (Liz's item 14, 2026-09-04) --
+   *  has_refund_authority is checked again server-side; this only decides
+   *  what the UI offers, never the real authorization. */
+  isDelegate: boolean;
+  /** isOwner || isDelegate -- whether to show the refund action at all. A
+   *  co_leader with no grant still passes the RLS read on this screen (see
+   *  canCurrentUserRefundEvent's own comment) but stays false here, same as
+   *  before delegation existed. */
+  canRefund: boolean;
+}
+
+/**
+ * The refund-issuing screens (attendees.tsx, purchase/[id].tsx) need more
+ * than the old owner-only boolean: a delegate issuer must be offered the
+ * refund action AND asked for a reason before it, while an owner sees
+ * neither. Mirrors the edge function's own isOrganizer-then-has_refund_authority
+ * resolution so the two never disagree about who can act.
+ */
+export async function getRefundAccess(eventId: string): Promise<RefundAccess> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { isOwner: false, isDelegate: false, canRefund: false };
+  const organizerId = await getRefundOrganizerId(eventId);
+  const isOwner = !!organizerId && organizerId === user.id;
+  if (isOwner) return { isOwner: true, isDelegate: false, canRefund: true };
+  const { data, error } = await supabase.rpc('has_refund_authority', {
+    p_user_id: user.id,
+    p_event_id: eventId,
+  });
+  const isDelegate = !error && data === true;
+  return { isOwner: false, isDelegate, canRefund: isDelegate };
 }
 
 /** action:"preview": no Stripe call, nothing recorded; the wallet and the

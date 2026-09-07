@@ -28,7 +28,8 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
-import { attendeesToCsv, canCurrentUserRefundEvent, executeRefund, formatCents, previewRefund } from '../../lib/ticketing';
+import { attendeesToCsv, executeRefund, formatCents, getRefundAccess, previewRefund, type RefundTarget } from '../../lib/ticketing';
+import { RefundReasonModal } from '../../components/creator/RefundReasonModal';
 import {
   attachAnswers,
   countAttendees,
@@ -65,13 +66,16 @@ export default function AttendeesScreen() {
     staleTime: 10_000,
   });
   // Safe default while loading and for anyone who isn't the exact organizer
-  // identity the refund function checks (e.g. a co_leader): no button.
-  const { data: canRefund = false } = useQuery({
-    queryKey: ['event-refund-organizer', id],
-    queryFn: () => canCurrentUserRefundEvent(id!),
+  // identity or a granted delegate (Liz's item 14) the refund function
+  // checks (e.g. a co_leader with no grant): no button.
+  const { data: refundAccess } = useQuery({
+    queryKey: ['event-refund-access', id],
+    queryFn: () => getRefundAccess(id!),
     enabled: !!id,
     staleTime: 60_000,
   });
+  const canRefund = refundAccess?.canRefund ?? false;
+  const isRefundDelegate = refundAccess?.isDelegate ?? false;
 
   // Screen 54 addendum: questionnaire answers, a separate read from
   // getEventAttendees above so screens that never show answers don't pay for
@@ -167,8 +171,8 @@ export default function AttendeesScreen() {
    */
   const chooseRefund = async (a: DoorAttendee, mode: 'seat' | 'order') => {
     setRefundingId(a.positionId);
-    const target = {
-      kind: 'buyer_request' as const,
+    const target: RefundTarget = {
+      kind: 'buyer_request',
       positionIndexes: mode === 'seat' ? [a.positionIndex] : null,
     };
     const preview = await previewRefund(a.orderId, target);
@@ -178,6 +182,18 @@ export default function AttendeesScreen() {
          per Scene handoff §14 (no backend vocab in copy); web may still say "order", check
          before assuming parity */
       Alert.alert('about that refund', "that refund isn't available for this purchase.");
+      return;
+    }
+    // A granted delegate (not the owner) must supply a reason -- the edge
+    // function and record_refund_issuance both require it, and the owner is
+    // never asked. See RefundReasonModal.
+    if (isRefundDelegate) {
+      setReasonModal({
+        attendee: a,
+        target,
+        amountLabel: formatCents(preview.refundAmountCents),
+        scopeLabel: mode === 'seat' ? `this seat only, for ${a.buyerName}` : `${a.buyerName}'s whole remaining purchase`,
+      });
       return;
     }
     Alert.alert(
@@ -191,7 +207,7 @@ export default function AttendeesScreen() {
     );
   };
 
-  const runRefund = async (a: DoorAttendee, target: { kind: 'buyer_request'; positionIndexes: number[] | null }) => {
+  const runRefund = async (a: DoorAttendee, target: RefundTarget) => {
     setRefundingId(a.positionId);
     const outcome = await executeRefund(a.orderId, target);
     setRefundingId(null);
@@ -208,6 +224,24 @@ export default function AttendeesScreen() {
     } else {
       Alert.alert('about that refund', outcome.message);
     }
+  };
+
+  // Delegate-only reason step (Liz's item 14): opened from chooseRefund above
+  // once the preview confirms the refund is allowed; closed on submit or cancel.
+  const [reasonModal, setReasonModal] = useState<{
+    attendee: DoorAttendee;
+    target: RefundTarget;
+    amountLabel: string;
+    scopeLabel: string;
+  } | null>(null);
+  const [reasonSubmitting, setReasonSubmitting] = useState(false);
+
+  const submitReasonRefund = async (reason: string) => {
+    if (!reasonModal) return;
+    setReasonSubmitting(true);
+    await runRefund(reasonModal.attendee, { ...reasonModal.target, reason });
+    setReasonSubmitting(false);
+    setReasonModal(null);
   };
 
   const startRefund = (a: DoorAttendee) => {
@@ -400,6 +434,15 @@ export default function AttendeesScreen() {
           )}
         </ScrollView>
       )}
+
+      <RefundReasonModal
+        visible={!!reasonModal}
+        amountLabel={reasonModal?.amountLabel ?? ''}
+        scopeLabel={reasonModal?.scopeLabel ?? ''}
+        submitting={reasonSubmitting}
+        onCancel={() => setReasonModal(null)}
+        onSubmit={submitReasonRefund}
+      />
     </SafeAreaView>
   );
 }

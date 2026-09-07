@@ -60,6 +60,7 @@ import {
   MESSAGE_BODY_MAX,
   MESSAGE_SUBJECT_MAX,
   saveDraft,
+  sendAttendeeMessageTestToSelf,
   type EssentialReason,
   type MessageKind,
   type SeatFilter,
@@ -102,6 +103,8 @@ export default function AttendeeMessageScreen() {
   const [reviewing, setReviewing] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [d, setD] = useState<DraftState>(EMPTY_DRAFT);
+  const [testSending, setTestSending] = useState(false);
+  const [testSent, setTestSent] = useState(false);
 
   const { data: event, isLoading: eventLoading } = useQuery({
     queryKey: ['event-summary', id],
@@ -170,6 +173,21 @@ export default function AttendeeMessageScreen() {
     );
   };
 
+  const handleSendTest = async () => {
+    if (testSending || !id) return;
+    hapticLight();
+    setTestSending(true);
+    try {
+      await sendAttendeeMessageTestToSelf(id, d.subject, d.body);
+      setTestSent(true);
+      setTimeout(() => setTestSent(false), 2500);
+    } catch (e) {
+      Alert.alert('could not send test', e instanceof Error ? e.message : 'try again.');
+    } finally {
+      setTestSending(false);
+    }
+  };
+
   if (eventLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -235,6 +253,23 @@ export default function AttendeeMessageScreen() {
             <Text style={styles.heldBannerTitle}>sending isn&apos;t open yet</Text>
             <Text style={styles.heldBannerBody}>this draft saves on your device. we&apos;ll turn sending on once the last setup is done.</Text>
           </View>
+
+          <TouchableOpacity
+            style={[styles.secondaryButton, testSending && styles.secondaryButtonDisabled]}
+            onPress={handleSendTest}
+            disabled={testSending}
+            accessibilityRole="button"
+            accessibilityLabel="send a test to yourself"
+            accessibilityState={{ disabled: testSending, busy: testSending }}
+          >
+            {/* copy to the taste gate. Founder button-label rule: 1-3 words,
+                never wraps -- accessibilityLabel above stays fully descriptive
+                for screen readers since that rule is about rendered/visual
+                wrap, not spoken text. */}
+            <Text style={styles.secondaryButtonText}>
+              {testSent ? 'sent to you' : testSending ? 'sending…' : 'test to me'}
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity style={styles.primaryButton} onPress={handleSend} accessibilityRole="button" accessibilityLabel="send">
             <Text style={styles.primaryButtonText}>send</Text>
@@ -441,6 +476,12 @@ const styles = StyleSheet.create({
   },
   primaryButtonDisabled: { opacity: 0.5 },
   primaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  secondaryButton: {
+    backgroundColor: 'transparent', borderWidth: 1.5, borderColor: Colors.terracotta, borderRadius: 999,
+    paddingVertical: 14, alignItems: 'center', marginTop: EventSpacing.sm,
+  },
+  secondaryButtonDisabled: { opacity: 0.5 },
+  secondaryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   reviewCard: {
     backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
     padding: 14, gap: 4, marginBottom: EventSpacing.sm,

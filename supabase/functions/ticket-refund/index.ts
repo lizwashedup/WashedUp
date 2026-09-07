@@ -323,6 +323,32 @@ Deno.serve(async (req)=>{
       p_order_id: orderId,
       p_claim_key: idempotencyKey
     });
+    // TOCTOU close (confirmed audit finding, 2026-09-06): isDelegate was
+    // resolved once, early in the request, and never re-checked. Between
+    // that check and the Stripe call there is a claim RPC, a compute RPC,
+    // and a Stripe network round-trip -- a revoke landing in that window
+    // would not stop an already-in-flight delegate refund. Re-check here,
+    // immediately after the claim and before any further work, so a revoke
+    // that lands during that window is caught. isOrganizer is real
+    // event/community ownership, not a revocable grant, so only the
+    // delegate path can go stale like this and needs re-checking.
+    if (isDelegate) {
+      const { data: stillHasAuthority, error: recheckErr } = await service.rpc('has_refund_authority', {
+        p_user_id: callerId,
+        p_event_id: order.event_id
+      });
+      if (recheckErr) {
+        console.error('ticket-refund: refund-authority re-check failed', orderId, recheckErr.code, recheckErr.message);
+        return await respond(500, {
+          error: 'could not confirm refund authority.'
+        });
+      }
+      if (stillHasAuthority !== true) {
+        return await respond(403, {
+          error: 'refund authority was revoked before this refund could complete'
+        });
+      }
+    }
   }
   // the probed money math — the ONLY source of refund amounts
   const { data: computed, error: cmpErr } = await service.rpc('compute_ticket_refund', {
@@ -523,11 +549,24 @@ Deno.serve(async (req)=>{
   // Never blocks the response -- the buyer's refund already succeeded and is
   // already recorded above; a failure here is a logging gap, not a money
   // problem, but it must never be silent.
+  //
+  // isBuyer and isOrganizer are NOT mutually exclusive -- an organizer who
+  // bought a ticket to their own event (supported above) is both. Gate the
+  // default on "genuinely neither organizer nor delegate" rather than on
+  // isBuyer alone, so that combined case still falls through to `reason ||
+  // null` like every other organizer-issued refund, instead of being
+  // mislabeled with the plain-buyer preset. record_refund_issuance's own
+  // CHECK (issuer_is_owner OR a non-empty reason) rejects a null reason for a
+  // real third-party buyer just like it does for a delegate -- but a buyer is
+  // never asked to type one (§5 is a self-service preset, not a form). Fill a
+  // fixed, non-null default so the required row is written every time,
+  // matching this file's plain, non-jargon labels (refundKindLabel).
+  const auditReason = (!isOrganizer && !isDelegate) ? (reason || 'buyer requested their own refund') : (reason || null);
   const { error: auditErr } = await service.rpc('record_refund_issuance', {
     p_order_id: orderId,
     p_issued_by_user_id: callerId,
     p_issuer_is_owner: isOrganizer,
-    p_reason: reason || null,
+    p_reason: auditReason,
     p_kind: kind,
     p_position_indexes: positionsArg,
     p_refund_amount_cents: c.refund_amount_cents,

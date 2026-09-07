@@ -105,6 +105,26 @@ export async function getEventRsvpGoingCount(eventId: string): Promise<number> {
   return count ?? 0;
 }
 
+/**
+ * Send-test-to-yourself: pushes the exact subject/body to the organizer's
+ * own account via the same OneSignal pipeline a real send would use
+ * (app_notifications -> claim_pending_push_notifications ->
+ * send-push-notifications), completely independent of the real send backend
+ * described in this file's header (no attendee_message_sends row, no daily
+ * cap, no opt-out lookup -- see the RPC's own migration). The RPC takes no
+ * audience parameter at all -- auth.uid() is the only possible recipient,
+ * re-verified server-side on every call -- so there is no way for this to
+ * reach anyone but the caller.
+ */
+export async function sendAttendeeMessageTestToSelf(eventId: string, subject: string, body: string): Promise<void> {
+  const { error } = await supabase.rpc('send_attendee_message_test_to_self', {
+    p_event_id: eventId,
+    p_subject: subject,
+    p_body: body,
+  });
+  if (error) throw error;
+}
+
 // ─── local drafts ──────────────────────────────────────────────────────
 // AsyncStorage mirrors web's localStorage draft (AttendeeMessageComposer.tsx),
 // so nothing an organizer writes in the composer or reminder settings is
