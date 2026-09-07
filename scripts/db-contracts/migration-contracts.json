@@ -1,7 +1,7 @@
 {
   "format": 3,
-  "migration_count": 269,
-  "inventory_sha256": "fb0a12505a22e3ea84f621c5db8cddf8d09634d988d656e7b0f8f3180b22bae5",
+  "migration_count": 274,
+  "inventory_sha256": "3917fa487d29cd942e6ffc80347c9be09b42b4220848c4bd49b9021994d10724",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
@@ -31,7 +31,7 @@
     "20260905020000_fix_member_invite_ambiguous_column.sql",
     "20260905030000_fix_co_creator_invite_ambiguous_column.sql"
   ],
-  "side_effect_union_count": 76,
+  "side_effect_union_count": 81,
   "approved_legacy_secret_literals": [
     {
       "file": "20260505000000_albums_processor_webhook.sql",
@@ -41,8 +41,8 @@
   ],
   "classification_counts": {
     "scheduler": 10,
-    "top_level_dml": 26,
-    "do_fixture_dml": 39,
+    "top_level_dml": 27,
+    "do_fixture_dml": 44,
     "irreversible_ddl": 1,
     "stateful_replacement": 10,
     "default_privileges": 1
@@ -94,7 +94,8 @@
       "20260824211000_harden_topic_album_upload_metadata.sql",
       "20260825110000_centralize_admin_alert_recipient.sql",
       "20260901000000_build35_community_role_reconciliation.sql",
-      "20260901010000_build35_event_ownership.sql"
+      "20260901010000_build35_event_ownership.sql",
+      "20260906210000_backfill_community_leader_event_host_grant.sql"
     ],
     "do_fixture_dml": [
       "20260608000100_decline_soft.sql",
@@ -135,7 +136,12 @@
       "20260820010000_operator_set_event_ticket_capacity.sql",
       "20260820020000_follower_broadcast_push_fanout.sql",
       "20260820030000_community_purpose_name_length.sql",
-      "20260821001500_fix_creator_milestones_trigger_auth_gap.sql"
+      "20260821001500_fix_creator_milestones_trigger_auth_gap.sql",
+      "20260906170000_organizer_profile_support_email.sql",
+      "20260906180000_build35_screen48_community_handle_available.sql",
+      "20260906190000_fix_operator_application_resubmit_after_withdraw.sql",
+      "20260906200000_build35_screen37_main_chat_name.sql",
+      "20260906210000_backfill_community_leader_event_host_grant.sql"
     ],
     "irreversible_ddl": [
       "20260504200000_drop_album_v0.sql"
