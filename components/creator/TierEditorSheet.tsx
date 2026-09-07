@@ -7,14 +7,13 @@
  * edited here - that's a separate slice.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,6 +21,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
@@ -81,6 +81,9 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
   const [openTime, setOpenTime] = useState('');
   const [closeDate, setCloseDate] = useState('');
   const [closeTime, setCloseTime] = useState('');
+  const [saveAttempted, setSaveAttempted] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const nameRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -98,7 +101,8 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
     const closeWall = tier?.sales_close_at ? getLAWallParts(tier.sales_close_at) : null;
     setCloseDate(closeWall ? `${closeWall.y}-${pad2(closeWall.m + 1)}-${pad2(closeWall.d)}` : '');
     setCloseTime(closeWall ? `${pad2(closeWall.hour24)}:${pad2(closeWall.minute)}` : '');
-  }, [visible, tier]);
+    setSaveAttempted(false);
+  }, [visible, tier, initialName]);
 
   const priceCents = parsePriceCents(priceText);
   const preview = useMemo(
@@ -159,10 +163,20 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
     return null;
   })();
 
-  const canSave = name.trim().length > 0 && priceProblem === null && minProblem === null && windowProblem === null && !busy;
+  const nameProblem = saveAttempted && name.trim().length === 0
+    ? 'give this ticket a name.'
+    : null;
+  const hasValidationProblem = name.trim().length === 0 || priceProblem !== null || minProblem !== null || windowProblem !== null;
 
   const handleSave = () => {
-    if (!canSave || priceCents === null) return;
+    setSaveAttempted(true);
+    if (busy || hasValidationProblem || priceCents === null) {
+      if (name.trim().length === 0) {
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
+        nameRef.current?.focus();
+      }
+      return;
+    }
     hapticLight();
     const visibility: TierVisibility = hidden ? 'hidden' : 'visible';
     const cap = capText.trim() ? parseInt(capText, 10) : null;
@@ -189,29 +203,45 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
     });
   };
 
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.overlay} onPress={() => Keyboard.dismiss()}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.avoider}>
-          <Pressable style={styles.sheet} onPress={() => Keyboard.dismiss()}>
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <View style={styles.headerRow}>
-                {/* copy to the taste gate */}
-                <Text style={styles.title}>{tier ? 'edit this ticket' : 'a new ticket'}</Text>
-                <TouchableOpacity onPress={onClose} hitSlop={12}>
-                  <Text style={styles.closeX}>✕</Text>
-                </TouchableOpacity>
-              </View>
+  const handleClose = () => {
+    Keyboard.dismiss();
+    onClose();
+  };
 
-              <Text style={styles.label}>name</Text>
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
+      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.avoider}>
+          <View style={styles.headerRow}>
+            {/* copy to the taste gate */}
+            <Text style={styles.title}>{tier ? 'edit this ticket' : 'a new ticket'}</Text>
+            <TouchableOpacity onPress={handleClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="close ticket editor">
+              <Text style={styles.closeText}>close</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            ref={scrollRef}
+            style={styles.scroll}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            showsVerticalScrollIndicator={false}
+          >
+
+              <Text style={styles.label}>ticket name · required</Text>
               <TextInput
-                style={styles.input}
+                ref={nameRef}
+                style={[styles.input, !!nameProblem && styles.inputProblem]}
                 value={name}
                 onChangeText={setName}
                 placeholder="general admission"
                 placeholderTextColor={Colors.textLight}
                 maxLength={TIER_NAME_MAX}
+                returnKeyType="next"
+                accessibilityLabel="ticket name, required"
               />
+              {!!nameProblem && <Text style={styles.problem}>{nameProblem}</Text>}
 
               <Text style={styles.label}>description</Text>
               <TextInput
@@ -371,10 +401,11 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
               {!!windowProblem && <Text style={styles.problem}>{windowProblem}</Text>}
 
               <TouchableOpacity
-                style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+                style={[styles.saveBtn, busy && styles.saveBtnDisabled]}
                 onPress={handleSave}
-                disabled={!canSave}
+                disabled={busy}
                 activeOpacity={0.85}
+                accessibilityRole="button"
               >
                 {busy ? (
                   <ActivityIndicator size="small" color={Colors.white} />
@@ -382,28 +413,29 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
                   <Text style={styles.saveBtnText}>{tier ? 'save it' : 'add it'}</Text>
                 )}
               </TouchableOpacity>
-            </ScrollView>
-          </Pressable>
+          </ScrollView>
         </KeyboardAvoidingView>
-      </Pressable>
+      </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: Colors.overlayDark, justifyContent: 'flex-end' },
-  avoider: { justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: Colors.parchment,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 34,
-    maxHeight: '88%',
+  screen: { flex: 1, backgroundColor: Colors.parchment },
+  avoider: { flex: 1 },
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: 20, paddingBottom: 48 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
   },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   title: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
-  closeX: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.textMedium },
+  closeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   label: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium, marginTop: 12, marginBottom: 6 },
   input: {
     backgroundColor: Colors.inputBg,
@@ -414,6 +446,7 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
   },
+  inputProblem: { borderWidth: 1, borderColor: Colors.errorRed },
   inputMultiline: { minHeight: 72, textAlignVertical: 'top' },
   problem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 6 },
   previewBox: {

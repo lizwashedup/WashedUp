@@ -80,6 +80,7 @@ export default function TicketSetupScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [editingTier, setEditingTier] = useState<TicketTier | null>(null);
+  const [savedTierName, setSavedTierName] = useState<string | null>(null);
   // Build 35 guinea pig: pre-fills the name field when a creator taps "add a
   // free rsvp" instead of the generic "add a ticket" button. Reuses the
   // exact same createTier path a manually-typed $0 tier already goes
@@ -180,7 +181,7 @@ export default function TicketSetupScreen() {
   });
 
   const invalidateTiers = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['ticket-tiers', id] });
+    return queryClient.invalidateQueries({ queryKey: ['ticket-tiers', id] });
   }, [queryClient, id]);
 
   const invalidateQuestions = useCallback(() => {
@@ -326,17 +327,20 @@ export default function TicketSetupScreen() {
 
   const saveTierMutation = useMutation({
     mutationFn: async (draft: TierDraft) => {
+      const wasEditing = !!editingTier;
       const result = editingTier
         ? await updateTier(editingTier.id, draft)
         : await createTier(id!, draft, tiers.length);
       if (!result.ok) throw new Error(result.message ?? 'save failed');
+      return { name: draft.name, wasEditing };
     },
-    onSuccess: () => {
+    onSuccess: async ({ name, wasEditing }) => {
       hapticSuccess();
       setEditorVisible(false);
       setEditingTier(null);
       setNewTierPreset(undefined);
-      invalidateTiers();
+      await invalidateTiers();
+      setSavedTierName(wasEditing ? `${name} updated.` : `${name} added.`);
     },
     onError: (e: any) => {
       hapticError();
@@ -539,6 +543,12 @@ export default function TicketSetupScreen() {
           <Text style={styles.sectionTitle}>the tickets</Text>
         </View>
 
+        {!!savedTierName && (
+          <View style={styles.savedNotice} accessibilityRole="alert">
+            <Text style={styles.savedNoticeText}>{savedTierName} it is saved below.</Text>
+          </View>
+        )}
+
         {tiersLoading ? (
           <ActivityIndicator size="small" color={Colors.terracotta} />
         ) : tiers.length === 0 ? (
@@ -557,6 +567,7 @@ export default function TicketSetupScreen() {
                   router.push(`/creator/rsvp-settings?id=${id}&tierId=${tier.id}` as never);
                   return;
                 }
+                setSavedTierName(null);
                 setEditingTier(tier);
                 setEditorVisible(true);
               }}
@@ -617,6 +628,7 @@ export default function TicketSetupScreen() {
           onPress={() => {
             if (tiersFull) return;
             hapticLight();
+            setSavedTierName(null);
             setEditingTier(null);
             setNewTierPreset(undefined);
             setEditorVisible(true);
@@ -975,6 +987,14 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 4 },
   sectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  savedNotice: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.gold,
+    padding: 12,
+  },
+  savedNoticeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   tierCard: {
     backgroundColor: Colors.white,
     borderRadius: 12,

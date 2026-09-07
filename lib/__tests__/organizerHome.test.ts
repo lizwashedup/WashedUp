@@ -323,3 +323,40 @@ describe('Build 42 creator ticket-flow regression contracts', () => {
     expect(form).not.toContain('organizerProfile.logo_url');
   });
 });
+
+describe('Build 43 ticket-editor regression contracts', () => {
+  const readAppSource = (relativePath: string) => fs.readFileSync(path.resolve(__dirname, '../..', relativePath), 'utf8');
+
+  it('uses a full-screen keyboard-safe editor instead of a partial-height pressable sheet', () => {
+    const source = readAppSource('components/creator/TierEditorSheet.tsx');
+    expect(source).toContain('presentationStyle="fullScreen"');
+    expect(source).toContain("style={styles.avoider}");
+    expect(source).toContain("keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}");
+    expect(source).not.toContain("maxHeight: '88%'");
+    expect(source).not.toContain('style={styles.overlay}');
+  });
+
+  it('explains the required ticket name and never turns missing input into a dead button', () => {
+    const source = readAppSource('components/creator/TierEditorSheet.tsx');
+    expect(source).toContain('ticket name · required');
+    expect(source).toContain('give this ticket a name.');
+    expect(source).toContain('nameRef.current?.focus()');
+    expect(source).toContain('disabled={busy}');
+    expect(source).not.toContain('disabled={!canSave}');
+  });
+
+  it('dismisses the keyboard before either close path leaves the editor', () => {
+    const source = readAppSource('components/creator/TierEditorSheet.tsx');
+    expect(source).toContain('const handleClose = () => {');
+    expect(source).toContain('Keyboard.dismiss();');
+    expect(source).toContain('onRequestClose={handleClose}');
+    expect(source).toContain('onPress={handleClose}');
+  });
+
+  it('refreshes the saved ticket list before showing visible success', () => {
+    const source = readAppSource('app/creator/tickets.tsx');
+    expect(source).toContain('await invalidateTiers();');
+    expect(source).toContain("setSavedTierName(wasEditing ? `${name} updated.` : `${name} added.`)");
+    expect(source).toContain('{savedTierName} it is saved below.');
+  });
+});
