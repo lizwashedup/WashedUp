@@ -21,6 +21,18 @@ interface PayoutsCardProps {
 }
 
 export function PayoutsCard({ payout, onboardBusy, onOnboard }: PayoutsCardProps) {
+  // An undefined payout means React Query has not finished the first read.
+  // Never turn "still loading" into the false "set up payouts" state Liz
+  // saw flash before her real ready state appeared.
+  if (payout === undefined) {
+    return (
+      <View style={styles.card} accessibilityLabel="checking payout setup">
+        <Text style={styles.title}>checking payout setup</Text>
+        <ActivityIndicator size="small" color={Colors.terracotta} />
+      </View>
+    );
+  }
+
   const ready = isPayoutReady(payout);
   return (
     <View style={styles.card}>

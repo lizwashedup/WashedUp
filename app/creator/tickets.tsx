@@ -75,7 +75,7 @@ import { AddonEditorSheet } from '../../components/creator/AddonEditorSheet';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 export default function TicketSetupScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, setup } = useLocalSearchParams<{ id: string; setup?: string }>();
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
@@ -452,6 +452,19 @@ export default function TicketSetupScreen() {
   }, [queryClient, id]);
 
   const payoutReady = isPayoutReady(payout);
+  const paidTiers = tiers.filter((tier) => tier.price_cents > 0);
+  const paidOnSale = paidTiers.some((tier) => tier.status === 'on_sale');
+  const setupMessage = tiersLoading
+    ? 'checking your ticket setup.'
+    : paidTiers.length === 0
+      ? 'add a paid ticket and set its price below.'
+      : payout === undefined
+        ? 'checking payout setup.'
+      : !payoutReady
+        ? 'finish payout setup, then put your ticket on sale.'
+        : !paidOnSale
+          ? 'put your paid ticket on sale.'
+          : 'your ticket is ready. review and publish your event.';
   // law 11: three or four, one of them recommended
   const recommendedId = recommendedTierId(tiers);
   const tiersFull = tiers.length >= TIER_COUNT_MAX;
@@ -495,6 +508,25 @@ export default function TicketSetupScreen() {
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {!!event && <Text style={styles.eventTitle}>{event.title}</Text>}
+
+        {setup === '1' && (
+          <View style={styles.setupCard} accessibilityLabel="ticketed event setup">
+            <Text style={styles.setupKicker}>ticketed event setup</Text>
+            <Text style={styles.setupTitle}>{paidOnSale && payoutReady ? 'ready to publish' : 'finish making it sellable'}</Text>
+            <Text style={styles.setupMeta}>{setupMessage}</Text>
+            {paidOnSale && payoutReady && (
+              <TouchableOpacity
+                style={styles.setupBtn}
+                onPress={() => { hapticLight(); router.back(); }}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="review event"
+              >
+                <Text style={styles.setupBtnText}>review event</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* payouts (doc 61 §2): the SAME card as the standalone getting-paid
             front door, so the two never drift (7-27 item 4) */}
@@ -915,6 +947,31 @@ const styles = StyleSheet.create({
   salesLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.textMedium },
   content: { padding: 20, paddingBottom: 40, gap: 10 },
   eventTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt, marginBottom: 4 },
+  setupCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: EventAction.primary,
+    padding: EventSpacing.md,
+    gap: EventSpacing.xs,
+  },
+  setupKicker: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.caption,
+    color: EventAction.primary,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  setupTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
+  setupMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium, lineHeight: 19 },
+  setupBtn: {
+    backgroundColor: EventAction.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: EventSpacing.xs,
+  },
+  setupBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: EventAction.onPrimary },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 4 },
   sectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },

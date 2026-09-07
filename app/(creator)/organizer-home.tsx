@@ -53,7 +53,7 @@ export default function OrganizerHomeScreen() {
     staleTime: Infinity,
   });
 
-  const { data: organizerProfile = null } = useQuery({
+  const { data: organizerProfile = null, isPending: organizerProfilePending } = useQuery({
     queryKey: ['organizer-profile'],
     queryFn: getMyOrganizerProfile,
   });
@@ -289,7 +289,14 @@ export default function OrganizerHomeScreen() {
         <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/creator/organizer-profile')} activeOpacity={0.8}>
           <View style={{ flex: 1 }}>
             {/* LIZ COPY */}
-            <Text style={styles.linkRowTitle}>your organization</Text>
+            <View style={styles.linkRowTitleLine}>
+              <Text style={styles.linkRowTitle}>your organization</Text>
+              {!organizerProfilePending && !organizerProfile && (
+                <View style={styles.setupBadge} accessibilityLabel="organization setup needed">
+                  <Text style={styles.setupBadgeText}>set up</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.linkRowMeta}>
               {organizerProfile ? 'the name your events wear' : 'set it up. takes a minute.'}
             </Text>
@@ -477,5 +484,15 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   linkRowTitle: { fontFamily: EventType.bodyBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  linkRowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: EventSpacing.xs },
+  setupBadge: {
+    backgroundColor: EventAction.successFill,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.gold,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  setupBadgeText: { fontFamily: EventType.bodyBold, fontSize: FontSizes.micro, color: Colors.brandDeep },
   linkRowMeta: { fontFamily: EventType.body, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 2 },
 });

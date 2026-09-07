@@ -1,4 +1,6 @@
 import { availableProfileContexts, resolveProfileContext } from '../profileContext';
+import fs from 'fs';
+import path from 'path';
 
 describe('profile context access foundation', () => {
   it('always gives a person context and exposes only active leadership contexts', () => {
@@ -29,5 +31,12 @@ describe('profile context access foundation', () => {
     expect(resolveProfileContext('community:not-mine', contexts)?.key).toBe('person:user-1');
     expect(resolveProfileContext('creator:user-1', contexts)?.key).toBe('creator:user-1');
     expect(resolveProfileContext(null, [])).toBeNull();
+  });
+
+  it('does not expose internal release diagnostics on the user-facing profile screen', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '../../app/(tabs)/profile.tsx'), 'utf8');
+    expect(source).not.toContain('App build:');
+    expect(source).not.toContain("from 'expo-updates'");
+    expect(source).toContain("label: 'Contact Us'");
   });
 });

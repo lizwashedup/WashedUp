@@ -1,7 +1,8 @@
 /**
  * Creator mode: post or edit an event (doc 08 events organ). Create asks
  * attribution once (from the community or just you, locked after, batch 15
- * call e) and publishes straight to Live (call a). Edit honors the
+ * call e). Free events publish immediately; ticketed events are created as
+ * private drafts and continue through ticket and payout setup. Edit honors the
  * FULL-OVERWRITE contract: the form loads every field and always sends the
  * complete set (see lib/creatorEvents.ts). A community event offers "tell
  * your members" after publish, one-shot, never automatic. Functionally
@@ -46,8 +47,7 @@ import { getCreatorAccess, canManageEvents, creatorLandingRoute } from '../../li
 import { CO_CREATOR_INVITES_ENABLED } from '../../constants/FeatureFlags';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { supabase } from '../../lib/supabase';
-import { eventHasPaidTier, getMyPayoutState, getTiers, isPayoutReady, refundLiveOrdersOnCancel, type CancelRefundSummary } from '../../lib/ticketing';
-import { hasUnpublishedTickets } from '../../lib/organizerHome';
+import { getMyPayoutState, getTiers, isPayoutReady, refundLiveOrdersOnCancel, type CancelRefundSummary } from '../../lib/ticketing';
 import { OFFER_TYPE_OPTIONS, isOfferTypeSellableToday, isOfferType, type OfferType } from '../../lib/offerTypes';
 import {
   announceEventToMembers,
@@ -169,28 +169,33 @@ export default function EventFormScreen() {
     probeTicketCapacityRpc().then(setTicketCapacityRpcOpen);
   }, []);
 
-  // Audit finding (75-threshold spec item 2): warnIfNothingOnSale only ever
-  // fires once, right after a save, and its "later" button never resurfaces.
-  // This makes the same signal durable on the event's own management view --
-  // read-only, best-effort, mirrors the door-probe effects above. Only a
-  // published (Live) event can mislead anyone, so drafts are skipped.
+  // Build 42: ticketed offers must have a paid tier on sale before publish.
+  // This state is refreshed whenever the form regains focus, including after
+  // the organizer follows the setup door to the tickets screen and returns.
   // Review finding 2026-08-29: a plain useEffect never reran when a creator
   // followed this nudge to the tickets screen and came straight back, since
   // this screen stays mounted and none of the deps change -- useFocusEffect
   // re-checks every time the screen regains focus instead.
-  const [ticketsUnpublished, setTicketsUnpublished] = useState(false);
+  const [ticketSetupState, setTicketSetupState] = useState<'not_needed' | 'checking' | 'missing' | 'draft' | 'ready'>('checking');
   useFocusEffect(
     useCallback(() => {
-      if (!editing || !id || eventStatus !== 'Live') {
-        setTicketsUnpublished(false);
+      if (!editing || !id || offerType !== 'ticketed_event') {
+        setTicketSetupState('not_needed');
         return;
       }
       let cancelled = false;
+      setTicketSetupState('checking');
       getTiers(id)
-        .then((tiers) => { if (!cancelled) setTicketsUnpublished(hasUnpublishedTickets(tiers)); })
-        .catch(() => { if (!cancelled) setTicketsUnpublished(false); });
+        .then((tiers) => {
+          if (cancelled) return;
+          const paid = tiers.filter((tier) => tier.price_cents > 0);
+          setTicketSetupState(
+            paid.length === 0 ? 'missing' : paid.some((tier) => tier.status === 'on_sale') ? 'ready' : 'draft',
+          );
+        })
+        .catch(() => { if (!cancelled) setTicketSetupState('checking'); });
       return () => { cancelled = true; };
-    }, [editing, id, eventStatus]),
+    }, [editing, id, offerType]),
   );
   const [seeded, setSeeded] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -514,21 +519,28 @@ export default function EventFormScreen() {
    * one screen that fixes it.
    */
   const warnIfNothingOnSale = async (eventId: string, onDone: () => void) => {
-    let tiers: { status: string }[] = [];
+    if (offerType !== 'ticketed_event') {
+      onDone();
+      return;
+    }
+    let tiers: Awaited<ReturnType<typeof getTiers>> = [];
     try {
       tiers = await getTiers(eventId);
     } catch {
       onDone();
       return;
     }
-    if (tiers.length === 0 || tiers.some((t) => t.status === 'on_sale')) {
+    const paidTiers = tiers.filter((tier) => tier.price_cents > 0);
+    if (paidTiers.some((tier) => tier.status === 'on_sale')) {
       onDone();
       return;
     }
     setAlertInfo({
       /* copy to the taste gate */
-      title: 'your tickets are still drafts',
-      message: 'this event is up, but nobody can buy a ticket until you put one on sale.',
+      title: paidTiers.length === 0 ? 'add your ticket and price' : 'your tickets are still drafts',
+      message: paidTiers.length === 0
+        ? 'this is a ticketed event, but nobody can buy yet. add a paid ticket before it goes live.'
+        : 'this event is up, but nobody can buy a ticket until you put one on sale.',
       buttons: [
         { text: 'later', style: 'cancel', onPress: onDone },
         { text: 'set them up', onPress: () => { onDone(); router.push(`/creator/tickets?id=${eventId}` as never); } },
@@ -551,12 +563,21 @@ export default function EventFormScreen() {
         await warnIfNothingOnSale(id, () => router.back());
       } else {
         const communityId = fromCommunity && community ? community.id : null;
-        const newId = await createOperatorEvent(fields, communityId);
+        // Ticketed creation is a guided draft-first flow. An event must exist
+        // before its priced tier can exist, so create the private draft and
+        // continue directly to ticket setup instead of publishing a shell.
+        const ticketedSetup = offerType === 'ticketed_event';
+        const newId = await createOperatorEvent(fields, communityId, !ticketedSetup);
         await syncCoords(newId);
         await syncOfferType(newId);
         await syncTicketCapacity(newId);
         hapticSuccess();
         afterSave();
+        if (ticketedSetup) {
+          router.replace(`/creator/event-form?id=${newId}` as never);
+          router.push(`/creator/tickets?id=${newId}&setup=1` as never);
+          return;
+        }
         if (communityId) {
           offerAnnounce(newId);
         } else {
@@ -585,6 +606,9 @@ export default function EventFormScreen() {
     { label: 'a date', done: !!date.trim() },
     { label: 'where it is', done: !!venue.trim() },
     { label: 'photos or a story', done: (blocks?.length ?? 0) > 0 },
+    ...(offerType === 'ticketed_event'
+      ? [{ label: 'a paid ticket on sale', done: ticketSetupState === 'ready' }]
+      : []),
   ];
 
   const autosaveSignature = JSON.stringify([
@@ -644,12 +668,26 @@ export default function EventFormScreen() {
     if (!fields || !id || saving) return;
     setSaving(true);
     try {
-      // the P3 selling gate: a draft with a PAID tier cannot go Live until
-      // both Stripe capabilities exist. eventHasPaidTier throws on a failed
-      // read, so a flaky check blocks the publish (fail closed) instead of
-      // letting paid tickets ship without payout rails. Free-only and
-      // un-ticketed events publish as before.
-      if (await eventHasPaidTier(id)) {
+      // Build 42 closes the disconnected create-to-sell gap. A ticketed event
+      // cannot publish until it has a real paid tier on sale. The tier read
+      // throws on failure, so this remains fail-closed.
+      const tiers = await getTiers(id);
+      const paidTiers = tiers.filter((tier) => tier.price_cents > 0);
+      const paidOnSale = paidTiers.some((tier) => tier.status === 'on_sale');
+      if (offerType === 'ticketed_event' && !paidOnSale) {
+        setAlertInfo({
+          title: paidTiers.length === 0 ? 'add your ticket and price' : 'put your ticket on sale',
+          message: paidTiers.length === 0
+            ? 'ticketed events need a paid ticket before they can go live.'
+            : 'your paid ticket is still a draft. put it on sale, then publish.',
+          buttons: [
+            { text: 'not now', style: 'cancel' },
+            { text: 'set it up', onPress: () => router.push(`/creator/tickets?id=${id}&setup=1` as never) },
+          ],
+        });
+        return;
+      }
+      if (paidTiers.length > 0) {
         const { data: { user } } = await supabase.auth.getUser();
         const payout = user ? await getMyPayoutState(user.id) : null;
         if (!isPayoutReady(payout)) {
@@ -913,7 +951,7 @@ export default function EventFormScreen() {
               </Text>
             )}
 
-            {editing && eventStatus === 'Live' && ticketsUnpublished && (
+            {editing && offerType === 'ticketed_event' && (ticketSetupState === 'missing' || ticketSetupState === 'draft') && (
               // Audit finding (75-threshold spec item 2): durable version of
               // warnIfNothingOnSale's one-time popup -- stays visible on
               // every visit to this event until tickets are actually on sale.
@@ -924,8 +962,14 @@ export default function EventFormScreen() {
               >
                 <View style={styles.ticketNudgeBody}>
                   {/* copy to the taste gate */}
-                  <Text style={styles.ticketNudgeTitle}>your tickets are still drafts</Text>
-                  <Text style={styles.ticketNudgeMeta}>this event is up, but nobody can buy a ticket yet. set them up →</Text>
+                  <Text style={styles.ticketNudgeTitle}>
+                    {ticketSetupState === 'missing' ? 'add your ticket and price' : 'your tickets are still drafts'}
+                  </Text>
+                  <Text style={styles.ticketNudgeMeta}>
+                    {eventStatus === 'Live'
+                      ? 'this event is up, but nobody can buy a ticket yet. set it up →'
+                      : 'finish ticket setup before you publish. set it up →'}
+                  </Text>
                 </View>
                 <ChevronRight size={18} color={Colors.terracotta} strokeWidth={2.5} />
               </TouchableOpacity>

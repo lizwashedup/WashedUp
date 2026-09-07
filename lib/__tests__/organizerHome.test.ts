@@ -9,6 +9,8 @@ import {
   pickNextUpcomingEvent,
   sumTierCapacity,
 } from '../organizerHome';
+import fs from 'fs';
+import path from 'path';
 import type { CommunityEventRow } from '../creatorMode';
 import type { TicketTier } from '../ticketing';
 
@@ -287,5 +289,37 @@ describe('hasUnpublishedTickets', () => {
 
   it('is true for a mix of closed and draft tiers -- the draft one is real', () => {
     expect(hasUnpublishedTickets([tier({ status: 'closed' }), tier({ status: 'draft' })])).toBe(true);
+  });
+});
+
+describe('Build 42 creator ticket-flow regression contracts', () => {
+  const readAppSource = (relativePath: string) => fs.readFileSync(path.resolve(__dirname, '../..', relativePath), 'utf8');
+
+  it('creates a ticketed event as a private draft and continues to priced ticket setup', () => {
+    const source = readAppSource('app/creator/event-form.tsx');
+    expect(source).toContain("const ticketedSetup = offerType === 'ticketed_event'");
+    expect(source).toContain('createOperatorEvent(fields, communityId, !ticketedSetup)');
+    expect(source).toContain('`/creator/tickets?id=${newId}&setup=1`');
+  });
+
+  it('blocks ticketed publish until a paid tier is on sale', () => {
+    const source = readAppSource('app/creator/event-form.tsx');
+    expect(source).toContain('const paidOnSale = paidTiers.some');
+    expect(source).toContain("offerType === 'ticketed_event' && !paidOnSale");
+    expect(source).toContain('ticketed events need a paid ticket before they can go live.');
+  });
+
+  it('never renders an unloaded payout as not set up', () => {
+    const source = readAppSource('components/creator/PayoutsCard.tsx');
+    expect(source.indexOf('if (payout === undefined)')).toBeGreaterThan(-1);
+    expect(source.indexOf('if (payout === undefined)')).toBeLessThan(source.indexOf('isPayoutReady(payout)'));
+    expect(source).toContain('checking payout setup');
+  });
+
+  it('surfaces missing organization identity without making the optional logo a publish blocker', () => {
+    const home = readAppSource('app/(creator)/organizer-home.tsx');
+    const form = readAppSource('app/creator/event-form.tsx');
+    expect(home).toContain('organization setup needed');
+    expect(form).not.toContain('organizerProfile.logo_url');
   });
 });
