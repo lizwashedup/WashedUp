@@ -3,8 +3,9 @@
  * personal tabs and creator tabs never mix. Entered from the profile
  * switch; exits via menu -> switch back.
  *
- * Community Leaders (or anyone actively leading a community) get all five
- * community tabs. An event-host-only grant gets its own purpose-built
+ * Community Leaders (or anyone actively leading a community) get the final
+ * three-tab shell from the Build 35 handoff: Overview, Events, Community. An
+ * event-host-only grant gets its own purpose-built
  * organizer shell instead (CTO scope item 06; design spec item 04
  * "distinct... workspace shells"; inventory O-01): organizer-home + events +
  * menu, never the leader's cut-down five-tab set. Enforced here AND by RLS
@@ -25,7 +26,7 @@ import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { getCreatorAccess, hasCreatorAccess, creatorShellKind } from '../../lib/creatorMode';
 import { hydrateSelectedCommunity } from '../../lib/selectedCommunity';
-import { hydrateWorkspace } from '../../lib/workspaceContext';
+import { hydrateWorkspace, useWorkspace } from '../../lib/workspaceContext';
 import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
 
 export default function CreatorLayout() {
@@ -37,6 +38,7 @@ export default function CreatorLayout() {
     queryFn: getCreatorAccess,
     staleTime: 30_000,
   });
+  const workspace = useWorkspace(access);
 
   // Restore the persisted community selection and product-level workspace
   // (master plan §5.1 A4) the moment the creator shell mounts -- once per
@@ -79,12 +81,20 @@ export default function CreatorLayout() {
     return <Redirect href={COMMUNITIES_ENABLED ? '/(tabs)/profile' : '/(tabs)/plans'} />;
   }
 
-  const shellKind = creatorShellKind(access);
+  // A creator can hold both independent approvals. The persisted workspace
+  // choice decides which product shell is active instead of always forcing a
+  // Community creator into Community and making Organization unreachable.
+  const shellKind = workspace === 'organization' ? 'organizer' : creatorShellKind(access);
   const showToday = shellKind === 'full';
   const showOrganizerHome = shellKind === 'organizer' || shellKind === 'events';
   const showEvents = shellKind === 'full' || shellKind === 'organizer' || shellKind === 'events';
   const showCommunity = shellKind === 'full';
-  const showMembers = shellKind === 'full' || shellKind === 'member_care';
+  // Build 35 final navigation removes the old global Members and Menu tabs
+  // for Community owners. Those destinations remain reachable inside the
+  // Community hub. A member-care-only collaborator still needs the focused
+  // Members surface because they do not receive the full owner shell.
+  const showMembers = shellKind === 'member_care';
+  const showMenu = workspace === 'organization' || shellKind !== 'full';
   const tabBarHeight = Platform.OS === 'ios' ? 52 + insets.bottom : 60;
 
   return (
@@ -94,12 +104,12 @@ export default function CreatorLayout() {
         headerShown: false,
         lazy: true,
         freezeOnBlur: true,
-        tabBarActiveTintColor: '#2C1810',
-        tabBarInactiveTintColor: '#A09385',
+        tabBarActiveTintColor: Colors.darkWarm,
+        tabBarInactiveTintColor: Colors.warmGray,
         tabBarStyle: {
           backgroundColor: Colors.parchment,
           borderTopWidth: 0.5,
-          borderTopColor: '#E5DDD1',
+          borderTopColor: Colors.border,
           height: tabBarHeight,
           paddingBottom: Platform.OS === 'ios' ? insets.bottom : 8,
           paddingTop: 8,
@@ -113,7 +123,7 @@ export default function CreatorLayout() {
       <Tabs.Screen
         name="today"
         options={{
-          title: 'Today',
+          title: 'Overview',
           href: showToday ? undefined : null,
           tabBarIcon: ({ color }) => <Sun size={22} color={color} strokeWidth={2} />,
         }}
@@ -123,7 +133,7 @@ export default function CreatorLayout() {
         options={{
           // O-01's own nav naming ("Today / Events / Attendees / More"); the
           // leader's "Today" and this are mutually exclusive, never both shown
-          title: 'Today',
+          title: 'Overview',
           href: showOrganizerHome ? undefined : null,
           tabBarIcon: ({ color }) => <Sun size={22} color={color} strokeWidth={2} />,
         }}
@@ -159,7 +169,8 @@ export default function CreatorLayout() {
           // (Today / Events / Attendees / More); the leader's five-tab
           // shell keeps the existing "Menu" label, its own naming is
           // unrelated to O-01.
-          title: shellKind === 'full' ? 'Menu' : 'More',
+          title: workspace === 'organization' ? 'Organization' : shellKind === 'full' ? 'Menu' : 'More',
+          href: showMenu ? undefined : null,
           tabBarIcon: ({ color }) => <Menu size={22} color={color} strokeWidth={2} />,
         }}
       />

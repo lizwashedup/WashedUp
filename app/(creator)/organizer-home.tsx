@@ -41,6 +41,8 @@ import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { formatEventDateLA } from '../../lib/laDate';
 import { daysUntilLabel, failedPayoutLabel, inventoryLabel, lowInventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
 import { supabase } from '../../lib/supabase';
+import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
+import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
 
 export default function OrganizerHomeScreen() {
   const router = useRouter();
@@ -64,15 +66,16 @@ export default function OrganizerHomeScreen() {
   // loading, and isLoading is isPending && isFetching in this query-client
   // major version. isPending alone stays true across that whole gap, which
   // is what actually gates the false "nothing on the calendar" flash below.
-  const { data: events = [], isPending: eventsPending } = useQuery({
-    queryKey: ['creator-events-tab', access?.ledCommunities.map((c) => c.id).join(',')],
+  const { data: allEvents = [], isPending: eventsPending } = useQuery({
+    queryKey: ['creator-events-tab', 'organization'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
-      return getCreatorEvents((access?.ledCommunities ?? []).map((c) => c.id), user.id);
+      return getCreatorEvents([], user.id);
     },
     enabled: access != null,
   });
+  const events = allEvents.filter((event) => eventBelongsToWorkspace(event, 'organization', null));
 
   const nextEvent = useMemo(() => pickNextUpcomingEvent(events), [events]);
 
@@ -111,8 +114,8 @@ export default function OrganizerHomeScreen() {
   // across this organizer's events. Empty array hides the card entirely,
   // same "no fake zero" convention as followerCount above.
   const { data: failedPayouts = [] } = useQuery({
-    queryKey: ['organizer-home-failed-payouts', userId, access?.ledCommunities.map((c) => c.id).join(',')],
-    queryFn: () => getFailedPayouts((access?.ledCommunities ?? []).map((c) => c.id), userId!),
+    queryKey: ['organizer-home-failed-payouts', userId, 'organization'],
+    queryFn: () => getFailedPayouts([], userId!),
     enabled: !!userId && access != null,
     staleTime: 30_000,
   });
@@ -125,6 +128,7 @@ export default function OrganizerHomeScreen() {
         {/* LIZ COPY */}
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>{producerName}</Text>
+        <WorkspaceSwitcher access={access} />
 
         {/* Build 35 Screen 01: exception-first surfacing. Rises above the
             routine next-event card on purpose -- a stuck payout matters

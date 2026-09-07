@@ -21,10 +21,14 @@ import { useLedCommunity } from '../../lib/selectedCommunity';
 import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
 import { supabase } from '../../lib/supabase';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
+import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
+import { useWorkspace } from '../../lib/workspaceContext';
 
 export default function CreatorMenuScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = useLedCommunity(access);
+  const workspace = useWorkspace(access);
+  const selectedCommunity = useLedCommunity(access);
+  const community = workspace === 'community' ? selectedCommunity : null;
 
   const { data: members = [] } = useQuery({
     queryKey: ['creator-members', community?.id],
@@ -68,7 +72,8 @@ export default function CreatorMenuScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {/* LIZ COPY */}
         <Text style={styles.kicker}>creator mode</Text>
-        <Text style={styles.title}>menu</Text>
+        <Text style={styles.title}>{workspace === 'organization' ? 'organization' : 'community'}</Text>
+        <WorkspaceSwitcher access={access} />
 
         {/* slice 0 (doc 43 track B): the identity card — who you are here.
             community mark + the leader's face chip for a community;
@@ -123,7 +128,7 @@ export default function CreatorMenuScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <CommunitySwitcher access={access} />
+        {workspace === 'community' && <CommunitySwitcher access={access} />}
 
         {/* switch back rides directly beneath the identity card (slice 0) */}
         <TouchableOpacity

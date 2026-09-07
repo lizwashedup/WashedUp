@@ -61,6 +61,28 @@ tonight; validating it end to end is listed on the migration's own manual checkl
 real; confirmed live via `information_schema.columns` that `communities.join_ask_reason`,
 `join_ask_source`, `join_ask_rules_confirm`, and `join_open_question` all exist.
 
+## ## Follower broadcast push fanout (`20260820020000`)
+
+Different apply path than the three above: applied via Supabase MCP `apply_migration` against
+project `upstjumasqblszevlgik`, not `supabase db query --linked -f`, and not dry-run tested first
+since the file's own bundled self-test runs inside the same transaction as the real apply (real
+`BEGIN`/`COMMIT`, no separate rollback rehearsal). Pre-apply check confirmed
+`fanout_follower_broadcast_push` did not exist yet and `follower_broadcasts` already did, so the
+file's own stated dependency was satisfied. The self-test creates real fixtures (an organizer, a
+follower, a stranger, a temporary community) and asserts: a non-sender is rejected, the real sender
+fans out exactly one `app_notifications` row per follower on both the organizer-broadcast and
+community-broadcast paths, and every fixture row is deleted in the same transaction before commit.
+`apply_migration` returning success is only possible if that self-test passed -- a failing
+assertion would have raised and rolled back the whole transaction, function included. Confirmed
+live after apply via `to_regprocedure('public.fanout_follower_broadcast_push(uuid)')`. Migration
+file itself was not edited, per this repo's immutability policy -- recorded here instead.
+
+Not independently re-verified tonight: whether a real push notification actually renders on a
+physical device when this function fires. The self-test proves the database-side pipeline (row
+insert, authorization, exactly-once fan-out); it does not prove delivery past `app_notifications`
+through the push provider to a real phone. A real canary broadcast + device check is still
+outstanding, same category as the standing real-device ticket-purchase walkthrough.
+
 ## Not applied tonight
 
 `20260904010000_refund_authority_grants.sql` and `20260904020000_ticket_transfer_draft.sql`

@@ -29,7 +29,18 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Users, UserPlus, DollarSign, MessageCircle, ChevronRight } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  Users,
+  UserPlus,
+  DollarSign,
+  MessageCircle,
+  ChevronRight,
+  Pencil,
+  Copy,
+  ScanLine,
+  Ticket,
+} from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
@@ -116,6 +127,49 @@ export default function EventSummaryScreen() {
             </View>
           </View>
 
+          <View style={styles.primaryActions}>
+            <TouchableOpacity
+              style={styles.primaryAction}
+              onPress={() => { hapticLight(); router.push(`/creator/event-form?id=${id}` as never); }}
+              accessibilityRole="button"
+              accessibilityLabel="edit event"
+            >
+              <Pencil size={18} color={Colors.white} strokeWidth={2} />
+              <Text style={styles.primaryActionText}>edit event</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.primaryAction, styles.primaryActionSecondary]}
+              onPress={() => { hapticLight(); router.push(`/creator/event-form?duplicateFrom=${id}` as never); }}
+              accessibilityRole="button"
+              accessibilityLabel="duplicate event"
+            >
+              <Copy size={18} color={Colors.terracotta} strokeWidth={2} />
+              <Text style={[styles.primaryActionText, styles.primaryActionTextSecondary]}>duplicate</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={styles.tabRow}
+            onPress={() => { hapticLight(); router.push(`/creator/tickets?id=${id}` as never); }}
+            accessibilityRole="button"
+            accessibilityLabel="open ticket sales"
+          >
+            <Ticket size={20} color={Colors.terracotta} strokeWidth={2} />
+            <Text style={styles.tabLabel}>ticket sales</Text>
+            <ChevronRight size={18} color={Colors.textLight} strokeWidth={2} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.tabRow}
+            onPress={() => { hapticLight(); router.push(`/creator/check-in?id=${id}` as never); }}
+            accessibilityRole="button"
+            accessibilityLabel="open check-in"
+          >
+            <ScanLine size={20} color={Colors.terracotta} strokeWidth={2} />
+            <Text style={styles.tabLabel}>check in</Text>
+            <ChevronRight size={18} color={Colors.textLight} strokeWidth={2} />
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.tabRow}
             onPress={() => { hapticLight(); router.push(`/creator/attendees?id=${id}` as never); }}
@@ -191,6 +245,24 @@ const styles = StyleSheet.create({
   countCell: { flex: 1, backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, paddingVertical: 10, alignItems: 'center' },
   countN: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   countL: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.textMedium, textTransform: 'uppercase', letterSpacing: 0.5 },
+  primaryActions: { flexDirection: 'row', gap: EventSpacing.sm },
+  primaryAction: {
+    flex: 1,
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.terracotta,
+    borderRadius: 10,
+  },
+  primaryActionSecondary: {
+    backgroundColor: Colors.cardBg,
+    borderWidth: 1,
+    borderColor: Colors.terracotta,
+  },
+  primaryActionText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
+  primaryActionTextSecondary: { color: Colors.terracotta },
   tabRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,

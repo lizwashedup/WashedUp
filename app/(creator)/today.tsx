@@ -30,6 +30,8 @@ import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { getRsvpCount } from '../../lib/eventRsvp';
 import { OfflineBanner } from '../../components/state/StateViews';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
+import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
 
 export default function CreatorTodayScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
@@ -45,7 +47,7 @@ export default function CreatorTodayScreen() {
     queryFn: () => getBroadcasts(community!.id),
     enabled: !!community,
   });
-  const { data: events = [] } = useQuery({
+  const { data: allEvents = [] } = useQuery({
     queryKey: ['creator-events', community?.id],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -54,6 +56,9 @@ export default function CreatorTodayScreen() {
     },
     enabled: access != null,
   });
+  const events = allEvents.filter((event) =>
+    eventBelongsToWorkspace(event, 'community', community?.id ?? null),
+  );
   // inventory C-02: a real link into the persistent room, not a fabricated
   // "pulse" metric -- room count is genuinely available (community.tsx
   // already fetches this the same way), so the home card can be honest.
@@ -141,6 +146,7 @@ export default function CreatorTodayScreen() {
       >
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>{community ? community.name.toLowerCase() : 'today'}</Text>
+        <WorkspaceSwitcher access={access} />
         <CommunitySwitcher access={access} />
         {!online && <OfflineBanner />}
 

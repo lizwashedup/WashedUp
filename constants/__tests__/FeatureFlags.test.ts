@@ -8,7 +8,9 @@ type NativeFlags = {
   MEMBER_STATE_ENABLED: boolean;
   CHAT_ENGINE_ENABLED: boolean;
   PLAN_CARD_ACTIVITY_FIRST_ENABLED: boolean;
+  EVENT_SUMMARY_ENABLED: boolean;
   REFUND_AUTHORITY_ENABLED: boolean;
+  MESSAGE_TEST_SEND_ENABLED: boolean;
 };
 
 const envKeys = [
@@ -21,7 +23,9 @@ const envKeys = [
   'EXPO_PUBLIC_MEMBER_STATE_ENABLED',
   'EXPO_PUBLIC_CHAT_ENGINE_ENABLED',
   'EXPO_PUBLIC_PLAN_CARD_ACTIVITY_FIRST_ENABLED',
+  'EXPO_PUBLIC_EVENT_SUMMARY_ENABLED',
   'EXPO_PUBLIC_REFUND_AUTHORITY_ENABLED',
+  'EXPO_PUBLIC_MESSAGE_TEST_SEND_ENABLED',
 ] as const;
 
 const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
@@ -63,7 +67,9 @@ describe('native feature flag contract', () => {
       MEMBER_STATE_ENABLED: true,
       CHAT_ENGINE_ENABLED: false,
       PLAN_CARD_ACTIVITY_FIRST_ENABLED: false,
+      EVENT_SUMMARY_ENABLED: true,
       REFUND_AUTHORITY_ENABLED: false,
+      MESSAGE_TEST_SEND_ENABLED: false,
     });
   });
 
@@ -74,6 +80,7 @@ describe('native feature flag contract', () => {
     ['join gate', 'EXPO_PUBLIC_JOIN_GATE_ENABLED', 'JOIN_GATE_ENABLED'],
     ['chat deletion', 'EXPO_PUBLIC_CHAT_DELETE_ENABLED', 'CHAT_DELETE_ENABLED'],
     ['member state', 'EXPO_PUBLIC_MEMBER_STATE_ENABLED', 'MEMBER_STATE_ENABLED'],
+    ['event summary', 'EXPO_PUBLIC_EVENT_SUMMARY_ENABLED', 'EVENT_SUMMARY_ENABLED'],
   ] as const)('%s rollback flag', (_name, envKey, flagKey) => {
     it.each([
       ['true', true],
@@ -91,6 +98,7 @@ describe('native feature flag contract', () => {
     ['chat engine', 'EXPO_PUBLIC_CHAT_ENGINE_ENABLED', 'CHAT_ENGINE_ENABLED'],
     ['activity-first plan card', 'EXPO_PUBLIC_PLAN_CARD_ACTIVITY_FIRST_ENABLED', 'PLAN_CARD_ACTIVITY_FIRST_ENABLED'],
     ['refund authority', 'EXPO_PUBLIC_REFUND_AUTHORITY_ENABLED', 'REFUND_AUTHORITY_ENABLED'],
+    ['message test send', 'EXPO_PUBLIC_MESSAGE_TEST_SEND_ENABLED', 'MESSAGE_TEST_SEND_ENABLED'],
   ] as const)('%s opt-in flag', (_name, envKey, flagKey) => {
     it.each([
       ['true', true],

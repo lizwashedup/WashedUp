@@ -1,23 +1,25 @@
 {
   "tester": "authorized tester name",
   "device": "physical iPhone model and iOS version",
+  "second_account": "person or controlled account used to verify two-account behavior",
   "tested_at": "2026-08-29T00:00:00.000Z",
+  "operator_canaries_tested_at": "2026-08-29T00:00:00.000Z",
   "app_version": "1.0.6",
-  "build_number": 37,
+  "build_number": 41,
   "test_order_id": "00000000-0000-4000-8000-000000000000",
   "artifacts": {
-    "testflight": "artifacts/testflight-build-37.png",
+    "testflight": "artifacts/testflight-build-41.png",
     "chat_and_notifications": "artifacts/chat-notification-walkthrough.mov",
     "creator_and_tickets": "artifacts/creator-ticket-walkthrough.mov",
-    "ticket_email": "artifacts/ticket-email.png"
+    "ticket_email": "artifacts/ticket-email.png",
+    "operator_canaries": "artifacts/operator-canaries.txt"
   },
-  "checks": {
-    "testflight_build_37_visible": false,
+  "device_checks": {
+    "testflight_build_41_visible": false,
     "app_opens": false,
     "topic_text_seen_by_second_account": false,
     "topic_photo_seen_and_notification_nonblank": false,
     "reply_edit_mention_reaction_persist_for_second_account": false,
-    "archived_topic_message_and_reaction_rejected": false,
     "notification_tap_opens_exact_topic": false,
     "main_thread_photo_edit_delete_persist_for_second_account": false,
     "creator_space_does_not_loop": false,
@@ -26,8 +28,20 @@
     "on_sale_ticket_clears_warning": false,
     "required_ticket_questions_block_checkout_until_answered": false,
     "fresh_paid_checkout_email_received_once": false,
+    "brand_new_account_otp_reaches_verification": false,
+    "affected_signup_user_retry_confirmed": false,
+    "affected_final_seat_user_retry_confirmed": false
+  },
+  "operator_checks": {
+    "archived_topic_message_and_reaction_rejected": false,
     "duplicate_webhook_does_not_send_second_email": false,
     "transient_email_failure_creates_retry_or_alert_evidence": false,
     "receipt_resend_is_buyer_only_and_rate_limited": false
+  },
+  "operator_evidence": {
+    "archived_topic_message_and_reaction_rejected": "",
+    "duplicate_webhook_does_not_send_second_email": "",
+    "transient_email_failure_creates_retry_or_alert_evidence": "",
+    "receipt_resend_is_buyer_only_and_rate_limited": ""
   }
 }

@@ -21,7 +21,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, Users } from 'lucide-react-native';
+import { ChevronRight, CircleDollarSign, HelpCircle, UserPlus, UserRound, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -33,6 +33,7 @@ import { getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
+import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 
 export default function CreatorCommunityScreen() {
   const router = useRouter();
@@ -152,7 +153,41 @@ export default function CreatorCommunityScreen() {
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
           <Text style={styles.title}>community</Text>
+          <WorkspaceSwitcher access={access} />
           <CommunitySwitcher access={access} />
+
+          {/* Build 35 final navigation removes global Members and Menu tabs.
+              Their real destinations live here so nothing becomes harder to
+              reach when the Community shell contracts to three tabs. */}
+          <Text style={styles.sectionLabel}>your people</Text>
+          <View style={styles.hubStack}>
+            <TouchableOpacity
+              style={styles.hubRow}
+              onPress={() => router.push('/(creator)/members')}
+              accessibilityRole="button"
+              accessibilityLabel="Members and join requests"
+            >
+              <Users size={19} color={Colors.terracotta} strokeWidth={2} />
+              <View style={styles.editPageTextWrap}>
+                <Text style={styles.editPageTitle}>members and join requests</Text>
+                <Text style={styles.editPageHint}>see who is in, review requests, and manage access.</Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.hubRow}
+              onPress={() => router.push('/creator/member-invites' as never)}
+              accessibilityRole="button"
+              accessibilityLabel="Invite members"
+            >
+              <UserPlus size={19} color={Colors.terracotta} strokeWidth={2} />
+              <View style={styles.editPageTextWrap}>
+                <Text style={styles.editPageTitle}>invite members</Text>
+                <Text style={styles.editPageHint}>bring people in without mixing them with organization access.</Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </View>
 
           {community?.status === 'draft' && (
             <View style={styles.draftBanner}>
@@ -311,6 +346,49 @@ export default function CreatorCommunityScreen() {
                 <Text style={styles.roomRowOpen}>open</Text>
               </TouchableOpacity>
             ))}
+          </View>
+
+          <Text style={styles.sectionLabel}>account</Text>
+          <View style={styles.hubStack}>
+            <TouchableOpacity
+              style={styles.hubRow}
+              onPress={() => router.push('/creator/payouts' as never)}
+              accessibilityRole="button"
+              accessibilityLabel="Money and payouts"
+            >
+              <CircleDollarSign size={19} color={Colors.terracotta} strokeWidth={2} />
+              <View style={styles.editPageTextWrap}>
+                <Text style={styles.editPageTitle}>money and payouts</Text>
+                <Text style={styles.editPageHint}>set up payouts and see what has been paid.</Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.hubRow}
+              onPress={() => router.push('/creator/help')}
+              accessibilityRole="button"
+              accessibilityLabel="Help and permissions"
+            >
+              <HelpCircle size={19} color={Colors.terracotta} strokeWidth={2} />
+              <View style={styles.editPageTextWrap}>
+                <Text style={styles.editPageTitle}>help and permissions</Text>
+                <Text style={styles.editPageHint}>see what you can do or ask a real person for help.</Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.hubRow}
+              onPress={() => router.replace('/(tabs)/profile')}
+              accessibilityRole="button"
+              accessibilityLabel="Switch back to your personal profile"
+            >
+              <UserRound size={19} color={Colors.terracotta} strokeWidth={2} />
+              <View style={styles.editPageTextWrap}>
+                <Text style={styles.editPageTitle}>switch back to you</Text>
+                <Text style={styles.editPageHint}>your plans, chats, and people stay exactly where you left them.</Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
           </View>
 
           {canArchive && (
@@ -481,6 +559,17 @@ const styles = StyleSheet.create({
   broadcastBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   broadcastMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 6 },
   editPageCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 14,
+    gap: 10,
+  },
+  hubStack: { gap: 8, marginBottom: 24 },
+  hubRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.cardBg,

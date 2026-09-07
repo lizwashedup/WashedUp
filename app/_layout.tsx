@@ -570,13 +570,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // section on top) is the right landing for all three.
       } else if (data?.circleId) {
         // Circle chat push (20260605000200_circle_message_push.sql +
-        // 20260827223000_claim_rpc_add_circle_topic_ids.sql, both unapplied):
+        // 20260827223000_claim_rpc_add_circle_topic_ids.sql):
         // circle chat lives at a different route than plan chat, not the
         // generic eventId fallback below.
         safePush(`/(tabs)/chats/circle/${data.circleId}`);
       } else if (data?.topicId) {
         // Community room push (20260827220000_community_topic_message_push.sql
-        // + 20260827223000_claim_rpc_add_circle_topic_ids.sql, both unapplied).
+        // + 20260827223000_claim_rpc_add_circle_topic_ids.sql). The database
+        // contract suite proves both migrations remain present and wired.
         safePush(`/community-topic/${data.topicId}`);
       } else if (data?.chatId) {
         safePush(`/(tabs)/chats/${data.chatId}`);

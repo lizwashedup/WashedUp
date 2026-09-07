@@ -26,6 +26,7 @@ import {
   Confirmation,
 } from '../../components/creator/ApplyFormKit';
 import { COMMUNITY_CADENCES, fetchMyGrants, submitApplication } from '../../lib/operatorApplications';
+import { buildCommunityApplication, missingCommunityApplicationFields } from '../../lib/operatorApplicationForms';
 
 const AFFILIATION_OPTIONS = [
   { key: 'no', label: 'no' },
@@ -88,48 +89,22 @@ export default function ApplyCommunityScreen() {
     })();
   }, []);
 
-  const cleanLinks = proofLinks.map((l) => l.trim()).filter(Boolean);
-
-  const valid =
-    yourName.trim().length > 0 &&
-    communityName.trim().length > 0 &&
-    concept.trim().length > 0 &&
-    audience.trim().length > 0 &&
-    !!cadence &&
-    (cadence !== 'other' || cadenceOther.trim().length > 0) &&
-    whyYou.trim().length > 0 &&
-    cleanLinks.length > 0 &&
-    !!affiliation &&
-    (affiliation !== 'yes' || affiliationDetail.trim().length > 0) &&
-    responsibilityAck &&
-    terms;
+  const applicationDraft = {
+    yourName, communityName, concept, audience, cadence, cadenceOther, whyYou,
+    proofLinks, affiliation, affiliationDetail, responsibilityAck, terms,
+  };
+  const missingFields = missingCommunityApplicationFields(applicationDraft);
+  const valid = missingFields.length === 0;
 
   // What's still unfilled, in the form's own words, so a tap on the greyed
   // "send it in" explains itself instead of doing nothing.
-  const missingFields = (): string[] => {
-    const m: string[] = [];
-    if (yourName.trim().length === 0) m.push('your name');
-    if (communityName.trim().length === 0) m.push('name your community');
-    if (concept.trim().length === 0) m.push('what is it?');
-    if (audience.trim().length === 0) m.push('who is it for?');
-    if (!cadence) m.push('how often will things happen?');
-    else if (cadence === 'other' && cadenceOther.trim().length === 0) m.push('tell us (how often)');
-    if (whyYou.trim().length === 0) m.push('why you?');
-    if (cleanLinks.length === 0) m.push('show us proof (at least one link)');
-    if (!affiliation) m.push('are you connected to a business, venue, or brand?');
-    else if (affiliation === 'yes' && affiliationDetail.trim().length === 0) m.push('tell us (affiliation)');
-    if (!responsibilityAck) m.push('agree a community is a responsibility');
-    if (!terms) m.push('agree to the terms');
-    return m;
-  };
-
   const attemptSubmit = () => {
     if (submitting) return;
     if (!valid) {
       hapticError();
       setAlertInfo({
         title: 'Almost there',
-        message: `A few things still need filling in:\n\n• ${missingFields().join('\n• ')}`,
+        message: `A few things still need filling in:\n\n• ${missingFields.join('\n• ')}`,
       });
       return;
     }
@@ -139,21 +114,7 @@ export default function ApplyCommunityScreen() {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const application: Record<string, unknown> = {
-        your_name: yourName.trim(),
-        community_name: communityName.trim(),
-        concept: concept.trim(),
-        audience: audience.trim(),
-        cadence,
-        why_you: whyYou.trim(),
-        proof_links: cleanLinks,
-        affiliation,
-        responsibility_ack: true,
-      };
-      if (cadence === 'other') application.cadence_other = cadenceOther.trim();
-      if (affiliation === 'yes') application.affiliation_detail = affiliationDetail.trim();
-
-      await submitApplication('community_leader', application);
+      await submitApplication('community_leader', buildCommunityApplication(applicationDraft));
       hapticSuccess();
       setDone(true);
     } catch (e: any) {

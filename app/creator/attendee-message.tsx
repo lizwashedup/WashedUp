@@ -44,6 +44,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
+import { MESSAGE_TEST_SEND_ENABLED } from '../../constants/FeatureFlags';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
@@ -254,22 +255,24 @@ export default function AttendeeMessageScreen() {
             <Text style={styles.heldBannerBody}>this draft saves on your device. we&apos;ll turn sending on once the last setup is done.</Text>
           </View>
 
-          <TouchableOpacity
-            style={[styles.secondaryButton, testSending && styles.secondaryButtonDisabled]}
-            onPress={handleSendTest}
-            disabled={testSending}
-            accessibilityRole="button"
-            accessibilityLabel="send a test to yourself"
-            accessibilityState={{ disabled: testSending, busy: testSending }}
-          >
-            {/* copy to the taste gate. Founder button-label rule: 1-3 words,
-                never wraps -- accessibilityLabel above stays fully descriptive
-                for screen readers since that rule is about rendered/visual
-                wrap, not spoken text. */}
-            <Text style={styles.secondaryButtonText}>
-              {testSent ? 'sent to you' : testSending ? 'sending…' : 'test to me'}
-            </Text>
-          </TouchableOpacity>
+          {MESSAGE_TEST_SEND_ENABLED && (
+            <TouchableOpacity
+              style={[styles.secondaryButton, testSending && styles.secondaryButtonDisabled]}
+              onPress={handleSendTest}
+              disabled={testSending}
+              accessibilityRole="button"
+              accessibilityLabel="send a test to yourself"
+              accessibilityState={{ disabled: testSending, busy: testSending }}
+            >
+              {/* copy to the taste gate. Founder button-label rule: 1-3 words,
+                  never wraps -- accessibilityLabel above stays fully descriptive
+                  for screen readers since that rule is about rendered/visual
+                  wrap, not spoken text. */}
+              <Text style={styles.secondaryButtonText}>
+                {testSent ? 'sent to you' : testSending ? 'sending…' : 'test to me'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.primaryButton} onPress={handleSend} accessibilityRole="button" accessibilityLabel="send">
             <Text style={styles.primaryButtonText}>send</Text>

@@ -30,6 +30,10 @@ import { formatEventDateLA } from '../../lib/laDate';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import { EVENT_SUMMARY_ENABLED } from '../../constants/FeatureFlags';
+import { useLedCommunity } from '../../lib/selectedCommunity';
+import { eventBelongsToWorkspace, useWorkspace } from '../../lib/workspaceContext';
+import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
+import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 
 type Segment = 'attention' | 'next' | 'drafts' | 'later' | 'past' | 'templates';
 
@@ -84,16 +88,21 @@ export default function CreatorEventsScreen() {
   const queryClient = useQueryClient();
   const [segment, setSegment] = useState<Segment>('attention');
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
+  const workspace = useWorkspace(access);
+  const community = useLedCommunity(access);
 
-  const { data: events = [], refetch, isRefetching } = useQuery({
-    queryKey: ['creator-events-tab', access?.ledCommunities.map((c) => c.id).join(',')],
+  const { data: allEvents = [], refetch, isRefetching } = useQuery({
+    queryKey: ['creator-events-tab', workspace, community?.id],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
-      return getCreatorEvents((access?.ledCommunities ?? []).map((c) => c.id), user.id);
+      return getCreatorEvents(workspace === 'community' && community ? [community.id] : [], user.id);
     },
-    enabled: access != null,
+    enabled: access != null && workspace != null,
   });
+  const events = allEvents.filter((event) =>
+    eventBelongsToWorkspace(event, workspace, community?.id ?? null),
+  );
 
   const { data: templates = [] } = useQuery({
     queryKey: ['event-templates'],
@@ -127,6 +136,11 @@ export default function CreatorEventsScreen() {
     opts?: { past?: boolean; draft?: boolean; attention?: boolean },
   ) => {
     const state = deriveEventState(e);
+    const manageRoute = opts?.draft
+      ? `/creator/event-form?id=${e.id}`
+      : EVENT_SUMMARY_ENABLED
+        ? `/creator/event-summary?id=${e.id}`
+        : `/creator/attendees?id=${e.id}`;
     return (
     // S-04: this card used to be ONE outer TouchableOpacity wrapping the
     // poster, the title/meta text, AND the tickets/who's-coming/check-in
@@ -140,7 +154,7 @@ export default function CreatorEventsScreen() {
     // styling of its own).
     <View key={e.id} style={[styles.card, opts?.past && styles.cardPast]}>
       <TouchableOpacity
-        onPress={() => router.push(`/creator/event-form?id=${e.id}` as never)}
+        onPress={() => router.push(manageRoute as never)}
         activeOpacity={0.85}
         accessible={false}
       >
@@ -148,11 +162,17 @@ export default function CreatorEventsScreen() {
       </TouchableOpacity>
       <View style={styles.cardBody}>
         <TouchableOpacity
-          onPress={() => router.push(`/creator/event-form?id=${e.id}` as never)}
+          onPress={() => router.push(manageRoute as never)}
           activeOpacity={0.85}
           accessibilityRole="button"
           accessibilityLabel={`${e.title}${e.event_date ? `, ${formatEventDateLA(e.event_date)}` : ''}`}
-          accessibilityHint={opts?.draft ? 'Keep shaping this draft' : 'Manage this event'}
+          accessibilityHint={
+            opts?.draft
+              ? 'Keep shaping this draft'
+              : EVENT_SUMMARY_ENABLED
+                ? 'Open this event summary'
+                : 'Open attendees for this event'
+          }
         >
           <View style={styles.cardTitleRow}>
             <Text style={styles.cardTitle} numberOfLines={1}>{e.title}</Text>
@@ -345,6 +365,8 @@ export default function CreatorEventsScreen() {
         {/* LIZ COPY */}
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>events</Text>
+        <WorkspaceSwitcher access={access} stayOnEvents />
+        {workspace === 'community' && <CommunitySwitcher access={access} />}
 
         <TouchableOpacity
           style={styles.postBtn}

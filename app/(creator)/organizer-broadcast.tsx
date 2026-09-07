@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
+import { MESSAGE_TEST_SEND_ENABLED } from '../../constants/FeatureFlags';
 import { EventAction, EventSpacing, EventSurface, EventType } from '../../constants/EventDesign';
 import { FontSizes, LineHeights } from '../../constants/Typography';
 import { getFollowerCount } from '../../lib/organizerFollows';
@@ -128,21 +129,23 @@ export default function OrganizerBroadcastScreen() {
 
           {error && <Text style={styles.errorText}>{error}</Text>}
 
-          <TouchableOpacity
-            style={[styles.testBtn, !canSendTest && styles.testBtnDisabled]}
-            onPress={handleSendTest}
-            disabled={!canSendTest}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel="send a test to yourself"
-            accessibilityState={{ disabled: !canSendTest, busy: testSending }}
-          >
-            {/* LIZ COPY (proposed, taste gate). Founder button-label rule:
-                1-3 words, never wraps -- accessibilityLabel above stays fully
-                descriptive for screen readers since that rule is about
-                rendered/visual wrap, not spoken text. */}
-            <Text style={styles.testBtnText}>{testSent ? 'sent to you' : testSending ? 'sending…' : 'test to me'}</Text>
-          </TouchableOpacity>
+          {MESSAGE_TEST_SEND_ENABLED && (
+            <TouchableOpacity
+              style={[styles.testBtn, !canSendTest && styles.testBtnDisabled]}
+              onPress={handleSendTest}
+              disabled={!canSendTest}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="send a test to yourself"
+              accessibilityState={{ disabled: !canSendTest, busy: testSending }}
+            >
+              {/* LIZ COPY (proposed, taste gate). Founder button-label rule:
+                  1-3 words, never wraps -- accessibilityLabel above stays fully
+                  descriptive for screen readers since that rule is about
+                  rendered/visual wrap, not spoken text. */}
+              <Text style={styles.testBtnText}>{testSent ? 'sent to you' : testSending ? 'sending…' : 'test to me'}</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}

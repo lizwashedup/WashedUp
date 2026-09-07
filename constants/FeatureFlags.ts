@@ -303,8 +303,8 @@ export const PLAN_CARD_ACTIVITY_FIRST_ENABLED =
  * showing title/date/venue/status plus attendee and money snapshots, with
  * navigation into the existing Attendees and Money screens.
  *
- * When false (default): the events list links straight to Tickets/Attendees
- * exactly as shipped today, byte-identical.
+ * When false (emergency rollback): the events list links straight to
+ * Tickets/Attendees.
  *
  * When true: the events list also offers this hub as the landing point for
  * an event, reusing getOperatorEvent/getEventAttendees/getEventMoneySummary
@@ -313,15 +313,18 @@ export const PLAN_CARD_ACTIVITY_FIRST_ENABLED =
  * there is no send backend for attendee messages anywhere in this codebase
  * yet (native or web), so wiring a button to it would be a fake affordance.
  *
- * Local dev: set EXPO_PUBLIC_EVENT_SUMMARY_ENABLED=true in .env.local
- * (gitignored). Env-driven and ships OFF wherever the var is unset
- * (CI / prod / EAS), so it cannot ship on by accident. Built against
+ * LAUNCH: committed ON. The summary is the structural keystone of Build 35,
+ * uses only already-live read paths, and requires no migration. Exact
+ * lowercase `false` is the emergency rollback.
+ *
+ * Local dev: set EXPO_PUBLIC_EVENT_SUMMARY_ENABLED=false in .env.local
+ * (gitignored) to force OFF. Built against
  * today's host_user_id/community_id ownership pair, not the drafted
  * owner_type/owner_id columns (migration 20260901010000, not applied to
  * prod) -- ownership-derived filtering here should get a follow-up pass
  * once that migration lands, but this hub does not need it to be useful.
  */
-export const EVENT_SUMMARY_ENABLED = process.env.EXPO_PUBLIC_EVENT_SUMMARY_ENABLED === 'true';
+export const EVENT_SUMMARY_ENABLED = process.env.EXPO_PUBLIC_EVENT_SUMMARY_ENABLED !== 'false';
 
 /**
  * Community public page control center (Build 35 Screen 14): status, the
@@ -596,3 +599,15 @@ export const CONFIGURABLE_JOIN_QUESTIONS_ENABLED =
  */
 export const REFUND_AUTHORITY_ENABLED =
   process.env.EXPO_PUBLIC_REFUND_AUTHORITY_ENABLED === 'true';
+
+/**
+ * Creator message test sends.
+ *
+ * The attendee composer and follower broadcast screen both depend on the
+ * narrow RPCs added by 20260906221000_attendee_message_test_send.sql. Keep
+ * their controls invisible until that migration has been separately applied
+ * and verified. This prevents a release candidate from exposing a button that
+ * can only fail against the current production schema.
+ */
+export const MESSAGE_TEST_SEND_ENABLED =
+  process.env.EXPO_PUBLIC_MESSAGE_TEST_SEND_ENABLED === 'true';

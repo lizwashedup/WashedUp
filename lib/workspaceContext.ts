@@ -32,12 +32,9 @@
  * stale/foreign value harmless -- the same shape ./selectedCommunity.ts's
  * `led.find(...) ?? led[0]` fallback already relies on.
  *
- * NOT YET WIRED TO ANY SCREEN: no UI switcher renders this yet -- that is
- * later, UI-visible work, and master plan §5.1 is explicit that "nothing
- * here is user-visible" and navigation/UI does not move until this contract
- * is proven. hydrateWorkspace() IS wired into app/(creator)/_layout.tsx so
- * the persisted value is real and loaded the moment the creator shell
- * mounts, not merely theoretically readable.
+ * The contract is now wired into the creator shell and its explicit
+ * WorkspaceSwitcher. hydrateWorkspace() runs from app/(creator)/_layout.tsx
+ * so the persisted value is loaded when the creator shell mounts.
  */
 
 import { useSyncExternalStore } from 'react';
@@ -122,13 +119,39 @@ export function resolveWorkspace(
   raw: Workspace | null,
   access: CreatorAccess | null | undefined,
 ): Workspace | null {
-  const hasCommunity = (access?.ledCommunities.length ?? 0) > 0;
+  // An approved Community creator owns that workspace before the first
+  // Community record exists. Excluding hasLeaderGrant here made the product
+  // switch disappear during the exact onboarding state where they need to
+  // enter Community and create the draft.
+  const hasCommunity = (access?.ledCommunities.length ?? 0) > 0 || !!access?.hasLeaderGrant;
   const hasOrganization = !!access?.hasEventHostGrant;
   if (raw === 'community' && hasCommunity) return 'community';
   if (raw === 'organization' && hasOrganization) return 'organization';
   if (hasCommunity) return 'community';
   if (hasOrganization) return 'organization';
   return null;
+}
+
+/** Whether the creator can actually choose between both separate products. */
+export function hasMultipleWorkspaces(access: CreatorAccess | null | undefined): boolean {
+  const hasCommunity = (access?.ledCommunities.length ?? 0) > 0 || !!access?.hasLeaderGrant;
+  return hasCommunity && !!access?.hasEventHostGrant;
+}
+
+/**
+ * The ownership boundary for every creator event list. The legacy query must
+ * still read host_user_id/community_id for compatibility, but the visible
+ * list must never mix a standalone Organization event into a Community or a
+ * Community event into the Organization.
+ */
+export function eventBelongsToWorkspace(
+  event: { community_id: string | null },
+  selected: Workspace | null,
+  communityId: string | null,
+): boolean {
+  if (selected === 'organization') return event.community_id === null;
+  if (selected === 'community') return !!communityId && event.community_id === communityId;
+  return false;
 }
 
 /** The workspace the creator is actually in right now -- see resolveWorkspace. */

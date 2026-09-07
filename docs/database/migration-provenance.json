@@ -3,6 +3,12 @@
   "schema_provenance": "incomplete",
   "direct_applied": [
     {
+      "file": "20260820020000_follower_broadcast_push_fanout.sql",
+      "production_evidence": "docs/database/direct-apply-evidence-20260906-held-migrations-batch.md: applied via Supabase MCP apply_migration against project upstjumasqblszevlgik, exact unmodified file content. Its own in-transaction self-test ran as part of the apply and passed (apply_migration returned success, which is only possible if the self-test's assertions all held, otherwise the transaction would have rolled back). Confirmed live after apply via to_regprocedure('public.fanout_follower_broadcast_push(uuid)'). File itself was not edited, per this repo's migration-immutability policy -- see the linked evidence file for full detail.",
+      "apply_date": "2026-09-06",
+      "approval_class": "verified_direct_apply"
+    },
+    {
       "file": "20260901020000_build35_screen56_member_invites.sql",
       "production_evidence": "docs/database/direct-apply-evidence-20260906-held-migrations-batch.md: this record was WRONG for 5 days -- held_migrations said 'not applied to production' as late as 2026-09-05, but 20260905020000's own header already said Josh applied these function bodies live on 2026-09-05 to fix an ambiguous-column bug, meaning the base feature had to already be live for that bug to have been hit. Confirmed directly tonight (2026-09-06): community_member_invites table and create_/preview_/accept_member_invite() all exist in production right now. This entry corrects the record to match reality.",
       "apply_date": "2026-09-05",
@@ -126,6 +132,21 @@
       "file": "supabase/migrations/20260905030000_fix_co_creator_invite_ambiguous_column.sql",
       "reason": "In-tree migration self-labeled DRAFT in its own header ('DRAFT: DO NOT APPLY WITHOUT JOSH'S WORD.'). Delta fix over 20260905010000_fix_co_creator_invite_role_default_draft.sql, split into its own file instead of editing that already-committed file's bytes, because this repo's own release policy (scripts/release/migration-policy.mjs) treats committed migration history as immutable. Same bug class as 20260905020000, on create_co_creator_invite/preview_co_creator_invite/accept_co_creator_invite: RETURNS TABLE columns collided with real community_members columns referenced bare inside an ON CONFLICT clause. Fix: #variable_conflict use_column as the first line of each of the 3 function bodies. Already applied directly to production 2026-09-05 (Josh ran the corrected bodies via the Supabase SQL editor before this file existed); this file re-declares those exact live function bodies (pulled via pg_get_functiondef, not retyped). Dry-run verified against production inside a rollback transaction this session, exit clean, zero rows changed.",
       "source": "supabase/migrations/20260905030000_fix_co_creator_invite_ambiguous_column.sql"
+    },
+    {
+      "file": "supabase/migrations/20260906221000_attendee_message_test_send.sql",
+      "reason": "Review-only creator test-send RPCs. Production does not yet have these functions, and both native and web controls are now fail-safe off behind MESSAGE_TEST_SEND_ENABLED. Keep excluded from the automatic release-candidate inventory until the migration has a dedicated disposable-Postgres contract, an approved production apply, and a real-device push canary.",
+      "source": "supabase/migrations/20260906221000_attendee_message_test_send.sql"
+    },
+    {
+      "file": "supabase/migrations/20260906230000_refund_issuance_log_nullable_issuer.sql",
+      "reason": "Repair for the still-held refund-authority schema. Its target table does not exist in production while 20260904010000_refund_authority_grants.sql remains held, so this follow-up must remain held with its base and must never be auto-applied independently.",
+      "source": "supabase/migrations/20260906230000_refund_issuance_log_nullable_issuer.sql"
+    },
+    {
+      "file": "supabase/migrations/20260906231000_has_refund_authority_self_only.sql",
+      "reason": "Security repair for the still-held refund-authority function. The base function does not exist in production while 20260904010000_refund_authority_grants.sql remains held. Keep this follow-up excluded until the full refund-authority chain is rebuilt, contract-tested together, and separately approved for production.",
+      "source": "supabase/migrations/20260906231000_has_refund_authority_self_only.sql"
     }
   ],
   "unresolved_versions": [

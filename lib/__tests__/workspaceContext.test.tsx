@@ -41,7 +41,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setSelectedCommunityId, useLedCommunity } from '../selectedCommunity';
-import { resolveWorkspace, setWorkspace, useWorkspace, type Workspace } from '../workspaceContext';
+import {
+  eventBelongsToWorkspace,
+  hasMultipleWorkspaces,
+  resolveWorkspace,
+  setWorkspace,
+  useWorkspace,
+  type Workspace,
+} from '../workspaceContext';
 import type { CreatorAccess } from '../creatorMode';
 
 function ledCommunity(id: string, name: string) {
@@ -68,6 +75,14 @@ const organizationOnly: CreatorAccess = {
   ledCommunities: [],
   hasLeaderGrant: false,
   hasEventHostGrant: true,
+  isRevoked: false,
+};
+
+/** Approved for Community, before the first Community draft is created. */
+const approvedCommunityOnboarding: CreatorAccess = {
+  ledCommunities: [],
+  hasLeaderGrant: true,
+  hasEventHostGrant: false,
   isRevoked: false,
 };
 
@@ -221,6 +236,10 @@ describe('resolveWorkspace (pure fallback logic, no rendering)', () => {
     expect(resolveWorkspace(null, twoLed)).toBe('community');
   });
 
+  it('keeps the Community workspace available between approval and first draft creation', () => {
+    expect(resolveWorkspace(null, approvedCommunityOnboarding)).toBe('community');
+  });
+
   it('returns null when the creator has access to neither product', () => {
     expect(resolveWorkspace(null, neitherAvailable)).toBeNull();
     expect(resolveWorkspace('organization', neitherAvailable)).toBeNull();
@@ -241,6 +260,29 @@ describe('resolveWorkspace (pure fallback logic, no rendering)', () => {
     // chose Community, then they stop leading any community, but still
     // hold an event_host grant
     expect(resolveWorkspace('community', organizationOnly)).toBe('organization');
+  });
+});
+
+describe('workspace product boundaries', () => {
+  it('shows the product switch only when both approvals are usable', () => {
+    expect(hasMultipleWorkspaces(bothAvailable)).toBe(true);
+    expect(hasMultipleWorkspaces(twoLed)).toBe(false);
+    expect(hasMultipleWorkspaces(organizationOnly)).toBe(false);
+  });
+
+  it('treats an approved Community creator without a record as Community access', () => {
+    expect(hasMultipleWorkspaces({ ...approvedCommunityOnboarding, hasEventHostGrant: true })).toBe(true);
+  });
+
+  it('never mixes standalone Organization events into a Community list', () => {
+    expect(eventBelongsToWorkspace({ community_id: null }, 'community', 'community-a')).toBe(false);
+    expect(eventBelongsToWorkspace({ community_id: 'community-a' }, 'community', 'community-a')).toBe(true);
+    expect(eventBelongsToWorkspace({ community_id: 'community-b' }, 'community', 'community-a')).toBe(false);
+  });
+
+  it('never mixes Community events into an Organization list', () => {
+    expect(eventBelongsToWorkspace({ community_id: null }, 'organization', null)).toBe(true);
+    expect(eventBelongsToWorkspace({ community_id: 'community-a' }, 'organization', null)).toBe(false);
   });
 });
 

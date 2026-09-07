@@ -34,6 +34,7 @@ import {
   fetchMyGrants,
   submitApplication,
 } from '../../lib/operatorApplications';
+import { buildEventApplication, missingEventApplicationFields } from '../../lib/operatorApplicationForms';
 
 export default function ApplyEventsScreen() {
   const router = useRouter();
@@ -95,46 +96,22 @@ export default function ApplyEventsScreen() {
   const isJustMe = applicantType === 'just_me';
   const isVenue = applicantType === 'venue';
   const needsProvider = ticketing === 'other_site' || ticketing === 'both';
-  const cleanLinks = proofLinks.map((l) => l.trim()).filter(Boolean);
-
-  const valid =
-    !!applicantType &&
-    (applicantType !== 'other' || applicantTypeOther.trim().length > 0) &&
-    yourName.trim().length > 0 &&
-    (isJustMe || publicName.trim().length > 0) &&
-    categories.length > 0 &&
-    !!frequency &&
-    cleanLinks.length > 0 &&
-    (!isVenue || venueAddress.trim().length > 0) &&
-    !!ticketing &&
-    about.trim().length > 0 &&
-    terms;
+  const applicationDraft = {
+    applicantType, applicantTypeOther, yourName, publicName, categories, frequency,
+    proofLinks, venueAddress, ticketing, ticketingProvider, about, terms,
+  };
+  const missingFields = missingEventApplicationFields(applicationDraft);
+  const valid = missingFields.length === 0;
 
   // What's still unfilled, in the form's own words, so a tap on the greyed
   // "send it in" explains itself instead of doing nothing.
-  const missingFields = (): string[] => {
-    const m: string[] = [];
-    if (!applicantType) m.push('what are you?');
-    else if (applicantType === 'other' && applicantTypeOther.trim().length === 0) m.push('tell us');
-    if (yourName.trim().length === 0) m.push('your name');
-    if (applicantType && !isJustMe && publicName.trim().length === 0) m.push('the name people know you by');
-    if (categories.length === 0) m.push('what kind of events?');
-    if (!frequency) m.push('how often?');
-    if (cleanLinks.length === 0) m.push('show us proof (at least one link)');
-    if (isVenue && venueAddress.trim().length === 0) m.push("where's your spot?");
-    if (!ticketing) m.push('how do people get tickets today?');
-    if (about.trim().length === 0) m.push('tell us about what you run');
-    if (!terms) m.push('agree to the terms');
-    return m;
-  };
-
   const attemptSubmit = () => {
     if (submitting) return;
     if (!valid) {
       hapticError();
       setAlertInfo({
         title: 'Almost there',
-        message: `A few things still need filling in:\n\n• ${missingFields().join('\n• ')}`,
+        message: `A few things still need filling in:\n\n• ${missingFields.join('\n• ')}`,
       });
       return;
     }
@@ -144,21 +121,7 @@ export default function ApplyEventsScreen() {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const application: Record<string, unknown> = {
-        applicant_type: applicantType,
-        your_name: yourName.trim(),
-        event_categories: categories,
-        frequency,
-        proof_links: cleanLinks,
-        ticketing_today: ticketing,
-        about: about.trim(),
-      };
-      if (applicantType === 'other') application.applicant_type_other = applicantTypeOther.trim();
-      if (!isJustMe) application.public_name = publicName.trim();
-      if (isVenue) application.venue_address = venueAddress.trim();
-      if (needsProvider && ticketingProvider.trim()) application.ticketing_provider = ticketingProvider.trim();
-
-      await submitApplication('event_host', application);
+      await submitApplication('event_host', buildEventApplication(applicationDraft));
       hapticSuccess();
       setDone(true);
     } catch (e: any) {
