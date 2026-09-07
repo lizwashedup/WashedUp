@@ -478,6 +478,69 @@ export function purchaseStatusLabel(p: Pick<OrganizationPurchase, 'status' | 're
   return p.refundedCents > 0 ? 'partial' : 'paid';
 }
 
+/**
+ * Build 35 Screen 44: this ONE event's purchases, not the whole
+ * organization's. Same row shape as getOrganizationPurchases above (a
+ * narrower lens on the identical OrganizationPurchase type), so every
+ * existing reader -- purchaseStatusLabel, searchOrganizationPurchases,
+ * organizationPurchasesToCsv -- works unchanged; ticket sales operations is
+ * a per-event filter on the same fact, not a second purchase shape. RLS
+ * (is_ticketing_organizer) is the real security boundary, same convention as
+ * getEventAttendees/getEventMoneySummary: this does not re-derive event
+ * ownership client-side, it trusts the caller's own screen-level gate.
+ */
+export async function getEventPurchases(eventId: string, eventTitle: string): Promise<OrganizationPurchase[]> {
+  const { data, error } = await supabase
+    .from('ticket_orders')
+    .select('id, event_id, buyer_name_snapshot, qty, total_cents, refunded_cents, status, created_at, ticket_tiers ( name )')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: false });
+  if (error) return [];
+
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((o) => ({
+    orderId: o.id as string,
+    eventId: o.event_id as string,
+    eventTitle,
+    buyerName: (o.buyer_name_snapshot as string | null)?.trim() || 'guest',
+    tierName: (o.ticket_tiers as { name?: string } | null)?.name ?? null,
+    qty: (o.qty as number) ?? 0,
+    totalCents: (o.total_cents as number) ?? 0,
+    refundedCents: (o.refunded_cents as number) ?? 0,
+    status: (o.status as string) ?? 'pending',
+    createdAt: o.created_at as string,
+  }));
+}
+
+/**
+ * Build 35 Screen 45: one purchase, self-contained (the event id and title
+ * ride the same embedded read, so a caller only ever needs the order id --
+ * unlike getEventPurchases above, which expects a caller already scoped to
+ * one event). Same OrganizationPurchase shape as its siblings for the same
+ * reason: one row type, three lenses (organization-wide, one event, one
+ * order), never a fourth purchase shape to keep in sync.
+ */
+export async function getPurchaseDetail(orderId: string): Promise<OrganizationPurchase | null> {
+  const { data, error } = await supabase
+    .from('ticket_orders')
+    .select('id, event_id, buyer_name_snapshot, qty, total_cents, refunded_cents, status, created_at, ticket_tiers ( name ), explore_events ( title )')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const o = data as unknown as Record<string, unknown>;
+  return {
+    orderId: o.id as string,
+    eventId: o.event_id as string,
+    eventTitle: (o.explore_events as { title?: string } | null)?.title ?? 'an event',
+    buyerName: (o.buyer_name_snapshot as string | null)?.trim() || 'guest',
+    tierName: (o.ticket_tiers as { name?: string } | null)?.name ?? null,
+    qty: (o.qty as number) ?? 0,
+    totalCents: (o.total_cents as number) ?? 0,
+    refundedCents: (o.refunded_cents as number) ?? 0,
+    status: (o.status as string) ?? 'pending',
+    createdAt: o.created_at as string,
+  };
+}
+
 /** Buyer name, event title, or tier name -- substring, case-insensitive, no network. */
 export function searchOrganizationPurchases(
   purchases: OrganizationPurchase[],
@@ -789,12 +852,18 @@ export interface TicketQuestion {
   required: boolean;
   scope: QuestionScope;
   sort_order: number;
+  /** Build 35 Screen 28: when this question was created / last edited (e.g.
+   *  required flipped on, or reactivated). Drives isQuestionAskableAfterOrder
+   *  below; updated_at can be null on a question that has never been edited
+   *  since creation. */
+  created_at: string;
+  updated_at: string | null;
 }
 
 export async function getQuestions(eventId: string): Promise<TicketQuestion[]> {
   const { data, error } = await supabase
     .from('ticket_questions')
-    .select('id, event_id, prompt, qtype, options, required, scope, sort_order')
+    .select('id, event_id, prompt, qtype, options, required, scope, sort_order, created_at, updated_at')
     .eq('event_id', eventId)
     .eq('is_active', true)
     .order('sort_order', { ascending: true });
@@ -1300,6 +1369,30 @@ export function resolveOrderViewState(
   if (order.status === 'pending') return { kind: 'pending' };
   const hasActiveSeat = order.seats.some((s) => !s.voided);
   return hasActiveSeat ? { kind: 'ready' } : { kind: 'settling' };
+}
+
+/**
+ * Build 35 Screen 28 cleanup. begin_ticket_checkout (doc 118) already
+ * refuses to create an order at all when a question that is THEN active and
+ * required goes unanswered (it raises before the insert), so a required
+ * question can only genuinely be missing on the post-order fallback screen
+ * (app/tickets/order/[id].tsx) when it postdates the order -- added, or
+ * flipped required/active, after the order already existed, and so was
+ * never put in front of this buyer at checkout. An older required question
+ * is never re-offered there: the order's own existence already proves it
+ * was answered at checkout (or the order is old enough to predate the
+ * question entirely, the same "legacy order" case, since a question that
+ * did not exist yet trivially postdates nothing before it existed).
+ * Optional questions carry no such guarantee either way, so they are always
+ * askable regardless of timing -- this only ever restricts required ones.
+ */
+export function isQuestionAskableAfterOrder(
+  question: Pick<TicketQuestion, 'required' | 'created_at' | 'updated_at'>,
+  orderCreatedAt: string,
+): boolean {
+  if (!question.required) return true;
+  const questionSetAt = new Date(question.updated_at ?? question.created_at).getTime();
+  return questionSetAt > new Date(orderCreatedAt).getTime();
 }
 
 // ─── doc 111: the organizer's "after they buy" message ───────────────────

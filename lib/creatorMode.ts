@@ -904,6 +904,28 @@ export async function getBroadcasts(communityId: string): Promise<BroadcastRow[]
   return (data ?? []) as BroadcastRow[];
 }
 
+/**
+ * Screen 19 audience preview: the real recipient count for a broadcast sent
+ * right now, not just "active members." Mirrors notify_community_broadcast()
+ * (native:supabase/migrations/20260708220000_open_composer.sql) exactly --
+ * active, not broadcasts_muted, excluding the sender -- so the composer
+ * never promises more reach than the fan-out trigger actually delivers.
+ * head:true keeps this a cheap count-only read, same pattern as
+ * getCommunityMemberCounts above.
+ */
+export async function getBroadcastAudienceCount(communityId: string): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  let query = supabase
+    .from('community_members')
+    .select('id', { count: 'exact', head: true })
+    .eq('community_id', communityId)
+    .eq('status', 'active')
+    .eq('broadcasts_muted', false);
+  if (user) query = query.neq('user_id', user.id);
+  const { count } = await query;
+  return count ?? 0;
+}
+
 export async function sendBroadcast(communityId: string, body: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
@@ -1061,6 +1083,31 @@ export async function createCommunity(
   });
   if (error) throw error;
   return data as string;
+}
+
+/**
+ * Screen 48: a network retry after a lost response must not create a second
+ * Community. There is no server-side idempotency token here -- create_community
+ * already has two independent DRAFT signature changes pending on top of it
+ * (gender restriction, join policy), each explicitly gated "DO NOT APPLY
+ * WITHOUT JOSH WORD" and already coordinating a merge with each other; adding
+ * a third pending fork to accept + persist a client idempotency key would
+ * stack a THIRD merge dependency onto that same contested function. Instead,
+ * the one durable fact a retry can check without touching that function at
+ * all is the membership table itself: if this handle already resolves to a
+ * community this user leads, the earlier attempt already landed server-side
+ * (the response was just lost), and firing create_community again would
+ * either 23505 on the same handle or -- worse -- actually create a second,
+ * differently-handled community if the user tries a new handle thinking the
+ * first attempt failed outright. Call this from the retry/catch path before
+ * showing any "try again" copy; a match means treat it as success, not error.
+ */
+export function findLedCommunityByHandle(
+  access: CreatorAccess,
+  handle: string,
+): LedCommunity | undefined {
+  const target = handle.trim().toLowerCase();
+  return access.ledCommunities.find((c) => c.handle.toLowerCase() === target);
 }
 
 /**

@@ -320,7 +320,12 @@ export default function CommunityThreadScreen() {
           onPress={() => router.push(`/community/${id}` as never)}
           hitSlop={6}
         >
-          <Text style={styles.headerTitle} numberOfLines={1}>{card?.name ?? 'community'}</Text>
+          {/* Screen 37: the main chat's own display name (communities.main_chat_name),
+              not the community's name -- the two are deliberately decoupled so a
+              leader can eventually rename just the chat. Falls back to the same
+              "community chat" default the column itself carries, for a card that
+              predates migration 20260906200000. */}
+          <Text style={styles.headerTitle} numberOfLines={1}>{card?.main_chat_name ?? 'community chat'}</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={handleMute} hitSlop={12}>
           {muted ? (

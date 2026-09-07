@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ChevronRight, Ticket, Users } from 'lucide-react-native';
+import { ArrowLeft, ChevronDown, ChevronRight, Ticket, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -66,6 +66,10 @@ export default function CreatorApplyScreen() {
   const queryClient = useQueryClient();
   const [withdrawingId, setWithdrawingId] = React.useState<string | null>(null);
   const [alertInfo, setAlertInfo] = React.useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  // Screen 47 copy redesign (delta matrix / doc 12.5 language contract):
+  // "Choose one / See the difference", never "Choose a path" or "Compare
+  // paths" -- this screen never calls the two tracks "paths".
+  const [showDifference, setShowDifference] = React.useState(false);
 
   const { data: grants = [], isLoading, refetch } = useQuery({
     queryKey: ['my-operator-grants'],
@@ -124,8 +128,41 @@ export default function CreatorApplyScreen() {
           <Text style={styles.title}>run things on washedup</Text>
           <Text style={styles.intro}>
             real people run real things here. tell us who you are and what you want to bring to LA.
-            a human reads every application and replies within a day.
+            a human reads every application and replies within a day. choose one, or apply for both.
           </Text>
+
+          <TouchableOpacity
+            style={styles.differenceToggle}
+            onPress={() => {
+              hapticLight();
+              setShowDifference((v) => !v);
+            }}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="see the difference between putting on events and starting a community"
+            accessibilityState={{ expanded: showDifference }}
+          >
+            <Text style={styles.differenceToggleText}>see the difference</Text>
+            <ChevronDown
+              size={16}
+              color={Colors.terracotta}
+              strokeWidth={2.5}
+              style={showDifference ? styles.chevronOpen : undefined}
+            />
+          </TouchableOpacity>
+
+          {showDifference && (
+            <View style={styles.differenceCard}>
+              <View style={styles.differenceRow}>
+                <Text style={styles.differenceWho}>put on events</Text>
+                <Text style={styles.differenceWhat}>one-off events on the scene. no ongoing group, no member roster.</Text>
+              </View>
+              <View style={[styles.differenceRow, styles.differenceRowLast]}>
+                <Text style={styles.differenceWho}>start a community</Text>
+                <Text style={styles.differenceWhat}>an ongoing group people join and belong to. putting on events comes with it.</Text>
+              </View>
+            </View>
+          )}
 
           {TRACK_CARDS.map(({ track, title, blurb, route, Icon }) => {
             const grant = grants.find((g) => g.track === track);
@@ -210,6 +247,46 @@ const styles = StyleSheet.create({
     lineHeight: LineHeights.bodyMD,
     color: Colors.secondary,
     marginBottom: 12,
+  },
+
+  differenceToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginBottom: 14,
+  },
+  differenceToggleText: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
+  },
+  chevronOpen: { transform: [{ rotate: '180deg' }] },
+  differenceCard: {
+    backgroundColor: Colors.creamWarm,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.borderWarm,
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  differenceRow: {
+    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderWarm,
+    gap: 2,
+  },
+  differenceRowLast: { borderBottomWidth: 0 },
+  differenceWho: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.darkWarm,
+  },
+  differenceWhat: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.bodySM,
+    lineHeight: LineHeights.bodySM,
+    color: Colors.secondary,
   },
 
   card: {

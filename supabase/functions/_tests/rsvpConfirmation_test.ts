@@ -19,19 +19,49 @@ Deno.test("free RSVP idempotency is stable per event and user", () => {
   );
 });
 
-Deno.test("free RSVP email uses registration language and creator details", () => {
+Deno.test("free RSVP email uses Appendix C.8.1's exact copy and creator details", () => {
   const rendered = renderRsvpConfirmation({
     title: "Sunset picnic",
-    eventDate: "Friday at 6 PM",
+    eventDate: "Friday, Sep 12",
+    // Realistic raw values, matching what explore_events.start_time/end_time
+    // actually hold and what transactional-email-drain actually passes --
+    // NOT pre-formatted display strings. Regression: an earlier version of
+    // this test fed "6:00 PM" directly, which never exercised the real
+    // ISO-to-LA-wall-clock formatting path and let a raw-timestamp-leak bug
+    // through uncaught. 2026-09-10T18:00:00-07:00 is 6:00 PM in LA (PDT).
+    startTime: "2026-09-10T18:00:00-07:00",
+    endTime: "2026-09-10T21:00:00-07:00",
     venue: "Elysian Park",
+    venueAddress: "1885 Angels Point Rd, Los Angeles, CA",
+    ownerName: "Jamie",
     creatorNote: "Bring a blanket",
     eventId: "event-1",
   });
   const allCopy = `${rendered.subject}\n${rendered.text}\n${rendered.html}`
     .toLowerCase();
   assert(
-    allCopy.includes("you're registered"),
-    "registration language missing",
+    rendered.subject === "You're confirmed: Sunset picnic",
+    "subject must match Appendix C.8.1's exact 'You're confirmed: {event_name}'",
+  );
+  assert(allCopy.includes("you're going"), "Appendix C.8.1 headline missing");
+  assert(
+    allCopy.includes("your rsvp is active"),
+    "active-RSVP confirmation line missing",
+  );
+  assert(allCopy.includes("from jamie"), "owner byline missing");
+  assert(allCopy.includes("6:00 pm-9:00 pm"), "start-end time range missing");
+  assert(
+    !allCopy.includes("t18:00:00") && !allCopy.includes("-07:00") &&
+      !allCopy.includes("2026-09-10t"),
+    "raw ISO timestamp must never leak into the rendered email -- only the formatted LA wall-clock time",
+  );
+  assert(
+    allCopy.includes("1885 angels point rd"),
+    "venue address missing",
+  );
+  assert(
+    allCopy.includes("maps.apple.com"),
+    "a real directions link should be offered when an address is known",
   );
   assert(allCopy.includes("bring a blanket"), "creator note missing");
   assert(
@@ -41,6 +71,26 @@ Deno.test("free RSVP email uses registration language and creator details", () =
   assert(
     !allCopy.includes("order total"),
     "free RSVP copy must not imply payment",
+  );
+});
+
+Deno.test("free RSVP email degrades gracefully when owner/time/address are unknown", () => {
+  const rendered = renderRsvpConfirmation({
+    title: "Sunset picnic",
+    eventDate: "Friday, Sep 12",
+    venue: "Elysian Park",
+    eventId: "event-1",
+  });
+  const allCopy = `${rendered.subject}\n${rendered.text}\n${rendered.html}`
+    .toLowerCase();
+  assert(allCopy.includes("you're going"), "headline should still render");
+  assert(
+    !allCopy.includes("from ."),
+    "an empty owner name must omit the From line, not render it blank",
+  );
+  assert(
+    !allCopy.includes("maps.apple.com"),
+    "no directions link should render without a real address",
   );
 });
 

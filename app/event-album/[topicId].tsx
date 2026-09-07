@@ -21,6 +21,7 @@ import { ArrowLeft, Camera, CirclePlay, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
+import { ReportModal } from '../../components/modals/ReportModal';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
@@ -48,6 +49,17 @@ export default function EventAlbumScreen() {
   const [enabling, setEnabling] = useState(false);
   const [viewerId, setViewerId] = useState<string | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  // Screen 50 (Build 35 delta matrix) gap: guests had no explicit
+  // visibility notice before adding photos here. One lightweight confirm
+  // per visit to the screen -- not persisted, this is a visibility
+  // reminder, not the legal-assent flow app/event/[id].tsx's
+  // ParticipationNotice already owns for a different, unrelated thing.
+  const [hasConsented, setHasConsented] = useState(false);
+  // Screen 50 gap: "report" had no destination at all -- long-pressing
+  // someone else's photo did nothing. Reuses the same ReportModal every
+  // other screen in this app already reports a person through.
+  const [showReport, setShowReport] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
 
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null)).catch(() => {});
@@ -87,7 +99,10 @@ export default function EventAlbumScreen() {
     }
   };
 
-  const handleAddPhotos = async () => {
+  // Screen 50 gap: the real picker + upload flow, now gated behind an
+  // explicit visibility confirm (handleAddPhotos below) rather than firing
+  // the moment "add photos" is tapped.
+  const performAddPhotos = async () => {
     if (!topicId || uploading) return;
     hapticLight();
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -119,6 +134,27 @@ export default function EventAlbumScreen() {
     } finally {
       setUploading(false);
     }
+  };
+
+  // Screen 50 gap: the entry point "add photos" actually calls. First tap
+  // in a visit to this screen shows an explicit visibility confirm before
+  // the picker opens; once agreed, later taps in the same visit go
+  // straight through (this is a reminder, not a re-ask every time).
+  const handleAddPhotos = () => {
+    if (!topicId || uploading) return;
+    if (hasConsented) {
+      performAddPhotos();
+      return;
+    }
+    hapticLight();
+    setAlertInfo({
+      title: 'before you add photos',
+      message: "anyone in this event's chat space can see them. you can remove your own anytime.",
+      buttons: [
+        { text: 'not now', style: 'cancel' },
+        { text: 'add photos', onPress: () => { setHasConsented(true); performAddPhotos(); } },
+      ],
+    });
   };
 
   const confirmDelete = (upload: TopicAlbumUpload) => {
@@ -153,11 +189,22 @@ export default function EventAlbumScreen() {
       <Pressable
         style={styles.tile}
         onPress={() => setViewerId(item.id)}
-        onLongPress={() => { if (isOwn) confirmDelete(item); }}
+        onLongPress={() => {
+          if (isOwn) {
+            confirmDelete(item);
+            return;
+          }
+          // Screen 50 gap: reporting someone else's photo had no
+          // destination at all -- reuses the same person-report flow
+          // every other screen in this app already uses.
+          hapticLight();
+          setReportTarget({ id: item.userId, name: item.uploaderName || 'this person' });
+          setShowReport(true);
+        }}
         delayLongPress={280}
         accessibilityRole="imagebutton"
         accessibilityLabel={item.uploaderName ? `Photo by ${item.uploaderName}${isOwn ? ', yours' : ''}` : 'Photo'}
-        accessibilityHint={isOwn ? 'double tap to view, hold to delete' : 'double tap to view'}
+        accessibilityHint={isOwn ? 'double tap to view, hold to delete' : 'double tap to view, hold to report'}
       >
         {item.signedThumbUrl ? (
           <Image source={{ uri: item.signedThumbUrl }} style={styles.tileImage} contentFit="cover" transition={150} />
@@ -239,7 +286,15 @@ export default function EventAlbumScreen() {
               <View style={styles.saveNotice}>
                 <Text style={styles.saveNoticeText}>this chat space is closed. photos are view-only.</Text>
               </View>
-            ) : null
+            ) : (
+              // Screen 50 gap: guests had no visibility explanation for
+              // this album at all -- a standing, calm disclosure (not a
+              // one-time toast that can be missed) using the same banner
+              // already established above for the closing-soon/closed states.
+              <View style={styles.saveNotice}>
+                <Text style={styles.saveNoticeText}>anyone in this event's chat space can see photos added here.</Text>
+              </View>
+            )
           }
           ListEmptyComponent={
             <View style={styles.emptyGrid}>
@@ -328,6 +383,15 @@ export default function EventAlbumScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+
+      {reportTarget && (
+        <ReportModal
+          visible={showReport}
+          onClose={() => { setShowReport(false); setReportTarget(null); }}
+          reportedUserId={reportTarget.id}
+          reportedUserName={reportTarget.name}
+        />
+      )}
     </SafeAreaView>
   );
 }

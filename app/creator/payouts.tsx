@@ -10,11 +10,9 @@
  * Same screen-level gate as event-money.tsx's canSeeEventMoney (Finance/
  * Owner/Admin, or a solo event host) -- RLS (is_ticketing_organizer) is the
  * real security boundary underneath, this client check only decides what
- * renders. Read-only: no refund or payout action lives here. Refunds stay on
- * Attendees (Screen 05), where they already work; a per-purchase detail view
- * plus an audit-logged action trail is Screen 45, separate, unbuilt scope --
- * so a purchase row here is inert, not a dead link to a screen that doesn't
- * exist yet.
+ * renders. Read-only: no refund action lives directly on this list. Refunds
+ * happen on the purchase itself now: Screen 45 (app/creator/purchase/[id].tsx)
+ * is built, so a purchase row below opens it rather than sitting inert.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -298,7 +296,13 @@ function PurchaseRow({ purchase }: { purchase: OrganizationPurchase }) {
   const labelText = label === 'partial' ? 'partially refunded' : label;
   const muted = label === 'refunded' || label === 'partial' || label === 'canceled';
   return (
-    <View style={styles.purchaseRow}>
+    <TouchableOpacity
+      style={styles.purchaseRow}
+      onPress={() => { hapticLight(); router.push(`/creator/purchase/${purchase.orderId}` as never); }}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={`open purchase by ${purchase.buyerName}`}
+    >
       <View style={styles.purchaseBody}>
         <Text style={styles.purchaseName} numberOfLines={1}>{purchase.buyerName}</Text>
         <Text style={styles.purchaseMeta} numberOfLines={1}>
@@ -309,7 +313,7 @@ function PurchaseRow({ purchase }: { purchase: OrganizationPurchase }) {
         <Text style={styles.purchaseAmount}>{formatCents(purchase.totalCents)}</Text>
         <Text style={[styles.purchaseStatus, muted && styles.purchaseStatusMuted]}>{labelText}</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 

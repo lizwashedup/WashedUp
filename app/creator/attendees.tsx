@@ -23,7 +23,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Ban, Check, ChevronDown, ChevronUp, ScanLine } from 'lucide-react-native';
+import { ArrowLeft, Ban, Check, ChevronDown, ChevronRight, ChevronUp, ScanLine } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
@@ -292,6 +292,23 @@ export default function AttendeesScreen() {
         ))}
       </ScrollView>
 
+      {/* Screen 54 sub-destination: the event-wide questionnaire reader
+          (per-question filters, aggregate counts for choice questions) that
+          this screen's inline expand-per-attendee view doesn't cover. Only
+          worth showing when the event actually has active questions. */}
+      {questions.length > 0 && (
+        <TouchableOpacity
+          style={styles.responsesLinkRow}
+          onPress={() => { hapticLight(); router.push(`/creator/questionnaire-responses?id=${id}` as never); }}
+          accessibilityRole="button"
+          accessibilityLabel="open questionnaire responses"
+        >
+          {/* copy to the taste gate */}
+          <Text style={styles.responsesLinkText}>questionnaire responses</Text>
+          <ChevronRight size={16} color={Colors.terracotta} strokeWidth={2} />
+        </TouchableOpacity>
+      )}
+
       {filtered.length > 0 && (
         <View style={styles.exportRow}>
           <TouchableOpacity onPress={handleExportAttendees} hitSlop={12} accessibilityRole="button" accessibilityLabel="export attendees">
@@ -411,6 +428,13 @@ const styles = StyleSheet.create({
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center', marginTop: EventSpacing.xl },
   exportRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, paddingBottom: EventSpacing.sm },
   exportLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.textMedium },
+  responsesLinkRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: 20, marginBottom: EventSpacing.sm,
+    backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 14, minHeight: 44,
+  },
+  responsesLinkText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   rowGroup: {
     backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
     overflow: 'hidden',

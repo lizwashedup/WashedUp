@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router } from 'expo-router';
 import { Image } from 'expo-image';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Calendar, Megaphone, Plus } from 'lucide-react-native';
+import { ChevronRight, Calendar, Megaphone, Plus, UserPlus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import {
@@ -144,10 +144,9 @@ export default function CreatorTodayScreen() {
         <CommunitySwitcher access={access} />
         {!online && <OfflineBanner />}
 
-        {/* Screen 11 gap: fixed Create event / Broadcast / Invite quick-action
-            order. Invite (Screen 56) has no destination yet -- Master Plan v3
-            §4.2 -- so it's left out here rather than linking to nothing; add
-            it in this same order once that screen exists. */}
+        {/* Screen 11 gap closed 2026-09-06: Invite (Screen 56) now has a real
+            destination -- app/creator/member-invites.tsx, backend live since
+            2026-09-05 -- so it's wired in here in the spec's fixed order. */}
         <View style={styles.quickActions}>
           <TouchableOpacity
             style={styles.quickAction}
@@ -168,6 +167,16 @@ export default function CreatorTodayScreen() {
           >
             <Megaphone size={16} color={Colors.terracotta} strokeWidth={2.5} />
             <Text style={[styles.quickActionText, styles.quickActionTextSecondary]}>broadcast</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.quickAction, styles.quickActionSecondary]}
+            onPress={() => router.push('/creator/member-invites' as never)}
+            accessibilityRole="button"
+            accessibilityLabel="Invite"
+            activeOpacity={0.85}
+          >
+            <UserPlus size={16} color={Colors.terracotta} strokeWidth={2.5} />
+            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]}>invite</Text>
           </TouchableOpacity>
         </View>
 

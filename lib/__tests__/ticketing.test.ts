@@ -7,19 +7,25 @@ import {
   attendeesToCsv,
   buildCheckoutBreakdown,
   computeFeePreview,
+  getEventPurchases,
   getFailedPayouts,
   getOrganizationPurchases,
   getOrganizationReconciliation,
+  getPurchaseDetail,
+  getQuestions,
   getTierAvailability,
   isLowInventory,
+  isQuestionAskableAfterOrder,
   organizationPurchasesToCsv,
   purchaseStatusLabel,
   resolveOrderViewState,
+  retireQuestion,
   searchOrganizationPurchases,
   sumReconciliationRows,
   type EventReconciliationRow,
   type MyOrder,
   type OrganizationPurchase,
+  type TicketQuestion,
 } from '../ticketing';
 import type { PriceQuote } from '../ticketPromosAddons';
 import type { AttendeeQuestion, DoorAttendeeWithAnswers } from '../ticketAttendees';
@@ -419,6 +425,7 @@ describe('attendeesToCsv', () => {
       checkedInAt: '2026-09-05T18:00:00Z',
       purchasedAt: '2026-09-01T12:00:00Z',
       answers: {},
+      rawAnswers: {},
       ...overrides,
     };
   }
@@ -599,5 +606,239 @@ describe('getTierAvailability', () => {
     mockRpc.mockResolvedValue({ data: null, error: new Error('boom') });
     const result = await getTierAvailability(['tier-a']);
     expect(result.has('tier-a')).toBe(false);
+  });
+});
+
+// ─── Build 35 Screen 28: post-order fallback eligibility ──────────────────
+
+function question(overrides: Partial<TicketQuestion> = {}): TicketQuestion {
+  return {
+    id: 'q-1',
+    event_id: 'event-1',
+    prompt: 'what do you need to know?',
+    qtype: 'short_text',
+    options: null,
+    required: true,
+    scope: 'per_order',
+    sort_order: 0,
+    created_at: '2026-08-01T00:00:00.000Z',
+    updated_at: null,
+    ...overrides,
+  };
+}
+
+describe('isQuestionAskableAfterOrder', () => {
+  const ORDER_CREATED_AT = '2026-08-15T00:00:00.000Z';
+
+  it('is always askable when optional, regardless of when it was created', () => {
+    const q = question({ required: false, created_at: '2026-07-01T00:00:00.000Z' });
+    expect(isQuestionAskableAfterOrder(q, ORDER_CREATED_AT)).toBe(true);
+  });
+
+  it('is NOT askable when required and it already existed before the order (begin_ticket_checkout would have enforced it)', () => {
+    const q = question({ required: true, created_at: '2026-08-01T00:00:00.000Z', updated_at: null });
+    expect(isQuestionAskableAfterOrder(q, ORDER_CREATED_AT)).toBe(false);
+  });
+
+  it('IS askable when required but added after the order -- the legacy-order case, including an event with no questions at the time of the order', () => {
+    const q = question({ required: true, created_at: '2026-09-01T00:00:00.000Z', updated_at: null });
+    expect(isQuestionAskableAfterOrder(q, ORDER_CREATED_AT)).toBe(true);
+  });
+
+  it('IS askable when an old question was flipped required/reactivated after the order -- updated_at wins over created_at', () => {
+    const q = question({
+      required: true,
+      created_at: '2026-07-01T00:00:00.000Z', // predates the order
+      updated_at: '2026-09-01T00:00:00.000Z', // organizer edited it after the order existed
+    });
+    expect(isQuestionAskableAfterOrder(q, ORDER_CREATED_AT)).toBe(true);
+  });
+
+  it('is NOT askable when both created_at and updated_at predate the order', () => {
+    const q = question({
+      required: true,
+      created_at: '2026-07-01T00:00:00.000Z',
+      updated_at: '2026-08-10T00:00:00.000Z',
+    });
+    expect(isQuestionAskableAfterOrder(q, ORDER_CREATED_AT)).toBe(false);
+  });
+});
+
+// ─── Build 35 Screen 53: guest questionnaire is owner-agnostic ────────────
+
+describe('getQuestions (Screen 53: identical for community- and person-owned events)', () => {
+  beforeEach(() => mockFrom.mockReset());
+
+  it('scopes strictly by event_id (+ is_active) and never filters by host_user_id or community_id', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      order: jest.fn(() => Promise.resolve({ data: [], error: null })),
+    };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'ticket_questions') return chain;
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    // Same call, no owner information passed in at all -- there is no
+    // owner-id parameter on this function for a community- vs person-owned
+    // event to even diverge on. Questions hang off the event, never the
+    // owner (matches the same event_id-only scoping in begin_ticket_checkout's
+    // required-question enforcement loop).
+    await getQuestions('event-1');
+
+    expect(chain.eq).toHaveBeenCalledWith('event_id', 'event-1');
+    expect(chain.eq).not.toHaveBeenCalledWith('host_user_id', expect.anything());
+    expect(chain.eq).not.toHaveBeenCalledWith('community_id', expect.anything());
+  });
+
+  it('reads the same result shape for a community-owned event id as a person-owned one', async () => {
+    const rows = [
+      { id: 'q-1', event_id: 'event-either-owner', prompt: 'dietary needs?', qtype: 'short_text', options: null, required: true, scope: 'per_order', sort_order: 0, created_at: '2026-08-01T00:00:00.000Z', updated_at: null },
+    ];
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      order: jest.fn(() => Promise.resolve({ data: rows, error: null })),
+    };
+    mockFrom.mockImplementation(() => chain);
+
+    // The function has no concept of "community" vs "person" event -- calling
+    // it with either kind of event's id runs the exact same query and returns
+    // the exact same shape, which is the guarantee Screen 53 depends on.
+    const communityEventResult = await getQuestions('event-either-owner');
+    const personEventResult = await getQuestions('event-either-owner');
+    expect(communityEventResult).toEqual(personEventResult);
+    expect(communityEventResult).toEqual(rows);
+  });
+});
+
+// ─── Build 35 Screen 58: deletion preserves answers, verified not assumed ──
+// The invariant is structural (retireQuestion never issues a DELETE, and the
+// row it flips stays intact for ticket_answers' foreign key), so the real
+// thing to prove from the client is the EXACT call shape: an UPDATE setting
+// is_active:false, and getQuestions' own active-only filter (already proven
+// above) is what makes a retired question stop being offered to new guests
+// while changing nothing about rows that already reference it.
+
+describe('retireQuestion (Screen 58: deletion preserves answers)', () => {
+  beforeEach(() => mockFrom.mockReset());
+
+  it('soft-deletes via update(is_active:false), never a hard delete', async () => {
+    const chain: any = {
+      update: jest.fn(() => chain),
+      eq: jest.fn(() => Promise.resolve({ data: null, error: null })),
+      delete: jest.fn(() => { throw new Error('retireQuestion must never call delete()'); }),
+    };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'ticket_questions') return chain;
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    const ok = await retireQuestion('question-1');
+
+    expect(ok).toBe(true);
+    expect(chain.delete).not.toHaveBeenCalled();
+    expect(chain.update).toHaveBeenCalledWith({ is_active: false });
+    expect(chain.eq).toHaveBeenCalledWith('id', 'question-1');
+  });
+
+  it('reports failure without throwing when the update errors, same contract as the other write helpers here', async () => {
+    const chain: any = {
+      update: jest.fn(() => chain),
+      eq: jest.fn(() => Promise.resolve({ data: null, error: new Error('boom') })),
+    };
+    mockFrom.mockImplementation(() => chain);
+
+    await expect(retireQuestion('question-1')).resolves.toBe(false);
+  });
+});
+
+// ─── Build 35 Screen 44: one event's purchases, same shape as Screen 10's ──
+
+describe('getEventPurchases', () => {
+  beforeEach(() => mockFrom.mockReset());
+
+  it('scopes strictly to one event_id and carries the caller-supplied event title through', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      order: jest.fn(() => Promise.resolve({
+        data: [{
+          id: 'order-1', event_id: 'event-1', buyer_name_snapshot: 'Alex',
+          qty: 2, total_cents: 4000, refunded_cents: 0, status: 'paid',
+          created_at: '2026-09-01T00:00:00.000Z', ticket_tiers: { name: 'general' },
+        }],
+        error: null,
+      })),
+    };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'ticket_orders') return chain;
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    const result = await getEventPurchases('event-1', 'Comedy Night');
+
+    expect(chain.eq).toHaveBeenCalledWith('event_id', 'event-1');
+    expect(result).toEqual([{
+      orderId: 'order-1', eventId: 'event-1', eventTitle: 'Comedy Night',
+      buyerName: 'Alex', tierName: 'general', qty: 2, totalCents: 4000,
+      refundedCents: 0, status: 'paid', createdAt: '2026-09-01T00:00:00.000Z',
+    }]);
+  });
+
+  it('returns an empty list rather than throwing on a read error', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      order: jest.fn(() => Promise.resolve({ data: null, error: new Error('boom') })),
+    };
+    mockFrom.mockImplementation(() => chain);
+
+    await expect(getEventPurchases('event-1', 'Comedy Night')).resolves.toEqual([]);
+  });
+});
+
+describe('getPurchaseDetail (Screen 45)', () => {
+  beforeEach(() => mockFrom.mockReset());
+
+  it('reads its own event id and title off the embedded join, so a caller needs only the order id', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      maybeSingle: jest.fn(() => Promise.resolve({
+        data: {
+          id: 'order-1', event_id: 'event-1', buyer_name_snapshot: '  Sam  ',
+          qty: 1, total_cents: 2000, refunded_cents: 0, status: 'paid',
+          created_at: '2026-09-01T00:00:00.000Z',
+          ticket_tiers: { name: 'vip' }, explore_events: { title: 'Open Mic' },
+        },
+        error: null,
+      })),
+    };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'ticket_orders') return chain;
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    const result = await getPurchaseDetail('order-1');
+
+    expect(chain.eq).toHaveBeenCalledWith('id', 'order-1');
+    expect(result).toEqual({
+      orderId: 'order-1', eventId: 'event-1', eventTitle: 'Open Mic',
+      buyerName: 'Sam', tierName: 'vip', qty: 1, totalCents: 2000,
+      refundedCents: 0, status: 'paid', createdAt: '2026-09-01T00:00:00.000Z',
+    });
+  });
+
+  it('returns null for an order that does not exist, rather than a half-filled object', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      maybeSingle: jest.fn(() => Promise.resolve({ data: null, error: null })),
+    };
+    mockFrom.mockImplementation(() => chain);
+
+    await expect(getPurchaseDetail('missing')).resolves.toBeNull();
   });
 });

@@ -9,6 +9,7 @@
  */
 
 import { supabase } from './supabase';
+import { QUESTION_TYPES_WITH_OPTIONS } from './ticketing';
 import type { QuestionType, QuestionScope } from './ticketing';
 
 export interface DoorAttendee {
@@ -193,6 +194,10 @@ export interface AttendeeQuestion {
   qtype: QuestionType;
   scope: QuestionScope;
   sortOrder: number;
+  /** declared choices (single_select/dropdown/multi_select only -- see
+   *  QUESTION_TYPES_WITH_OPTIONS). Optional: existing callers/tests that
+   *  build an AttendeeQuestion without it (short_text has none) stay valid. */
+  options?: string[] | null;
 }
 
 /** Fixed answer-value shapes (Cowork 2026-07-26), mirrors web's answerToString (organizerData.ts:124-143). */
@@ -217,6 +222,16 @@ export function answerToString(qtype: QuestionType, value: unknown): string {
   }
 }
 
+/** The raw multi_select choice array (pre-join), for callers that need to
+ *  count or filter each choice on its own rather than re-split answerToString's
+ *  ', '-joined display string -- see aggregateChoiceAnswers below and its
+ *  caller in questionnaire-responses.tsx. */
+export function choicesFromRawAnswer(value: unknown): string[] {
+  if (value == null || typeof value !== 'object') return [];
+  const choices = (value as Record<string, unknown>).choices;
+  return Array.isArray(choices) ? choices.filter((c): c is string => typeof c === 'string') : [];
+}
+
 /**
  * BR-2: only active questions, ordered for display -- the response-review
  * reader. A separate purpose from ticketing.ts's getQuestions() (question
@@ -226,7 +241,7 @@ export function answerToString(qtype: QuestionType, value: unknown): string {
 export async function getEventQuestions(eventId: string): Promise<AttendeeQuestion[]> {
   const { data, error } = await supabase
     .from('ticket_questions')
-    .select('id, prompt, qtype, scope, sort_order')
+    .select('id, prompt, qtype, scope, sort_order, options')
     .eq('event_id', eventId)
     .eq('is_active', true)
     .order('sort_order', { ascending: true });
@@ -237,6 +252,7 @@ export async function getEventQuestions(eventId: string): Promise<AttendeeQuesti
     qtype: q.qtype as QuestionType,
     scope: q.scope as QuestionScope,
     sortOrder: q.sort_order as number,
+    options: (q.options as string[] | null) ?? null,
   }));
 }
 
@@ -271,6 +287,12 @@ export async function getEventAnswers(orderIds: string[]): Promise<RawTicketAnsw
 export interface DoorAttendeeWithAnswers extends DoorAttendee {
   /** this seat's answers, keyed by question id, already stringified */
   answers: Record<string, string>;
+  /** same answers, keyed by question id, as the RAW un-joined value -- a
+   *  multi_select choice list stays a real string[] here instead of being
+   *  re-split off answers' ', '-joined display string, which silently
+   *  misparses any creator-authored option label that itself contains ', '
+   *  (nothing in question-editor.tsx forbids a comma in an option label). */
+  rawAnswers: Record<string, unknown>;
 }
 
 /**
@@ -287,6 +309,7 @@ export function attachAnswers(
   const qById = new Map(questions.map((q) => [q.id, q]));
   return attendees.map((a) => {
     const answers: Record<string, string> = {};
+    const rawAnswers: Record<string, unknown> = {};
     for (const row of answerRows) {
       if (row.orderId !== a.orderId) continue;
       const q = qById.get(row.questionId);
@@ -294,7 +317,79 @@ export function attachAnswers(
       const wanted = q.scope === 'per_attendee' ? a.positionIndex : null;
       if (row.attendeeIndex !== wanted) continue;
       answers[q.id] = answerToString(q.qtype, row.value);
+      rawAnswers[q.id] = row.value;
     }
-    return { ...a, answers };
+    return { ...a, answers, rawAnswers };
   });
+}
+
+// ─── Screen 54 (questionnaire-responses.tsx): per-question breakdowns ──────
+
+export interface AnswerAggregateValue {
+  /** display value (already answerToString'd) -- one multi_select choice
+   *  counts on its own row, never combined with its siblings */
+  value: string;
+  count: number;
+}
+
+export interface AnswerAggregate {
+  questionId: string;
+  prompt: string;
+  qtype: QuestionType;
+  /** every declared option gets a row, even at zero, so "nobody picked
+   *  vegan" is visible rather than silently absent. Sorted by count desc. */
+  values: AnswerAggregateValue[];
+  blankCount: number;
+  totalCount: number;
+}
+
+/**
+ * Choice-question aggregates for the questionnaire-responses reader --
+ * QUESTION_TYPES_WITH_OPTIONS only (single_select/dropdown/multi_select,
+ * the same list question-editor.tsx uses to decide a question needs an
+ * options array). Free text has no natural bucket and stays a per-attendee
+ * read (attachAnswers) instead.
+ *
+ * Takes the already scope-resolved per-seat answers (attachAnswers' output)
+ * rather than re-deriving per_order/per_attendee resolution here. multi_select
+ * counts each choice from the RAW rawAnswers.choices array, not by re-splitting
+ * the ', '-joined display string -- a creator-authored option label can itself
+ * contain a comma (e.g. "gluten-free, dairy-free"), which would otherwise
+ * silently misparse into the wrong buckets.
+ *
+ * Pass the caller's currently search/tier-filtered attendee list, not the
+ * full event, so counts reflect what's on screen -- but NOT also filtered by
+ * whichever answer bucket is currently selected, or picking one bucket would
+ * collapse every other bucket's own count to zero (faceted-search
+ * convention: a facet's counts reflect every OTHER active filter, not itself).
+ */
+export function aggregateChoiceAnswers(
+  attendees: DoorAttendeeWithAnswers[],
+  questions: AttendeeQuestion[],
+): AnswerAggregate[] {
+  return questions
+    .filter((q) => QUESTION_TYPES_WITH_OPTIONS.includes(q.qtype))
+    .map((q) => {
+      const counts = new Map<string, number>();
+      for (const opt of q.options ?? []) counts.set(opt, 0);
+      let answered = 0;
+      for (const a of attendees) {
+        const display = a.answers[q.id];
+        if (!display) continue;
+        answered += 1;
+        const picks = q.qtype === 'multi_select' ? choicesFromRawAnswer(a.rawAnswers[q.id]) : [display];
+        for (const p of picks) counts.set(p, (counts.get(p) ?? 0) + 1);
+      }
+      const values = Array.from(counts.entries())
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => b.count - a.count);
+      return {
+        questionId: q.id,
+        prompt: q.prompt,
+        qtype: q.qtype,
+        values,
+        blankCount: Math.max(0, attendees.length - answered),
+        totalCount: attendees.length,
+      };
+    });
 }

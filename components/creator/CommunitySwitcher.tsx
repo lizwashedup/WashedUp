@@ -23,7 +23,13 @@ export function CommunitySwitcher({ access }: Props) {
   const led = access?.ledCommunities ?? [];
   if (led.length < 2) return null;
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.row}
+      accessibilityRole="tablist"
+      accessibilityLabel="switch community"
+    >
       {led.map((c) => {
         const on = c.id === current?.id;
         return (
@@ -36,6 +42,9 @@ export function CommunitySwitcher({ access }: Props) {
                 setSelectedCommunityId(c.id);
               }
             }}
+            accessibilityRole="tab"
+            accessibilityLabel={c.name}
+            accessibilityState={{ selected: on }}
           >
             <Text style={[styles.pillText, on && styles.pillTextOn]} numberOfLines={1}>
               {c.name.toLowerCase()}

@@ -218,14 +218,15 @@ export const CO_CREATOR_INVITES_ENABLED = process.env.EXPO_PUBLIC_CO_CREATOR_INV
  * invites only -- phone-contact invites are an explicit open product
  * decision (Screen 56 scope doc §4), not built here. Backed by
  * supabase/migrations/20260901020000_build35_screen56_member_invites.sql
- * (create_/preview_/accept_/revoke_member_invite RPCs, DRAFT -- do not flip
- * on for a real build until that migration is reviewed and applied to prod).
- *
- * Local dev: set EXPO_PUBLIC_MEMBER_INVITES_ENABLED=true in .env.local
- * (gitignored). Env-driven and ships OFF wherever the var is unset
- * (CI / prod / EAS), so it cannot ship on by accident.
+ * (create_/preview_/accept_/revoke_member_invite RPCs) -- confirmed applied
+ * and live in production 2026-09-05 (re-verified directly against prod
+ * 2026-09-06: community_member_invites table and all 4 RPCs exist with the
+ * ambiguous-column fix already in their bodies). The precondition this flag
+ * used to gate on is satisfied; flipped on for real 2026-09-06. Today.tsx's
+ * quick-action row now links to app/creator/member-invites.tsx (Screen 11's
+ * own "no destination yet" gap, closed the same day).
  */
-export const MEMBER_INVITES_ENABLED = process.env.EXPO_PUBLIC_MEMBER_INVITES_ENABLED === 'true';
+export const MEMBER_INVITES_ENABLED = true;
 
 /**
  * Member state on the event page's put-on-by card (doc 121 T9).

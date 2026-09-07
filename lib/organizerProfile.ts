@@ -41,6 +41,14 @@ export interface OrganizerProfile {
    * public organization page need it.
    */
   city: string | null;
+  /**
+   * Build 35 Screen 42: same self-flipping shape as city (see
+   * getOrganizerSupportEmail below) - null until
+   * supabase/migrations/20260906170000_organizer_profile_support_email.sql
+   * (DRAFT) is applied, or simply unset. Same "owner's own editor and the
+   * public organization page only" scope as city.
+   */
+  support_email: string | null;
 }
 
 const COLUMNS = 'user_id, display_name, logo_url, bio, link_url';
@@ -73,16 +81,44 @@ export async function setOrganizerCity(city: string | null): Promise<boolean> {
   return !error && !!count;
 }
 
+/**
+ * Build 35 Screen 42: same self-flipping shape as getOrganizerCity above -
+ * null until 20260906170000_organizer_profile_support_email.sql (DRAFT) is
+ * applied, or simply unset.
+ */
+export async function getOrganizerSupportEmail(userId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('organizer_profiles')
+    .select('support_email')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error || !data) return null; // column absent (42703) or unreadable = dormant
+  const v = (data as { support_email?: unknown }).support_email;
+  return typeof v === 'string' && v.trim() ? v : null;
+}
+
+/** Owner-only by the existing organizer_profiles_update RLS policy. */
+export async function setOrganizerSupportEmail(supportEmail: string | null): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { error, count } = await supabase
+    .from('organizer_profiles')
+    .update({ support_email: supportEmail?.trim().slice(0, 254) || null }, { count: 'exact' })
+    .eq('user_id', user.id);
+  return !error && !!count;
+}
+
 /** The signed-in creator's own profile; null when none (or pre-apply). */
 export async function getMyOrganizerProfile(): Promise<OrganizerProfile | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const [{ data, error }, city] = await Promise.all([
+  const [{ data, error }, city, supportEmail] = await Promise.all([
     supabase.from('organizer_profiles').select(COLUMNS).eq('user_id', user.id).maybeSingle(),
     getOrganizerCity(user.id),
+    getOrganizerSupportEmail(user.id),
   ]);
   if (error || !data) return null;
-  return { ...(data as OrganizerProfile), city };
+  return { ...(data as OrganizerProfile), city, support_email: supportEmail };
 }
 
 /** Batch fetch for byline fronting; empty map on any error (pre-apply safe). */
@@ -94,11 +130,11 @@ export async function getOrganizerProfiles(userIds: string[]): Promise<Map<strin
     .select(COLUMNS)
     .in('user_id', ids);
   if (error) return new Map();
-  // city is never part of COLUMNS here (see the field's doc comment) - fill
-  // it in explicitly so every OrganizerProfile this module hands out has the
-  // same real shape, never a silently-missing property.
+  // city/support_email are never part of COLUMNS here (see each field's doc
+  // comment) - fill them in explicitly so every OrganizerProfile this module
+  // hands out has the same real shape, never a silently-missing property.
   return new Map(
-    ((data ?? []) as OrganizerProfile[]).map((p) => [p.user_id, { ...p, city: null }]),
+    ((data ?? []) as OrganizerProfile[]).map((p) => [p.user_id, { ...p, city: null, support_email: null }]),
   );
 }
 
@@ -210,7 +246,7 @@ export async function getOrganizationPage(organizerId: string): Promise<Organiza
   if (error || !row) return null;
 
   const today = laTodayIsoDate();
-  const [{ data: upcoming }, { data: past }, city] = await Promise.all([
+  const [{ data: upcoming }, { data: past }, city, supportEmail] = await Promise.all([
     supabase
       .from('explore_events')
       .select(ORG_EVENT_COLUMNS)
@@ -230,10 +266,11 @@ export async function getOrganizationPage(organizerId: string): Promise<Organiza
       .order('event_date', { ascending: false })
       .limit(ORG_PAST_LIMIT),
     getOrganizerCity(organizerId),
+    getOrganizerSupportEmail(organizerId),
   ]);
 
   return {
-    profile: { ...(row as OrganizerProfile), city },
+    profile: { ...(row as OrganizerProfile), city, support_email: supportEmail },
     upcomingEvents: (upcoming ?? []) as OrganizationPageEvent[],
     pastEvents: (past ?? []) as OrganizationPageEvent[],
   };

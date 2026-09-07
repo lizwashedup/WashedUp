@@ -200,7 +200,13 @@ Deno.serve(async (req) => {
         service.from("profiles").select("email").eq("id", job.user_id)
           .maybeSingle(),
         service.from("explore_events")
-          .select("title, event_date, venue, confirmation_message")
+          // start_time/end_time/venue_address/public_name added for Build 35
+          // Screen 31 (Appendix C.8.1 exact copy) -- all four are real,
+          // already-live columns (confirmed: lib/creatorEvents.ts's
+          // getOperatorEvent selects the identical set).
+          .select(
+            "title, event_date, start_time, end_time, venue, venue_address, public_name, confirmation_message",
+          )
           .eq("id", job.explore_event_id)
           .maybeSingle(),
       ]);
@@ -219,7 +225,11 @@ Deno.serve(async (req) => {
       const rendered = renderRsvpConfirmation({
         title: event.title ?? "your event",
         eventDate: event.event_date,
+        startTime: event.start_time,
+        endTime: event.end_time,
         venue: event.venue,
+        venueAddress: event.venue_address,
+        ownerName: event.public_name,
         creatorNote: event.confirmation_message,
         eventId: job.explore_event_id,
       });

@@ -7,7 +7,7 @@
  * flow opens it.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -29,12 +29,14 @@ import {
   isLeaderAccess,
   createCommunity,
   suggestHandle,
+  findLedCommunityByHandle,
   HANDLE_SHAPE,
   type RestrictedGender,
   type JoinPolicy,
 } from '../../lib/creatorMode';
 import { isHouseCommunity } from '../../lib/houseCommunity';
 import { hapticSuccess, hapticError } from '../../lib/haptics';
+import { supabase } from '../../lib/supabase';
 import {
   GENDER_RESTRICTED_COMMUNITIES_ENABLED,
   COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED,
@@ -77,6 +79,16 @@ export default function SetupCommunityScreen() {
   const [joinPolicy, setJoinPolicyChoice] = useState<JoinPolicy>('open');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Screen 48: availability checked live, before submit, instead of only
+  // surfacing via the 23505 unique-violation once they've already tapped
+  // create.
+  const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
+  const [checkingHandle, setCheckingHandle] = useState(false);
+  // Screen 21: the explicit success state (not just an immediate redirect)
+  // with its three named onward actions. Holding the just-created community
+  // here is enough -- createCommunity() already returns its id, and the
+  // handle/name are exactly what was just submitted.
+  const [createdCommunity, setCreatedCommunity] = useState<{ id: string; handle: string; name: string } | null>(null);
 
   const onNameChange = (v: string) => {
     setName(v);
@@ -93,7 +105,37 @@ export default function SetupCommunityScreen() {
   // inventory C-04: a real, specific pitch, not the longer freeform
   // description -- required before create, same as name/city/handle.
   const purposeValid = purpose.trim().length >= PURPOSE_MIN;
-  const canCreate = nameValid && handleValid && cityValid && purposeValid && !busy;
+  // handleAvailable !== false (not === true): an in-flight or failed check
+  // reads as unknown/null and must never block submit -- the 23505 catch
+  // below is still the real backstop either way. Only a CONFIRMED taken
+  // handle disables the button early.
+  const canCreate = nameValid && handleValid && cityValid && purposeValid && handleAvailable !== false && !busy;
+
+  // Screen 48: debounced (500ms, same shape as the personal-handle check in
+  // app/(tabs)/profile.tsx) live availability check. A dedicated
+  // SECURITY DEFINER RPC is required rather than a plain client select:
+  // communities_select RLS only surfaces active/member/admin rows, so a
+  // draft community someone else just created would otherwise read back as
+  // falsely "available".
+  useEffect(() => {
+    if (!handleValid) { setHandleAvailable(null); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setCheckingHandle(true);
+      try {
+        const { data, error } = await supabase.rpc('community_handle_available', { p_handle: handle });
+        if (error) throw error;
+        if (!cancelled) setHandleAvailable(data as boolean);
+      } catch {
+        // inconclusive -- never block submit on a check failure, the create
+        // call's own 23505 handling is still the real backstop
+        if (!cancelled) setHandleAvailable(null);
+      } finally {
+        if (!cancelled) setCheckingHandle(false);
+      }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [handle, handleValid]);
 
   const handleCreate = async () => {
     if (!canCreate) return;
@@ -102,7 +144,7 @@ export default function SetupCommunityScreen() {
     try {
       // Flag off -> undefined -> createCommunity never sends p_restricted_gender
       // at all, so this call is byte-identical to before this feature existed.
-      await createCommunity(
+      const id = await createCommunity(
         handle,
         name.trim(),
         city.trim(),
@@ -112,8 +154,30 @@ export default function SetupCommunityScreen() {
       );
       hapticSuccess();
       await queryClient.invalidateQueries({ queryKey: ['creator-access'] });
-      router.replace('/(creator)/today');
+      // Screen 21: land on the explicit success state, not an immediate
+      // redirect -- today.tsx (11), edit-page (33), and member-invites (56)
+      // are all real onward destinations from here now.
+      setCreatedCommunity({ id, handle, name: name.trim() });
+      setBusy(false);
     } catch (e: unknown) {
+      // Screen 48: a network retry must never create a second Community.
+      // Before showing retry-eligible copy, check whether this exact create
+      // already landed (the request succeeded but the response was lost) --
+      // see findLedCommunityByHandle's own comment for why this re-check,
+      // not a server-side idempotency key, is the right-sized fix here.
+      try {
+        const freshAccess = await getCreatorAccess();
+        const already = findLedCommunityByHandle(freshAccess, handle);
+        if (already) {
+          await queryClient.invalidateQueries({ queryKey: ['creator-access'] });
+          hapticSuccess();
+          setCreatedCommunity({ id: already.id, handle: already.handle, name: already.name });
+          setBusy(false);
+          return;
+        }
+      } catch {
+        // inconclusive -- fall through to the normal error copy below
+      }
       hapticError();
       const code = (e as { code?: string })?.code;
       // LIZ COPY (both)
@@ -125,6 +189,46 @@ export default function SetupCommunityScreen() {
       setBusy(false);
     }
   };
+
+  // Screen 21: the explicit success state, reached only after a real create
+  // (or a retry that discovered one already landed, see the catch block
+  // above). Forward-only on purpose -- no back arrow into the now-stale
+  // empty form, just the three real onward destinations.
+  if (createdCommunity) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ScrollView contentContainerStyle={styles.content}>
+          <Text style={styles.kicker}>creator mode</Text>
+          <Text style={styles.title}>you're set.</Text>
+          <Text style={styles.subtext}>
+            {createdCommunity.name} is up. your page starts as a draft only you can see. you choose when it opens.
+          </Text>
+          <TouchableOpacity
+            style={styles.createBtn}
+            onPress={() => router.replace('/(creator)/today')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.createBtnText}>view community</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryBtn}
+            onPress={() => router.push('/creator/edit-page')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.secondaryBtnText}>edit page</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryBtn}
+            onPress={() => router.push('/creator/member-invites' as never)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.secondaryBtnText}>invite members</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -268,6 +372,13 @@ export default function SetupCommunityScreen() {
                 handles are 3 to 40 characters: lowercase letters, numbers, and hyphens.
               </Text>
             )}
+            {/* Screen 48: caught before submit now, not just via the 23505 at
+                create time -- same copy as that existing catch below, so the
+                two paths never say two different things about the same fact. */}
+            {handleValid && !checkingHandle && handleAvailable === false && (
+              /* LIZ COPY (reused) */
+              <Text style={styles.problem}>that handle is taken. try another.</Text>
+            )}
 
             {!!problem && <Text style={styles.problem}>{problem}</Text>}
 
@@ -390,6 +501,19 @@ const styles = StyleSheet.create({
   },
   createBtnOff: { opacity: 0.45 },
   createBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  // Screen 21: the two secondary onward actions on the success state. Same
+  // bordered/terracotta-text secondary pattern as today.tsx's quickActionSecondary.
+  secondaryBtn: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.terracotta,
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  secondaryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   quietNote: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.caption,

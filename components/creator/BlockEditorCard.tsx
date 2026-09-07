@@ -27,6 +27,7 @@ import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { friendlyError } from '../../lib/friendlyError';
 import {
   BLOCK_TYPE_INFO,
+  checkLinkUrl,
   COVER_MAX_IMAGES,
   GALLERY_MAX_IMAGES,
   mutateBlockImages,
@@ -35,6 +36,13 @@ import {
   updateBlockContent,
   type CommunityBlock,
 } from '../../lib/communityBlocks';
+
+/** The crop aspect locked per image slot -- 4:5 mirrors washedup-web's own
+    locked cover ratio; a logo crops square for its round mask; gallery
+    photos stay free-form. */
+function cropAspectFor(type: CommunityBlock['block_type']): [number, number] | undefined {
+  return type === 'cover' ? [4, 5] : undefined;
+}
 
 const THUMB_SIZE = 72;
 const LOGO_SIZE = 56;
@@ -132,11 +140,27 @@ export function BlockEditorCard({
   const addImage = async () => {
     setBusy(true);
     try {
-      const url = await pickAndUploadBlockImage(communityId);
+      const url = await pickAndUploadBlockImage(communityId, { aspect: cropAspectFor(block.block_type) });
       if (url) {
         await mutateBlockImages(block.id, (current) =>
           current.length < maxImages ? [...current, url] : current,
         );
+        hapticSuccess();
+        onChanged();
+      }
+    } catch (e) {
+      onError('That photo did not upload', friendlyError(e, 'Try again in a moment.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const replaceImage = async (oldUrl: string) => {
+    setBusy(true);
+    try {
+      const url = await pickAndUploadBlockImage(communityId, { aspect: cropAspectFor(block.block_type) });
+      if (url) {
+        await mutateBlockImages(block.id, (current) => current.map((i) => (i === oldUrl ? url : i)));
         hapticSuccess();
         onChanged();
       }
@@ -162,7 +186,7 @@ export function BlockEditorCard({
   const setLogo = async () => {
     setBusy(true);
     try {
-      const url = await pickAndUploadBlockImage(communityId);
+      const url = await pickAndUploadBlockImage(communityId, { aspect: [1, 1] });
       if (url) {
         await updateBlockContent(block.id, { ...block.content, logo_url: url });
         hapticSuccess();
@@ -198,14 +222,34 @@ export function BlockEditorCard({
         )}
         {images.map((url) => (
           <View key={url} style={styles.thumbWrap}>
-            <Image source={{ uri: url }} style={styles.thumb} />
-            <TouchableOpacity style={styles.thumbRemove} onPress={() => removeImage(url)} hitSlop={8}>
+            <TouchableOpacity
+              onPress={() => replaceImage(url)}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="replace this photo"
+            >
+              <Image source={{ uri: url }} style={styles.thumb} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.thumbRemove}
+              onPress={() => removeImage(url)}
+              disabled={busy}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="remove this photo"
+            >
               <X size={12} color={Colors.white} strokeWidth={3} />
             </TouchableOpacity>
           </View>
         ))}
         {images.length < maxImages && (
-          <TouchableOpacity style={styles.thumbAdd} onPress={addImage} disabled={busy}>
+          <TouchableOpacity
+            style={styles.thumbAdd}
+            onPress={addImage}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel="add a photo"
+          >
             {busy ? (
               <ActivityIndicator size="small" color={Colors.terracotta} />
             ) : (
@@ -240,13 +284,33 @@ export function BlockEditorCard({
       <View style={styles.logoRow}>
         {logoUrl ? (
           <View style={styles.thumbWrap}>
-            <Image source={{ uri: logoUrl }} style={styles.logo} />
-            <TouchableOpacity style={styles.thumbRemove} onPress={clearLogo} hitSlop={8}>
+            <TouchableOpacity
+              onPress={setLogo}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="replace your logo"
+            >
+              <Image source={{ uri: logoUrl }} style={styles.logo} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.thumbRemove}
+              onPress={clearLogo}
+              disabled={busy}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="remove your logo"
+            >
               <X size={12} color={Colors.white} strokeWidth={3} />
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity style={styles.logoAdd} onPress={setLogo} disabled={busy}>
+          <TouchableOpacity
+            style={styles.logoAdd}
+            onPress={setLogo}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel="add a logo"
+          >
             {busy ? (
               <ActivityIndicator size="small" color={Colors.terracotta} />
             ) : (
@@ -323,60 +387,97 @@ export function BlockEditorCard({
     </View>
   );
 
-  const renderLinksEditor = () => (
-    <View>
-      {links.map((link, i) => (
-        <View key={i} style={styles.linkRow}>
-          <View style={styles.linkInputs}>
-            <TextInput
-              style={styles.input}
-              value={link.label}
-              onChangeText={(v) => setLinks(links.map((l, j) => (j === i ? { ...l, label: v } : l)))}
-              placeholder="label, like instagram"
-              placeholderTextColor={Colors.inkSoft}
-              maxLength={60}
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            />
-            <TextInput
-              style={styles.input}
-              value={link.url}
-              onChangeText={(v) => setLinks(links.map((l, j) => (j === i ? { ...l, url: v } : l)))}
-              placeholder="https://"
-              placeholderTextColor={Colors.inkSoft}
-              autoCapitalize="none"
-              keyboardType="url"
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            />
-          </View>
-          <TouchableOpacity onPress={() => setLinks(links.filter((_, j) => j !== i))} hitSlop={8}>
-            <X size={16} color={Colors.tertiary} strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
-      ))}
-      <TouchableOpacity style={styles.addLinkBtn} onPress={() => setLinks([...links, { label: '', url: '' }])}>
-        <Plus size={14} color={Colors.terracotta} strokeWidth={2.5} />
-        <Text style={styles.addLinkText}>add a link</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.saveBtn}
-        onPress={() =>
-          persistContent({
-            ...block.content,
-            links: links
-              .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
-              .filter((l) => l.label && l.url),
-          })
-        }
-        disabled={saving}
-      >
-        {saving ? (
-          <ActivityIndicator size="small" color={Colors.white} />
-        ) : (
-          <Text style={styles.saveBtnText}>save</Text>
+  const renderLinksEditor = () => {
+    // Build 35 screen 36: a link that's broken or unsafe must never
+    // silently publish. Every filled-in row gets checked; a valid one shows
+    // its real destination host back as a quiet confirmation, an invalid
+    // one blocks save until it's fixed or cleared.
+    const checks = links.map((l) => checkLinkUrl(l.url));
+    const hasInvalidLink = checks.some((c) => !c.ok);
+
+    return (
+      <View>
+        {links.map((link, i) => {
+          const check = checks[i];
+          return (
+            <View key={i} style={styles.linkRow}>
+              <View style={styles.linkInputs}>
+                <TextInput
+                  style={styles.input}
+                  value={link.label}
+                  onChangeText={(v) => setLinks(links.map((l, j) => (j === i ? { ...l, label: v } : l)))}
+                  placeholder="label, like instagram"
+                  placeholderTextColor={Colors.inkSoft}
+                  maxLength={60}
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                />
+                <TextInput
+                  style={[styles.input, !check.ok && styles.inputProblem]}
+                  value={link.url}
+                  onChangeText={(v) => setLinks(links.map((l, j) => (j === i ? { ...l, url: v } : l)))}
+                  placeholder="https://"
+                  placeholderTextColor={Colors.inkSoft}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                  accessibilityLabel="link address"
+                  accessibilityHint={check.problem ?? undefined}
+                />
+                {/* LIZ COPY (proposed): the destination-host warning -- a
+                    real link shows exactly where it goes before it saves,
+                    a bad one says why it can't yet. */}
+                {check.problem ? (
+                  <Text style={styles.linkProblem}>{check.problem}</Text>
+                ) : check.host ? (
+                  <Text style={styles.linkHost}>→ {check.host}</Text>
+                ) : null}
+              </View>
+              <TouchableOpacity
+                onPress={() => setLinks(links.filter((_, j) => j !== i))}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="remove this link"
+              >
+                <X size={16} color={Colors.tertiary} strokeWidth={2.5} />
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+        <TouchableOpacity
+          style={styles.addLinkBtn}
+          onPress={() => setLinks([...links, { label: '', url: '' }])}
+          accessibilityRole="button"
+          accessibilityLabel="add a link"
+        >
+          <Plus size={14} color={Colors.terracotta} strokeWidth={2.5} />
+          <Text style={styles.addLinkText}>add a link</Text>
+        </TouchableOpacity>
+        {/* LIZ COPY (proposed) */}
+        {hasInvalidLink && (
+          <Text style={styles.linkProblem}>fix the link above before saving.</Text>
         )}
-      </TouchableOpacity>
-    </View>
-  );
+        <TouchableOpacity
+          style={[styles.saveBtn, hasInvalidLink && styles.saveBtnDisabled]}
+          onPress={() =>
+            persistContent({
+              ...block.content,
+              links: links
+                .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
+                .filter((l) => l.label && l.url),
+            })
+          }
+          disabled={saving || hasInvalidLink}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color={Colors.white} />
+          ) : (
+            <Text style={styles.saveBtnText}>save</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   const renderEditor = () => {
     switch (block.block_type) {
@@ -402,18 +503,54 @@ export function BlockEditorCard({
   return (
     <View style={[styles.card, !block.visible && styles.cardHidden]}>
       <View style={styles.titleRow}>
-        <TouchableOpacity style={styles.titleTap} onPress={toggleExpanded} hitSlop={6}>
+        <TouchableOpacity
+          style={styles.titleTap}
+          onPress={toggleExpanded}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`${info.label}${info.auto ? ', fills in on its own' : ''}${!block.visible ? ', hidden' : ''}`}
+          accessibilityHint={expanded ? 'collapses this block' : 'expands this block to edit it'}
+        >
           <Text style={styles.blockLabel}>{info.label}</Text>
+          {/* Build 35 screen 35: automatic-vs-editable is an acceptance
+              requirement, not a design nicety -- every card says which one
+              it is, not just the two that happen to fill themselves in. */}
+          <Text style={[styles.kindTag, info.auto && styles.kindTagAuto]}>
+            {info.auto ? 'automatic' : 'editable'}
+          </Text>
           {!block.visible && <Text style={styles.hiddenTag}>hidden</Text>}
         </TouchableOpacity>
         <View style={styles.controls}>
-          <TouchableOpacity onPress={onMoveUp} disabled={isFirst} hitSlop={6} style={isFirst && styles.controlOff}>
+          <TouchableOpacity
+            onPress={onMoveUp}
+            disabled={isFirst}
+            hitSlop={6}
+            style={isFirst && styles.controlOff}
+            accessibilityRole="button"
+            accessibilityLabel="move up"
+            accessibilityState={{ disabled: isFirst }}
+          >
             <ChevronUp size={18} color={Colors.secondary} strokeWidth={2.5} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={onMoveDown} disabled={isLast} hitSlop={6} style={isLast && styles.controlOff}>
+          <TouchableOpacity
+            onPress={onMoveDown}
+            disabled={isLast}
+            hitSlop={6}
+            style={isLast && styles.controlOff}
+            accessibilityRole="button"
+            accessibilityLabel="move down"
+            accessibilityState={{ disabled: isLast }}
+          >
             <ChevronDown size={18} color={Colors.secondary} strokeWidth={2.5} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={toggleVisible} disabled={busy} hitSlop={6}>
+          <TouchableOpacity
+            onPress={toggleVisible}
+            disabled={busy}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={block.visible ? 'hide this block' : 'show this block'}
+            accessibilityState={{ selected: block.visible }}
+          >
             {block.visible ? (
               <Eye size={18} color={Colors.terracotta} strokeWidth={2.5} />
             ) : (
@@ -426,7 +563,12 @@ export function BlockEditorCard({
       {expanded && (
         <View style={styles.editor}>
           {renderEditor()}
-          <TouchableOpacity onPress={onDeleteRequest} hitSlop={6}>
+          <TouchableOpacity
+            onPress={onDeleteRequest}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`remove the ${info.label} block`}
+          >
             <Text style={styles.removeText}>remove this block</Text>
           </TouchableOpacity>
         </View>
@@ -448,6 +590,14 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   titleTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   blockLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  kindTag: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.secondary,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  kindTagAuto: { color: Colors.terracotta },
   hiddenTag: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.caption,
@@ -479,6 +629,21 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   inputMultiline: { minHeight: 100, textAlignVertical: 'top' },
+  inputProblem: { borderColor: Colors.errorRed },
+  linkProblem: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.errorRed,
+    marginTop: -6,
+    marginBottom: 10,
+  },
+  linkHost: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
+    marginTop: -6,
+    marginBottom: 10,
+  },
   thumbRow: { gap: 10, paddingVertical: 4 },
   thumbEmpty: {
     width: THUMB_SIZE,
@@ -534,6 +699,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
   },
+  saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
   removeText: {
     fontFamily: Fonts.sansMedium,

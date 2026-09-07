@@ -480,7 +480,17 @@ export default function TicketSetupScreen() {
         </TouchableOpacity>
         {/* copy to the taste gate */}
         <Text style={styles.headerTitle}>tickets</Text>
-        <View style={styles.headerSpacer} />
+        {/* Build 35 Screen 44: sales operations live on their own screen now
+            rather than growing this one past 38K (matrix's own instruction) */}
+        <TouchableOpacity
+          onPress={() => { hapticLight(); router.push(`/creator/ticket-sales?id=${id}` as never); }}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="ticket sales"
+        >
+          {/* copy to the taste gate */}
+          <Text style={styles.salesLink}>sales</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -509,6 +519,12 @@ export default function TicketSetupScreen() {
               style={styles.tierCard}
               onPress={() => {
                 hapticLight();
+                // Build 35 Screen 23/59: a free (rsvp) tier gets its own named
+                // settings destination instead of the generic ticket editor.
+                if (tier.price_cents === 0) {
+                  router.push(`/creator/rsvp-settings?id=${id}&tierId=${tier.id}` as never);
+                  return;
+                }
                 setEditingTier(tier);
                 setEditorVisible(true);
               }}
@@ -586,9 +602,10 @@ export default function TicketSetupScreen() {
           onPress={() => {
             if (tiersFull) return;
             hapticLight();
-            setEditingTier(null);
-            setNewTierPreset('Free RSVP');
-            setEditorVisible(true);
+            // Build 35 Screen 23/59: "Free RSVP" is now a named destination
+            // (rsvp-settings) rather than the generic ticket editor sheet
+            // with a pre-filled name -- see that screen's own header.
+            router.push(`/creator/rsvp-settings?id=${id}&tierId=new` as never);
           }}
           disabled={tiersFull}
           activeOpacity={0.85}
@@ -895,6 +912,7 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12 },
   headerTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   headerSpacer: { flex: 1 },
+  salesLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.textMedium },
   content: { padding: 20, paddingBottom: 40, gap: 10 },
   eventTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt, marginBottom: 4 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 4 },

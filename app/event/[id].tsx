@@ -873,6 +873,21 @@ export default function EventDetailScreen() {
   // no handling at all -- a guest who could still load a cancelled event's
   // page saw normal, live attendance buttons.
   const isCancelled = event.status === 'Cancelled';
+  // Screen 49 (Build 35 delta matrix) gap: "one dominant action reflecting
+  // live sale state." 'Completed' is the same kind of real, live status
+  // value as 'Cancelled' above -- event-summary.tsx and organizerHome.ts
+  // already branch on it -- but this guest page had no handling for it at
+  // all, so a guest opening a link to a past event still saw live
+  // "get tickets" / "count me in" buttons.
+  const isCompleted = event.status === 'Completed';
+  // allSoldOut is only ever true when real ticket_tiers rows exist and
+  // every one is sold out (getPublicTicketSummary's own contract), so this
+  // never fires for a genuine free/RSVP-only event. Before this, a
+  // sold-out ticketed event fell through to the sceneParticipationEnabled
+  // branch below and still showed an actionable "count me in" RSVP button
+  // -- a guest could tap it and register as going via the free-RSVP path
+  // even though there was zero real ticket inventory left.
+  const isSoldOut = !!ticketSummary?.allSoldOut;
 
   // the byline grammar (slice 2): public_name override wins and wears
   // neither image; a community event fronts with the COMMUNITY name and
@@ -1410,6 +1425,22 @@ export default function EventDetailScreen() {
               {/* copy to the taste gate */}
               <Text style={styles.cancelledContactText}>paid for this? email us — hello@washedup.app</Text>
             </TouchableOpacity>
+          </View>
+        ) : isCompleted ? (
+          // Screen 49 gap: a completed event gets the same single,
+          // non-actionable dominant state as Cancelled -- reuses the exact
+          // pill styling, no separate contact line (nothing to refund/
+          // contact about just because an event already happened).
+          <View style={[styles.rsvpButton, styles.cancelledPill]}>
+            {/* copy to the taste gate */}
+            <Text style={styles.cancelledPillText}>event ended</Text>
+          </View>
+        ) : isSoldOut ? (
+          // Screen 49 gap: sold-out is its own honest dominant state, not
+          // a silent fallthrough into the free-RSVP button (see isSoldOut).
+          <View style={[styles.rsvpButton, styles.cancelledPill]}>
+            {/* copy to the taste gate */}
+            <Text style={styles.cancelledPillText}>sold out</Text>
           </View>
         ) : (
         <>

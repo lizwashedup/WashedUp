@@ -4,6 +4,7 @@ import {
   failedPayoutLabel,
   hasUnpublishedTickets,
   inventoryLabel,
+  lowInventoryLabel,
   needsAttention,
   pickNextUpcomingEvent,
   sumTierCapacity,
@@ -250,6 +251,16 @@ describe('failedPayoutLabel', () => {
 
   it('pluralizes multiple payouts', () => {
     expect(failedPayoutLabel(2)).toBe('2 payouts need attention');
+  });
+});
+
+describe('lowInventoryLabel', () => {
+  it('singularizes one ticket', () => {
+    expect(lowInventoryLabel(1)).toBe('1 ticket left');
+  });
+
+  it('pluralizes multiple tickets', () => {
+    expect(lowInventoryLabel(3)).toBe('3 tickets left');
   });
 });
 

@@ -58,6 +58,7 @@ import {
   getConfirmationMessage,
   getOrder,
   getQuestions,
+  isQuestionAskableAfterOrder,
   recordAnswer,
   resolveOrderViewState,
   type MyOrder,
@@ -374,20 +375,36 @@ export default function OrderCompleteScreen() {
 
   const qty = order?.qty ?? 1;
 
+  // Build 35 Screen 28 cleanup: begin_ticket_checkout (doc 118) already
+  // refuses to create an order at all when a question that is THEN active
+  // and required goes unanswered, so a required question can only
+  // genuinely be owed on this fallback form when it postdates the order --
+  // added, or turned required/active, after the order already existed and
+  // so was never put in front of this buyer at checkout
+  // (isQuestionAskableAfterOrder, lib/ticketing -- per question, not a
+  // single flat cutover date, so an organizer editing an event's questions
+  // after some guests already checked out is still handled correctly). A
+  // truly old "legacy" order from before this event had any questions at
+  // all is covered by the exact same check: every question it could ever
+  // be missing necessarily postdates it. Optional questions are never
+  // restricted by this.
+  //
   // TK-03: drop a question once every seat it's asked for already has a
   // saved answer. A per_attendee question with only SOME seats answered
   // still shows (so the remaining seat isn't skipped) -- it just won't
   // pre-fill the seats already on file, same as the checkout-time form.
   const unansweredQuestions = useMemo(() => {
-    if (!answeredByQuestion) return questions;
-    return questions.filter((q) => {
+    if (!order) return [];
+    const askable = questions.filter((q) => isQuestionAskableAfterOrder(q, order.created_at));
+    if (!answeredByQuestion) return askable;
+    return askable.filter((q) => {
       const seats = answeredByQuestion.get(q.id);
       if (!seats) return true;
       if (q.scope !== 'per_attendee') return !seats.has(null);
       for (let i = 1; i <= qty; i++) if (!seats.has(i)) return true;
       return false;
     });
-  }, [questions, answeredByQuestion, qty]);
+  }, [order, questions, answeredByQuestion, qty]);
 
   const setCell = useCallback((questionId: string, seat: Seat, patch: AnswerRaw) => {
     const key = cellKey(questionId, seat);

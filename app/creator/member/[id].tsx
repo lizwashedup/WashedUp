@@ -35,6 +35,16 @@
  *   archive with no access-control minimization. Wiring a leader-facing
  *   read into that table is a real access-policy call for Josh/Liz, not a
  *   UI addition -- reported, not built.
+ *
+ * - Confirmation-on-destructive-action coverage: this screen's one
+ *   destructive action (remove) called the plain removeMember() RPC
+ *   unconditionally, even though the roster screen (members.tsx) already
+ *   requires a recorded reason once MEMBER_REMOVAL_REASON_ENABLED is on
+ *   (Liz decision #10, 2026-09-03, via removeMemberWithReason() /
+ *   MemberRemovalReasonModal) -- removing the same member from this detail
+ *   screen silently skipped that requirement and left no reason/actor
+ *   record. Fixed by mirroring members.tsx's exact branch: same flag, same
+ *   modal, same RPC.
  */
 
 import React, { useState } from 'react';
@@ -46,7 +56,9 @@ import { Image } from 'expo-image';
 import { ArrowLeft, Ticket, CalendarCheck, RotateCcw } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
+import { MEMBER_REMOVAL_REASON_ENABLED } from '../../../constants/FeatureFlags';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
+import { MemberRemovalReasonModal } from '../../../components/creator/MemberRemovalReasonModal';
 import { friendlyError } from '../../../lib/friendlyError';
 import { hapticLight } from '../../../lib/haptics';
 import { formatEventDateLA } from '../../../lib/laDate';
@@ -59,6 +71,7 @@ import {
   getJoinAnswerCards,
   getMemberEventHistory,
   removeMember,
+  removeMemberWithReason,
   type MemberEventHistoryItem,
 } from '../../../lib/creatorMode';
 
@@ -68,6 +81,7 @@ export default function MemberDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [removing, setRemoving] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const [removalReasonVisible, setRemovalReasonVisible] = useState(false);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
 
@@ -93,9 +107,16 @@ export default function MemberDetailScreen() {
   });
   const answers = member ? answersByMember?.get(member.id) : undefined;
 
+  // Liz decision #10 (2026-09-03): removal requires a recorded reason, once
+  // MEMBER_REMOVAL_REASON_ENABLED is on -- same branch members.tsx already
+  // makes. Flag off keeps this screen's original plain confirm, byte-identical.
   const confirmRemove = () => {
     if (!member) return;
     hapticLight();
+    if (MEMBER_REMOVAL_REASON_ENABLED) {
+      setRemovalReasonVisible(true);
+      return;
+    }
     setAlertInfo({
       title: `Remove ${member.name ?? 'this member'}?`,
       message: 'They lose access to the community and its chat.',
@@ -119,6 +140,22 @@ export default function MemberDetailScreen() {
         },
       ],
     });
+  };
+
+  const handleRemovalSubmit = async (reason: string) => {
+    if (!member) return;
+    setRemovalReasonVisible(false);
+    setRemoving(true);
+    try {
+      await removeMemberWithReason(member.id, reason);
+      queryClient.invalidateQueries({ queryKey: ['creator-members'] });
+      queryClient.invalidateQueries({ queryKey: ['creator-members-removed'] });
+      router.back();
+    } catch (e) {
+      setAlertInfo({ title: 'That did not work', message: friendlyError(e, 'Try again in a moment.') });
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const renderHistoryRow = (h: MemberEventHistoryItem, idx: number) => (
@@ -294,6 +331,15 @@ export default function MemberDetailScreen() {
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
+      {MEMBER_REMOVAL_REASON_ENABLED && (
+        <MemberRemovalReasonModal
+          visible={removalReasonVisible}
+          memberName={member?.name ?? null}
+          submitting={removing}
+          onCancel={() => setRemovalReasonVisible(false)}
+          onSubmit={handleRemovalSubmit}
+        />
+      )}
     </SafeAreaView>
   );
 }

@@ -73,6 +73,16 @@ export function failedPayoutLabel(count: number): string {
   return count === 1 ? '1 payout needs attention' : `${count} payouts need attention`;
 }
 
+/**
+ * Build 35 Screen 01 exception surfacing: "N left" for the next event's
+ * aggregate inventory once ticketing.ts's isLowInventory (Liz decision #16,
+ * 90% sold) has already gated on it. Same singular/plural shape as
+ * failedPayoutLabel above.
+ */
+export function lowInventoryLabel(left: number): string {
+  return left === 1 ? '1 ticket left' : `${left} tickets left`;
+}
+
 /** Calendar days from now to eventDateISO, LA-day-boundary aware. Negative = past. */
 function dayDiff(eventDateISO: string, nowISO: string): number {
   const now = getLADayParts(nowISO);

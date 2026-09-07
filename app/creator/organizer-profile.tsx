@@ -1,11 +1,16 @@
 /**
- * The organizer profile editor (proposal 36, Liz's addendum). Four fields
- * and a save: display name, optional logo, short bio, one link. Reached
- * from the creator Menu tab card; a stack screen with its own back control
- * (never a dead end). Functionally minimal per decision 15a.
+ * The organizer profile editor (proposal 36, Liz's addendum). Display name,
+ * optional city/logo/bio/link, and a save. Reached from the creator Menu tab
+ * card; a stack screen with its own back control (never a dead end).
+ * Functionally minimal per decision 15a.
  *
  * Until proposal 36 applies the save fails with the friendly error and
  * nothing else breaks (the block-editor precedent).
+ *
+ * Build 35 Screen 42 (2026-09-06): added support email (same self-flipping
+ * DRAFT-column shape as city -- see lib/organizerProfile.ts) and the
+ * required copy stating this is an organization, not a Community, now that
+ * both are real separate products.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -36,6 +41,7 @@ import {
   pickAndUploadOrganizerLogo,
   upsertOrganizerProfile,
   setOrganizerCity,
+  setOrganizerSupportEmail,
 } from '../../lib/organizerProfile';
 
 const LOGO_SIZE = 84;
@@ -50,6 +56,7 @@ export default function OrganizerProfileScreen() {
   const [logoUrl, setLogoUrl] = useState('');
   const [bio, setBio] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
+  const [supportEmail, setSupportEmail] = useState('');
   const [seeded, setSeeded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -68,6 +75,7 @@ export default function OrganizerProfileScreen() {
         setLogoUrl(profile.logo_url ?? '');
         setBio(profile.bio ?? '');
         setLinkUrl(profile.link_url ?? '');
+        setSupportEmail(profile.support_email ?? '');
       }
       setSeeded(true);
     }
@@ -99,11 +107,13 @@ export default function OrganizerProfileScreen() {
         bio: bio || null,
         link_url: linkUrl || null,
       });
-      // Isolated write (see lib/organizerProfile.ts): silently a no-op until
-      // the city column's DRAFT migration is applied, and requires the row
-      // upsertOrganizerProfile just guaranteed above to exist first - never
-      // blocks or errors the rest of this save either way.
+      // Isolated writes (see lib/organizerProfile.ts): each is silently a
+      // no-op until its own column's DRAFT migration is applied, and each
+      // requires the row upsertOrganizerProfile just guaranteed above to
+      // exist first - neither blocks or errors the rest of this save either
+      // way.
       await setOrganizerCity(city || null);
+      await setOrganizerSupportEmail(supportEmail || null);
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['organizer-profile'] });
       router.back();
@@ -135,6 +145,13 @@ export default function OrganizerProfileScreen() {
             {/* LIZ COPY */}
             <Text style={styles.subtitle}>
               the name your events wear. it fronts your listings; each event can still set its own.
+            </Text>
+            {/* Build 35 Screen 42: required copy distinguishing this from a
+                Community profile now that both are real, separate products
+                (master plan §5.1) -- an organization has no roster, join
+                gate, or member feed of its own. LIZ COPY */}
+            <Text style={styles.notACommunityNote}>
+              this is an organization, not a community. no roster or member feed, just the identity your events wear.
             </Text>
 
             <Text style={styles.fieldLabel}>name</Text>
@@ -205,6 +222,25 @@ export default function OrganizerProfileScreen() {
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
+            {/* Build 35 Screen 42: a real contact address for this
+                organization, distinct from the personal account email
+                nobody here ever sees. Optional, same as link/logo/about. */}
+            <Text style={styles.fieldLabel}>support email</Text>
+            {/* LIZ COPY */}
+            <Text style={styles.fieldHint}>optional. a real way for guests to reach you if something goes wrong.</Text>
+            <TextInput
+              style={styles.input}
+              value={supportEmail}
+              onChangeText={setSupportEmail}
+              placeholder="you@example.com"
+              placeholderTextColor={Colors.inkSoft}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              maxLength={254}
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            />
+
             <TouchableOpacity
               style={[styles.saveBtn, saving && styles.saveBtnBusy]}
               onPress={handleSave}
@@ -248,6 +284,12 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
+    marginBottom: 8,
+  },
+  notACommunityNote: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
     marginBottom: 16,
   },
   fieldLabel: {

@@ -29,17 +29,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { AlertTriangle, ChevronRight, Plus, ScanLine, Ticket, Users } from 'lucide-react-native';
+import { AlertTriangle, ChevronRight, Flame, Plus, ScanLine, Ticket, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { EventAction, EventSpacing, EventSurface, EventType } from '../../constants/EventDesign';
 import { FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCreatorEvents } from '../../lib/creatorMode';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { getFollowerCount } from '../../lib/organizerFollows';
-import { getFailedPayouts, getTiers } from '../../lib/ticketing';
+import { getFailedPayouts, getTiers, isLowInventory } from '../../lib/ticketing';
 import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { formatEventDateLA } from '../../lib/laDate';
-import { daysUntilLabel, failedPayoutLabel, inventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
+import { daysUntilLabel, failedPayoutLabel, inventoryLabel, lowInventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
 import { supabase } from '../../lib/supabase';
 
 export default function OrganizerHomeScreen() {
@@ -89,6 +89,15 @@ export default function OrganizerHomeScreen() {
   const counts = countAttendees(attendees);
   const capacity = useMemo(() => sumTierCapacity(tiers), [tiers]);
 
+  // Build 35 Screen 01 exception surfacing: the next event's aggregate
+  // inventory crossing Liz decision #16's 90%-sold threshold (isLowInventory,
+  // lib/ticketing.ts), read at the same roll-up level this screen already
+  // shows via inventoryLabel below, not a new per-tier concept. null capacity
+  // (an open-ended event) never counts as low, same contract isLowInventory
+  // already enforces for cap <= 0.
+  const capacityLeft = capacity != null ? capacity - counts.sold : null;
+  const showLowInventory = !!nextEvent && capacityLeft != null && isLowInventory(capacityLeft, capacity!);
+
   // dormant until proposal 68 applies (lib/organizerFollows.ts): null hides
   // this section entirely rather than showing a fake zero.
   const { data: followerCount = null } = useQuery({
@@ -137,6 +146,27 @@ export default function OrganizerHomeScreen() {
                   ? `${failedPayouts[0].eventTitle} · we're retrying automatically`
                   : "we're retrying automatically · see getting paid"}
               </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
+          </TouchableOpacity>
+        )}
+
+        {/* Build 35 Screen 01 exception surfacing: real scarcity, not a fake
+            countdown -- same isLowInventory threshold already proven on the
+            tickets screen's per-tier badge. Rises with the payout card, above
+            the routine next-event card below. */}
+        {showLowInventory && (
+          <TouchableOpacity
+            style={styles.lowInventoryCard}
+            onPress={() => router.push(`/creator/tickets?id=${nextEvent!.id}` as never)}
+            activeOpacity={0.85}
+          >
+            <Flame size={20} color={EventAction.scarcity} strokeWidth={2} />
+            <View style={styles.urgencyBody}>
+              {/* LIZ COPY */}
+              <Text style={styles.lowInventoryKicker}>almost sold out</Text>
+              <Text style={styles.urgencyTitle}>{lowInventoryLabel(capacityLeft!)}</Text>
+              <Text style={styles.urgencyMeta} numberOfLines={1}>{nextEvent!.title}</Text>
             </View>
             <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
           </TouchableOpacity>
@@ -336,6 +366,24 @@ const styles = StyleSheet.create({
     fontFamily: EventType.bodyBold,
     fontSize: FontSizes.caption,
     color: EventAction.error,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  lowInventoryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: EventSpacing.sm,
+    backgroundColor: EventSurface.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: EventAction.scarcity,
+    padding: EventSpacing.md,
+    marginTop: EventSpacing.xs,
+  },
+  lowInventoryKicker: {
+    fontFamily: EventType.bodyBold,
+    fontSize: FontSizes.caption,
+    color: EventAction.scarcity,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },

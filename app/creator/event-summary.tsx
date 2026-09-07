@@ -6,10 +6,13 @@
  * every mutation still happens on the screen that already owns it.
  *
  * Money is a separate parallel workstream's screen (07) -- this hub only
- * links to it, it does not render Money's own content. Messages (06) has
- * no send backend anywhere in this codebase yet (native or web -- web's
- * own composer header says so directly), so it shows as coming soon with a
- * stated reason instead of a button that would go nowhere.
+ * links to it, it does not render Money's own content. Messages (06) now
+ * has a real native destination (event-messages.tsx, built for Build 35's
+ * event-communications cluster): a hub linking to reminders (60) and the
+ * attendee composer (61). Sending itself still isn't live anywhere (the
+ * web composer's own real send path is a draft, unapplied migration gated
+ * off by default) -- that honesty now lives inside those destination
+ * screens instead of a disabled row here that went nowhere.
  *
  * Built against today's host_user_id/community_id ownership pair. Migration
  * 20260901010000 (owner_type/owner_id) applied to prod 2026-09-02 (verified:
@@ -151,11 +154,17 @@ export default function EventSummaryScreen() {
             </TouchableOpacity>
           )}
 
-          <View style={[styles.tabRow, styles.tabRowDisabled]}>
-            <MessageCircle size={20} color={Colors.textLight} strokeWidth={2} />
-            {/* copy to the taste gate -- honest, not a fake working button */}
-            <Text style={styles.tabLabelDisabled}>messages — coming soon</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.tabRow}
+            onPress={() => { hapticLight(); router.push(`/creator/event-messages?id=${id}` as never); }}
+            accessibilityRole="button"
+            accessibilityLabel="open messages"
+          >
+            <MessageCircle size={20} color={Colors.terracotta} strokeWidth={2} />
+            {/* copy to the taste gate */}
+            <Text style={styles.tabLabel}>messages</Text>
+            <ChevronRight size={18} color={Colors.textLight} strokeWidth={2} />
+          </TouchableOpacity>
         </ScrollView>
       )}
     </SafeAreaView>

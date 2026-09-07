@@ -82,25 +82,35 @@ function SeatTicket({ seat, qty, eventEnded }: { seat: MySeat; qty: number; even
       </View>
     );
   }
+  // Screen 29/30 (Build 35 delta matrix): "active" is its own named state in
+  // the state machine (reserved -> payment_pending -> paid_needs_details ->
+  // active -> checked_in), distinct from checked_in and from an ended event.
+  // The QR only gets anyone through a door while the seat is genuinely
+  // active -- once it's checked in or the event's over, that code is
+  // functionally dead the same way a voided seat's is (TK-07's own "nobody
+  // walks up with a dead code" reasoning above), so it stops rendering.
+  const isActive = !seat.checkedIn && !eventEnded;
   return (
     <View style={styles.seat}>
       {qty > 1 && (
         /* copy to the taste gate: per-seat label */
         <Text style={styles.seatLabel}>ticket {seat.position_index} of {qty}</Text>
       )}
-      <View
-        style={styles.qrWrap}
-        accessible
-        accessibilityLabel={`ticket code ${seat.reference_code}`}
-      >
-        <QRCode
-          value={seat.reference_code}
-          size={QR_SIZE}
-          quietZone={QR_QUIET_ZONE}
-          color={Colors.asphalt}
-          backgroundColor={Colors.white}
-        />
-      </View>
+      {isActive && (
+        <View
+          style={styles.qrWrap}
+          accessible
+          accessibilityLabel={`ticket code ${seat.reference_code}`}
+        >
+          <QRCode
+            value={seat.reference_code}
+            size={QR_SIZE}
+            quietZone={QR_QUIET_ZONE}
+            color={Colors.asphalt}
+            backgroundColor={Colors.white}
+          />
+        </View>
+      )}
       <Text style={styles.seatCode}>{seat.reference_code}</Text>
       {/* TK-07 (2026-08-19): the door's own record (ticket_checkins), not a
           guess. "waitlisted" and "transferred" are skipped here on purpose,
@@ -113,7 +123,19 @@ function SeatTicket({ seat, qty, eventEnded }: { seat: MySeat; qty: number; even
       ) : eventEnded ? (
         /* copy to the taste gate */
         <Text style={styles.seatExpiredNote}>expired, this one was never scanned</Text>
-      ) : null}
+      ) : (
+        // Screen 29: the state machine's other four reachable states here
+        // (checked in, expired, refunded above) all already carried their
+        // own label; this positive "active" one didn't. Mirrors the web
+        // wallet's already-shipped "valid" pill (src/app/app/tickets/page.tsx,
+        // walletTicketState) using this app's own documented confirmed-state
+        // treatment (CLAUDE.md "Documented exceptions": goingConfirmedFill
+        // fill + gold border + brandDeep label).
+        <View style={styles.validBadge}>
+          {/* copy to the taste gate */}
+          <Text style={styles.validBadgeText}>valid</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -408,6 +430,17 @@ const styles = StyleSheet.create({
   seatVoidedNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   seatCheckedInNote: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   seatExpiredNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  // Screen 29: the "active" state badge -- same confirmed-state treatment as
+  // FeaturedEventCard's ctaButtonJoined (CLAUDE.md documented exception).
+  validBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: Colors.goingConfirmedFill,
+    borderWidth: 1,
+    borderColor: Colors.gold,
+  },
+  validBadgeText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.brandDeep },
   organizerNote: {
     backgroundColor: Colors.white, borderRadius: 12,
     borderWidth: 1, borderColor: Colors.border,

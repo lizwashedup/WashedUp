@@ -25,6 +25,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { EventSpacing } from '../../constants/EventDesign';
 import { getCreatorAccess, isLeaderAccess, type CreatorAccess } from '../../lib/creatorMode';
+import { fetchMyGrants, type OperatorGrantStatus } from '../../lib/operatorApplications';
 import { hapticLight } from '../../lib/haptics';
 
 /** The plain-language role line for the identity a real getCreatorAccess()
@@ -45,6 +46,34 @@ function roleSummary(access: CreatorAccess | undefined): string {
     return 'you are approved to put on standalone events. no community, no member room -- that is by design for this track.';
   }
   return 'no active creator access found on this account.';
+}
+
+/**
+ * Screen 46 gap (delta matrix): "both approval records distinctly". Read
+ * straight from fetchMyGrants() rather than getCreatorAccess()'s derived
+ * hasLeaderGrant/hasEventHostGrant booleans, which only ever answer
+ * approved-or-not -- an applied/in_review/needs_more_info/declined/withdrawn
+ * record is real state a creator should be able to review here and is
+ * otherwise invisible on this screen.
+ */
+function grantStatusLabel(status: OperatorGrantStatus | undefined): string {
+  switch (status) {
+    case 'applied':
+    case 'in_review':
+      return 'a real person is reading it';
+    case 'needs_more_info':
+      return 'needs one more thing from you';
+    case 'approved':
+      return 'approved';
+    case 'declined':
+      return 'not approved, can reapply';
+    case 'withdrawn':
+      return 'withdrawn, can reapply';
+    case 'revoked':
+      return 'closed';
+    default:
+      return 'not applied';
+  }
 }
 
 interface FaqItem {
@@ -77,6 +106,11 @@ const FAQ: FaqItem[] = [
 
 export default function CreatorHelpScreen() {
   const { data: access, isLoading } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
+  // Same queryKey apply.tsx uses for the same read -- shares/dedupes the
+  // React Query cache when both screens are visited in one session.
+  const { data: grants, isLoading: grantsLoading } = useQuery({ queryKey: ['my-operator-grants'], queryFn: fetchMyGrants });
+  const eventHostGrant = grants?.find((g) => g.track === 'event_host');
+  const communityGrant = grants?.find((g) => g.track === 'community_leader');
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -92,7 +126,7 @@ export default function CreatorHelpScreen() {
         <View style={styles.permCard}>
           <Text style={styles.permKicker}>your access, right now</Text>
           <Text style={styles.permBody}>{isLoading ? 'checking your access...' : roleSummary(access)}</Text>
-          {!isLoading && access && access.ledCommunities.length > 0 && (
+          {!isLoading && access && (access.ledCommunities.length > 0 || access.hasEventHostGrant) && (
             <View style={styles.permList}>
               {access.ledCommunities.map((c) => (
                 <View key={c.id} style={styles.permRow}>
@@ -100,9 +134,38 @@ export default function CreatorHelpScreen() {
                   <Text style={styles.permRowRole}>{c.role === 'leader' ? 'primary leader' : 'co-leader'}</Text>
                 </View>
               ))}
+              {access.hasEventHostGrant && (
+                <View style={styles.permRow}>
+                  <Text style={styles.permRowName} numberOfLines={1}>organization</Text>
+                  <Text style={styles.permRowRole}>put on events</Text>
+                </View>
+              )}
             </View>
           )}
         </View>
+
+        <Text style={styles.sectionLabel}>your approval records</Text>
+        <View style={styles.approvalCard}>
+          <View style={styles.approvalRow}>
+            <View style={styles.approvalTrackWrap}>
+              <Text style={styles.approvalTrackName}>organization</Text>
+              <Text style={styles.approvalTrackSub}>put on events</Text>
+            </View>
+            <Text style={[styles.approvalStatus, eventHostGrant?.status === 'approved' && styles.approvalStatusApproved]}>
+              {grantsLoading ? 'checking...' : grantStatusLabel(eventHostGrant?.status)}
+            </Text>
+          </View>
+          <View style={[styles.approvalRow, styles.approvalRowLast]}>
+            <View style={styles.approvalTrackWrap}>
+              <Text style={styles.approvalTrackName}>community</Text>
+              <Text style={styles.approvalTrackSub}>start a community</Text>
+            </View>
+            <Text style={[styles.approvalStatus, communityGrant?.status === 'approved' && styles.approvalStatusApproved]}>
+              {grantsLoading ? 'checking...' : grantStatusLabel(communityGrant?.status)}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.approvalHint}>two separate approvals. being approved for one never approves the other.</Text>
 
         <Text style={styles.sectionLabel}>common questions</Text>
         <View style={styles.faqCard}>
@@ -168,6 +231,35 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginTop: 4,
   },
+
+  approvalCard: {
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  approvalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  approvalRowLast: { borderBottomWidth: 0 },
+  approvalTrackWrap: { flex: 1 },
+  approvalTrackName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
+  approvalTrackSub: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary, marginTop: 2 },
+  approvalStatus: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, textAlign: 'right' },
+  approvalStatusApproved: { fontFamily: Fonts.sansBold, color: Colors.darkWarm },
+  approvalHint: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
+    marginTop: -4,
+  },
+
   faqCard: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,

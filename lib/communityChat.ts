@@ -49,6 +49,12 @@ export interface CommunityChatCard {
   community_id: string;
   handle: string;
   name: string;
+  /** Screen 37: the main chat's own display name, independent of the
+   *  community's name (communities.main_chat_name via get_my_community_chat_cards,
+   *  migration 20260906200000). Null until that migration is applied, or for
+   *  a community that has never had one explicitly set -- callers fall back
+   *  to "community chat", same default the column itself carries. */
+  main_chat_name: string | null;
   accent_color: string | null;
   role: 'leader' | 'co_leader' | 'admin' | 'events' | 'member_care' | 'finance' | 'member';
   latest_broadcast: { id: string; body: string; created_at: string; sender_id: string | null } | null;
@@ -201,6 +207,10 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
       kind: 'community',
       targetId: c.community_id,
       communityId: c.community_id,
+      // deliberately still the community's name, not c.main_chat_name
+      // (Screen 37): this row belongs to the Chats-list surface, not the
+      // community-thread screen -- left untouched here rather than decided
+      // on this screen's behalf.
       title: c.name,
       secondary: null,
       // LIZ COPY

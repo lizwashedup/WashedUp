@@ -192,6 +192,20 @@ export default function CommunityPageScreen() {
     );
   }
 
+  // Build 35 Screen 39: the visitor preview must run the real production
+  // authorization, not just re-render the leader's own membership-granted
+  // data behind a client-side flag. communities_select
+  // (20260901080000_gender_restricted_communities.sql) only opens a
+  // community to a non-member when status = 'active'; a leader is always
+  // let through by that policy's is_community_member() branch regardless of
+  // status, so without this the banner would claim "how a visitor sees it"
+  // for a draft/archived community a real stranger's request could never
+  // even load. Same conditional-truth shape as app/event/[id].tsx's own
+  // guest preview (previewUnpublished): the content still renders so the
+  // leader can polish it before publishing, the banner just stops lying
+  // about who can currently see it.
+  const previewUnpublished = previewMode === 'visitor' && page.community.status !== 'active';
+
   const accent = page.community.accent_color ?? Colors.terracotta;
   const nextEvent = page.events[0] ?? null;
   const leaderFirstName = leaderCard?.display_name?.trim().split(/\s+/)[0] ?? null;
@@ -412,9 +426,20 @@ export default function CommunityPageScreen() {
 
       {previewMode && (
         <View style={[styles.previewBar, { paddingTop: insets.top + 4 }]}>
-          {/* LIZ COPY */}
           <Text style={styles.previewBarText}>
-            {previewMode === 'visitor' ? 'how a visitor sees it' : 'how a member sees it'}
+            {previewUnpublished ? (
+              // Build 35 Screen 39: real authorization, not the "sees it"
+              // claim below -- a draft/archived community returns nothing
+              // to a real stranger's request, so the banner says what it
+              // WILL look like once published instead of overstating what
+              // is true right now.
+              page.community.status === 'archived'
+                ? 'your page is archived. visitors cannot see this.'
+                : 'how your page will look to visitors once you publish'
+            ) : (
+              /* LIZ COPY */
+              previewMode === 'visitor' ? 'how a visitor sees it' : 'how a member sees it'
+            )}
           </Text>
           <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
             {/* LIZ COPY */}

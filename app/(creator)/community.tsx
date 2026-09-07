@@ -21,14 +21,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronRight, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticWarning } from '../../lib/haptics';
-import { getCreatorAccess, getBroadcasts, isLeaderAccess, isAdminTierRole, creatorLandingRoute, publishCommunity, archiveCommunity, sendBroadcast, buildCommunityPublicLink } from '../../lib/creatorMode';
+import { getCreatorAccess, getBroadcasts, getBroadcastAudienceCount, isLeaderAccess, isAdminTierRole, creatorLandingRoute, publishCommunity, archiveCommunity, sendBroadcast, buildCommunityPublicLink } from '../../lib/creatorMode';
 import { getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
@@ -47,6 +47,11 @@ export default function CreatorCommunityScreen() {
   const { data: broadcasts = [], refetch, isRefetching } = useQuery({
     queryKey: ['creator-broadcasts', community?.id],
     queryFn: () => getBroadcasts(community!.id),
+    enabled: !!community,
+  });
+  const { data: audienceCount } = useQuery({
+    queryKey: ['creator-broadcast-audience', community?.id],
+    queryFn: () => getBroadcastAudienceCount(community!.id),
     enabled: !!community,
   });
   const { data: rooms = [] } = useQuery({
@@ -204,6 +209,17 @@ export default function CreatorCommunityScreen() {
             is the sweet spot.
           </Text>
           <View style={styles.composer}>
+            <View style={styles.audienceRow}>
+              <Users size={14} color={Colors.terracotta} strokeWidth={2} />
+              {/* LIZ COPY: honest preview, Screen 19's audience count + channel display requirement */}
+              <Text style={styles.audienceText}>
+                {audienceCount == null
+                  ? 'checking your community…'
+                  : audienceCount === 0
+                    ? 'no one to send to yet -- this would go nowhere.'
+                    : `goes to ${audienceCount} active ${audienceCount === 1 ? 'member' : 'members'}, straight to their phone.`}
+              </Text>
+            </View>
             <TextInput
               style={styles.composerInput}
               value={draft}
@@ -428,6 +444,17 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     padding: 14,
     gap: 10,
+  },
+  audienceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  audienceText: {
+    flex: 1,
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.secondary,
   },
   composerInput: {
     minHeight: 70,

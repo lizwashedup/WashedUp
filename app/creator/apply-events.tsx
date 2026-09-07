@@ -68,7 +68,11 @@ export default function ApplyEventsScreen() {
         if (data?.first_name_display) setYourName((v) => v || data.first_name_display);
         const grants = await fetchMyGrants();
         const prior = grants.find((g) => g.track === 'event_host');
-        if (prior && ['declined', 'needs_more_info'].includes(prior.status)) {
+        // Screen 47 "resumable applications" (delta matrix): a withdrawn
+        // application is the applicant's own reversible choice, not a no --
+        // "apply again anytime" (apply.tsx statusLine) should resume with
+        // what they already wrote, same as declined/needs_more_info.
+        if (prior && ['declined', 'needs_more_info', 'withdrawn'].includes(prior.status)) {
           const a = prior.application as Record<string, any>;
           if (a.applicant_type) setApplicantType(a.applicant_type);
           if (a.applicant_type_other) setApplicantTypeOther(a.applicant_type_other);

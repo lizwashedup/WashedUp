@@ -2,6 +2,7 @@ const mockFrom = jest.fn();
 jest.mock('../supabase', () => ({ supabase: { from: mockFrom } }));
 
 const {
+  aggregateChoiceAnswers,
   answerToString,
   attachAnswers,
   countAttendees,
@@ -27,6 +28,7 @@ function attendee(overrides: Record<string, unknown> = {}) {
     pricePaidCents: 0,
     checkedInAt: null,
     purchasedAt: null,
+    rawAnswers: {},
     ...overrides,
   };
 }
@@ -164,13 +166,95 @@ describe('attachAnswers', () => {
   });
 });
 
+describe('aggregateChoiceAnswers', () => {
+  const question = (overrides: Record<string, unknown> = {}) => ({
+    id: 'q1',
+    prompt: 'dietary restriction?',
+    qtype: 'single_select',
+    scope: 'per_attendee',
+    sortOrder: 0,
+    options: ['vegetarian', 'vegan', 'none'],
+    ...overrides,
+  });
+
+  it('counts each declared option, including one nobody picked', () => {
+    const rows = [
+      attendee({ positionId: 'p1', answers: { q1: 'vegetarian' } }),
+      attendee({ positionId: 'p2', answers: { q1: 'vegetarian' } }),
+      attendee({ positionId: 'p3', answers: { q1: 'none' } }),
+    ];
+    const [agg] = aggregateChoiceAnswers(rows, [question()]);
+    expect(agg.values).toEqual([
+      { value: 'vegetarian', count: 2 },
+      { value: 'none', count: 1 },
+      { value: 'vegan', count: 0 },
+    ]);
+    expect(agg.blankCount).toBe(0);
+    expect(agg.totalCount).toBe(3);
+  });
+
+  it('counts an unanswered attendee as blank, not folded into any value bucket', () => {
+    const rows = [
+      attendee({ positionId: 'p1', answers: { q1: 'vegetarian' } }),
+      attendee({ positionId: 'p2', answers: {} }),
+    ];
+    const [agg] = aggregateChoiceAnswers(rows, [question()]);
+    expect(agg.blankCount).toBe(1);
+    expect(agg.values.find((v: { value: string }) => v.value === 'vegetarian')).toEqual({ value: 'vegetarian', count: 1 });
+  });
+
+  it('counts a multi_select pick toward each of its choices, not one combined "a, b" bucket', () => {
+    const q = question({ id: 'q2', qtype: 'multi_select', options: ['red', 'blue', 'green'] });
+    const rows = [
+      attendee({ positionId: 'p1', answers: { q2: 'red, blue' }, rawAnswers: { q2: { choices: ['red', 'blue'] } } }),
+      attendee({ positionId: 'p2', answers: { q2: 'blue' }, rawAnswers: { q2: { choices: ['blue'] } } }),
+    ];
+    const [agg] = aggregateChoiceAnswers(rows, [q]);
+    const byValue = Object.fromEntries(agg.values.map((v: { value: string; count: number }) => [v.value, v.count]));
+    expect(byValue).toEqual({ blue: 2, red: 1, green: 0 });
+  });
+
+  it('counts a multi_select option correctly even when its label contains a literal ", "', () => {
+    // Regression: an earlier version re-split the ', '-joined DISPLAY string
+    // instead of reading the raw choices array, so an option label like
+    // "gluten-free, dairy-free" would fracture into two fake buckets. Using
+    // rawAnswers.choices sidesteps the joined string entirely.
+    const q = question({
+      id: 'q4',
+      qtype: 'multi_select',
+      options: ['gluten-free, dairy-free', 'nut-free'],
+    });
+    const rows = [
+      attendee({
+        positionId: 'p1',
+        answers: { q4: 'gluten-free, dairy-free, nut-free' },
+        rawAnswers: { q4: { choices: ['gluten-free, dairy-free', 'nut-free'] } },
+      }),
+      attendee({
+        positionId: 'p2',
+        answers: { q4: 'nut-free' },
+        rawAnswers: { q4: { choices: ['nut-free'] } },
+      }),
+    ];
+    const [agg] = aggregateChoiceAnswers(rows, [q]);
+    const byValue = Object.fromEntries(agg.values.map((v: { value: string; count: number }) => [v.value, v.count]));
+    expect(byValue).toEqual({ 'gluten-free, dairy-free': 1, 'nut-free': 2 });
+  });
+
+  it('excludes free-text questions entirely -- no natural bucket to aggregate', () => {
+    const q = question({ id: 'q3', qtype: 'short_text', options: null });
+    const rows = [attendee({ positionId: 'p1', answers: { q3: 'anything typed here' } })];
+    expect(aggregateChoiceAnswers(rows, [q])).toEqual([]);
+  });
+});
+
 describe('getEventQuestions', () => {
   it('reads only active questions for the event, ordered by sort_order', async () => {
     const chain: any = {
       select: jest.fn(() => chain),
       eq: jest.fn(() => chain),
       order: jest.fn(() => Promise.resolve({
-        data: [{ id: 'q1', prompt: 'plus one?', qtype: 'short_text', scope: 'per_order', sort_order: 0 }],
+        data: [{ id: 'q1', prompt: 'plus one?', qtype: 'short_text', scope: 'per_order', sort_order: 0, options: null }],
         error: null,
       })),
     };
@@ -179,7 +263,22 @@ describe('getEventQuestions', () => {
     const rows = await getEventQuestions('event-1');
     expect(mockFrom).toHaveBeenCalledWith('ticket_questions');
     expect(chain.eq).toHaveBeenCalledWith('is_active', true);
-    expect(rows).toEqual([{ id: 'q1', prompt: 'plus one?', qtype: 'short_text', scope: 'per_order', sortOrder: 0 }]);
+    expect(rows).toEqual([{ id: 'q1', prompt: 'plus one?', qtype: 'short_text', scope: 'per_order', sortOrder: 0, options: null }]);
+  });
+
+  it('carries the declared options array through for a choice question', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      order: jest.fn(() => Promise.resolve({
+        data: [{ id: 'q2', prompt: 'dietary restriction?', qtype: 'single_select', scope: 'per_attendee', sort_order: 0, options: ['vegetarian', 'vegan', 'none'] }],
+        error: null,
+      })),
+    };
+    mockFrom.mockReturnValue(chain);
+
+    const rows = await getEventQuestions('event-1');
+    expect(rows[0].options).toEqual(['vegetarian', 'vegan', 'none']);
   });
 
   it('returns an empty list on a read error rather than throwing', async () => {
