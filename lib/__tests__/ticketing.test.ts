@@ -1,5 +1,5 @@
 jest.mock('../supabase', () => ({
-  supabase: { rpc: jest.fn(), from: jest.fn() },
+  supabase: { rpc: jest.fn(), from: jest.fn(), functions: { invoke: jest.fn() } },
 }));
 
 import { supabase } from '../supabase';
@@ -23,6 +23,7 @@ import {
   retireQuestion,
   searchOrganizationPurchases,
   sumReconciliationRows,
+  syncMyPayoutState,
   type EventReconciliationRow,
   type MyOrder,
   type OrganizationPurchase,
@@ -33,6 +34,24 @@ import type { AttendeeQuestion, DoorAttendeeWithAnswers } from '../ticketAttende
 
 const mockRpc = supabase.rpc as jest.Mock;
 const mockFrom = supabase.from as jest.Mock;
+const mockInvoke = supabase.functions.invoke as jest.Mock;
+
+describe('syncMyPayoutState', () => {
+  beforeEach(() => mockInvoke.mockReset());
+
+  it('requests current Stripe truth from the onboarding function', async () => {
+    mockInvoke.mockResolvedValue({ data: { synced: true }, error: null });
+    await expect(syncMyPayoutState()).resolves.toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith('ticket-connect-onboarding', {
+      body: { action: 'status' },
+    });
+  });
+
+  it('fails closed when Stripe status cannot be synchronized', async () => {
+    mockInvoke.mockResolvedValue({ data: null, error: { message: 'unavailable' } });
+    await expect(syncMyPayoutState()).resolves.toBe(false);
+  });
+});
 
 describe('getPaidTicketEventReadiness', () => {
   beforeEach(() => mockFrom.mockReset());
