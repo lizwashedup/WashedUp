@@ -30,6 +30,7 @@ export interface Plan {
   id: string;
   title: string;
   start_time: string;
+  end_time?: string | null;
   location_text: string | null;
   location_lat: number | null;
   location_lng: number | null;
@@ -70,6 +71,7 @@ function mapRowToPlan(item: any): Plan {
     id: item.id,
     title: item.title,
     start_time: item.start_time,
+    end_time: item.end_time ?? null,
     location_text: item.location_text ?? null,
     location_lat: item.location_lat ?? null,
     location_lng: item.location_lng ?? null,
@@ -140,8 +142,8 @@ export async function fetchPlans(
       // select only the shipped columns so the feed enrichment never errors.
       .select(
         GROUPS_ENABLED
-          ? 'id, featured_type, allow_duplicate, circle_id, circle_visibility, stranger_cap'
-          : 'id, featured_type, allow_duplicate',
+          ? 'id, end_time, featured_type, allow_duplicate, circle_id, circle_visibility, stranger_cap'
+          : 'id, end_time, featured_type, allow_duplicate',
       )
       .in('id', plans.map((p) => p.id)),
   ]);
@@ -151,9 +153,11 @@ export async function fetchPlans(
   if (!featuredTypeResult.error) {
     const featuredTypeById: Record<string, 'washedup_event' | 'birthday_party' | 'special_event' | null> = {};
     const allowDuplicateById: Record<string, boolean> = {};
+    const endTimeById: Record<string, string | null> = {};
     const circleById: Record<string, { circle_id: string | null; circle_visibility: 'circle_only' | 'open' | null; stranger_cap: number | null }> = {};
-    ((featuredTypeResult.data ?? []) as unknown as Array<{ id: string; featured_type: string | null; allow_duplicate: boolean | null; circle_id?: string | null; circle_visibility?: 'circle_only' | 'open' | null; stranger_cap?: number | null }>).forEach(
+    ((featuredTypeResult.data ?? []) as unknown as Array<{ id: string; end_time: string | null; featured_type: string | null; allow_duplicate: boolean | null; circle_id?: string | null; circle_visibility?: 'circle_only' | 'open' | null; stranger_cap?: number | null }>).forEach(
       (row) => {
+        endTimeById[row.id] = row.end_time ?? null;
         featuredTypeById[row.id] = (row.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null;
         allowDuplicateById[row.id] = row.allow_duplicate ?? true;
         circleById[row.id] = {
@@ -164,6 +168,7 @@ export async function fetchPlans(
       },
     );
     plans.forEach((p) => {
+      if (p.id in endTimeById) p.end_time = endTimeById[p.id];
       p.featured_type = featuredTypeById[p.id] ?? null;
       if (p.id in allowDuplicateById) p.allow_duplicate = allowDuplicateById[p.id];
       const c = circleById[p.id];

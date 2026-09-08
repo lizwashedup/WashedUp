@@ -215,7 +215,12 @@ export default function CreatorEventsScreen() {
               style={styles.segment}
               onPress={() => { hapticLight(); setSegment(s.key); }}
             >
-              <Text style={[styles.segmentText, segment === s.key && styles.segmentTextOn]}>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.85}
+                style={[styles.segmentText, segment === s.key && styles.segmentTextOn]}
+              >
                 {s.label}
               </Text>
               <View style={[styles.segmentUnderline, segment === s.key && styles.segmentUnderlineOn]} />

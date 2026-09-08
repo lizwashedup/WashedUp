@@ -51,6 +51,7 @@ import { withTimeout, withDeadline } from '../../../lib/withTimeout';
 import { friendlyError } from '../../../lib/friendlyError';
 import { postAuthTransitionRef } from '../../../lib/navState';
 import { useBlock } from '../../../hooks/useBlock';
+import { isPlanPast } from '../../../lib/planTime';
 import {
   markWelcomeShown,
   wasHandlePromptShownThisSession,
@@ -745,7 +746,7 @@ export default function PlansScreen() {
 
       const { data: events, error } = await supabase
         .from('events')
-        .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured, featured_type')
+        .select('id, title, start_time, end_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured, featured_type')
         .in('id', eligibleIds)
         .order('start_time', { ascending: true });
 
@@ -780,7 +781,9 @@ export default function PlansScreen() {
       const memberPhotoMap: Record<string, string | null> = {};
       (memberProfiles ?? []).forEach((p: any) => { memberPhotoMap[p.id] = p.profile_photo_url ?? null; });
 
-      return events.map((e: any) => {
+      return events
+        .filter((e: any) => !isPlanPast(e.start_time, e.end_time))
+        .map((e: any) => {
         const hp = profileMap[e.creator_user_id] ?? null;
         const eventMembers = membersByEvent[e.id] ?? [];
         return {
@@ -788,7 +791,9 @@ export default function PlansScreen() {
           title: e.title,
           host_message: e.host_message ?? null,
           start_time: e.start_time,
+          end_time: e.end_time ?? null,
           location_text: e.location_text ?? null,
+          neighborhood: null,
           category: e.primary_vibe ?? null,
           max_invites: e.max_invites ?? 0,
           member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
@@ -796,6 +801,7 @@ export default function PlansScreen() {
           is_featured: true,
           featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null,
           creator: {
+            id: e.creator_user_id,
             first_name_display: hp?.first_name_display ?? 'Creator',
             profile_photo_url: hp?.profile_photo_url ?? null,
           },
@@ -863,7 +869,7 @@ export default function PlansScreen() {
     // Featured plans render in their own carousel section above the
     // time-bucketed sections — strip them out here so they never
     // double-appear in "This Week" / "This Weekend" / etc.
-    let result = allPlans.filter((p) => !p.is_featured);
+    let result = allPlans.filter((p) => !p.is_featured && !isPlanPast(p.start_time, p.end_time));
     if (dayFilterKey) {
       result = result.filter((p) => {
         const { y, m, d } = getLADayParts(p.start_time);
@@ -967,7 +973,7 @@ export default function PlansScreen() {
           onReport={handleReport}
           onBlock={handleBlock}
           onCreatorPress={handleCreatorPress}
-          isPast={item.status === 'completed'}
+          isPast={isPlanPast(item.start_time, item.end_time)}
         />
       </View>
     ),
@@ -1002,7 +1008,7 @@ export default function PlansScreen() {
                   onReport={handleReport}
                   onBlock={handleBlock}
                   onCreatorPress={handleCreatorPress}
-                  isPast={p.status === 'completed'}
+                  isPast={isPlanPast(p.start_time, p.end_time)}
                 />
               </View>
             )}
@@ -1167,9 +1173,17 @@ export default function PlansScreen() {
         <ProfileButton />
       </View>
 
-      {/* Filter row: When, Category, Near me, Map (fixed-row layout, no scrolling) */}
+      {/* The four filters center as a group on roomy phones and become a
+          quiet horizontal strip when Dynamic Type or a narrow screen needs
+          more width. This keeps the final Map control reachable instead of
+          squeezing or clipping the row. */}
       {!mapView && (
-        <View style={styles.filterRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+          keyboardShouldPersistTaps="handled"
+        >
           <TouchableOpacity
             style={[styles.filterPill, whenActive && styles.filterPillActive]}
             onPress={() => {
@@ -1177,11 +1191,11 @@ export default function PlansScreen() {
               setWhenSheetOpen(true);
             }}
           >
-            <Calendar size={14} color={whenActive ? '#FFFFFF' : '#78695C'} strokeWidth={2} />
+            <Calendar size={14} color={whenActive ? Colors.white : Colors.secondary} strokeWidth={2} />
             <Text style={[styles.filterPillText, whenActive && styles.filterPillTextActive]} numberOfLines={1}>
               {whenLabel}
             </Text>
-            <ChevronDown size={10} color={whenActive ? '#FFFFFF' : '#78695C'} strokeWidth={2.5} />
+            <ChevronDown size={10} color={whenActive ? Colors.white : Colors.secondary} strokeWidth={2.5} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.filterPill, categoryActive && styles.filterPillActive]}
@@ -1193,14 +1207,14 @@ export default function PlansScreen() {
             <Text style={[styles.filterPillText, categoryActive && styles.filterPillTextActive]} numberOfLines={1}>
               {categoryLabel}
             </Text>
-            <ChevronDown size={10} color={categoryActive ? '#FFFFFF' : '#78695C'} strokeWidth={2.5} />
+            <ChevronDown size={10} color={categoryActive ? Colors.white : Colors.secondary} strokeWidth={2.5} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.filterPill, nearMeActive && styles.filterPillActive]}
             onPress={handleNearMeToggle}
             accessibilityLabel={nearMeActive ? 'Turn off near me' : 'Show plans near me'}
           >
-            <Ionicons name="location-outline" size={14} color={nearMeActive ? '#FFFFFF' : '#78695C'} />
+            <Ionicons name="location-outline" size={14} color={nearMeActive ? Colors.white : Colors.secondary} />
             <Text style={[styles.filterPillText, nearMeActive && styles.filterPillTextActive]}>Near me</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1214,13 +1228,13 @@ export default function PlansScreen() {
             {mapView ? (
               <LayoutList size={14} color={Colors.white} strokeWidth={2} />
             ) : (
-              <Map size={14} color={'#78695C'} strokeWidth={2} />
+              <Map size={14} color={Colors.secondary} strokeWidth={2} />
             )}
             <Text style={[styles.filterPillText, mapView && styles.filterPillTextActive]}>
               {mapView ? 'List' : 'Map'}
             </Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       )}
 
       {/* Near-me: radius presets + permission-deny notice (list view only) */}
@@ -1495,8 +1509,10 @@ const styles = StyleSheet.create({
   // ── Full-width underline tabs ──
   // ── Filters ──
   filterRow: {
+    flexGrow: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 4,
@@ -1511,19 +1527,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 36,
     borderRadius: 20,
-    backgroundColor: '#F5EDE0',
+    backgroundColor: Colors.dividerWarm,
   },
   filterPillActive: {
-    backgroundColor: '#B5522E',
+    backgroundColor: Colors.terracotta,
   },
   filterPillText: {
     fontFamily: Fonts.sansMedium,
     fontSize: 13,
-    color: '#78695C',
+    color: Colors.secondary,
     includeFontPadding: false,
   },
   filterPillTextActive: {
-    color: '#FFFFFF',
+    color: Colors.white,
   },
   // ── Near-me radius presets + deny notice ──
   radiusRow: {

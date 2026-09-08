@@ -12,5 +12,5 @@ if [ -z "$message" ]; then
   exit 2
 fi
 
-export WASHEDUP_OTA_EXPECTED_BRANCH="codex/runtime105-ui-chat-release"
+export WASHEDUP_OTA_EXPECTED_BRANCH="codex/runtime105-livefix"
 bash scripts/publish-ota.sh ios "$message"

@@ -13,12 +13,10 @@ import { getLeaderCards } from './communityLeader';
 
 /**
  * When an event stops being "upcoming", mirroring proposal 28's S3 clock:
- * coalesce(end_time, start_time, end of the event_date day IN LA) plus a
- * 6 hour grace. Null for rows with no date at all (they cannot be ranked;
+ * coalesce(end_time, start_time, end of the event_date day IN LA). Null for
+ * rows with no date at all (they cannot be ranked;
  * C9 flags them for manual fix).
  */
-const ROLL_OFF_GRACE_MS = 6 * 60 * 60 * 1000;
-
 function eventClockMs(e: Pick<SceneEvent, 'event_date' | 'start_time'> & { end_time?: string | null }): number | null {
   if (e.end_time) {
     const t = Date.parse(e.end_time);
@@ -79,7 +77,7 @@ export async function getSceneEvents(): Promise<SceneEvent[]> {
   const events = ((data ?? []) as SceneEvent[])
     .filter((e) => {
       const clock = eventClockMs(e);
-      return clock === null || clock > now - ROLL_OFF_GRACE_MS;
+      return clock === null || clock > now;
     })
     .sort((a, b) => {
       const ca = eventClockMs(a);

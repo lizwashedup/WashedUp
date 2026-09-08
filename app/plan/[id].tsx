@@ -842,7 +842,7 @@ export default function PlanDetailScreen() {
     : Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
   const isFull = plan ? displayMemberCount >= totalCapacity : false;
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
-  const isPastPlan = plan ? new Date(plan.start_time) < new Date() : false;
+  const isPastPlan = plan ? isPlanPast(plan.start_time, plan.end_time) : false;
 
   // Communities: if this plan spawned from a Scene event and that event was
   // cancelled, say so plainly. Two read shapes cover everyone: a normal
@@ -926,6 +926,9 @@ export default function PlanDetailScreen() {
     mutationFn: async (greeting?: string) => {
       if (!currentUserId || !id) throw new Error('Not authenticated');
       if (!plan) throw new Error('Plan not loaded');
+      if (isPlanPast(plan.start_time, plan.end_time)) {
+        throw new Error('This plan has ended.');
+      }
 
       if (greeting?.trim()) {
         const filter = checkContent(greeting.trim());
@@ -1064,6 +1067,11 @@ export default function PlanDetailScreen() {
   // closes first because two sibling Modals cannot be visible at once on
   // iOS, and joinMessage survives in state.
   const requestJoin = useCallback(async (message?: string) => {
+    if (!plan || isPlanPast(plan.start_time, plan.end_time)) {
+      setJoinModalVisible(false);
+      setBrandedAlert({ visible: true, title: 'This plan ended', message: 'You can still look back, but nobody new can join.' });
+      return;
+    }
     const { needsAssent } = await getParticipationNoticeStatus();
     if (needsAssent) {
       setJoinModalVisible(false);
@@ -1071,7 +1079,7 @@ export default function PlanDetailScreen() {
       return;
     }
     joinMutation.mutate(message);
-  }, [joinMutation]);
+  }, [joinMutation, plan]);
 
   const requestAcceptException = useCallback(async () => {
     const { needsAssent } = await getParticipationNoticeStatus();
@@ -1891,6 +1899,10 @@ export default function PlanDetailScreen() {
               <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
               <Text style={styles.openChatText}>Open Chat</Text>
             </TouchableOpacity>
+          </View>
+        ) : isPastPlan ? (
+          <View style={styles.endedBar}>
+            <Text style={styles.endedBarText}>plan ended</Text>
           </View>
         ) : isCreator ? (
           <View>
@@ -3283,6 +3295,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   joinButtonText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM },
+  endedBar: {
+    minHeight: 52,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  endedBarText: {
+    color: Colors.secondary,
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+  },
   inviteActions: {
     flexDirection: 'row',
     gap: 10,

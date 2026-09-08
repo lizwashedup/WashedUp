@@ -287,6 +287,18 @@ export async function requestOnboardingLink(): Promise<OnboardingLinkResult> {
   }
 }
 
+/** Pull current readiness directly from Stripe after the browser returns. */
+export async function syncMyPayoutState(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.functions.invoke(ONBOARDING_EDGE_FN, {
+      body: { action: 'status' },
+    });
+    return !error && data?.synced === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Never a raw server string, but never a lie about the product either. */
 function humanOnboardingError(raw: string | null | undefined): string {
   const s = (raw ?? '').toLowerCase();

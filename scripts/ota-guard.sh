@@ -30,8 +30,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-RUNTIME105_BRANCH="codex/runtime105-ui-chat-release"
-RUNTIME105_BASELINE="c5e23411cfb66fb41b13a74e2472eb063e83d292"
+RUNTIME105_BRANCH="codex/runtime105-livefix"
+RUNTIME105_BASELINE="de9ded1862a57326c9324c5d2ef54f5eb03e61ae"
 expected_branch="${WASHEDUP_OTA_EXPECTED_BRANCH:-main}"
 
 fail() {
@@ -90,15 +90,21 @@ if [ "$expected_branch" = "$RUNTIME105_BRANCH" ]; then
   fi
   while IFS= read -r changed_path; do
     case "$changed_path" in
-      "app/(tabs)/chats/index.tsx"|\
+      "app/(creator)/events.tsx"|\
       "app/(tabs)/plans/index.tsx"|\
+      "app/+native-intent.tsx"|\
+      "app/community-thread/[id].tsx"|\
+      "app/community-topic/[id].tsx"|\
       "app/creator/event-form.tsx"|\
-      "components/ProfileButton.tsx"|\
-      "components/chat/ChatThread.tsx"|\
-      "components/chat/__tests__/ChatUxContract.test.ts"|\
-      "components/plans/PlanCard.tsx"|\
-      "hooks/useChat.ts"|\
-      "hooks/useChatList.ts"|\
+      "app/creator/payouts.tsx"|\
+      "app/event/[id].tsx"|\
+      "app/plan/[id].tsx"|\
+      "components/communities/CommunityMessageActions.tsx"|\
+      "lib/creatorEvents.ts"|\
+      "lib/fetchPlans.ts"|\
+      "lib/planTime.ts"|\
+      "lib/sceneDiscovery.ts"|\
+      "lib/ticketing.ts"|\
       "scripts/ota-guard.sh"|\
       "scripts/publish-runtime105-ota.sh") ;;
       *) fail "unapproved 1.0.5 maintenance change: $changed_path" ;;

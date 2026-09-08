@@ -30,6 +30,7 @@ import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedA
 import { ReportModal } from '../../components/modals/ReportModal';
 import { useBlock } from '../../hooks/useBlock';
 import { BroadcastCard } from '../../components/communities/BroadcastCard';
+import { CommunityMessageActions } from '../../components/communities/CommunityMessageActions';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import {
@@ -186,6 +187,9 @@ export default function CommunityThreadScreen() {
           hitSlop={6}
         >
           <Text style={styles.headerTitle} numberOfLines={1}>{card?.name ?? 'community'}</Text>
+          <Text style={styles.headerAudience} numberOfLines={1}>
+            {card?.name ? `everyone in ${card.name}` : 'everyone in this community'}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={handleMute} hitSlop={12}>
           {muted ? (
@@ -243,19 +247,18 @@ export default function CommunityThreadScreen() {
                     <Text style={styles.faceInitial}>{(item.sender_name ?? '?').slice(0, 1).toLowerCase()}</Text>
                   </View>
                 ))}
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onLongPress={() => { if (item.sender_id && item.sender_id !== myId) openMemberMenu(item.sender_id, item.sender_name ?? 'someone'); }}
-                  style={[styles.bubble, item.sender_id === myId && styles.bubbleMine]}
-                  accessibilityHint={item.sender_id !== myId ? 'hold to report or block' : undefined}
-                >
-                  {item.sender_id !== myId && (
-                    <Text style={styles.senderName}>{item.sender_name ?? 'someone'}</Text>
-                  )}
-                  <Text style={[styles.messageText, item.sender_id === myId && styles.messageTextMine]}>
-                    {item.body}
-                  </Text>
-                </TouchableOpacity>
+                <View style={[styles.messageColumn, item.sender_id === myId && styles.messageColumnMine]}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onLongPress={() => { if (item.sender_id && item.sender_id !== myId) openMemberMenu(item.sender_id, item.sender_name ?? 'someone'); }}
+                    style={[styles.bubble, item.sender_id === myId && styles.bubbleMine]}
+                    accessibilityHint={item.sender_id !== myId ? 'hold to report or block' : undefined}
+                  >
+                    {item.sender_id !== myId && <Text style={styles.senderName}>{item.sender_name ?? 'someone'}</Text>}
+                    <Text style={[styles.messageText, item.sender_id === myId && styles.messageTextMine]}>{item.body}</Text>
+                  </TouchableOpacity>
+                  <CommunityMessageActions message={item} onError={showError} />
+                </View>
               </View>
             ) : (
               <BroadcastCard broadcast={item} communityName={card?.name ?? ''} onError={showError} />
@@ -334,11 +337,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  headerTitleTap: { flex: 1 },
+  headerTitleTap: { flex: 1, alignItems: 'center' },
   headerTitle: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyLG,
     color: Colors.darkWarm,
+    textAlign: 'center',
+  },
+  headerAudience: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
     textAlign: 'center',
   },
   mutedLine: {
@@ -395,6 +404,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 10 },
   messageRowMine: { justifyContent: 'flex-end' },
+  messageColumn: { maxWidth: '82%', alignItems: 'flex-start' },
+  messageColumnMine: { alignItems: 'flex-end' },
   face: { width: 28, height: 28, borderRadius: 14 },
   facePlaceholder: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
   faceInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },

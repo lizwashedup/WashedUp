@@ -21,6 +21,15 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
     if (pathname === '/e' && url.searchParams.get('checkout')) {
       return `/checkout-return${search}`;
     }
+    if (pathname === '/creator/payouts/return') {
+      return '/creator/payouts?stripe=return';
+    }
+    if (pathname === '/creator/payouts/refresh') {
+      return '/creator/payouts?stripe=refresh';
+    }
+    if (pathname === '/app/creator/payouts') {
+      return `/creator/payouts${search}`;
+    }
     if (pathname.startsWith('/app/creator')) {
       return '/(creator)/events';
     }

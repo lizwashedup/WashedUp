@@ -74,6 +74,7 @@ interface ExploreEvent {
   image_url: string | null;
   event_date: string | null;
   start_time: string | null;
+  end_time: string | null;
   venue: string | null;
   venue_address: string | null;
   category: string | null;
@@ -252,7 +253,7 @@ export default function EventDetailScreen() {
     queryFn: async (): Promise<ExploreEvent | null> => {
       const { data, error } = await supabase
         .from('explore_events')
-        .select('id, title, description, description_blocks, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id, status')
+        .select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id, status')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -710,6 +711,12 @@ export default function EventDetailScreen() {
 
   const ticketPrice = normalizeTicketPrice(event.ticket_price);
   const isFree = ticketPrice === null;
+  const eventEndMs = event.end_time ? Date.parse(event.end_time) : NaN;
+  const eventStartMs = event.start_time ? Date.parse(event.start_time) : NaN;
+  const eventHasEnded = event.status === 'Cancelled' || event.status === 'Completed'
+    || (Number.isFinite(eventEndMs)
+      ? eventEndMs <= Date.now()
+      : Number.isFinite(eventStartMs) && eventStartMs + 3 * 60 * 60 * 1000 <= Date.now());
 
   // the byline grammar (slice 2): public_name override wins and wears
   // neither image; a community event fronts with the COMMUNITY name and
@@ -1176,7 +1183,15 @@ export default function EventDetailScreen() {
             terracotta fill), opening the tier selector -> checkout. rsvp is
             the going-signal for FREE/tierless events, so it steps aside when
             tickets are on sale (buying is the going action). */}
-        {ticketSummary?.onSale ? (
+        {eventHasEnded ? (
+          <View style={[styles.rsvpButton, { opacity: 0.6 }]}>
+            <Text style={styles.rsvpButtonText}>{event.status === 'Cancelled' ? 'cancelled' : 'event ended'}</Text>
+          </View>
+        ) : ticketSummary?.allSoldOut ? (
+          <View style={[styles.rsvpButton, { opacity: 0.6 }]}>
+            <Text style={styles.rsvpButtonText}>sold out</Text>
+          </View>
+        ) : ticketSummary?.onSale ? (
           <TouchableOpacity
             style={styles.rsvpButton}
             onPress={() => {

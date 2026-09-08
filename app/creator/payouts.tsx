@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -19,11 +19,12 @@ import { EventSpacing } from '../../constants/EventDesign';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
-import { getMyPayoutState, requestOnboardingLink } from '../../lib/ticketing';
+import { getMyPayoutState, requestOnboardingLink, syncMyPayoutState } from '../../lib/ticketing';
 import { PayoutsCard } from '../../components/creator/PayoutsCard';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
 export default function GettingPaidScreen() {
+  const { stripe } = useLocalSearchParams<{ stripe?: string }>();
   const [userId, setUserId] = useState<string | null>(null);
   const [onboardBusy, setOnboardBusy] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
@@ -32,12 +33,18 @@ export default function GettingPaidScreen() {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)).catch(() => {});
   }, []);
 
-  const { data: payout } = useQuery({
+  const { data: payout, refetch: refetchPayout } = useQuery({
     queryKey: ['payout-state', userId],
     queryFn: () => getMyPayoutState(userId!),
     enabled: !!userId,
     staleTime: 30_000,
   });
+
+  useFocusEffect(
+    useCallback(() => {
+      if (userId) void refetchPayout();
+    }, [refetchPayout, userId]),
+  );
 
   const handleOnboard = useCallback(async () => {
     if (onboardBusy) return;
@@ -64,6 +71,30 @@ export default function GettingPaidScreen() {
   // callback depend on itself
   const handleOnboardRef = useRef<(() => void) | null>(null);
   handleOnboardRef.current = handleOnboard;
+
+  const handledStripeRefresh = useRef(false);
+  useEffect(() => {
+    if (stripe !== 'refresh' || handledStripeRefresh.current) return;
+    handledStripeRefresh.current = true;
+    router.setParams({ stripe: undefined });
+    void handleOnboard();
+  }, [handleOnboard, stripe]);
+
+  const handledStripeReturn = useRef(false);
+  useEffect(() => {
+    if (stripe !== 'return' || handledStripeReturn.current) return;
+    handledStripeReturn.current = true;
+    router.setParams({ stripe: undefined });
+    let alive = true;
+    setOnboardBusy(true);
+    void syncMyPayoutState().finally(async () => {
+      await refetchPayout();
+      if (alive) setOnboardBusy(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [refetchPayout, stripe]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
