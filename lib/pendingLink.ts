@@ -73,6 +73,21 @@ export async function stashPendingCheckout(orderId: string): Promise<void> {
   try { await AsyncStorage.setItem(CHECKOUT_KEY, orderId); } catch { /* best-effort */ }
 }
 
+/**
+ * Read without clearing. A checkout handoff is not complete merely because
+ * the app became active: iOS can briefly foreground the app while Safari is
+ * opening or closing. The order screen clears this only after it can read the
+ * real order, so a lifecycle bounce cannot lose a paid ticket destination.
+ */
+export async function peekPendingCheckout(): Promise<string | null> {
+  try { return await AsyncStorage.getItem(CHECKOUT_KEY); } catch { return null; }
+}
+
+export async function clearPendingCheckout(): Promise<void> {
+  try { await AsyncStorage.removeItem(CHECKOUT_KEY); } catch { /* best-effort */ }
+}
+
+/** @deprecated Prefer peekPendingCheckout + clearPendingCheckout at the destination. */
 export async function consumePendingCheckout(): Promise<string | null> {
   try {
     const orderId = await AsyncStorage.getItem(CHECKOUT_KEY);

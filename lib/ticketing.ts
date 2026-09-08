@@ -634,6 +634,10 @@ export async function startTicketCheckout(
   const body: Record<string, unknown> = {
     // origin drives the Stripe success/cancel return; the fn allow-lists it
     tier_id: tierId, qty, origin: 'https://washedup.app', checkout_key: checkoutKey,
+    // The browser bridge uses this fixed marker to hand a native buyer back
+    // to the already-authenticated app instead of asking them to sign in on
+    // the website after Stripe.
+    return_mode: 'native',
   };
   if (extras?.promoCode) body.promo_code = extras.promoCode;
   if (extras?.addons && extras.addons.length > 0) body.add_ons = extras.addons;

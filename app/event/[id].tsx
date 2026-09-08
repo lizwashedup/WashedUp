@@ -19,7 +19,7 @@ import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess,
 import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight, MoreHorizontal, BadgeCheck } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
-import { consumePendingCheckout } from '../../lib/pendingLink';
+import { peekPendingCheckout } from '../../lib/pendingLink';
 import LinkifiedText from '../../components/LinkifiedText';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -48,7 +48,7 @@ import { getParticipationNoticeStatus, recordParticipationAssent } from '../../l
 import { type DescriptionBlock } from '../../lib/eventContent';
 import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
 import { EventAction, EventSurface } from '../../constants/EventDesign';
-import { formatCents, getPublicTicketSummary } from '../../lib/ticketing';
+import { formatCents, getOrder, getPublicTicketSummary } from '../../lib/ticketing';
 import { EventFaqCards } from '../../components/events/EventFaqCards';
 import { TicketCheckoutSheet } from '../../components/events/TicketCheckoutSheet';
 
@@ -211,8 +211,12 @@ export default function EventDetailScreen() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
-      consumePendingCheckout().then((orderId) => {
-        if (orderId) router.push(`/tickets/order/${orderId}` as never);
+      peekPendingCheckout().then(async (orderId) => {
+        if (!orderId) return;
+        const pendingOrder = await getOrder(orderId).catch(() => null);
+        if (pendingOrder && pendingOrder.status !== 'pending') {
+          router.replace(`/tickets/order/${orderId}` as never);
+        }
       });
     });
     return () => sub.remove();
@@ -1180,7 +1184,7 @@ export default function EventDetailScreen() {
               hapticMedium(); setCheckoutVisible(true);
             }}
           >
-            <Text style={styles.rsvpButtonText}>get tickets</Text>
+            <Text style={styles.rsvpButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>get tickets</Text>
           </TouchableOpacity>
         ) : COMMUNITIES_ENABLED && (
           <TouchableOpacity
@@ -1194,7 +1198,7 @@ export default function EventDetailScreen() {
             {rsvpBusy ? (
               <ActivityIndicator size="small" color={myRsvp === 'going' ? Colors.brandDeep : Colors.white} />
             ) : (
-              <Text style={[styles.rsvpButtonText, myRsvp === 'going' && styles.rsvpButtonTextGoing]}>
+              <Text style={[styles.rsvpButtonText, myRsvp === 'going' && styles.rsvpButtonTextGoing]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                 {myRsvp === 'going' ? "you're going" : 'count me in'}
               </Text>
             )}
@@ -1217,12 +1221,12 @@ export default function EventDetailScreen() {
               }}
             >
               {/* copy to the taste gate (doc 69 Q5) */}
-              <Text style={styles.postPlanButtonText}>open the chat</Text>
+              <Text style={styles.postPlanButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>open the chat</Text>
             </TouchableOpacity>
           )
         ) : (
           <TouchableOpacity style={styles.postPlanButton} onPress={goFindPeople}>
-            <Text style={styles.postPlanButtonText}>find people to go with</Text>
+            <Text style={styles.postPlanButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>find people</Text>
           </TouchableOpacity>
         )}
         </View>
@@ -1440,23 +1444,25 @@ const styles = StyleSheet.create({
   postPlanButton: {
     flex: 1,
     borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderColor: Colors.terracotta,
+    borderRadius: 999,
+    minHeight: 56,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
+  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta, textAlign: 'center' },
   // RSVP is the primary CTA: the one terracotta fill. going = the
   // documented gold confirmed-state (fill + hairline gold border +
   // brandDeep label), the house success family, never green.
   rsvpButton: {
     flex: 1,
     backgroundColor: Colors.terracotta,
-    borderRadius: 14,
+    borderRadius: 999,
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
-    paddingVertical: 14,
+    minHeight: 56,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },

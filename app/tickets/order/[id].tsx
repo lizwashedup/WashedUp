@@ -11,7 +11,7 @@
  * lib/ticketing (web's reader reads the same rows). Six types (§3.8).
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -29,6 +29,7 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { EventAction, EventSpacing } from '../../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../../lib/haptics';
 import { formatEventDateLA } from '../../../lib/laDate';
+import { clearPendingCheckout, peekPendingCheckout } from '../../../lib/pendingLink';
 import {
   getConfirmationMessage,
   getOrder,
@@ -67,6 +68,14 @@ export default function OrderCompleteScreen() {
     },
   });
   const settling = !!order && !order.seats.some((s) => !s.voided);
+
+  useEffect(() => {
+    const terminal = !!order && order.status !== 'pending';
+    if (!id || !terminal) return;
+    peekPendingCheckout().then((pendingId) => {
+      if (pendingId === id) clearPendingCheckout();
+    });
+  }, [id, order?.status]);
   const { data: questions = [] } = useQuery({
     queryKey: ['order-questions', order?.event_id],
     queryFn: () => getQuestions(order!.event_id),
@@ -127,9 +136,18 @@ export default function OrderCompleteScreen() {
         </View>
         {/* copy to the taste gate: arrival, not a receipt */}
         <Text style={styles.title}>you're in</Text>
-        {!!order?.event_title && <Text style={styles.eventTitle}>{order.event_title}</Text>}
-        {!!order?.event_date && (
-          <Text style={styles.eventMeta}>{formatEventDateLA(order.event_date)}</Text>
+        {!!order?.event_title && (
+          <TouchableOpacity
+            onPress={() => router.push(`/event/${order.event_id}` as never)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`Open event: ${order.event_title}`}
+          >
+            <Text style={styles.eventTitle}>{order.event_title}</Text>
+            {!!order.event_date && (
+              <Text style={styles.eventMeta}>{formatEventDateLA(order.event_date)}</Text>
+            )}
+          </TouchableOpacity>
         )}
         {/* the door checks each seat's reference_code, so those are the only
             codes worth printing; the order id is not a ticket. A paid checkout

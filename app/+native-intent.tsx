@@ -11,7 +11,16 @@
 
 export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
   try {
-    const pathname = path.startsWith('http') ? new URL(path).pathname : path;
+    if (!path.startsWith('http')) return path;
+    const url = new URL(path);
+    if (!/(^|\.)washedup\.app$/i.test(url.hostname)) return path;
+
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    const search = url.search ?? '';
+
+    if (pathname === '/e' && url.searchParams.get('checkout')) {
+      return `/checkout-return${search}`;
+    }
     if (pathname.startsWith('/app/creator')) {
       return '/(creator)/events';
     }

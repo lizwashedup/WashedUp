@@ -18,9 +18,10 @@ import SunriseIcon from '../../components/yours/icons/SunriseIcon';
 import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
 import { SCENE_STAGE, getSeenSceneStage, SCENE_BADGE_KEY } from '../../lib/sceneStage';
 import { TermsReacceptance } from '../../components/legal/TermsReacceptance';
+import { getOrder } from '../../lib/ticketing';
 import {
   clearPendingDestination,
-  consumePendingCheckout,
+  peekPendingCheckout,
   consumePendingDestination,
 } from '../../lib/pendingLink';
 
@@ -101,12 +102,16 @@ export default function TabLayout() {
     let cancelled = false;
     (async () => {
       // a finished checkout outranks a saved link: they just paid
-      const orderId = await consumePendingCheckout();
+      const orderId = await peekPendingCheckout();
       if (cancelled) return;
       if (orderId) {
-        await clearPendingDestination();
-        router.push(`/tickets/order/${orderId}` as never);
-        return;
+        const pendingOrder = await getOrder(orderId).catch(() => null);
+        if (cancelled) return;
+        if (pendingOrder && pendingOrder.status !== 'pending') {
+          await clearPendingDestination();
+          router.replace(`/tickets/order/${orderId}` as never);
+          return;
+        }
       }
       const href = await consumePendingDestination();
       if (cancelled || !href) return;
