@@ -39,7 +39,7 @@ import { getFollowerCount } from '../../lib/organizerFollows';
 import { getFailedPayouts, getTiers, isLowInventory } from '../../lib/ticketing';
 import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { formatEventDateLA } from '../../lib/laDate';
-import { daysUntilLabel, failedPayoutLabel, inventoryLabel, lowInventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
+import { daysUntilLabel, failedPayoutLabel, hasUnpublishedTickets, inventoryLabel, lowInventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
 import { supabase } from '../../lib/supabase';
 import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
@@ -78,6 +78,8 @@ export default function OrganizerHomeScreen() {
   const events = allEvents.filter((event) => eventBelongsToWorkspace(event, 'organization', null));
 
   const nextEvent = useMemo(() => pickNextUpcomingEvent(events), [events]);
+  const draftEvent = useMemo(() => events.find((event) => event.status === 'Draft') ?? null, [events]);
+  const draftHasTicketSetup = !!draftEvent && hasUnpublishedTickets(draftEvent.tiers);
 
   const { data: tiers = [] } = useQuery({
     queryKey: ['organizer-home-tiers', nextEvent?.id],
@@ -176,6 +178,31 @@ export default function OrganizerHomeScreen() {
           </TouchableOpacity>
         )}
 
+        {!eventsPending && draftEvent && (
+          <TouchableOpacity
+            style={styles.draftCard}
+            onPress={() => router.push(
+              (draftHasTicketSetup
+                ? `/creator/tickets?id=${draftEvent.id}`
+                : `/creator/event-form?id=${draftEvent.id}`) as never,
+            )}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`Continue draft: ${draftEvent.title}`}
+          >
+            <View style={styles.urgencyBody}>
+              <Text style={styles.draftKicker}>draft saved</Text>
+              <Text style={styles.urgencyTitle} numberOfLines={1}>{draftEvent.title}</Text>
+              <Text style={styles.urgencyMeta}>
+                {draftHasTicketSetup
+                  ? 'your ticket is saved. finish making it sellable.'
+                  : 'only you can see it. keep shaping it.'}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
+          </TouchableOpacity>
+        )}
+
         {eventsPending ? (
           <View style={[styles.emptyCard, styles.loadingCard]}>
             <ActivityIndicator size="small" color={EventAction.primary} />
@@ -198,7 +225,7 @@ export default function OrganizerHomeScreen() {
             </View>
             <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
           </TouchableOpacity>
-        ) : (
+        ) : !draftEvent ? (
           // LIZ COPY: invitation, never a bare "nothing yet" (matches events.tsx's own empty hint)
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>nothing on the calendar yet. put one on and it lives here.</Text>
@@ -208,7 +235,7 @@ export default function OrganizerHomeScreen() {
               <Text style={styles.emptyBtnText}>put on an event</Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
 
         {nextEvent && (
           <TouchableOpacity
@@ -361,6 +388,24 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderWarm,
     padding: EventSpacing.md,
     marginTop: EventSpacing.xs,
+  },
+  draftCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: EventSpacing.sm,
+    backgroundColor: EventSurface.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: EventAction.primary,
+    padding: EventSpacing.md,
+    marginTop: EventSpacing.xs,
+  },
+  draftKicker: {
+    fontFamily: EventType.bodyBold,
+    fontSize: FontSizes.caption,
+    color: EventAction.primary,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   exceptionCard: {
     flexDirection: 'row',

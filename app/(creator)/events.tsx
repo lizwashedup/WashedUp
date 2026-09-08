@@ -378,8 +378,14 @@ export default function CreatorEventsScreen() {
           <Text style={styles.postBtnText}>put on an event</Text>
         </TouchableOpacity>
 
-        {/* the house underline-tab pattern, full width */}
-        <View style={styles.segmentRow} accessibilityRole="tablist">
+        {/* Six labels cannot stay readable in one compressed phone-width
+            row. Keep the underline-tab pattern and let the row scroll. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.segmentRow}
+          accessibilityRole="tablist"
+        >
           {SEGMENTS.map((s) => (
             <TouchableOpacity
               key={s.key}
@@ -389,13 +395,13 @@ export default function CreatorEventsScreen() {
               accessibilityLabel={s.label}
               accessibilityState={{ selected: segment === s.key }}
             >
-              <Text style={[styles.segmentText, segment === s.key && styles.segmentTextOn]}>
+              <Text numberOfLines={1} style={[styles.segmentText, segment === s.key && styles.segmentTextOn]}>
                 {s.label}
               </Text>
               <View style={[styles.segmentUnderline, segment === s.key && styles.segmentUnderlineOn]} />
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
 
         {segmentBody()}
       </ScrollView>
@@ -433,11 +439,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   postBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  segmentRow: { flexDirection: 'row', marginBottom: 6 },
+  segmentRow: { flexDirection: 'row', gap: 8, paddingRight: 20, marginBottom: 6 },
   // S-04: paddingVertical was 8 (roughly a 30pt tap target with this text
   // size); 12 brings the real tap area near the 44pt minimum without
   // changing the tab row's proportions much.
-  segment: { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  segment: { flexShrink: 0, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 12 },
   segmentText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray },
   segmentTextOn: { color: Colors.darkWarm, fontFamily: Fonts.sansBold },
   segmentUnderline: { height: UNDERLINE_HEIGHT, alignSelf: 'stretch', marginTop: 6, backgroundColor: 'transparent' },

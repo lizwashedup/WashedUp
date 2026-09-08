@@ -5,6 +5,11 @@ import { TierEditorSheet } from '../TierEditorSheet';
 
 jest.mock('../../../lib/haptics', () => ({ hapticLight: jest.fn() }));
 
+jest.mock(
+  'react-native-safe-area-context',
+  () => jest.requireActual('react-native-safe-area-context/jest/mock').default,
+);
+
 jest.mock('../../composer/CollapsibleCalendar', () => {
   const { View } = require('react-native');
   return function MockCalendar() { return <View accessibilityLabel="calendar" />; };

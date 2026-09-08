@@ -151,4 +151,11 @@ describe('event summary emergency rollback contract', () => {
       /EVENT_SUMMARY_ENABLED\s*\? `\/creator\/event-summary\?id=\$\{e\.id\}`\s*:\s*`\/creator\/attendees\?id=\$\{e\.id\}`/,
     );
   });
+
+  it('keeps all six event filters readable instead of compressing or wrapping them', () => {
+    expect(eventsSource).toContain('<ScrollView\n          horizontal');
+    expect(eventsSource).toContain('contentContainerStyle={styles.segmentRow}');
+    expect(eventsSource).toContain('<Text numberOfLines={1} style={[styles.segmentText');
+    expect(eventsSource).toContain('segment: { flexShrink: 0');
+  });
 });

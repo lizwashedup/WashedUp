@@ -322,6 +322,14 @@ describe('Build 42 creator ticket-flow regression contracts', () => {
     expect(home).toContain('organization setup needed');
     expect(form).not.toContain('organizerProfile.logo_url');
   });
+
+  it('surfaces a saved draft on Overview instead of claiming the calendar is empty', () => {
+    const home = readAppSource('app/(creator)/organizer-home.tsx');
+    expect(home).toContain("events.find((event) => event.status === 'Draft')");
+    expect(home).toContain('draft saved');
+    expect(home).toContain('your ticket is saved. finish making it sellable.');
+    expect(home).toContain(') : !draftEvent ? (');
+  });
 });
 
 describe('Build 43 ticket-editor regression contracts', () => {
@@ -334,6 +342,12 @@ describe('Build 43 ticket-editor regression contracts', () => {
     expect(source).toContain("keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}");
     expect(source).not.toContain("maxHeight: '88%'");
     expect(source).not.toContain('style={styles.overlay}');
+  });
+
+  it('gives the full-screen modal its own safe-area provider', () => {
+    const source = readAppSource('components/creator/TierEditorSheet.tsx');
+    expect(source).toContain('<SafeAreaProvider>');
+    expect(source).toContain("edges={['top', 'bottom']}");
   });
 
   it('explains the required ticket name and never turns missing input into a dead button', () => {

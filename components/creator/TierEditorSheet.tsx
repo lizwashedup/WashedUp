@@ -21,7 +21,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
@@ -219,7 +219,11 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
-      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+      {/* Native modals render outside the screen's safe-area tree. Giving
+          this modal its own provider keeps reopened editors below the
+          iPhone status bar and Dynamic Island. */}
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.avoider}>
           <View style={styles.headerRow}>
             {/* copy to the taste gate */}
@@ -424,7 +428,8 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
               </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
-      </SafeAreaView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
