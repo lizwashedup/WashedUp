@@ -24,7 +24,7 @@ interface Props {
  */
 export function WorkspaceSwitcher({ access, stayOnEvents = false }: Props) {
   const current = useWorkspace(access);
-  if (!hasMultipleWorkspaces(access)) return null;
+  const showWorkspaceTabs = hasMultipleWorkspaces(access);
 
   const choose = (next: Workspace) => {
     if (next === current) return;
@@ -37,8 +37,18 @@ export function WorkspaceSwitcher({ access, stayOnEvents = false }: Props) {
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label}>working as</Text>
-      <View style={styles.tabs} accessibilityRole="tablist" accessibilityLabel="choose creator workspace">
+      <View style={styles.labelRow}>
+        <Text style={styles.label}>working as {current}</Text>
+        <TouchableOpacity
+          onPress={() => router.replace('/(tabs)/profile')}
+          accessibilityRole="button"
+          accessibilityLabel="Switch back to your personal profile"
+          hitSlop={8}
+        >
+          <Text style={styles.personalLink}>back to you</Text>
+        </TouchableOpacity>
+      </View>
+      {showWorkspaceTabs && <View style={styles.tabs} accessibilityRole="tablist" accessibilityLabel="choose creator workspace">
         {(['organization', 'community'] as const).map((item) => {
           const selected = current === item;
           return (
@@ -55,19 +65,25 @@ export function WorkspaceSwitcher({ access, stayOnEvents = false }: Props) {
             </TouchableOpacity>
           );
         })}
-      </View>
+      </View>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { gap: 6, marginBottom: 12 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   label: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.caption,
     color: Colors.tertiary,
     letterSpacing: 1,
     textTransform: 'uppercase',
+  },
+  personalLink: {
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodySM,
+    color: Colors.terracotta,
   },
   tabs: {
     flexDirection: 'row',

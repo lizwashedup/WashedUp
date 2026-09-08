@@ -13,17 +13,17 @@ const row = (id: string, fields: Record<string, unknown> = {}) => ({
 });
 
 describe('native Scene feed policy', () => {
-  it('uses end, start, LA date, then dateless ordering with a six-hour grace', () => {
+  it('removes ended events immediately and orders end, start, LA date, then dateless', () => {
     const now = Date.parse('2026-08-16T12:00:00Z');
     const result = applySceneFeedPolicy([
       row('dateless'),
       row('expired', { end_time: '2026-08-16T05:59:59Z' }),
       row('date', { event_date: '2026-08-16' }),
       row('start', { start_time: '2026-08-16T13:00:00Z', event_date: '2026-08-20' }),
-      row('grace', { end_time: '2026-08-16T11:00:00Z' }),
+      row('ended', { end_time: '2026-08-16T11:00:00Z' }),
     ], now);
     expect(result.map((event: { id: string }) => event.id)).toEqual([
-      'grace', 'start', 'date', 'dateless',
+      'start', 'date', 'dateless',
     ]);
   });
 

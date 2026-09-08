@@ -395,7 +395,12 @@ export default function CreatorEventsScreen() {
               accessibilityLabel={s.label}
               accessibilityState={{ selected: segment === s.key }}
             >
-              <Text numberOfLines={1} style={[styles.segmentText, segment === s.key && styles.segmentTextOn]}>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.85}
+                style={[styles.segmentText, segment === s.key && styles.segmentTextOn]}
+              >
                 {s.label}
               </Text>
               <View style={[styles.segmentUnderline, segment === s.key && styles.segmentUnderlineOn]} />

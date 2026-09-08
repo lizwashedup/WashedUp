@@ -36,6 +36,7 @@ import LinkifiedText from '../../components/LinkifiedText';
 import LinkPreviewCard from '../../components/chat/LinkPreviewCard';
 import MiniProfileCard from '../../components/MiniProfileCard';
 import ReactionEmojiPicker from '../../components/chat/ReactionEmojiPicker';
+import { CommunityMessageActions } from '../../components/communities/CommunityMessageActions';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
@@ -326,6 +327,9 @@ export default function CommunityThreadScreen() {
               "community chat" default the column itself carries, for a card that
               predates migration 20260906200000. */}
           <Text style={styles.headerTitle} numberOfLines={1}>{card?.main_chat_name ?? 'community chat'}</Text>
+          <Text style={styles.headerAudience} numberOfLines={1}>
+            {card?.name ? `everyone in ${card.name}` : 'everyone in this community'}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={handleMute} hitSlop={12}>
           {muted ? (
@@ -403,30 +407,33 @@ export default function CommunityThreadScreen() {
                         )}
                       </TouchableOpacity>
                     ) : <View style={styles.faceSpacer} />)}
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
-                      onLongPress={() => {
-                        if (mine) openOwnMessageMenu(item);
-                        else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id);
-                      }}
-                      style={[styles.bubble, mine && styles.bubbleMine]}
-                      accessibilityHint="hold for message actions"
-                    >
-                      {!mine && !grouped && <Text style={styles.senderName}>{item.sender_name ?? 'someone'}</Text>}
-                      {!!item.image_url && <Image source={{ uri: item.image_url }} style={styles.messageImage} contentFit="cover" />}
-                      {!!item.body && (
-                        <LinkifiedText
-                          text={item.body}
-                          style={[styles.messageText, mine && styles.messageTextMine]}
-                          linkStyle={mine && styles.messageTextMine}
-                          mentionNames={mentionNames}
-                          mentionStyle={mine && styles.messageTextMine}
-                        />
-                      )}
-                      {!!firstUrl && <LinkPreviewCard url={firstUrl} isOwn={mine} />}
-                      {!!item.edited_at && <Text style={[styles.editedText, mine && styles.messageTextMine]}>edited</Text>}
-                    </TouchableOpacity>
+                    <View style={[styles.messageColumn, mine && styles.messageColumnMine]}>
+                      <TouchableOpacity
+                        activeOpacity={0.9}
+                        onPress={bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
+                        onLongPress={() => {
+                          if (mine) openOwnMessageMenu(item);
+                          else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id);
+                        }}
+                        style={[styles.bubble, mine && styles.bubbleMine]}
+                        accessibilityHint="hold for message actions"
+                      >
+                        {!mine && !grouped && <Text style={styles.senderName}>{item.sender_name ?? 'someone'}</Text>}
+                        {!!item.image_url && <Image source={{ uri: item.image_url }} style={styles.messageImage} contentFit="cover" />}
+                        {!!item.body && (
+                          <LinkifiedText
+                            text={item.body}
+                            style={[styles.messageText, mine && styles.messageTextMine]}
+                            linkStyle={mine && styles.messageTextMine}
+                            mentionNames={mentionNames}
+                            mentionStyle={mine && styles.messageTextMine}
+                          />
+                        )}
+                        {!!firstUrl && <LinkPreviewCard url={firstUrl} isOwn={mine} />}
+                        {!!item.edited_at && <Text style={[styles.editedText, mine && styles.messageTextMine]}>edited</Text>}
+                      </TouchableOpacity>
+                      <CommunityMessageActions message={item} onError={showError} />
+                    </View>
                   </View>
                 ) : (
                   <BroadcastCard
@@ -599,11 +606,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  headerTitleTap: { flex: 1 },
+  headerTitleTap: { flex: 1, alignItems: 'center' },
   headerTitle: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyLG,
     color: Colors.darkWarm,
+    textAlign: 'center',
+  },
+  headerAudience: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
     textAlign: 'center',
   },
   mutedLine: {
@@ -661,6 +674,8 @@ const styles = StyleSheet.create({
   messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 10 },
   messageRowGrouped: { marginTop: -7 },
   messageRowMine: { justifyContent: 'flex-end' },
+  messageColumn: { maxWidth: '82%', alignItems: 'flex-start' },
+  messageColumnMine: { alignItems: 'flex-end' },
   face: { width: 28, height: 28, borderRadius: 14 },
   faceSpacer: { width: 28 },
   facePlaceholder: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },

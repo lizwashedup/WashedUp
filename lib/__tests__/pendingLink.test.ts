@@ -56,6 +56,12 @@ describe('redirectSystemPath (universal-link routing)', () => {
       .toBe(`/checkout-return?checkout=cancelled&order=${ID}&native=1`);
   });
 
+  it('routes Stripe payout returns into the native payouts screen', () => {
+    expect(call('https://washedup.app/creator/payouts/return')).toBe('/creator/payouts?stripe=return');
+    expect(call('https://washedup.app/creator/payouts/refresh')).toBe('/creator/payouts?stripe=refresh');
+    expect(call('https://washedup.app/app/creator/payouts?stripe=return')).toBe('/creator/payouts?stripe=return');
+  });
+
   it('maps web app-shell object links to their native screens', () => {
     expect(call(`https://washedup.app/app/plan/${ID}`)).toBe(`/plan/${ID}`);
     expect(call(`https://washedup.app/app/event/${ID}?return_route=chat`)).toBe(`/event/${ID}?return_route=chat`);

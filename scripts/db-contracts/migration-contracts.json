@@ -1,7 +1,7 @@
 {
   "format": 3,
-  "migration_count": 277,
-  "inventory_sha256": "f093d8820c501d7f924c006ac6be844e21a1b54937b3c0bb0c6a2decff0ef027",
+  "migration_count": 278,
+  "inventory_sha256": "ab663755d58a9df326fe9ef8a021cb576a78867291d5f01f14e69ad465ab79e8",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
@@ -32,7 +32,8 @@
     "20260905030000_fix_co_creator_invite_ambiguous_column.sql",
     "20260906221000_attendee_message_test_send.sql",
     "20260906230000_refund_issuance_log_nullable_issuer.sql",
-    "20260906231000_has_refund_authority_self_only.sql"
+    "20260906231000_has_refund_authority_self_only.sql",
+    "20260908010000_block_ended_plan_entries.sql"
   ],
   "side_effect_union_count": 82,
   "approved_legacy_secret_literals": [

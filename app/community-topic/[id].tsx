@@ -491,7 +491,12 @@ export default function CommunityTopicScreen() {
           <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
             <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle} numberOfLines={1}>{topic?.name ?? 'chat space'}</Text>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle} numberOfLines={1}>{topic?.name ?? 'chat space'}</Text>
+            <Text style={styles.headerAudience} numberOfLines={1}>
+              {eventTopic ? 'people going to this event' : 'members who joined this chat space'}
+            </Text>
+          </View>
           {eventTopic && (
             <TouchableOpacity
               onPress={() => router.push(`/event-album/${id}` as never)}
@@ -821,10 +826,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   headerTitle: {
-    flex: 1,
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyLG,
     color: Colors.darkWarm,
+    textAlign: 'center',
+  },
+  headerTitleWrap: { flex: 1, alignItems: 'center' },
+  headerAudience: {
+    fontFamily: Fonts.sans,
+    fontSize: FontSizes.caption,
+    color: Colors.tertiary,
     textAlign: 'center',
   },
   listWrap: { flex: 1 },

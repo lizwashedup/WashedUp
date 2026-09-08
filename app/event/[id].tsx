@@ -78,6 +78,7 @@ interface ExploreEvent {
   image_url: string | null;
   event_date: string | null;
   start_time: string | null;
+  end_time: string | null;
   venue: string | null;
   venue_address: string | null;
   category: string | null;
@@ -238,7 +239,7 @@ export default function EventDetailScreen() {
     queryFn: async (): Promise<ExploreEvent | null> => {
       const { data, error } = await supabase
         .from('explore_events')
-        .select('id, title, description, description_blocks, image_url, event_date, start_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id, status')
+        .select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id, status')
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -883,7 +884,12 @@ export default function EventDetailScreen() {
   // already branch on it -- but this guest page had no handling for it at
   // all, so a guest opening a link to a past event still saw live
   // "get tickets" / "count me in" buttons.
-  const isCompleted = event.status === 'Completed';
+  const eventEndMs = event.end_time ? Date.parse(event.end_time) : NaN;
+  const eventStartMs = event.start_time ? Date.parse(event.start_time) : NaN;
+  const isTimeEnded = Number.isFinite(eventEndMs)
+    ? eventEndMs <= Date.now()
+    : Number.isFinite(eventStartMs) && eventStartMs + 3 * 60 * 60 * 1000 <= Date.now();
+  const isCompleted = event.status === 'Completed' || isTimeEnded;
   // allSoldOut is only ever true when real ticket_tiers rows exist and
   // every one is sold out (getPublicTicketSummary's own contract), so this
   // never fires for a genuine free/RSVP-only event. Before this, a

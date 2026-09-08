@@ -380,7 +380,14 @@ export async function pickAndUploadEventImage(): Promise<string | null> {
   if (!user) throw new Error('Not signed in');
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!perm.granted) return null;
-  const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+  const res = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    quality: 1,
+    allowsEditing: true,
+    // The public event renderer is locked to a portrait 4:5 cover. Crop at
+    // selection time so the creator approves the same frame guests will see.
+    aspect: [4, 5],
+  });
   if (res.canceled || !res.assets?.[0]) return null;
   const manipulated = await ImageManipulator.manipulateAsync(
     res.assets[0].uri,

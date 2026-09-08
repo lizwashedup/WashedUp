@@ -155,7 +155,9 @@ describe('event summary emergency rollback contract', () => {
   it('keeps all six event filters readable instead of compressing or wrapping them', () => {
     expect(eventsSource).toContain('<ScrollView\n          horizontal');
     expect(eventsSource).toContain('contentContainerStyle={styles.segmentRow}');
-    expect(eventsSource).toContain('<Text numberOfLines={1} style={[styles.segmentText');
+    expect(eventsSource).toContain('numberOfLines={1}');
+    expect(eventsSource).toContain('adjustsFontSizeToFit');
+    expect(eventsSource).toContain('style={[styles.segmentText');
     expect(eventsSource).toContain('segment: { flexShrink: 0');
   });
 });

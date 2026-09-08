@@ -1002,6 +1002,7 @@ export default function EventFormScreen() {
             contentContainerStyle={styles.content}
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets
             onScrollBeginDrag={Keyboard.dismiss}
           >
             <Text style={styles.title}>{editing ? 'edit your event' : duplicateFrom ? 'put it on again' : 'put on an event'}</Text>

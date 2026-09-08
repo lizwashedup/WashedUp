@@ -4,8 +4,16 @@ jest.mock('../supabase', () => ({
 
 import { supabase } from '../supabase';
 import { probeTicketCapacityRpc, setEventTicketCapacity } from '../creatorEvents';
+import fs from 'fs';
+import path from 'path';
 
 const mockRpc = supabase.rpc as jest.Mock;
+
+it('makes creators approve the same 4:5 crop guests will see', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'creatorEvents.ts'), 'utf8');
+  expect(source).toContain('allowsEditing: true');
+  expect(source).toContain('aspect: [4, 5]');
+});
 
 // ─── C-21: probeTicketCapacityRpc / setEventTicketCapacity ────────────────
 // Regression coverage for the exact bug class eventRsvp.ts hit on

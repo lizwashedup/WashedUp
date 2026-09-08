@@ -18,7 +18,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, Redirect } from 'expo-router';
+import { router, Redirect, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowLeft, Search } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -59,6 +59,7 @@ const PURCHASE_FILTERS: { key: PurchaseFilter; label: string }[] = [
 ];
 
 export default function GettingPaidScreen() {
+  const { stripe } = useLocalSearchParams<{ stripe?: string }>();
   const [userId, setUserId] = useState<string | null>(null);
   const [onboardBusy, setOnboardBusy] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
@@ -69,12 +70,21 @@ export default function GettingPaidScreen() {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)).catch(() => {});
   }, []);
 
-  const { data: payout } = useQuery({
+  const { data: payout, refetch: refetchPayout } = useQuery({
     queryKey: ['payout-state', userId],
     queryFn: () => getMyPayoutState(userId!),
     enabled: !!userId,
     staleTime: 30_000,
   });
+
+  // Stripe returns to this screen after the person completes, pauses, or
+  // leaves onboarding. Re-check immediately on focus so the setup card never
+  // shows the state from before they went to Stripe.
+  useFocusEffect(
+    useCallback(() => {
+      if (userId) void refetchPayout();
+    }, [refetchPayout, userId]),
+  );
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const communityIds = useMemo(() => access?.ledCommunities.map((c) => c.id) ?? [], [access]);
@@ -154,6 +164,17 @@ export default function GettingPaidScreen() {
   // callback depend on itself
   const handleOnboardRef = useRef<(() => void) | null>(null);
   handleOnboardRef.current = handleOnboard;
+
+  // Stripe sends an expired or already-used Account Link to the refresh
+  // bridge. Once that bridge reopens the app, mint and open a fresh link
+  // automatically, as required by Stripe's hosted-onboarding contract.
+  const handledStripeRefresh = useRef(false);
+  useEffect(() => {
+    if (stripe !== 'refresh' || handledStripeRefresh.current) return;
+    handledStripeRefresh.current = true;
+    router.setParams({ stripe: undefined });
+    void handleOnboard();
+  }, [handleOnboard, stripe]);
 
   if (access && !access.hasEventHostGrant && !canManageFinance(access)) {
     return <Redirect href={creatorLandingRoute(access)} />;
