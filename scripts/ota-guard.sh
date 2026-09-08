@@ -30,8 +30,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-RUNTIME105_BRANCH="codex/runtime105-livefix"
-RUNTIME105_BASELINE="de9ded1862a57326c9324c5d2ef54f5eb03e61ae"
+RUNTIME105_BRANCH="codex/runtime105-complete-transaction"
+RUNTIME105_BASELINE="c5e23411cfb66fb41b13a74e2472eb063e83d292"
 expected_branch="${WASHEDUP_OTA_EXPECTED_BRANCH:-main}"
 
 fail() {
@@ -79,8 +79,8 @@ if [ "$expected_branch" = "$RUNTIME105_BRANCH" ]; then
     || fail "the pinned 1.0.5 baseline is missing locally."
   git merge-base --is-ancestor "$RUNTIME105_BASELINE" HEAD \
     || fail "HEAD is not descended from the pinned 1.0.5 production baseline."
-  if [ "$(git rev-list --count "$RUNTIME105_BASELINE"..HEAD)" != "1" ]; then
-    fail "the 1.0.5 maintenance release must be exactly one reviewed commit above its baseline."
+  if [ "$(git rev-list --count "$RUNTIME105_BASELINE"..HEAD)" != "3" ]; then
+    fail "the 1.0.5 maintenance release must be exactly three reviewed commits above its baseline."
   fi
   if [ "$(node -p "require('./app.json').expo.version" 2>/dev/null || true)" != "1.0.5" ]; then
     fail "the 1.0.5 maintenance branch no longer declares app version 1.0.5."
@@ -91,8 +91,10 @@ if [ "$expected_branch" = "$RUNTIME105_BRANCH" ]; then
   while IFS= read -r changed_path; do
     case "$changed_path" in
       "app/(creator)/events.tsx"|\
+      "app/(tabs)/chats/index.tsx"|\
       "app/(tabs)/plans/index.tsx"|\
       "app/+native-intent.tsx"|\
+      "app.config.js"|\
       "app/community-thread/[id].tsx"|\
       "app/community-topic/[id].tsx"|\
       "app/creator/event-form.tsx"|\
@@ -100,11 +102,20 @@ if [ "$expected_branch" = "$RUNTIME105_BRANCH" ]; then
       "app/event/[id].tsx"|\
       "app/plan/[id].tsx"|\
       "components/communities/CommunityMessageActions.tsx"|\
+      "components/ProfileButton.tsx"|\
+      "components/chat/ChatThread.tsx"|\
+      "components/chat/__tests__/ChatUxContract.test.ts"|\
+      "components/creator/TicketScanner.tsx"|\
+      "components/plans/PlanCard.tsx"|\
+      "hooks/useChat.ts"|\
+      "hooks/useChatList.ts"|\
       "lib/creatorEvents.ts"|\
       "lib/fetchPlans.ts"|\
       "lib/planTime.ts"|\
       "lib/sceneDiscovery.ts"|\
       "lib/ticketing.ts"|\
+      "package-lock.json"|\
+      "package.json"|\
       "scripts/ota-guard.sh"|\
       "scripts/publish-runtime105-ota.sh") ;;
       *) fail "unapproved 1.0.5 maintenance change: $changed_path" ;;
