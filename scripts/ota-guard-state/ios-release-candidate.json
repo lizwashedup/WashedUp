@@ -1,0 +1,9 @@
+{
+  "buildNumber": "43",
+  "easBuildId": "e6ff80eb-46db-4d86-a576-c03df44a5f27",
+  "gitCommitHash": "ac9d9dfe2d21b6857d07920a703c6fdf0bb11cbe",
+  "runtimeVersion": "17b471ae2a908d2805483436b15fd0059dd95572",
+  "appConfigSha256": "a6a87ec81b3831e7ef3952d781a5668fa60d1eba41f491098b3e5f0e61553250",
+  "status": "testflight_pending_ota_verification",
+  "note": "Build 43 is valid and in internal TestFlight. This target does not claim the OTA has been verified on build 43 or approved for App Store release."
+}

@@ -28,9 +28,22 @@ if [ -z "$message" ]; then
   exit 2
 fi
 
+# The iOS update must carry the exact runtime recorded by the real EAS build
+# it is intended to patch. app.config.js refuses this override during native
+# builds, so it cannot accidentally stamp a future binary.
+if [ "$platform" = "ios" ]; then
+  target_file="scripts/ota-guard-state/ios-release-candidate.json"
+  WASHEDUP_OTA_RUNTIME_VERSION="$(node -p "require('./$target_file').runtimeVersion" 2>/dev/null || true)"
+  if [ -z "$WASHEDUP_OTA_RUNTIME_VERSION" ]; then
+    echo "Could not read the iOS release-candidate runtime from $target_file." >&2
+    exit 1
+  fi
+  export WASHEDUP_OTA_RUNTIME_VERSION
+fi
+
 # Hard gate — aborts on wrong branch, dirty tree, forbidden native imports,
 # or empty EXPO_PUBLIC_ keys in .env.local.
-bash "$(dirname "$0")/ota-guard.sh"
+bash "$(dirname "$0")/ota-guard.sh" "$platform"
 
 # Load the pinned env HERE, not from the interactive shell, so EXPO_PUBLIC_
 # values always reach the export step (they bake into the bundle).

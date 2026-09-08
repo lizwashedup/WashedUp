@@ -35,6 +35,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+platform="${1:-ios}"
+if [ "$platform" != "ios" ] && [ "$platform" != "android" ]; then
+  echo "Usage: $0 <ios|android>" >&2
+  exit 2
+fi
+
 fail() {
   echo "" >&2
   echo "✋ OTA publish BLOCKED: $1" >&2
@@ -190,29 +196,80 @@ $var"
   fi
 fi
 
-# 7. Runtime fingerprint must match the last build confirmed installed and
-#    working on a real device (see scripts/ota-guard-state/last-confirmed-live-fingerprint.json).
-#    runtimeVersion.policy is "fingerprint" (app.config.js), and that hash is
-#    computed from more than JS source -- it includes app.json/app.config.js
-#    content, so even a bare buildNumber bump changes it. Publishing an OTA
-#    stamped with a fingerprint that matches zero currently-installed devices
-#    succeeds and prints a clean report while reaching nobody. Found 2026-09-03.
-PIN_FILE="scripts/ota-guard-state/last-confirmed-live-fingerprint.json"
-if [ ! -f "$PIN_FILE" ]; then
-  fail "$PIN_FILE is missing -- can't verify this publish reaches any real device. Restore it before publishing."
-fi
-pinned_fingerprint="$(node -p "require('./$PIN_FILE').fingerprint" 2>/dev/null || true)"
-if [ -z "$pinned_fingerprint" ]; then
-  fail "could not read a fingerprint out of $PIN_FILE -- fix or restore it before publishing."
-fi
-current_fingerprint="$(npx expo-updates fingerprint:generate --platform ios 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).hash" 2>/dev/null || true)"
-if [ -z "$current_fingerprint" ]; then
-  fail "could not compute this tree's runtime fingerprint (npx expo-updates fingerprint:generate failed). Don't publish blind -- fix the command and retry."
-fi
-if [ "$current_fingerprint" != "$pinned_fingerprint" ]; then
-  echo "This tree's runtime fingerprint: $current_fingerprint" >&2
-  echo "Last confirmed-live fingerprint: $pinned_fingerprint (see $PIN_FILE)" >&2
-  fail "runtime fingerprint doesn't match the last build confirmed live on a real device. Publishing now would ship an OTA matching nothing currently installed -- it would succeed and reach zero users. If a build with THIS fingerprint is confirmed installed and working on a real device, update $PIN_FILE's fingerprint to $current_fingerprint, then publish."
+# 7. Resolve the update runtime from a real EAS build, not a local fingerprint.
+#    Fingerprints include secret-backed native config. EAS secrets are
+#    intentionally unavailable to local exports, so recomputing a fingerprint
+#    locally can differ from the store binary even when the native interface is
+#    unchanged. That made the old guard point at build 36 while build 43 was
+#    already valid in TestFlight. For iOS, pin the exact EAS build record and
+#    prove that native inputs have not changed since its commit.
+if [ "$platform" = "ios" ]; then
+  TARGET_FILE="scripts/ota-guard-state/ios-release-candidate.json"
+  if [ ! -f "$TARGET_FILE" ]; then
+    fail "$TARGET_FILE is missing -- there is no explicit iOS build target."
+  fi
+
+  target_build_number="$(node -p "require('./$TARGET_FILE').buildNumber" 2>/dev/null || true)"
+  target_build_id="$(node -p "require('./$TARGET_FILE').easBuildId" 2>/dev/null || true)"
+  target_commit="$(node -p "require('./$TARGET_FILE').gitCommitHash" 2>/dev/null || true)"
+  target_runtime="$(node -p "require('./$TARGET_FILE').runtimeVersion" 2>/dev/null || true)"
+  target_app_config_sha="$(node -p "require('./$TARGET_FILE').appConfigSha256" 2>/dev/null || true)"
+
+  if [ -z "$target_build_number" ] || [ -z "$target_build_id" ] || [ -z "$target_commit" ] || [ -z "$target_runtime" ] || [ -z "$target_app_config_sha" ]; then
+    fail "$TARGET_FILE is incomplete. Refuse to guess a runtime target."
+  fi
+  if ! git cat-file -e "${target_commit}^{commit}" 2>/dev/null; then
+    fail "release-candidate commit $target_commit is not present locally."
+  fi
+  if ! git merge-base --is-ancestor "$target_commit" HEAD; then
+    fail "release-candidate commit $target_commit is not an ancestor of this update."
+  fi
+
+  # app.config.js contains the narrowly-scoped OTA runtime override itself.
+  # Pin its reviewed contents so later native config edits cannot ride through.
+  current_app_config_sha="$(shasum -a 256 app.config.js | awk '{print $1}')"
+  if [ "$current_app_config_sha" != "$target_app_config_sha" ]; then
+    fail "app.config.js changed after the release target was reviewed. Re-audit native compatibility before publishing."
+  fi
+
+  # These files directly determine the native binary. package.json is checked
+  # separately below so harmless script-only additions do not create a fake
+  # incompatibility.
+  if ! git diff --quiet "$target_commit"..HEAD -- app.json eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android; then
+    echo "Native-input changes since iOS build $target_build_number:" >&2
+    git diff --name-only "$target_commit"..HEAD -- app.json eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android >&2
+    fail "native inputs changed after the target build. Create and verify a new build instead of forcing an OTA."
+  fi
+
+  current_dependency_contract="$(node -e "const p=require('./package.json'); process.stdout.write(JSON.stringify({dependencies:p.dependencies||{},devDependencies:p.devDependencies||{},peerDependencies:p.peerDependencies||{},overrides:p.overrides||{}}))")"
+  target_dependency_contract="$(git show "${target_commit}:package.json" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const p=JSON.parse(s);process.stdout.write(JSON.stringify({dependencies:p.dependencies||{},devDependencies:p.devDependencies||{},peerDependencies:p.peerDependencies||{},overrides:p.overrides||{}}))})")"
+  if [ "$current_dependency_contract" != "$target_dependency_contract" ]; then
+    fail "package dependencies changed after iOS build $target_build_number. A new native build is required."
+  fi
+
+  build_json="$(npx eas-cli build:view "$target_build_id" --json 2>/dev/null || true)"
+  if [ -z "$build_json" ]; then
+    fail "could not read EAS build $target_build_id. Refuse to target an unverified runtime."
+  fi
+  remote_build_number="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.appBuildVersion||''))" "$build_json" 2>/dev/null || true)"
+  remote_runtime="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.runtime?.version||''))" "$build_json" 2>/dev/null || true)"
+  remote_commit="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.gitCommitHash||''))" "$build_json" 2>/dev/null || true)"
+  remote_status="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.status||''))" "$build_json" 2>/dev/null || true)"
+  if [ "$remote_status" != "FINISHED" ] || [ "$remote_build_number" != "$target_build_number" ] || [ "$remote_runtime" != "$target_runtime" ] || [ "$remote_commit" != "$target_commit" ]; then
+    fail "EAS build metadata does not match $TARGET_FILE. Do not publish to an inferred runtime."
+  fi
+
+  if [ -n "${WASHEDUP_OTA_RUNTIME_VERSION:-}" ] && [ "$WASHEDUP_OTA_RUNTIME_VERSION" != "$target_runtime" ]; then
+    fail "WASHEDUP_OTA_RUNTIME_VERSION does not match iOS build $target_build_number."
+  fi
+else
+  PIN_FILE="scripts/ota-guard-state/last-confirmed-live-fingerprint.json"
+  pinned_fingerprint="$(node -p "require('./$PIN_FILE').fingerprint" 2>/dev/null || true)"
+  current_fingerprint="$(npx expo-updates fingerprint:generate --platform android 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).hash" 2>/dev/null || true)"
+  if [ -z "$pinned_fingerprint" ] || [ -z "$current_fingerprint" ] || [ "$current_fingerprint" != "$pinned_fingerprint" ]; then
+    fail "Android has no verified build-specific OTA target. Verify and pin one before publishing."
+  fi
+  target_runtime="$pinned_fingerprint"
 fi
 
 # Warn (don't block) on source-referenced EXPO_PUBLIC_ vars not set anywhere —
@@ -224,4 +281,4 @@ for var in $(grep -rhoE 'EXPO_PUBLIC_[A-Z0-9_]+' app components hooks lib consta
   fi
 done
 
-echo "✅ OTA guard passed — on main, clean tree, HEAD matches origin/main, commit $(git rev-parse --short HEAD), no forbidden native imports, .env.local keys all non-empty, fingerprint matches last confirmed-live build."
+echo "OTA guard passed: platform=$platform, commit=$(git rev-parse --short HEAD), target runtime=$target_runtime."

@@ -36,6 +36,17 @@ const googleIosClientId =
 const googleIosUrlScheme =
   'com.googleusercontent.apps.' + googleIosClientId.replace('.apps.googleusercontent.com', '');
 
+// EAS Build fingerprints can include secret-backed native config values that
+// are intentionally unavailable to a local OTA export. That can make a safe
+// JS-only update compute a different runtime from the exact store binary it is
+// meant to patch. The guarded OTA script may therefore target a verified EAS
+// build's recorded runtime explicitly. Never allow that override during a
+// native build: new binaries must keep deriving their own fingerprint.
+const otaRuntimeVersion = process.env.WASHEDUP_OTA_RUNTIME_VERSION?.trim();
+if (otaRuntimeVersion && process.env.EAS_BUILD === 'true') {
+  throw new Error('WASHEDUP_OTA_RUNTIME_VERSION is for guarded OTA exports only, never EAS Build.');
+}
+
 module.exports = {
   ...appJson,
   expo: {
@@ -69,7 +80,7 @@ module.exports = {
       // NOTE: native config — only takes effect in a new build, not over OTA.
       fallbackToCacheTimeout: 8000,
     },
-    runtimeVersion: {
+    runtimeVersion: otaRuntimeVersion || {
       policy: 'fingerprint',
     },
     ios: {
