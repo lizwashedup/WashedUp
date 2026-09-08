@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
@@ -105,12 +104,6 @@ export default function ProfileButton() {
     },
     staleTime: 60_000,
   });
-
-  useFocusEffect(
-    React.useCallback(() => {
-      refetch();
-    }, [refetch])
-  );
 
   // Staggered safety-net retries so the avatar appears even if the photo
   // URL lags right after login/onboarding. Only needed while the photo is
