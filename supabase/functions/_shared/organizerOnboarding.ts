@@ -48,3 +48,21 @@ export function planAccountRowInsert(insertError: { code?: string } | null | und
   if (insertError.code === UNIQUE_VIOLATION) return 'race_recovered';
   return 'needs_human';
 }
+
+export interface StripeAccountSnapshot {
+  charges_enabled?: unknown;
+  payouts_enabled?: unknown;
+  details_submitted?: unknown;
+  requirements?: unknown;
+}
+
+/** Store only the non-sensitive readiness state WashedUp needs to sell. */
+export function buildAccountStateUpdate(snapshot: StripeAccountSnapshot, observedAt: string) {
+  return {
+    charges_enabled: snapshot.charges_enabled === true,
+    payouts_enabled: snapshot.payouts_enabled === true,
+    details_submitted: snapshot.details_submitted === true,
+    requirements_due: snapshot.requirements ?? {},
+    last_event_at: observedAt,
+  };
+}

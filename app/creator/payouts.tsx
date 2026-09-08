@@ -38,6 +38,7 @@ import {
   purchaseStatusLabel,
   requestOnboardingLink,
   searchOrganizationPurchases,
+  syncMyPayoutState,
   type OrganizationPurchase,
   type PurchaseStatusLabel,
 } from '../../lib/ticketing';
@@ -175,6 +176,25 @@ export default function GettingPaidScreen() {
     router.setParams({ stripe: undefined });
     void handleOnboard();
   }, [handleOnboard, stripe]);
+
+  // The webhook worker runs once per minute. A creator returning from Stripe
+  // should not see stale pre-onboarding state or be sent through the flow
+  // again while that worker catches up, so synchronize Stripe directly first.
+  const handledStripeReturn = useRef(false);
+  useEffect(() => {
+    if (stripe !== 'return' || handledStripeReturn.current) return;
+    handledStripeReturn.current = true;
+    router.setParams({ stripe: undefined });
+    let alive = true;
+    setOnboardBusy(true);
+    void syncMyPayoutState().finally(async () => {
+      await refetchPayout();
+      if (alive) setOnboardBusy(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [refetchPayout, stripe]);
 
   if (access && !access.hasEventHostGrant && !canManageFinance(access)) {
     return <Redirect href={creatorLandingRoute(access)} />;

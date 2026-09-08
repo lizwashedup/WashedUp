@@ -2,6 +2,7 @@ import {
   FOUNDING_PARTNER_BPS,
   hasApprovedOrganizerGrant,
   buildExpressAccountParams,
+  buildAccountStateUpdate,
   planAccountRowInsert,
 } from '../_shared/organizerOnboarding.ts';
 
@@ -98,4 +99,24 @@ Deno.test('onboarding entry: return and refresh use implemented HTTPS bridge pat
     onboardingSource.includes("const REFRESH_URL = 'https://washedup.app/creator/payouts/refresh'"),
     'refresh path must stay on the native payout bridge',
   );
+});
+
+Deno.test('buildAccountStateUpdate: mirrors Stripe readiness without storing identity data', () => {
+  const update = buildAccountStateUpdate({
+    charges_enabled: true,
+    payouts_enabled: false,
+    details_submitted: true,
+    requirements: { currently_due: ['external_account'] },
+  }, '2026-09-08T07:00:00.000Z');
+  assert(update.charges_enabled === true, 'charges readiness should mirror Stripe');
+  assert(update.payouts_enabled === false, 'payout readiness should mirror Stripe');
+  assert(update.details_submitted === true, 'details state should mirror Stripe');
+  assert(update.last_event_at === '2026-09-08T07:00:00.000Z', 'direct observation time should be stored');
+  assert(Object.keys(update).length === 5, 'identity fields must never be stored by the status sync');
+});
+
+Deno.test('onboarding entry: status action retrieves current Stripe truth', () => {
+  assert(onboardingSource.includes("requestBody?.action === 'status'"), 'status action must be recognized');
+  assert(onboardingSource.includes("stripeGet(stripeKey, `/accounts/${encodeURIComponent(accountId)}`)"), 'status action must retrieve the connected account');
+  assert(onboardingSource.includes('buildAccountStateUpdate(account.body'), 'Stripe readiness must be persisted');
 });

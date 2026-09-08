@@ -3,6 +3,7 @@ import {
   FOUNDING_PARTNER_BPS,
   hasApprovedOrganizerGrant,
   buildExpressAccountParams,
+  buildAccountStateUpdate,
   planAccountRowInsert,
 } from '../_shared/organizerOnboarding.ts';
 /**
@@ -49,7 +50,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
-function json(status, body) {
+function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -58,7 +59,7 @@ function json(status, body) {
     }
   });
 }
-async function stripePost(key, path, form) {
+async function stripePost(key: string, path: string, form: Record<string, string>) {
   const ctrl = new AbortController();
   const t = setTimeout(()=>ctrl.abort(), STRIPE_TIMEOUT_MS);
   try {
@@ -89,6 +90,34 @@ async function stripePost(key, path, form) {
     clearTimeout(t);
   }
 }
+async function stripeGet(key: string, path: string) {
+  const ctrl = new AbortController();
+  const t = setTimeout(()=>ctrl.abort(), STRIPE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${STRIPE_API}${path}`, {
+      headers: {
+        Authorization: `Bearer ${key}`
+      },
+      signal: ctrl.signal
+    });
+    const body = await res.json().catch(()=>({}));
+    return {
+      ok: res.ok,
+      status: res.status,
+      body
+    };
+  } catch  {
+    return {
+      ok: false,
+      status: 0,
+      body: {
+        error: 'stripe unreachable'
+      }
+    };
+  } finally{
+    clearTimeout(t);
+  }
+}
 Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -99,6 +128,8 @@ Deno.serve(async (req)=>{
   if (req.method !== 'POST') return json(405, {
     error: 'method not allowed'
   });
+  const requestBody = await req.json().catch(()=>({}));
+  const action = requestBody?.action === 'status' ? 'status' : 'onboarding';
   const stripeKey = Deno.env.get('STRIPE_CONNECT_ONBOARDING_KEY') ?? '';
   if (!stripeKey.startsWith('sk_')) {
     return json(500, {
@@ -147,6 +178,31 @@ Deno.serve(async (req)=>{
     error: 'account lookup failed'
   });
   let accountId = existing?.stripe_account_id;
+  if (action === 'status') {
+    if (!accountId) return json(200, {
+      synced: true,
+      exists: false
+    });
+    const account = await stripeGet(stripeKey, `/accounts/${encodeURIComponent(accountId)}`);
+    if (!account.ok || account.body?.id !== accountId) {
+      return json(502, {
+        error: 'stripe account status failed',
+        detail: account.body?.error?.message ?? null
+      });
+    }
+    const state = buildAccountStateUpdate(account.body, new Date().toISOString());
+    const { error: syncErr } = await service.from('organizer_stripe_accounts').update(state).eq('user_id', userId).eq('stripe_account_id', accountId);
+    if (syncErr) return json(500, {
+      error: 'account status sync failed'
+    });
+    return json(200, {
+      synced: true,
+      exists: true,
+      charges_enabled: state.charges_enabled,
+      payouts_enabled: state.payouts_enabled,
+      details_submitted: state.details_submitted
+    });
+  }
   if (!accountId) {
     // the doc 61 §2 target config, exactly the shape the paywall lane
     // verified on the sandbox demo account: fees.payer=application,
