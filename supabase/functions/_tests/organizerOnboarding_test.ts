@@ -5,6 +5,10 @@ import {
   planAccountRowInsert,
 } from '../_shared/organizerOnboarding.ts';
 
+const onboardingSource = await Deno.readTextFile(
+  new URL('../ticket-connect-onboarding/index.ts', import.meta.url),
+);
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
@@ -79,4 +83,19 @@ Deno.test('planAccountRowInsert: a unique-violation is the concurrent-create rac
 Deno.test('planAccountRowInsert: any other error means the account is orphaned at Stripe and needs a human', () => {
   assert(planAccountRowInsert({ code: '42501' }) === 'needs_human', 'a non-unique-violation error must escalate to a human, not silently retry');
   assert(planAccountRowInsert({}) === 'needs_human', 'an error object with no code must still escalate, not be assumed benign');
+});
+
+Deno.test('onboarding entry: account and grant reads start together', () => {
+  assert(onboardingSource.includes('await Promise.all(['), 'independent onboarding reads should run together');
+});
+
+Deno.test('onboarding entry: return and refresh use implemented HTTPS bridge paths', () => {
+  assert(
+    onboardingSource.includes("const RETURN_URL = 'https://washedup.app/creator/payouts/return'"),
+    'return path must stay on the native payout bridge',
+  );
+  assert(
+    onboardingSource.includes("const REFRESH_URL = 'https://washedup.app/creator/payouts/refresh'"),
+    'refresh path must stay on the native payout bridge',
+  );
 });

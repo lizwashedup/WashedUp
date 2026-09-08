@@ -122,11 +122,17 @@ Deno.serve(async (req)=>{
     error: 'not signed in'
   });
   const userId = userData.user.id;
-  // the gate: an APPROVED grant on either selling track
-  const { data: grants, error: grantErr } = await service.from('operator_grants').select('track, status').eq('user_id', userId).eq('status', 'approved').in('track', [
-    'event_host',
-    'community_leader'
+  // These reads are independent. Starting them together removes one database
+  // round trip from the wait before Stripe opens.
+  const [grantResult, accountResult] = await Promise.all([
+    service.from('operator_grants').select('track, status').eq('user_id', userId).eq('status', 'approved').in('track', [
+      'event_host',
+      'community_leader'
+    ]),
+    service.from('organizer_stripe_accounts').select('stripe_account_id').eq('user_id', userId).maybeSingle()
   ]);
+  // the gate: an APPROVED grant on either selling track
+  const { data: grants, error: grantErr } = grantResult;
   if (grantErr) return json(500, {
     error: 'grant check failed'
   });
@@ -136,7 +142,7 @@ Deno.serve(async (req)=>{
     });
   }
   // one connected account per organizer: reuse the row if it exists
-  const { data: existing, error: rowErr } = await service.from('organizer_stripe_accounts').select('stripe_account_id').eq('user_id', userId).maybeSingle();
+  const { data: existing, error: rowErr } = accountResult;
   if (rowErr) return json(500, {
     error: 'account lookup failed'
   });
