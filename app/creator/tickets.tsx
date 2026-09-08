@@ -16,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, router, Redirect } from 'expo-router';
+import { useLocalSearchParams, useFocusEffect, router, Redirect } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Plus, Ticket } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -36,6 +36,7 @@ import {
   getConfirmationMessage,
   getEventFaqs,
   getMyPayoutState,
+  getPaidTicketEventReadiness,
   getQuestions,
   getTierAvailability,
   getTiers,
@@ -88,6 +89,8 @@ export default function TicketSetupScreen() {
   // only makes that already-shipped free path an explicit, named choice
   // instead of something a creator has to discover by leaving price blank.
   const [newTierPreset, setNewTierPreset] = useState<string | undefined>(undefined);
+  const [pendingTierDraft, setPendingTierDraft] = useState<TierDraft | null>(null);
+  const resumeTierEditorRef = useRef(false);
   const [onboardBusy, setOnboardBusy] = useState(false);
   const [faqQuestion, setFaqQuestion] = useState('');
   const [faqAnswer, setFaqAnswer] = useState('');
@@ -102,6 +105,13 @@ export default function TicketSetupScreen() {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null)).catch(() => {});
   }, []);
 
+  useFocusEffect(useCallback(() => {
+    if (resumeTierEditorRef.current) {
+      resumeTierEditorRef.current = false;
+      setEditorVisible(true);
+    }
+  }, []));
+
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
 
   const { data: event } = useQuery({
@@ -109,7 +119,7 @@ export default function TicketSetupScreen() {
     queryFn: async () => {
       const { data } = await supabase
         .from('explore_events')
-        .select('id, title, event_date')
+        .select('id, title, event_date, end_time')
         .eq('id', id!)
         .maybeSingle();
       return data ?? null;
@@ -328,6 +338,16 @@ export default function TicketSetupScreen() {
   const saveTierMutation = useMutation({
     mutationFn: async (draft: TierDraft) => {
       const wasEditing = !!editingTier;
+      if (draft.price_cents > 0) {
+        const readiness = await getPaidTicketEventReadiness(id!);
+        if (!readiness.ok) {
+          const error = new Error(readiness.message ?? 'the event end time could not be checked.');
+          if (readiness.reason === 'missing_end_time') {
+            (error as Error & { code?: string }).code = 'event_end_time_required';
+          }
+          throw error;
+        }
+      }
       const result = editingTier
         ? await updateTier(editingTier.id, draft)
         : await createTier(id!, draft, tiers.length);
@@ -339,11 +359,31 @@ export default function TicketSetupScreen() {
       setEditorVisible(false);
       setEditingTier(null);
       setNewTierPreset(undefined);
+      setPendingTierDraft(null);
       await invalidateTiers();
       setSavedTierName(wasEditing ? `${name} updated.` : `${name} added.`);
     },
-    onError: (e: any) => {
+    onError: (e: any, draft) => {
       hapticError();
+      if (e?.code === 'event_end_time_required') {
+        setPendingTierDraft(draft);
+        setAlertInfo({
+          title: 'add the event end time',
+          message: e?.message,
+          buttons: [
+            { text: 'not now', style: 'cancel' },
+            {
+              text: 'set end time',
+              onPress: () => {
+                resumeTierEditorRef.current = true;
+                setEditorVisible(false);
+                router.push(`/creator/event-form?id=${id}&returnToTickets=1` as never);
+              },
+            },
+          ],
+        });
+        return;
+      }
       setAlertInfo({ title: 'that did not save', message: e?.message ?? 'give it another try.' });
     },
   });
@@ -914,11 +954,13 @@ export default function TicketSetupScreen() {
         commissionBps={payout?.commissionBps ?? 400}
         busy={saveTierMutation.isPending}
         initialName={newTierPreset}
+        initialDraft={pendingTierDraft}
         onSave={(draft) => saveTierMutation.mutate(draft)}
         onClose={() => {
           setEditorVisible(false);
           setEditingTier(null);
           setNewTierPreset(undefined);
+          setPendingTierDraft(null);
         }}
       />
 

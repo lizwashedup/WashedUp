@@ -9,6 +9,7 @@ import {
   computeFeePreview,
   getEventPurchases,
   getFailedPayouts,
+  getPaidTicketEventReadiness,
   getOrganizationPurchases,
   getOrganizationReconciliation,
   getPurchaseDetail,
@@ -32,6 +33,60 @@ import type { AttendeeQuestion, DoorAttendeeWithAnswers } from '../ticketAttende
 
 const mockRpc = supabase.rpc as jest.Mock;
 const mockFrom = supabase.from as jest.Mock;
+
+describe('getPaidTicketEventReadiness', () => {
+  beforeEach(() => mockFrom.mockReset());
+
+  it('allows the paid-ticket write only after the event end time is persisted', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      maybeSingle: jest.fn(() => Promise.resolve({ data: { end_time: '2026-09-09T22:00:00.000Z' }, error: null })),
+    };
+    mockFrom.mockReturnValue(chain);
+
+    await expect(getPaidTicketEventReadiness('event-1')).resolves.toEqual({
+      ok: true,
+      endTime: '2026-09-09T22:00:00.000Z',
+      message: null,
+      reason: 'ready',
+    });
+    expect(mockFrom).toHaveBeenCalledWith('explore_events');
+    expect(chain.eq).toHaveBeenCalledWith('id', 'event-1');
+  });
+
+  it('returns actionable guidance when a delayed event save left end_time empty', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      maybeSingle: jest.fn(() => Promise.resolve({ data: { end_time: null }, error: null })),
+    };
+    mockFrom.mockReturnValue(chain);
+
+    await expect(getPaidTicketEventReadiness('event-1')).resolves.toEqual({
+      ok: false,
+      endTime: null,
+      message: 'set and save when this event ends before adding a paid ticket.',
+      reason: 'missing_end_time',
+    });
+  });
+
+  it('does not mislabel a read failure as a missing end time', async () => {
+    const chain: any = {
+      select: jest.fn(() => chain),
+      eq: jest.fn(() => chain),
+      maybeSingle: jest.fn(() => Promise.resolve({ data: null, error: { message: 'network unavailable' } })),
+    };
+    mockFrom.mockReturnValue(chain);
+
+    await expect(getPaidTicketEventReadiness('event-1')).resolves.toEqual({
+      ok: false,
+      endTime: null,
+      message: 'network unavailable',
+      reason: 'unavailable',
+    });
+  });
+});
 
 // ─── buildCheckoutBreakdown (Scene design spec 05: itemized price) ────────
 

@@ -74,4 +74,131 @@ describe('TierEditorSheet', () => {
       status: 'draft',
     }));
   });
+
+  it('submits a named $5 paid ticket instead of looping in the editor', () => {
+    const onSave = jest.fn();
+    let editor: ReturnType<typeof create>;
+    act(() => {
+      editor = create(
+        <TierEditorSheet
+          visible
+          tier={null}
+          commissionBps={400}
+          busy={false}
+          onSave={onSave}
+          onClose={jest.fn()}
+        />,
+      );
+    });
+
+    const inputs = editor!.root.findAllByType(TextInput);
+    const nameInput = inputs.find((node) => node.props.accessibilityLabel === 'ticket name, required');
+    expect(nameInput).toBeTruthy();
+    act(() => {
+      nameInput!.props.onChangeText('General admission');
+      inputs[2].props.onChangeText('5');
+    });
+
+    const saveButton = editor!.root.findByProps({ accessibilityRole: 'button', activeOpacity: 0.85 });
+    act(() => saveButton.props.onPress());
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'General admission',
+      price_cents: 500,
+      status: 'draft',
+    }));
+  });
+
+  it('locks a rapid second tap before React can render the busy state', () => {
+    const onSave = jest.fn();
+    let editor: ReturnType<typeof create>;
+    act(() => {
+      editor = create(
+        <TierEditorSheet
+          visible
+          tier={null}
+          commissionBps={400}
+          busy={false}
+          initialDraft={{
+            name: 'General admission',
+            description: null,
+            price_cents: 500,
+            quantity_cap: null,
+            per_order_min: 1,
+            per_order_max: null,
+            visibility: 'visible',
+            status: 'draft',
+            sales_open_at: null,
+            sales_close_at: null,
+          }}
+          onSave={onSave}
+          onClose={jest.fn()}
+        />,
+      );
+    });
+
+    const saveButton = editor!.root.findByProps({ accessibilityRole: 'button', activeOpacity: 0.85 });
+    act(() => {
+      saveButton.props.onPress();
+      saveButton.props.onPress();
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'General admission',
+      price_cents: 500,
+    }));
+  });
+
+  it('restores attempted edits after an existing free tier detours to add an event end time', () => {
+    const onSave = jest.fn();
+    const existingTier = {
+      id: 'tier-1',
+      event_id: 'event-1',
+      name: 'General admission',
+      description: null,
+      price_cents: 0,
+      quantity_cap: null,
+      per_order_min: 1,
+      per_order_max: null,
+      sales_open_at: null,
+      sales_close_at: null,
+      opens_after_tier_id: null,
+      visibility: 'visible' as const,
+      status: 'draft' as const,
+      sort_order: 0,
+    };
+    let editor: ReturnType<typeof create>;
+    act(() => {
+      editor = create(
+        <TierEditorSheet
+          visible
+          tier={existingTier}
+          commissionBps={400}
+          busy={false}
+          initialDraft={{
+            name: 'Updated admission',
+            description: null,
+            price_cents: 500,
+            quantity_cap: null,
+            per_order_min: 1,
+            per_order_max: null,
+            visibility: 'visible',
+            status: 'draft',
+            sales_open_at: null,
+            sales_close_at: null,
+          }}
+          onSave={onSave}
+          onClose={jest.fn()}
+        />,
+      );
+    });
+
+    const saveButton = editor!.root.findByProps({ accessibilityRole: 'button', activeOpacity: 0.85 });
+    act(() => saveButton.props.onPress());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Updated admission',
+      price_cents: 500,
+    }));
+  });
 });

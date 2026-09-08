@@ -49,6 +49,7 @@ import { useLedCommunity } from '../../lib/selectedCommunity';
 import { supabase } from '../../lib/supabase';
 import { getMyPayoutState, getTiers, isPayoutReady, refundLiveOrdersOnCancel, type CancelRefundSummary } from '../../lib/ticketing';
 import { OFFER_TYPE_OPTIONS, isOfferTypeSellableToday, isOfferType, type OfferType } from '../../lib/offerTypes';
+import { runPaidTicketSetupHandoff } from '../../lib/paidTicketFlow';
 import {
   announceEventToMembers,
   createOperatorEvent,
@@ -90,7 +91,7 @@ function parseDateString(s: string): CalendarDay | null {
 export default function EventFormScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { id, duplicateFrom, templateId, openPhotos } = useLocalSearchParams<{ id?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string }>();
+  const { id, duplicateFrom, templateId, openPhotos, returnToTickets } = useLocalSearchParams<{ id?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string; returnToTickets?: string }>();
   const editing = !!id;
 
   const [title, setTitle] = useState('');
@@ -551,15 +552,25 @@ export default function EventFormScreen() {
   const handleSave = async () => {
     const fields = collectFields({ requireDate: true });
     if (!fields || saving) return;
+    if (offerType === 'ticketed_event' && !fields.end_time) {
+      showError('add an end time', 'paid tickets need to know when the event ends so payouts can be released.');
+      return;
+    }
+    explicitSaveRef.current = true;
     setSaving(true);
     try {
       if (editing && id) {
+        await autosaveInFlightRef.current?.catch(() => undefined);
         await updateOperatorEvent(id, fields, null);
         await syncCoords(id);
         await syncOfferType(id);
         await syncTicketCapacity(id);
         hapticSuccess();
         afterSave();
+        if (returnToTickets === '1') {
+          router.back();
+          return;
+        }
         await warnIfNothingOnSale(id, () => router.back());
       } else {
         const communityId = fromCommunity && community ? community.id : null;
@@ -587,6 +598,7 @@ export default function EventFormScreen() {
     } catch (e) {
       showError('That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
+      explicitSaveRef.current = false;
       setSaving(false);
     }
   };
@@ -616,6 +628,8 @@ export default function EventFormScreen() {
     category, ticketPrice, publicName, pinToChat, blocks,
   ]);
   const lastSavedRef = React.useRef<string | null>(null);
+  const autosaveInFlightRef = React.useRef<Promise<void> | null>(null);
+  const explicitSaveRef = React.useRef(false);
   useEffect(() => {
     if (!isDraft || !id || saving || !seeded) return;
     if (lastSavedRef.current === null) {
@@ -624,17 +638,27 @@ export default function EventFormScreen() {
     }
     if (lastSavedRef.current === autosaveSignature) return;
     const handle = setTimeout(async () => {
+      if (explicitSaveRef.current) return;
       const fields = collectFields({ silent: true });
       if (!fields) return;
+      const olderAutosave = autosaveInFlightRef.current;
+      const autosave = (async () => {
+        await olderAutosave?.catch(() => undefined);
+        if (explicitSaveRef.current) return;
+        await updateOperatorEvent(id, fields, null);
+      })();
+      autosaveInFlightRef.current = autosave;
       try {
         setAutosaveState('saving');
-        await updateOperatorEvent(id, fields, null);
+        await autosave;
         lastSavedRef.current = autosaveSignature;
         setAutosaveState('saved');
       } catch {
         // never a blocking alert on a background save; the explicit save
         // button remains the honest path and will surface the real error
         setAutosaveState('problem');
+      } finally {
+        if (autosaveInFlightRef.current === autosave) autosaveInFlightRef.current = null;
       }
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(handle);
@@ -643,9 +667,11 @@ export default function EventFormScreen() {
   const handleSaveDraft = async () => {
     const fields = collectFields();
     if (!fields || saving) return;
+    explicitSaveRef.current = true;
     setSaving(true);
     try {
       if (editing && id) {
+        await autosaveInFlightRef.current?.catch(() => undefined);
         await updateOperatorEvent(id, fields, null);
         await syncCoords(id);
       } else {
@@ -659,6 +685,48 @@ export default function EventFormScreen() {
     } catch (e) {
       showError('That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
+      explicitSaveRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  /**
+   * Ticket setup reads the saved event row, not the form's local state. Flush
+   * the full event first so a freshly selected end time is guaranteed to be
+   * present before a paid tier can be added. This is shared by Community and
+   * Organization events because community attribution does not change the
+   * event writer.
+   */
+  const handleOpenTickets = async (setupMode = false) => {
+    if (!id || saving) return;
+    const fields = collectFields({ requireDate: true });
+    if (!fields) return;
+    if (!fields.end_time) {
+      showError('add an end time', 'paid tickets need to know when the event ends so payouts can be released.');
+      return;
+    }
+    explicitSaveRef.current = true;
+    setSaving(true);
+    try {
+      setAutosaveState('saving');
+      await runPaidTicketSetupHandoff({
+        pendingAutosave: autosaveInFlightRef.current,
+        saveEvent: () => updateOperatorEvent(id, fields, null),
+        syncEventState: async () => {
+          await syncCoords(id);
+          await syncOfferType(id);
+          await syncTicketCapacity(id);
+        },
+        invalidateTicketEvent: () => queryClient.invalidateQueries({ queryKey: ['ticket-setup-event', id] }),
+        navigate: () => router.push(`/creator/tickets?id=${id}${setupMode ? '&setup=1' : ''}` as never),
+      });
+      lastSavedRef.current = autosaveSignature;
+      setAutosaveState('saved');
+    } catch (e) {
+      setAutosaveState('problem');
+      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+    } finally {
+      explicitSaveRef.current = false;
       setSaving(false);
     }
   };
@@ -666,6 +734,11 @@ export default function EventFormScreen() {
   const handlePublishDraft = async () => {
     const fields = collectFields({ requireDate: true });
     if (!fields || !id || saving) return;
+    if (offerType === 'ticketed_event' && !fields.end_time) {
+      showError('add an end time', 'paid tickets need to know when the event ends so payouts can be released.');
+      return;
+    }
+    explicitSaveRef.current = true;
     setSaving(true);
     try {
       // Build 42 closes the disconnected create-to-sell gap. A ticketed event
@@ -682,7 +755,7 @@ export default function EventFormScreen() {
             : 'your paid ticket is still a draft. put it on sale, then publish.',
           buttons: [
             { text: 'not now', style: 'cancel' },
-            { text: 'set it up', onPress: () => router.push(`/creator/tickets?id=${id}&setup=1` as never) },
+            { text: 'set it up', onPress: () => { void handleOpenTickets(true); } },
           ],
         });
         return;
@@ -699,6 +772,7 @@ export default function EventFormScreen() {
           return;
         }
       }
+      await autosaveInFlightRef.current?.catch(() => undefined);
       await updateOperatorEvent(id, fields, 'Live');
       await syncCoords(id);
       hapticSuccess();
@@ -712,6 +786,7 @@ export default function EventFormScreen() {
     } catch (e) {
       showError('That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
+      explicitSaveRef.current = false;
       setSaving(false);
     }
   };
@@ -957,7 +1032,7 @@ export default function EventFormScreen() {
               // every visit to this event until tickets are actually on sale.
               <TouchableOpacity
                 style={styles.ticketNudge}
-                onPress={() => router.push(`/creator/tickets?id=${id}` as never)}
+                onPress={() => { void handleOpenTickets(); }}
                 activeOpacity={0.85}
               >
                 <View style={styles.ticketNudgeBody}>
@@ -1076,11 +1151,15 @@ export default function EventFormScreen() {
               )}
             </View>
 
-            <Text style={styles.fieldLabel}>ends</Text>
-            {/* copy to the taste gate (§3.3): optional, but the end feeds the
-                payout-release wall on paid events, so it is worth setting. a
-                blank end day means the same day as the start. */}
-            <Text style={styles.fieldHint}>optional. sets when it wraps, and when a paid event's payout releases.</Text>
+            <Text style={styles.fieldLabel}>ends{offerType === 'ticketed_event' ? ' · required' : ''}</Text>
+            {/* copy to the taste gate (§3.3): optional for free events and
+                required for paid events because payout release depends on it.
+                a blank end day means the same day as the start. */}
+            <Text style={styles.fieldHint}>
+              {offerType === 'ticketed_event'
+                ? 'required for paid tickets and payout release.'
+                : 'optional. sets when it wraps.'}
+            </Text>
             <View style={styles.pickerBlock}>
               <CollapsibleCalendar
                 selected={endDayIsPast ? null : parsedEndDay}
@@ -1102,7 +1181,7 @@ export default function EventFormScreen() {
               />
               {!!endTimeMatch && (
                 <TouchableOpacity onPress={() => { hapticLight(); setEndTime(''); setEndDate(''); }} hitSlop={8}>
-                  {/* LIZ COPY: an end stays optional, so it must be removable */}
+                  {/* LIZ COPY: free events may remove it; paid-event save will explain the requirement */}
                   <Text style={styles.clearTimeLink}>no end time</Text>
                 </TouchableOpacity>
               )}
@@ -1378,13 +1457,15 @@ export default function EventFormScreen() {
 
             <TouchableOpacity
               style={[styles.saveBtn, saving && styles.saveBtnBusy]}
-              onPress={isDraft ? handlePublishDraft : handleSave}
+              onPress={returnToTickets === '1' ? handleSave : isDraft ? handlePublishDraft : handleSave}
               disabled={saving}
             >
               {saving ? (
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
-                <Text style={styles.saveBtnText}>{isDraft ? 'publish it' : editing ? 'save' : 'put it up'}</Text>
+                <Text style={styles.saveBtnText}>
+                  {returnToTickets === '1' ? 'save and return to tickets' : isDraft ? 'publish it' : editing ? 'save' : 'put it up'}
+                </Text>
               )}
             </TouchableOpacity>
 

@@ -177,6 +177,46 @@ export interface TierDraft {
   sales_close_at?: string | null;
 }
 
+export interface PaidTicketEventReadiness {
+  ok: boolean;
+  endTime: string | null;
+  message: string | null;
+  reason: 'ready' | 'missing_end_time' | 'missing_event' | 'unavailable';
+}
+
+/**
+ * Paid tickets cannot be written until the event has a persisted end time.
+ * The database enforces the same rule because payout release depends on it.
+ * Read it immediately before the tier write so a delayed event-form autosave
+ * can never turn the ticket editor into an unexplained retry loop.
+ */
+export async function getPaidTicketEventReadiness(eventId: string): Promise<PaidTicketEventReadiness> {
+  const { data, error } = await supabase
+    .from('explore_events')
+    .select('end_time')
+    .eq('id', eventId)
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, endTime: null, message: error.message, reason: 'unavailable' };
+  }
+  if (!data) {
+    return {
+      ok: false,
+      endTime: null,
+      message: 'this event could not be found. reopen it from your events list.',
+      reason: 'missing_event',
+    };
+  }
+  const endTime = typeof data.end_time === 'string' && data.end_time.trim() ? data.end_time : null;
+  return {
+    ok: endTime !== null,
+    endTime,
+    message: endTime ? null : 'set and save when this event ends before adding a paid ticket.',
+    reason: endTime ? 'ready' : 'missing_end_time',
+  };
+}
+
 export async function createTier(
   eventId: string,
   draft: TierDraft,

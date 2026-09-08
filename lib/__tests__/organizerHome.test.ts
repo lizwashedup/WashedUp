@@ -360,3 +360,28 @@ describe('Build 43 ticket-editor regression contracts', () => {
     expect(source).toContain('{savedTierName} it is saved below.');
   });
 });
+
+describe('Paid-ticket journey regression contracts', () => {
+  const readAppSource = (relativePath: string) => fs.readFileSync(path.resolve(__dirname, '../..', relativePath), 'utf8');
+
+  it('flushes the complete event before either Community or Organization ticket setup opens', () => {
+    const source = readAppSource('app/creator/event-form.tsx');
+    expect(source).toContain('const handleOpenTickets = async');
+    expect(source).toContain('await updateOperatorEvent(id, fields, null);');
+    expect(source).toContain("queryKey: ['ticket-setup-event', id]");
+    expect(source).toContain('void handleOpenTickets(true)');
+    expect(source).toContain('void handleOpenTickets()');
+    expect(source).toContain("returnToTickets === '1' ? handleSave");
+    expect(source).toContain('save and return to tickets');
+    expect(source).toContain('await autosaveInFlightRef.current?.catch(() => undefined);');
+  });
+
+  it('rechecks the persisted event end time immediately before a paid tier write', () => {
+    const source = readAppSource('app/creator/tickets.tsx');
+    expect(source).toContain('if (draft.price_cents > 0)');
+    expect(source).toContain('await getPaidTicketEventReadiness(id!)');
+    expect(source).toContain("error as Error & { code?: string }");
+    expect(source).toContain("router.push(`/creator/event-form?id=${id}&returnToTickets=1`");
+    expect(source).toContain("readiness.reason === 'missing_end_time'");
+  });
+});

@@ -59,6 +59,8 @@ interface TierEditorSheetProps {
   onClose: () => void;
   /** Pre-fills the name field when creating a new tier (tier === null). Ignored while editing an existing tier. */
   initialName?: string;
+  /** Restores an unsaved new tier after the creator fixes a required event field. */
+  initialDraft?: TierDraft | null;
 }
 
 function parsePriceCents(text: string): number | null {
@@ -69,7 +71,7 @@ function parsePriceCents(text: string): number | null {
   return Math.round(value * 100);
 }
 
-export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, onClose, initialName }: TierEditorSheetProps) {
+export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, onClose, initialName, initialDraft }: TierEditorSheetProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [priceText, setPriceText] = useState('');
@@ -84,25 +86,31 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
   const [saveAttempted, setSaveAttempted] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const nameRef = useRef<TextInput>(null);
+  const saveLockRef = useRef(false);
 
   useEffect(() => {
     if (!visible) return;
-    setName(tier?.name ?? initialName ?? '');
-    setDescription(tier?.description ?? '');
-    setPriceText(tier ? (tier.price_cents === 0 ? '' : (tier.price_cents / 100).toFixed(2)) : '');
-    setCapText(tier?.quantity_cap ? String(tier.quantity_cap) : '');
+    const source = initialDraft ?? tier;
+    setName(source?.name ?? initialName ?? '');
+    setDescription(source?.description ?? '');
+    setPriceText(source ? (source.price_cents === 0 ? '' : (source.price_cents / 100).toFixed(2)) : '');
+    setCapText(source?.quantity_cap ? String(source.quantity_cap) : '');
     // 1 is the column's no-minimum default; only a real minimum shows
-    setPerOrderMinText(tier && tier.per_order_min > 1 ? String(tier.per_order_min) : '');
-    setPerOrderMaxText(tier?.per_order_max ? String(tier.per_order_max) : '');
-    setHidden(tier?.visibility === 'hidden');
-    const openWall = tier?.sales_open_at ? getLAWallParts(tier.sales_open_at) : null;
+    setPerOrderMinText(source && source.per_order_min > 1 ? String(source.per_order_min) : '');
+    setPerOrderMaxText(source?.per_order_max ? String(source.per_order_max) : '');
+    setHidden(source?.visibility === 'hidden');
+    const openWall = source?.sales_open_at ? getLAWallParts(source.sales_open_at) : null;
     setOpenDate(openWall ? `${openWall.y}-${pad2(openWall.m + 1)}-${pad2(openWall.d)}` : '');
     setOpenTime(openWall ? `${pad2(openWall.hour24)}:${pad2(openWall.minute)}` : '');
-    const closeWall = tier?.sales_close_at ? getLAWallParts(tier.sales_close_at) : null;
+    const closeWall = source?.sales_close_at ? getLAWallParts(source.sales_close_at) : null;
     setCloseDate(closeWall ? `${closeWall.y}-${pad2(closeWall.m + 1)}-${pad2(closeWall.d)}` : '');
     setCloseTime(closeWall ? `${pad2(closeWall.hour24)}:${pad2(closeWall.minute)}` : '');
     setSaveAttempted(false);
-  }, [visible, tier, initialName]);
+  }, [visible, tier, initialName, initialDraft]);
+
+  useEffect(() => {
+    if (!busy) saveLockRef.current = false;
+  }, [busy]);
 
   const priceCents = parsePriceCents(priceText);
   const preview = useMemo(
@@ -170,13 +178,14 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
 
   const handleSave = () => {
     setSaveAttempted(true);
-    if (busy || hasValidationProblem || priceCents === null) {
+    if (saveLockRef.current || busy || hasValidationProblem || priceCents === null) {
       if (name.trim().length === 0) {
         scrollRef.current?.scrollTo({ y: 0, animated: true });
         nameRef.current?.focus();
       }
       return;
     }
+    saveLockRef.current = true;
     hapticLight();
     const visibility: TierVisibility = hidden ? 'hidden' : 'visible';
     const cap = capText.trim() ? parseInt(capText, 10) : null;
