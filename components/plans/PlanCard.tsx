@@ -354,7 +354,11 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   );
 
   return (
-    <Animated.View entering={FadeInUp.duration(300).easing(Easing.out(Easing.ease))}>
+    <Animated.View
+      entering={isOptimisticPlanId(plan.id)
+        ? FadeInUp.duration(300).easing(Easing.out(Easing.ease))
+        : undefined}
+    >
     <TouchableOpacity
       onPress={handlePress}
       onLongPress={handleLongPress}

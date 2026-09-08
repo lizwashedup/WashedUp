@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
@@ -997,7 +998,12 @@ export default function EventFormScreen() {
             <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
         ) : (
-          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            keyboardShouldPersistTaps="handled"
+            onScrollBeginDrag={Keyboard.dismiss}
+          >
             <Text style={styles.title}>{editing ? 'edit your event' : duplicateFrom ? 'put it on again' : 'put on an event'}</Text>
             {!editing && !!duplicateFrom && (
               /* LIZ COPY */
@@ -1336,6 +1342,16 @@ export default function EventFormScreen() {
 
             <Text style={styles.sectionHeader}>who puts it on</Text>
             <View style={styles.sectionCard}>
+            {!editing && !community && (
+              <>
+                <Text style={styles.fieldLabel}>whose event is this</Text>
+                <View style={styles.chipWrap}>
+                  <View style={[styles.chip, styles.chipOn]}>
+                    <Text style={[styles.chipText, styles.chipTextOn]}>just you</Text>
+                  </View>
+                </View>
+              </>
+            )}
             {!editing && community && (
               <>
                 <Text style={styles.fieldLabel}>whose event is this</Text>

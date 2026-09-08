@@ -18,7 +18,6 @@ import { ChevronDown, ChevronRight } from 'lucide-react-native';
 const wLogo = require('../../../assets/images/w-logo-waves.png');
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
-import { withTimeout } from '../../../lib/withTimeout';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
 import { consumeChatListDirty } from '../../../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
@@ -218,11 +217,11 @@ const ChatRow = React.memo(function ChatRow({
 
 export default function ChatsScreen() {
   const router = useRouter();
-  const { chats, loading, refetch, removeChat } = useChatList();
+  const { data: authUserId } = useAuthUserId();
+  const { chats, loading, refetch, removeChat } = useChatList(authUserId);
   const [refreshing, setRefreshing] = React.useState(false);
   // Delete chat / leave circle from the list (doc 120, CHAT_DELETE_ENABLED).
   // pendingLeave drives the confirm sheet; leaveError the failure alert.
-  const { data: authUserId } = useAuthUserId();
   const leaveCircle = useLeaveCircle(authUserId);
   const [pendingLeave, setPendingLeave] = React.useState<ChatPreview | null>(null);
   const [leaveError, setLeaveError] = React.useState<string | null>(null);
@@ -247,13 +246,20 @@ export default function ChatsScreen() {
   // was a primary contributor to the 2026-05-18 "chat is slow" reports.
   // Still refreshes when you open Chats, just not on rapid tab-switching.
   const lastChatsFocusFetchRef = React.useRef(0);
+  const hasFocusedChatsRef = React.useRef(false);
 
   useFocusEffect(
     React.useCallback(() => {
       const nowTs = Date.now();
+      const isFirstFocus = !hasFocusedChatsRef.current;
+      hasFocusedChatsRef.current = true;
+      const isDirty = consumeChatListDirty();
+      if (isFirstFocus) lastChatsFocusFetchRef.current = nowTs;
       // A just-created conversation (e.g. a new DM) sets the dirty flag so we
       // refetch immediately, bypassing the throttle; otherwise throttle to 30s.
-      if (consumeChatListDirty() || nowTs - lastChatsFocusFetchRef.current > 30_000) {
+      // The hook already fetches on mount, so the first focus must not start a
+      // duplicate copy of the same multi-query request.
+      if (!isFirstFocus && (isDirty || nowTs - lastChatsFocusFetchRef.current > 30_000)) {
         lastChatsFocusFetchRef.current = nowTs;
         // T1 (doc 121): silent. The loud form flips the whole screen to the
         // skeleton for the seconds the ~5 queries take, wiping content that
@@ -274,22 +280,17 @@ export default function ChatsScreen() {
       Notifications.setBadgeCountAsync(0).catch(() => {});
       (async () => {
         try {
-          // Bounded so a stale-session refresh can't hang this notification-clear
-          // side-effect; same pattern as the chat-list fetch.
-          const { data: { user } } = await withTimeout(
-            supabase.auth.getUser(), 3000, { data: { user: null } } as any,
-          );
-          if (!user) return;
+          if (!authUserId) return;
           await supabase
             .from('app_notifications')
             .update({ status: 'read' })
-            .eq('user_id', user.id)
+            .eq('user_id', authUserId)
             .eq('type', 'new_message')
             .eq('status', 'unread');
           queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
         } catch {}
       })();
-    }, [refetch, queryClient]),
+    }, [refetch, queryClient, authUserId]),
   );
 
   const handleRefresh = useCallback(async () => {

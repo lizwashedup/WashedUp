@@ -58,8 +58,6 @@ import {
   wasWelcomeShownThisSession,
 } from '../../../lib/promptState';
 
-const TC = '#B5522E'; // terracotta primary accent
-
 const wLogo = require('../../../assets/images/w-logo-waves.png');
 
 /**
@@ -949,6 +947,28 @@ export default function PlansScreen() {
     }
   }, [allPlans, blockUser]);
 
+  // Keep card callbacks stable so typing, saving, and other feed state changes
+  // do not defeat PlanCard's memoization and redraw every visible card.
+  const allPlansRef = useRef(allPlans);
+  allPlansRef.current = allPlans;
+  const wishlistMutateRef = useRef(wishlistMutation.mutate);
+  wishlistMutateRef.current = wishlistMutation.mutate;
+  const handleWishlist = useCallback((id: string, current: boolean) => {
+    wishlistMutateRef.current({ eventId: id, current });
+    if (!current) {
+      const plan = allPlansRef.current.find((candidate) => candidate.id === id);
+      setSnackbar({ planId: id, planTitle: plan?.title ?? '' });
+    } else {
+      setSnackbar(null);
+    }
+  }, []);
+  const handleFeaturedWishlist = useCallback((id: string, current: boolean) => {
+    wishlistMutateRef.current({ eventId: id, current });
+  }, []);
+  const handleCreatorPress = useCallback((creatorId: string) => {
+    setMiniProfileUserId(creatorId);
+  }, []);
+
   const renderItem = useCallback(
     ({ item }: { item: Plan }) => (
       <View style={styles.cardWrap}>
@@ -957,23 +977,15 @@ export default function PlansScreen() {
           layout={PLAN_CARD_ACTIVITY_FIRST_ENABLED ? 'activity-first' : 'creator-first'}
           isMember={!!memberIdSet[item.id]}
           isWishlisted={!!wishlistedSet[item.id]}
-          onWishlist={(id, current) => {
-            wishlistMutation.mutate({ eventId: id, current });
-            if (!current) {
-              const plan = allPlans.find(p => p.id === id);
-              setSnackbar({ planId: id, planTitle: plan?.title ?? '' });
-            } else {
-              setSnackbar(null);
-            }
-          }}
+          onWishlist={handleWishlist}
           onReport={handleReport}
           onBlock={handleBlock}
-          onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
+          onCreatorPress={handleCreatorPress}
           isPast={item.status === 'completed'}
         />
       </View>
     ),
-    [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, allPlans],
+    [memberIdSet, wishlistedSet, handleWishlist, handleReport, handleBlock, handleCreatorPress],
   );
 
   // Renders a cluster of duplicate plans as a horizontal scroll. Each member
@@ -1000,17 +1012,10 @@ export default function PlansScreen() {
                   plan={toPlanCardPlan(p)}
                   isMember={!!memberIdSet[p.id]}
                   isWishlisted={!!wishlistedSet[p.id]}
-                  onWishlist={(id, current) => {
-                    wishlistMutation.mutate({ eventId: id, current });
-                    if (!current) {
-                      setSnackbar({ planId: id, planTitle: p.title });
-                    } else {
-                      setSnackbar(null);
-                    }
-                  }}
+                  onWishlist={handleWishlist}
                   onReport={handleReport}
                   onBlock={handleBlock}
-                  onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
+                  onCreatorPress={handleCreatorPress}
                   isPast={p.status === 'completed'}
                 />
               </View>
@@ -1019,7 +1024,7 @@ export default function PlansScreen() {
         </View>
       );
     },
-    [renderItem, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock],
+    [renderItem, memberIdSet, wishlistedSet, handleWishlist, handleReport, handleBlock, handleCreatorPress],
   );
 
   const persistWelcomeSeen = useCallback(async () => {
@@ -1059,7 +1064,7 @@ export default function PlansScreen() {
               plan={featuredPlans[0]}
               isMember={!!memberIdSet[featuredPlans[0].id]}
               isWishlisted={!!wishlistedSet[featuredPlans[0].id]}
-              onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+              onWishlist={handleFeaturedWishlist}
               onReport={handleReport}
               onBlock={handleBlock}
               solo
@@ -1079,7 +1084,7 @@ export default function PlansScreen() {
                 plan={item}
                 isMember={!!memberIdSet[item.id]}
                 isWishlisted={!!wishlistedSet[item.id]}
-                onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+                onWishlist={handleFeaturedWishlist}
                 onReport={handleReport}
                 onBlock={handleBlock}
               />
@@ -1088,7 +1093,7 @@ export default function PlansScreen() {
         )}
       </View>
     );
-  }, [featuredPlans, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock]);
+  }, [featuredPlans, memberIdSet, wishlistedSet, handleFeaturedWishlist, handleReport, handleBlock]);
 
   // First-visit welcome banner. Renders inline at the top of the feed.
   // Uses the same persistence (welcome_seen_at + AsyncStorage) as before;
@@ -1260,13 +1265,13 @@ export default function PlansScreen() {
       {mapView ? (
         mapLoading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={TC} />
+            <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
         ) : (
           <MapErrorBoundary onClose={() => setMapView(false)}>
             <Suspense fallback={
               <View style={styles.centered}>
-                <ActivityIndicator size="large" color={TC} />
+                <ActivityIndicator size="large" color={Colors.terracotta} />
               </View>
             }>
               <LazyPlansMapView
@@ -1274,7 +1279,7 @@ export default function PlansScreen() {
                 wishlistedSet={wishlistedSet}
                 onPlanPress={(id) => router.push(`/plan/${id}`)}
                 onClose={() => setMapView(false)}
-                onWishlist={(id, current) => wishlistMutation.mutate({ eventId: id, current })}
+                onWishlist={handleFeaturedWishlist}
               />
             </Suspense>
           </MapErrorBoundary>
@@ -1343,7 +1348,7 @@ export default function PlansScreen() {
               maxToRenderPerBatch={20}
               windowSize={11}
               refreshControl={
-                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={TC} />
+                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />
               }
             />
           )}
@@ -1679,7 +1684,7 @@ const styles = StyleSheet.create({
   clusterHeaderText: {
     fontFamily: Fonts.sansBold,
     fontSize: 11,
-    color: TC,
+    color: Colors.terracotta,
     textTransform: 'uppercase',
     letterSpacing: 1.5,
     marginLeft: 20,
@@ -1699,7 +1704,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     fontFamily: Fonts.sansBold,
     fontSize: 11,
-    color: TC,
+    color: Colors.terracotta,
     textTransform: 'uppercase',
     letterSpacing: 1.5,
     marginTop: 24,
@@ -1713,11 +1718,11 @@ const styles = StyleSheet.create({
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: '#78695C', textAlign: 'center', marginBottom: 20 },
   emptySubText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: '#A09385', textAlign: 'center', lineHeight: 21, marginTop: -8, marginBottom: 20, maxWidth: 300 },
-  emptyButton: { backgroundColor: TC, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
+  emptyButton: { backgroundColor: Colors.terracotta, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
   emptyButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: '#FFFFFF' },
   errorTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: '#2C1810', marginBottom: 8, textAlign: 'center' },
   errorMessage: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: '#78695C', textAlign: 'center', marginBottom: 20, paddingHorizontal: 32 },
-  retryButton: { backgroundColor: TC, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
+  retryButton: { backgroundColor: Colors.terracotta, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
   retryButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: '#FFFFFF' },
 
   profilePromptOverlay: {
