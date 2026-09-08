@@ -21,7 +21,7 @@ import { ArrowLeft, Share2, Heart, Calendar, MapPin, Ticket, Users, ChevronRight
 import { supabase } from '../../lib/supabase';
 import { logError } from '../../lib/logger';
 import { openUrl } from '../../lib/url';
-import { consumePendingCheckout } from '../../lib/pendingLink';
+import { peekPendingCheckout } from '../../lib/pendingLink';
 import LinkifiedText from '../../components/LinkifiedText';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
@@ -51,13 +51,14 @@ import { getParticipationNoticeStatus, recordParticipationAssent } from '../../l
 import { type DescriptionBlock } from '../../lib/eventContent';
 import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
 import { EventAction, EventSurface } from '../../constants/EventDesign';
-import { formatCents, getPublicTicketSummary, isLowInventory } from '../../lib/ticketing';
+import { formatCents, getOrder, getPublicTicketSummary, isLowInventory } from '../../lib/ticketing';
 import { EventFaqCards } from '../../components/events/EventFaqCards';
 import { TicketCheckoutSheet } from '../../components/events/TicketCheckoutSheet';
 import PlanChooserSheet, { type ChooserPlan } from '../../components/plans/PlanChooserSheet';
 import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
 import { getJoinGate } from '../../lib/communityJoin';
 import { getJoinPolicy } from '../../lib/creatorMode';
+import { DEV_PAYMENT_QA_PROMO_CODE } from '../../lib/devPaymentQa';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 280;
@@ -165,7 +166,7 @@ export default function EventDetailScreen() {
   // §3.0 guest preview: the creator opens /event/[id]?preview=guest to see the
   // real public renderer. The param is honored ONLY for the organizer (below),
   // exactly as the community page gates ?preview to the leader.
-  const { id, preview } = useLocalSearchParams<{ id: string; preview?: string }>();
+  const { id, preview, qaPayment } = useLocalSearchParams<{ id: string; preview?: string; qaPayment?: string }>();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
@@ -197,8 +198,12 @@ export default function EventDetailScreen() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
-      consumePendingCheckout().then((orderId) => {
-        if (orderId) router.push(`/tickets/order/${orderId}` as never);
+      peekPendingCheckout().then(async (orderId) => {
+        if (!orderId) return;
+        const pendingOrder = await getOrder(orderId).catch(() => null);
+        if (pendingOrder && pendingOrder.status !== 'pending') {
+          router.replace(`/tickets/order/${orderId}` as never);
+        }
       });
     });
     return () => sub.remove();
@@ -1456,7 +1461,7 @@ export default function EventDetailScreen() {
               hapticMedium(); setCheckoutVisible(true);
             }}
           >
-            <Text style={styles.rsvpButtonText}>get tickets</Text>
+            <Text style={styles.rsvpButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>get tickets</Text>
           </TouchableOpacity>
         ) : sceneParticipationEnabled && (
           <TouchableOpacity
@@ -1470,7 +1475,7 @@ export default function EventDetailScreen() {
             {rsvpBusy ? (
               <ActivityIndicator size="small" color={myRsvp === 'going' ? Colors.brandDeep : Colors.white} />
             ) : (
-              <Text style={[styles.rsvpButtonText, myRsvp === 'going' && styles.rsvpButtonTextGoing]}>
+              <Text style={[styles.rsvpButtonText, myRsvp === 'going' && styles.rsvpButtonTextGoing]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                 {myRsvp === 'going' ? "you're going" : 'count me in'}
               </Text>
             )}
@@ -1493,12 +1498,12 @@ export default function EventDetailScreen() {
               }}
             >
               {/* copy to the taste gate (doc 69 Q5) */}
-              <Text style={styles.postPlanButtonText}>open the chat</Text>
+              <Text style={styles.postPlanButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>open the chat</Text>
             </TouchableOpacity>
           )
         ) : (
           <TouchableOpacity style={styles.postPlanButton} onPress={goFindPeople}>
-            <Text style={styles.postPlanButtonText}>find people to go with</Text>
+            <Text style={styles.postPlanButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>find people</Text>
           </TouchableOpacity>
         )}
         </>
@@ -1568,6 +1573,7 @@ export default function EventDetailScreen() {
         eventVenue={event.venue}
         creatorName={bylineName}
         creatorAvatar={bylineFace ?? bylineLogo}
+        initialPromoCode={__DEV__ && qaPayment === '1' ? DEV_PAYMENT_QA_PROMO_CODE : undefined}
       />
     </View>
   );
@@ -1754,13 +1760,14 @@ const styles = StyleSheet.create({
   postPlanButton: {
     flex: 1,
     borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderColor: Colors.terracotta,
+    borderRadius: 999,
+    minHeight: 56,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
+  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta, textAlign: 'center' },
   // Scene handoff §15 "Event cancelled": a quiet disabled pill (same shape
   // as rsvpButton, tierBlocked's opacity-only convention) replaces every
   // attendance CTA, plus one calm contact line reusing the order-complete
@@ -1777,10 +1784,11 @@ const styles = StyleSheet.create({
   rsvpButton: {
     flex: 1,
     backgroundColor: Colors.terracotta,
-    borderRadius: 14,
+    borderRadius: 999,
     borderWidth: 1.5,
     borderColor: Colors.terracotta,
-    paddingVertical: 14,
+    minHeight: 56,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },

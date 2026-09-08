@@ -48,6 +48,7 @@ import { hapticLight, hapticSuccess, hapticError } from '../../../lib/haptics';
 import { logError } from '../../../lib/logger';
 import { eventStartIso, formatEventDateLA } from '../../../lib/laDate';
 import { showAddToCalendar } from '../../../lib/addToCalendar';
+import { clearPendingCheckout, peekPendingCheckout } from '../../../lib/pendingLink';
 import { wasNudged, markNudged } from '../../../lib/eventRsvp';
 import { getEventTopicId } from '../../../lib/communityChat';
 import { getOrganizerProfiles } from '../../../lib/organizerProfile';
@@ -142,7 +143,13 @@ function EventHeader({
   order, bylineName, bylineLogo,
 }: { order: MyOrder; bylineName: string | null; bylineLogo: string | null }) {
   return (
-    <View style={styles.band}>
+    <TouchableOpacity
+      style={styles.band}
+      onPress={() => router.push(`/event/${order.event_id}` as never)}
+      activeOpacity={0.9}
+      accessibilityRole="button"
+      accessibilityLabel={`Open event: ${order.event_title ?? 'your event'}`}
+    >
       {order.event_image ? (
         <Image source={{ uri: order.event_image }} style={StyleSheet.absoluteFill} contentFit="cover" />
       ) : null}
@@ -172,7 +179,7 @@ function EventHeader({
           </View>
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -239,6 +246,18 @@ export default function OrderCompleteScreen() {
     },
   });
   const view = resolveOrderViewState(order, isLoading);
+
+  // The saved destination survives every Safari/app lifecycle bounce. Clear
+  // it only after the payment reaches a terminal or ticket-ready state. A
+  // readable pending row exists before Stripe opens and is not proof that
+  // the checkout completed.
+  useEffect(() => {
+    const terminal = view.kind === 'ready' || view.kind === 'canceled' || view.kind === 'refunded';
+    if (!id || !terminal) return;
+    peekPendingCheckout().then((pendingId) => {
+      if (pendingId === id) clearPendingCheckout();
+    });
+  }, [id, view.kind]);
 
   useEffect(() => {
     setPendingStuck(false);

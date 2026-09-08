@@ -135,6 +135,7 @@ Deno.serve(async (req)=>{
   const tierId = body?.tier_id ?? '';
   const qty = Number.isInteger(body?.qty) ? body.qty : Number(body?.qty);
   const origin = ALLOWED_ORIGINS.includes(body?.origin) ? body.origin : ALLOWED_ORIGINS[0];
+  const nativeReturn = body?.return_mode === 'native';
   if (!tierId || !Number.isFinite(qty) || qty < 1) {
     return json(400, {
       error: 'pick a ticket and a quantity.'
@@ -384,8 +385,12 @@ Deno.serve(async (req)=>{
         reference_code: b.reference_code
       },
       expires_at: holdExpiresSec,
-      success_url: `${origin}/e?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/e?checkout=cancelled`
+      success_url: nativeReturn
+        ? `${origin}/e/?checkout=success&session_id={CHECKOUT_SESSION_ID}&order=${b.order_id}&native=1`
+        : `${origin}/e?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: nativeReturn
+        ? `${origin}/e/?checkout=cancelled&order=${b.order_id}&native=1`
+        : `${origin}/e?checkout=cancelled`
     });
   } catch (err) {
     await unwindPending();

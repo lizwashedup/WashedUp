@@ -30,6 +30,21 @@ describe('ticket door offline contract', () => {
     });
   });
 
+  it('extracts the admission reference from a buyer QR event link', async () => {
+    mockRpc.mockResolvedValue({ data: 'admitted', error: null });
+    const qr = 'https://washedup.app/e/event-123?ticket=seat-code';
+    expect(normalizeCode(qr)).toBe('SEAT-CODE');
+    await recordCheckin(qr);
+    expect(mockRpc).toHaveBeenCalledWith('record_ticket_checkin', {
+      p_reference_code: 'SEAT-CODE',
+    });
+  });
+
+  it('does not extract a ticket parameter from another domain', () => {
+    const foreign = 'https://example.com/e/event-123?ticket=seat-code';
+    expect(normalizeCode(foreign)).toBe(foreign.toUpperCase());
+  });
+
   it('reads the grown {result, admitted_at} jsonb shape and threads the timestamp through', async () => {
     mockRpc.mockResolvedValueOnce({
       data: { result: 'duplicate', admitted_at: '2026-09-01T20:47:00-07:00' },

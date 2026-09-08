@@ -40,6 +40,9 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
 
     if (pathname === '/' ) return '/(tabs)/plans';
     if (pathname === '/plans') return '/(tabs)/plans';
+    if (pathname === '/e' && url.searchParams.get('checkout')) {
+      return `/checkout-return${search}`;
+    }
     if (pathname.startsWith('/auth/callback')) return path;
     if (pathname.startsWith('/app/creator')) return '/(creator)/events';
 

@@ -139,11 +139,14 @@ interface TicketCheckoutSheetProps {
    *  whichever the caller resolved; person = face, business = logo, never
    *  both (same rule as the event page). */
   creatorAvatar: string | null;
+  /** Development-only shortcut used by the local payment fixture. */
+  initialPromoCode?: string;
 }
 
 export function TicketCheckoutSheet({
   visible, eventId, onClose, onFreeConfirmed,
   eventTitle, eventImage, eventDateLabel, eventVenue, creatorName, creatorAvatar,
+  initialPromoCode,
 }: TicketCheckoutSheetProps) {
   const [tiers, setTiers] = useState<SellableTier[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -175,6 +178,7 @@ export function TicketCheckoutSheet({
   // yet seen end-to-end: no Live event currently has an active question.
   const [questions, setQuestions] = useState<TicketQuestion[]>([]);
   const [answers, setAnswers] = useState<AnswerDraft>({});
+  const initialPromoAttemptedRef = useRef(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -182,8 +186,9 @@ export function TicketCheckoutSheet({
     setAddonQty({});
     setAddonVariationPick({});
     setAnswers({});
-    setCodeFieldOpen(false);
-    setCodeText('');
+    initialPromoAttemptedRef.current = false;
+    setCodeFieldOpen(!!initialPromoCode);
+    setCodeText(initialPromoCode ?? '');
     setAppliedCode(null);
     setQuote(null);
     setCodeNote(null);
@@ -199,7 +204,25 @@ export function TicketCheckoutSheet({
       getAddonVariationsMap(rows.map((a) => a.id)).then(setAddonVariations);
     });
     getQuestions(eventId).then(setQuestions).catch(() => setQuestions([]));
-  }, [visible, eventId]);
+  }, [visible, eventId, initialPromoCode]);
+
+  useEffect(() => {
+    if (!visible || !initialPromoCode || !selectedId || initialPromoAttemptedRef.current) return;
+    initialPromoAttemptedRef.current = true;
+    setQuoteBusy(true);
+    setCodeNote(null);
+    quoteCheckout(selectedId, 1, initialPromoCode, []).then((answer) => {
+      setQuoteBusy(false);
+      if (answer?.ok && answer.promoValid) {
+        setQuote(answer);
+        setAppliedCode(initialPromoCode);
+        return;
+      }
+      setQuote(null);
+      setAppliedCode(null);
+      setCodeNote(answer?.promoReason ?? answer?.reason ?? "the private test price didn't load.");
+    });
+  }, [visible, initialPromoCode, selectedId]);
 
   // Any change to what is being bought invalidates the server's last price.
   // The applied code goes WITH it: a code that is still advertised as

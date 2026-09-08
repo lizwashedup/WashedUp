@@ -1,4 +1,10 @@
-import { parseAppDestination } from '../pendingLink';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  clearPendingCheckout,
+  parseAppDestination,
+  peekPendingCheckout,
+  stashPendingCheckout,
+} from '../pendingLink';
 import { redirectSystemPath } from '../../app/+native-intent';
 
 const ID = 'fe50d58b-0071-4818-bfbe-0b0e936650ea';
@@ -40,6 +46,16 @@ describe('redirectSystemPath (universal-link routing)', () => {
     expect(call('https://washedup.app/app/creator/events')).toBe('/(creator)/events');
   });
 
+  it('routes a Stripe success return into the native checkout handoff', () => {
+    expect(call(`https://washedup.app/e/?checkout=success&session_id=cs_live_123&order=${ID}&native=1`))
+      .toBe(`/checkout-return?checkout=success&session_id=cs_live_123&order=${ID}&native=1`);
+  });
+
+  it('routes a Stripe cancellation into the native checkout handoff', () => {
+    expect(call(`https://washedup.app/e/?checkout=cancelled&order=${ID}&native=1`))
+      .toBe(`/checkout-return?checkout=cancelled&order=${ID}&native=1`);
+  });
+
   it('maps web app-shell object links to their native screens', () => {
     expect(call(`https://washedup.app/app/plan/${ID}`)).toBe(`/plan/${ID}`);
     expect(call(`https://washedup.app/app/event/${ID}?return_route=chat`)).toBe(`/event/${ID}?return_route=chat`);
@@ -58,5 +74,17 @@ describe('redirectSystemPath (universal-link routing)', () => {
   it('leaves custom-scheme and foreign paths alone', () => {
     expect(call('/plan/abc')).toBe('/plan/abc');
     expect(call('https://example.com/whatever')).toBe('https://example.com/whatever');
+  });
+});
+
+describe('pending checkout durability', () => {
+  beforeEach(async () => AsyncStorage.clear());
+
+  it('survives repeated foreground reads until the order screen clears it', async () => {
+    await stashPendingCheckout(ID);
+    expect(await peekPendingCheckout()).toBe(ID);
+    expect(await peekPendingCheckout()).toBe(ID);
+    await clearPendingCheckout();
+    expect(await peekPendingCheckout()).toBeNull();
   });
 });

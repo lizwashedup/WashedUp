@@ -37,9 +37,24 @@ function parseCheckinPayload(data: unknown): { result: CheckinResult; admittedAt
 const QUEUE_KEY = 'ticket_checkin_queue_v1';
 const DEVICE_KEY_STORAGE = 'ticket_checkin_device_key_v1';
 
-/** the RPC upper()s and positions store upper; normalize the same way. */
+/**
+ * The buyer QR opens the public event when scanned with a phone camera and
+ * carries the admission reference in `ticket`. The in-app creator scanner
+ * extracts that reference before calling the existing RPC. Typed codes keep
+ * the original trim-and-uppercase behavior.
+ */
 export function normalizeCode(raw: string): string {
-  return raw.trim().toUpperCase();
+  const trimmed = raw.trim();
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol === 'https:' && /(^|\.)washedup\.app$/i.test(url.hostname)) {
+      const ticket = url.searchParams.get('ticket');
+      if (ticket) return ticket.trim().toUpperCase();
+    }
+  } catch {
+    // A typed reference is expected to be a plain string, not a URL.
+  }
+  return trimmed.toUpperCase();
 }
 
 interface QueuedCheckin { code: string; queuedAt: string; signature: string; }

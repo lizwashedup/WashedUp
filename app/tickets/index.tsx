@@ -68,7 +68,17 @@ const QR_SIZE = 168;
 // quiet zone is part of the QR spec: scanners need clear margin around the marks
 const QR_QUIET_ZONE = 12;
 
-function SeatTicket({ seat, qty, eventEnded }: { seat: MySeat; qty: number; eventEnded: boolean }) {
+function SeatTicket({
+  seat,
+  qty,
+  eventEnded,
+  eventId,
+}: {
+  seat: MySeat;
+  qty: number;
+  eventEnded: boolean;
+  eventId: string;
+}) {
   if (seat.voided) {
     return (
       <View style={styles.seat}>
@@ -103,7 +113,7 @@ function SeatTicket({ seat, qty, eventEnded }: { seat: MySeat; qty: number; even
           accessibilityLabel={`ticket code ${seat.reference_code}`}
         >
           <QRCode
-            value={seat.reference_code}
+            value={`https://washedup.app/e/${encodeURIComponent(eventId)}?ticket=${encodeURIComponent(seat.reference_code)}`}
             size={QR_SIZE}
             quietZone={QR_QUIET_ZONE}
             color={Colors.asphalt}
@@ -284,7 +294,13 @@ export default function YourTicketsScreen() {
     const byline = bylineFor(o);
     return (
       <View key={o.id} style={styles.card}>
-        <View style={styles.cardHeader}>
+        <TouchableOpacity
+          style={styles.cardHeader}
+          onPress={() => router.push(`/event/${o.event_id}` as never)}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={`Open event: ${o.event_title ?? 'your event'}`}
+        >
           {o.event_image ? (
             <Image source={{ uri: o.event_image }} style={styles.cardImage} contentFit="cover" />
           ) : (
@@ -310,7 +326,7 @@ export default function YourTicketsScreen() {
               </View>
             )}
           </View>
-        </View>
+        </TouchableOpacity>
         {o.status === 'paid' && <OrganizerNote eventId={o.event_id} />}
         {o.seats.map((seat) => (
           <SeatTicket
@@ -318,6 +334,7 @@ export default function YourTicketsScreen() {
             seat={seat}
             qty={o.qty}
             eventEnded={isEventEnded(o)}
+            eventId={o.event_id}
           />
         ))}
         <OrderRefund order={o} />

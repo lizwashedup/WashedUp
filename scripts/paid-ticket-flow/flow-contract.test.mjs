@@ -46,3 +46,47 @@ test('the local buyer checkout suite covers key classification and idempotency w
   assert.match(command, /deno test/);
   assert.doesNotMatch(command, /--allow-(?:all|net|env)|(?:^|\s)-A(?:\s|$)/);
 });
+
+test('native paid checkout keeps an order pointer until the ticket screen reads it', () => {
+  const checkout = read('lib/ticketing.ts');
+  const edge = read('supabase/functions/create-ticket-checkout/index.ts');
+  const pending = read('lib/pendingLink.ts');
+  const event = read('app/event/[id].tsx');
+  const tabs = read('app/(tabs)/_layout.tsx');
+  const order = read('app/tickets/order/[id].tsx');
+
+  assert.match(checkout, /return_mode: 'native'/);
+  assert.match(edge, /\$\{origin\}\/e\/\?checkout=success&session_id=\{CHECKOUT_SESSION_ID\}&order=\$\{b\.order_id\}&native=1/);
+  assert.match(edge, /\$\{origin\}\/e\/\?checkout=cancelled&order=\$\{b\.order_id\}&native=1/);
+  assert.match(pending, /export async function peekPendingCheckout/);
+  assert.match(event, /peekPendingCheckout\(\)/);
+  assert.match(event, /pendingOrder\.status !== 'pending'/);
+  assert.match(tabs, /peekPendingCheckout\(\)/);
+  assert.match(tabs, /pendingOrder\.status !== 'pending'/);
+  assert.match(order, /pendingId === id\) clearPendingCheckout\(\)/);
+  assert.match(order, /view\.kind === 'ready'.*view\.kind === 'canceled'.*view\.kind === 'refunded'/s);
+  const checkoutReturn = read('app/checkout-return.tsx');
+  assert.match(checkoutReturn, /rawCheckout === 'cancelled'/);
+  assert.match(checkoutReturn, /cancelled[\s\S]*clearPendingCheckout\(\)/);
+  assert.match(checkoutReturn, /no worries, nothing was charged\./);
+  assert.match(checkoutReturn, /cancelEventId \? `\/event\/\$\{cancelEventId\}` : '\/\(tabs\)\/explore'/);
+});
+
+test('the ticket wallet links back to its event and keeps door-scannable QR data', () => {
+  const wallet = read('app/tickets/index.tsx');
+  const order = read('app/tickets/order/[id].tsx');
+  const checkin = read('lib/ticketDoor.ts');
+
+  assert.match(wallet, /onPress=\{\(\) => router\.push\(`\/event\/\$\{o\.event_id\}`/);
+  assert.match(order, /onPress=\{\(\) => router\.push\(`\/event\/\$\{order\.event_id\}`/);
+  assert.match(wallet, /https:\/\/washedup\.app\/e\/\$\{encodeURIComponent\(eventId\)\}\?ticket=/);
+  assert.match(checkin, /url\.searchParams\.get\('ticket'\)/);
+});
+
+test('the event action bar uses short non-wrapping buyer actions', () => {
+  const event = read('app/event/[id].tsx');
+  assert.match(event, /numberOfLines=\{1\}[^>]*>get tickets<\/Text>/);
+  assert.match(event, /numberOfLines=\{1\}[^>]*>open the chat<\/Text>/);
+  assert.match(event, /numberOfLines=\{1\}[^>]*>find people<\/Text>/);
+  assert.doesNotMatch(event, />find people to go with<\/Text>/);
+});
