@@ -94,6 +94,23 @@ export async function peekPendingCheckout(): Promise<string | null> {
   try { return await AsyncStorage.getItem(CHECKOUT_KEY); } catch { return null; }
 }
 
+/**
+ * Resolve the native checkout that belongs to the event the buyer is viewing.
+ * Keeping this beside the durable pointer makes the post-Stripe retry rule
+ * testable without rendering the checkout sheet: another event's stale
+ * pointer is ignored, while this event's order is returned before a second
+ * Stripe session can be opened.
+ */
+export async function pendingCheckoutForEvent<T extends { event_id: string }>(
+  eventId: string,
+  loadOrder: (orderId: string) => Promise<T | null>,
+): Promise<string | null> {
+  const orderId = await peekPendingCheckout();
+  if (!orderId) return null;
+  const order = await loadOrder(orderId).catch(() => null);
+  return order?.event_id === eventId ? orderId : null;
+}
+
 export async function clearPendingCheckout(): Promise<void> {
   try { await AsyncStorage.removeItem(CHECKOUT_KEY); } catch { /* best-effort */ }
 }

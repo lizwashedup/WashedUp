@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   clearPendingCheckout,
   parseAppDestination,
+  pendingCheckoutForEvent,
   peekPendingCheckout,
   stashPendingCheckout,
 } from '../pendingLink';
@@ -92,5 +93,19 @@ describe('pending checkout durability', () => {
     expect(await peekPendingCheckout()).toBe(ID);
     await clearPendingCheckout();
     expect(await peekPendingCheckout()).toBeNull();
+  });
+
+  it('opens the saved order for the same event instead of restarting Stripe', async () => {
+    await stashPendingCheckout(ID);
+    const loadOrder = jest.fn(async () => ({ event_id: 'event-a' }));
+
+    expect(await pendingCheckoutForEvent('event-a', loadOrder)).toBe(ID);
+    expect(loadOrder).toHaveBeenCalledWith(ID);
+    expect(await peekPendingCheckout()).toBe(ID);
+  });
+
+  it('does not redirect a different event to the saved order', async () => {
+    await stashPendingCheckout(ID);
+    expect(await pendingCheckoutForEvent('event-b', async () => ({ event_id: 'event-a' }))).toBeNull();
   });
 });

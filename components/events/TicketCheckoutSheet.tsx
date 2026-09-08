@@ -37,13 +37,14 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing, EventSurface } from '../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { openUrl } from '../../lib/url';
-import { stashPendingCheckout } from '../../lib/pendingLink';
+import { pendingCheckoutForEvent, stashPendingCheckout } from '../../lib/pendingLink';
 import { supabase } from '../../lib/supabase';
 import {
   buildCheckoutBreakdown,
   computeFeePreview,
   formatCents,
   getQuestions,
+  getOrder,
   getTiers,
   startTicketCheckout,
   type TicketQuestion,
@@ -118,8 +119,8 @@ interface TicketCheckoutSheetProps {
   visible: boolean;
   eventId: string;
   onClose: () => void;
-  /** a free ticket confirms in-session -> the caller opens order-complete */
-  onFreeConfirmed: (orderId: string) => void;
+  /** an existing or newly confirmed order -> the caller opens order-complete */
+  onOrderReady: (orderId: string) => void;
   /** Scene spec 05: the event band. The caller already has every one of
    *  these loaded for its own hero + byline, so the sheet asks for none of
    *  it again - one query for tiers/addons/questions is enough. */
@@ -144,7 +145,7 @@ interface TicketCheckoutSheetProps {
 }
 
 export function TicketCheckoutSheet({
-  visible, eventId, onClose, onFreeConfirmed,
+  visible, eventId, onClose, onOrderReady,
   eventTitle, eventImage, eventDateLabel, eventVenue, creatorName, creatorAvatar,
   initialPromoCode,
 }: TicketCheckoutSheetProps) {
@@ -342,6 +343,18 @@ export function TicketCheckoutSheet({
     setBusy(true);
     setProblem(null);
     try {
+      // A native buyer may return from Stripe before the universal-link
+      // bridge wins focus, then tap "get tickets" again. The order pointer
+      // was deliberately stashed before Safari opened; resolve that order
+      // instead of opening its now-completed Stripe Checkout URL again.
+      // The order screen owns the brief pending->paid settle poll, so this is
+      // safe even when the webhook lands a beat after the buyer returns.
+      const pendingOrderId = await pendingCheckoutForEvent(eventId, getOrder);
+      if (pendingOrderId) {
+        hapticSuccess();
+        onOrderReady(pendingOrderId);
+        return;
+      }
       const result = await startTicketCheckout(selected.id, qty, {
         promoCode: appliedCode,
         addons: selections,
@@ -354,7 +367,7 @@ export function TicketCheckoutSheet({
       }
       if (result.kind === 'free') {
         hapticSuccess();
-        onFreeConfirmed(result.orderId);
+        onOrderReady(result.orderId);
         return;
       }
       // Paid: hand off to hosted Stripe Checkout. The order id was being

@@ -1565,7 +1565,7 @@ export default function EventDetailScreen() {
         visible={checkoutVisible}
         eventId={event.id}
         onClose={() => setCheckoutVisible(false)}
-        onFreeConfirmed={(orderId) => {
+        onOrderReady={(orderId) => {
           setCheckoutVisible(false);
           // C2/C3: the order-complete + your-tickets surfaces
           router.push(`/tickets/order/${orderId}` as never);

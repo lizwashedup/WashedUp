@@ -59,6 +59,14 @@ test('native paid checkout keeps an order pointer until the ticket screen reads 
   assert.match(edge, /\$\{origin\}\/e\/\?checkout=success&session_id=\{CHECKOUT_SESSION_ID\}&order=\$\{b\.order_id\}&native=1/);
   assert.match(edge, /\$\{origin\}\/e\/\?checkout=cancelled&order=\$\{b\.order_id\}&native=1/);
   assert.match(pending, /export async function peekPendingCheckout/);
+  assert.match(checkout, /export async function getOrder/);
+  const checkoutSheet = read('components/events/TicketCheckoutSheet.tsx');
+  assert.match(checkoutSheet, /const pendingOrderId = await pendingCheckoutForEvent\(eventId, getOrder\)/);
+  assert.match(checkoutSheet, /onOrderReady\(pendingOrderId\)/);
+  assert.ok(
+    checkoutSheet.indexOf('onOrderReady(pendingOrderId)') < checkoutSheet.indexOf('startTicketCheckout(selected.id'),
+    'a saved native order must open before a second Stripe checkout can start',
+  );
   assert.match(event, /peekPendingCheckout\(\)/);
   assert.match(event, /pendingOrder\.status !== 'pending'/);
   assert.match(tabs, /peekPendingCheckout\(\)/);
