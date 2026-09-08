@@ -58,7 +58,6 @@ import PlanChooserSheet, { type ChooserPlan } from '../../components/plans/PlanC
 import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
 import { getJoinGate } from '../../lib/communityJoin';
 import { getJoinPolicy } from '../../lib/creatorMode';
-import { DEV_PAYMENT_QA_PROMO_CODE } from '../../lib/devPaymentQa';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 280;
@@ -166,7 +165,7 @@ export default function EventDetailScreen() {
   // §3.0 guest preview: the creator opens /event/[id]?preview=guest to see the
   // real public renderer. The param is honored ONLY for the organizer (below),
   // exactly as the community page gates ?preview to the leader.
-  const { id, preview, qaPayment } = useLocalSearchParams<{ id: string; preview?: string; qaPayment?: string }>();
+  const { id, preview } = useLocalSearchParams<{ id: string; preview?: string }>();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
@@ -1573,7 +1572,6 @@ export default function EventDetailScreen() {
         eventVenue={event.venue}
         creatorName={bylineName}
         creatorAvatar={bylineFace ?? bylineLogo}
-        initialPromoCode={__DEV__ && qaPayment === '1' ? DEV_PAYMENT_QA_PROMO_CODE : undefined}
       />
     </View>
   );
