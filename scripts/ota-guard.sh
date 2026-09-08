@@ -13,7 +13,8 @@
 # This guard HARD-EXITS unless all of the following hold. Run it (or one of the
 # `ota:*` package.json scripts that wrap it) before every production OTA.
 #
-#   1. Current branch is `main`.
+#   1. Current branch is `main`, except for the one pinned 1.0.5 maintenance
+#      branch used to patch the public App Store binary.
 #   2. Working tree is clean (no uncommitted/untracked changes) — so what you
 #      publish is exactly the committed `main` HEAD.
 #   3. No tracked source imports a native module known to be absent from the
@@ -29,6 +30,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+RUNTIME105_BRANCH="codex/runtime105-ui-chat-release"
+RUNTIME105_BASELINE="c5e23411cfb66fb41b13a74e2472eb063e83d292"
+expected_branch="${WASHEDUP_OTA_EXPECTED_BRANCH:-main}"
+
 fail() {
   echo "" >&2
   echo "✋ OTA publish BLOCKED: $1" >&2
@@ -36,10 +41,14 @@ fail() {
   exit 1
 }
 
-# 1. Must be on main.
+# 1. Must be on main, or the explicitly selected and pinned 1.0.5 branch.
+if [ "$expected_branch" != "main" ] && [ "$expected_branch" != "$RUNTIME105_BRANCH" ]; then
+  fail "unsupported expected branch '$expected_branch'."
+fi
+
 branch="$(git branch --show-current)"
-if [ "$branch" != "main" ]; then
-  fail "you are on '$branch', not 'main'. Production OTAs ship from main only."
+if [ "$branch" != "$expected_branch" ]; then
+  fail "you are on '$branch', not the required '$expected_branch' branch."
 fi
 
 # 2. Working tree must be clean.
@@ -49,17 +58,52 @@ if [ -n "$(git status --porcelain)" ]; then
   fail "working tree is dirty. Commit or stash so the OTA matches main HEAD."
 fi
 
-# 2b. main HEAD must match origin/main. The publish ships the working tree,
+# 2b. HEAD must match the same online branch. The publish ships the working tree,
 #     and a second work lane can stack unpushed (held, unreviewed) commits on
 #     local main between your own HEAD check and the publish. That exact miss
 #     shipped the held 7-31 commit set to iOS production (rolled back within
 #     minutes). Fetch first so the comparison uses the real remote, not a
 #     stale ref. Flow consequence: push main, then publish, in that order.
-git fetch origin main --quiet || fail "could not fetch origin/main to verify HEAD (offline?)."
-if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
-  echo "local main:  $(git rev-parse --short HEAD)" >&2
-  echo "origin/main: $(git rev-parse --short origin/main)" >&2
-  fail "main HEAD does not match origin/main. Push or park the extra commits, then publish."
+git fetch origin "$expected_branch" --quiet || fail "could not fetch origin/$expected_branch to verify HEAD (offline?)."
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$expected_branch")" ]; then
+  echo "local $expected_branch:  $(git rev-parse --short HEAD)" >&2
+  echo "origin/$expected_branch: $(git rev-parse --short "origin/$expected_branch")" >&2
+  fail "$expected_branch HEAD does not match origin/$expected_branch. Push or park the extra commits, then publish."
+fi
+
+# 2c. The public store is still on runtime 1.0.5. Its maintenance branch is
+# intentionally frozen to the last known-good 1.0.5 production OTA, and only
+# this reviewed UI/chat patch plus these two release scripts may differ.
+if [ "$expected_branch" = "$RUNTIME105_BRANCH" ]; then
+  git cat-file -e "${RUNTIME105_BASELINE}^{commit}" 2>/dev/null \
+    || fail "the pinned 1.0.5 baseline is missing locally."
+  git merge-base --is-ancestor "$RUNTIME105_BASELINE" HEAD \
+    || fail "HEAD is not descended from the pinned 1.0.5 production baseline."
+  if [ "$(git rev-list --count "$RUNTIME105_BASELINE"..HEAD)" != "1" ]; then
+    fail "the 1.0.5 maintenance release must be exactly one reviewed commit above its baseline."
+  fi
+  if [ "$(node -p "require('./app.json').expo.version" 2>/dev/null || true)" != "1.0.5" ]; then
+    fail "the 1.0.5 maintenance branch no longer declares app version 1.0.5."
+  fi
+  if ! grep -q "policy: 'appVersion'" app.config.js; then
+    fail "the 1.0.5 maintenance branch no longer uses the appVersion runtime policy."
+  fi
+  while IFS= read -r changed_path; do
+    case "$changed_path" in
+      "app/(tabs)/chats/index.tsx"|\
+      "app/(tabs)/plans/index.tsx"|\
+      "app/creator/event-form.tsx"|\
+      "components/ProfileButton.tsx"|\
+      "components/chat/ChatThread.tsx"|\
+      "components/chat/__tests__/ChatUxContract.test.ts"|\
+      "components/plans/PlanCard.tsx"|\
+      "hooks/useChat.ts"|\
+      "hooks/useChatList.ts"|\
+      "scripts/ota-guard.sh"|\
+      "scripts/publish-runtime105-ota.sh") ;;
+      *) fail "unapproved 1.0.5 maintenance change: $changed_path" ;;
+    esac
+  done < <(git diff --name-only "$RUNTIME105_BASELINE"..HEAD)
 fi
 
 # 3. No tracked source may import native modules missing from the live binary.
@@ -100,4 +144,4 @@ for var in $(grep -rhoE 'EXPO_PUBLIC_[A-Z0-9_]+' app components hooks lib consta
   fi
 done
 
-echo "✅ OTA guard passed — on main, clean tree, HEAD matches origin/main, commit $(git rev-parse --short HEAD), no forbidden native imports, .env.local keys all non-empty."
+echo "OTA guard passed: branch=$expected_branch, commit=$(git rev-parse --short HEAD), tree clean, online branch matched, environment keys present."

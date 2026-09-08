@@ -109,15 +109,6 @@ export function useChat(key: ConversationKey) {
   const messagesRef = useRef<ChatMessage[]>([]);
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setCurrentUserId(user.id);
-        currentUserIdRef.current = user.id;
-      }
-    }).catch((err) => logError(err, 'useChat.getUser'));
-  }, []);
-
   // Keep messagesRef in sync for stable callbacks
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
@@ -225,13 +216,18 @@ export function useChat(key: ConversationKey) {
         supabase.auth
           .getUser()
           .then(({ data: d }) => d.user)
-          .catch((err) => {
+          .catch(async (err) => {
             logError(err, 'useChat.fetchMessages.getUser');
-            return null;
+            const { data: cached } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+            return cached.session?.user ?? null;
           }),
       ]);
       if (cancelledRef.current) return;
       if (user) {
+        if (currentUserIdRef.current !== user.id) {
+          currentUserIdRef.current = user.id;
+          setCurrentUserId(user.id);
+        }
         const msgIds = (data ?? []).map((m: any) => m.id);
         // Mark this conversation read. Plans and circles use different unique
         // keys on chat_reads, so the onConflict target differs.
@@ -254,45 +250,90 @@ export function useChat(key: ConversationKey) {
               .eq('type', 'new_message')
               .eq('status', 'unread')
           : Promise.resolve({ data: null });
-        const [{ data: profile }, , , { data: reactionsData }] = await Promise.all([
-          supabase.from('profiles').select('blocked_users').eq('id', user.id).maybeSingle(),
-          readUpsert,
-          notifClear,
-          msgIds.length > 0
-            ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
-            : Promise.resolve({ data: [] as any[] }),
-        ]);
+        // This privacy read stays ahead of first paint, but uses the shared
+        // query cache across thread mounts. useBlock invalidates this key, so a
+        // newly blocked person can never survive behind stale local state.
+        const blockedLookup = await queryClient.fetchQuery<Record<string, boolean>>({
+          queryKey: ['profile-blocked', user.id],
+          staleTime: 60_000,
+          queryFn: async () => {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('blocked_users')
+              .eq('id', user.id)
+              .maybeSingle();
+            const lookup: Record<string, boolean> = {};
+            (profile?.blocked_users ?? []).forEach((uid: string) => { lookup[uid] = true; });
+            return lookup;
+          },
+        });
         if (cancelledRef.current) return;
-        // Invalidate the Chats tab badge so it reflects this conversation being
-        // read. Plans clear app_notifications above; circles have no notification
-        // type yet, but their unread count is derived from chat_reads.last_read_at
-        // (just upserted), so the badge must still refresh for circle reads.
-        queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
-
-        const reactionsByMsg: Record<string, MessageReaction[]> = {};
-        (reactionsData ?? []).forEach((r: any) => {
-          if (!reactionsByMsg[r.message_id]) reactionsByMsg[r.message_id] = [];
-          reactionsByMsg[r.message_id].push({ user_id: r.user_id, reaction: r.reaction });
-        });
-
-        const blockedLookup: Record<string, boolean> = {};
-        (profile?.blocked_users ?? []).forEach((uid: string) => { blockedLookup[uid] = true; });
         blockedIdsRef.current = blockedLookup;
+        const filtered = ((data ?? []) as unknown as ChatMessage[])
+          .filter((message) => !blockedLookup[message.user_id]);
+        const firstPaint = filtered.map((message) => ({
+          ...message,
+          message_type: message.message_type ?? 'user',
+          reactions: message.reactions ?? [],
+        })) as ChatMessage[];
 
-        const filtered = (data ?? []).filter((msg: any) => !blockedLookup[msg.user_id]);
-        const enriched = await attachSenders(filtered);
-        const withReactions = enriched.map(m => ({ ...m, reactions: reactionsByMsg[m.id] ?? [] }));
-        // Resolve reply references from the same message array
-        const msgMap: Record<string, ChatMessage> = {};
-        withReactions.forEach(m => { msgMap[m.id] = m; });
-        const withReplies = withReactions.map(m => {
-          if (m.reply_to_message_id && msgMap[m.reply_to_message_id]) {
-            const parent = msgMap[m.reply_to_message_id];
-            return { ...m, reply_to: { id: parent.id, content: parent.content, sender_name: parent.sender?.first_name ?? null } };
+        // The message text is the useful first paint. Sender photos, reactions,
+        // read receipts, and notification cleanup are secondary and must not
+        // hold the entire thread behind a spinner.
+        if (!silent || messagesRef.current.length === 0) {
+          setMessages(prev => {
+            const optimistic = prev.filter(message => message.id.startsWith('optimistic-'));
+            return [...firstPaint, ...optimistic];
+          });
+          setLoading(false);
+        }
+
+        void (async () => {
+          try {
+            const [, , { data: reactionsData }, enriched] = await Promise.all([
+              readUpsert,
+              notifClear,
+              msgIds.length > 0
+                ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
+                : Promise.resolve({ data: [] as any[] }),
+              attachSenders(filtered),
+            ]);
+            if (cancelledRef.current) return;
+
+            const reactionsByMsg: Record<string, MessageReaction[]> = {};
+            (reactionsData ?? []).forEach((reaction: any) => {
+              if (!reactionsByMsg[reaction.message_id]) reactionsByMsg[reaction.message_id] = [];
+              reactionsByMsg[reaction.message_id].push({
+                user_id: reaction.user_id,
+                reaction: reaction.reaction,
+              });
+            });
+            const withReactions = enriched.map(message => ({
+              ...message,
+              reactions: reactionsByMsg[message.id] ?? [],
+            }));
+            const byId: Record<string, ChatMessage> = {};
+            withReactions.forEach(message => { byId[message.id] = message; });
+            const hydrated = withReactions.map(message => {
+              const parent = message.reply_to_message_id ? byId[message.reply_to_message_id] : null;
+              return parent
+                ? {
+                    ...message,
+                    reply_to: {
+                      id: parent.id,
+                      content: parent.content,
+                      sender_name: parent.sender?.first_name ?? null,
+                    },
+                  }
+                : message;
+            });
+            const hydratedById = new Map(hydrated.map(message => [message.id, message]));
+            setMessages(prev => prev.map(message => hydratedById.get(message.id) ?? message));
+            queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
+          } catch (error) {
+            logError(error, 'useChat.hydrateNewestPage');
           }
-          return m;
-        });
-        if (!cancelledRef.current) setMessages(withReplies);
+        })();
       } else {
         if (data) {
           // No user: either signed out, or getUser() lost the auth-lock race.

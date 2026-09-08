@@ -259,6 +259,7 @@ interface BubbleProps {
   onPhotoPress?: (url: string) => void;
   onReaction?: (messageId: string, emoji?: string) => void;
   onMessageLongPress?: (message: ChatMessage, isOwn: boolean) => void;
+  onStartReply?: (messageId: string) => void;
   onReplyTap?: (messageId: string) => void;
   onAvatarPress?: (userId: string) => void;
   mentionNames?: Set<string>;
@@ -268,7 +269,7 @@ interface BubbleProps {
 // Anchored exact-match so legacy name-embedded lines are never double-prefixed.
 const BARE_SYSTEM_TEMPLATES = /^(joined the plan|had to leave the plan|cancelled this plan)$/i;
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, onReaction, onMessageLongPress, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
+const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, onReaction, onMessageLongPress, onStartReply, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
   if (message.message_type === 'system') {
     // A system message carrying a plan reference renders as the compact plan card
     // (invite delivery), not as system text.
@@ -334,6 +335,10 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
     () => (message.message_type === 'user' ? soleUrlIn(message.content) : null),
     [message.message_type, message.content],
   );
+  // A plain text bubble can be a direct reply target. Media, locations, audio,
+  // and links keep their existing tap action; long-press and swipe still expose
+  // Reply for those message types.
+  const canTapToReply = message.message_type === 'user' && !message.image_url && !firstUrl;
   // Cache the emoji-only verdict per content -- the regex/Segmenter test is
   // cheap individually but runs for every bubble on every list re-render.
   const isEmojiOnlyMsg = useMemo(() => isEmojiOnly(message.content), [message.content]);
@@ -394,9 +399,19 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
         )}
 
         <Pressable
-          onPress={bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
+          onPress={bubbleUrl
+            ? () => openUrl(bubbleUrl)
+            : canTapToReply
+              ? () => onStartReply?.(message.id)
+              : undefined}
           onLongPress={handleLongPress}
           delayLongPress={400}
+          accessibilityRole="button"
+          accessibilityHint={bubbleUrl
+            ? 'Opens this link'
+            : canTapToReply
+              ? 'Starts a reply to this message'
+              : 'Shows message actions'}
         >
           {message.message_type === 'audio' && message.audio_url ? (
             <View style={[
@@ -700,12 +715,14 @@ const VOICE_LOCK_THRESHOLD = 80;
 
 const SwipeableRow = memo(function SwipeableRow({
   enabled,
+  messageId,
   onTriggerReply,
   containerStyle,
   children,
 }: {
   enabled: boolean;
-  onTriggerReply: () => void;
+  messageId: string;
+  onTriggerReply: (messageId: string) => void;
   containerStyle: any;
   children: React.ReactNode;
 }) {
@@ -716,7 +733,7 @@ const SwipeableRow = memo(function SwipeableRow({
   // stale closure when the row re-renders.
   const onTriggerReplyRef = useRef(onTriggerReply);
   onTriggerReplyRef.current = onTriggerReply;
-  const fireReply = useCallback(() => onTriggerReplyRef.current?.(), []);
+  const fireReply = useCallback(() => onTriggerReplyRef.current?.(messageId), [messageId]);
 
   const pan = useMemo(
     () =>
@@ -1031,10 +1048,16 @@ function ChatThread(props: ChatThreadProps) {
   // 15s on focus is enough. Firing it on every focus contributed to the
   // 2026-05-18 "chat is slow" reports.
   const lastChatFocusFetchRef = useRef(0);
+  const hasFocusedChatRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
       const nowTs = Date.now();
-      if (nowTs - lastChatFocusFetchRef.current > 15_000) {
+      const isFirstFocus = !hasFocusedChatRef.current;
+      hasFocusedChatRef.current = true;
+      if (isFirstFocus) lastChatFocusFetchRef.current = nowTs;
+      // useChat already loads on mount. Starting the focus safety-net on that
+      // same first frame doubled the initial message request.
+      if (!isFirstFocus && nowTs - lastChatFocusFetchRef.current > 15_000) {
         lastChatFocusFetchRef.current = nowTs;
         refetch(true);
       }
@@ -1627,6 +1650,20 @@ function ChatThread(props: ChatThreadProps) {
     }
   }, []);
   const handleAvatarPress = useCallback((uid: string) => setMiniProfileUserId(uid), []);
+  const handleTriggerReply = useCallback((msgId: string) => {
+    const msg = enrichedItemsRef.current.find(
+      (item): item is ChatMessage => !('type' in item) && item.id === msgId,
+    );
+    if (!msg) return;
+    setReplyingTo({
+      id: msg.id,
+      content: msg.content,
+      senderName: msg.sender?.first_name ?? 'Someone',
+    });
+    setEditingMessageId(null);
+    setActivePanel(null);
+    requestAnimationFrame(() => textInputRef.current?.focus());
+  }, []);
 
   // Stable renderItem. An inline arrow in the FlatList changes identity every
   // render, so the list re-renders every visible row on ANY state change (opening
@@ -1674,14 +1711,8 @@ function ChatThread(props: ChatThreadProps) {
         <SwipeableRow
           containerStyle={gap}
           enabled={!isPast && msg.message_type === 'user'}
-          onTriggerReply={() => {
-            setReplyingTo({
-              id: msg.id,
-              content: msg.content,
-              senderName: msg.sender?.first_name ?? 'Someone',
-            });
-            setEditingMessageId(null);
-          }}
+          messageId={msg.id}
+          onTriggerReply={handleTriggerReply}
         >
           <MessageBubble
             message={msg}
@@ -1694,6 +1725,7 @@ function ChatThread(props: ChatThreadProps) {
             onPhotoPress={setPhotoViewUrl}
             onReaction={handleReaction}
             onMessageLongPress={handleMessageLongPress}
+            onStartReply={!isPast ? handleTriggerReply : undefined}
             onReplyTap={handleReplyTap}
             onAvatarPress={handleAvatarPress}
             mentionNames={mentionNames}
@@ -1701,7 +1733,7 @@ function ChatThread(props: ChatThreadProps) {
         </SwipeableRow>
       );
     },
-    [currentUserId, enrichedItems, isPast, props.contextTitle, handleReaction, handleMessageLongPress, handleReplyTap, handleAvatarPress, mentionNames],
+    [currentUserId, enrichedItems, isPast, props.contextTitle, handleReaction, handleMessageLongPress, handleReplyTap, handleAvatarPress, handleTriggerReply, mentionNames],
   );
 
   return (
@@ -1710,7 +1742,7 @@ function ChatThread(props: ChatThreadProps) {
       <SafeAreaView edges={['top']} style={chatStyles.headerSafe}>
         <View style={chatStyles.header}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => router.replace('/(tabs)/chats' as never)}
             style={chatStyles.backBtn}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
@@ -2252,12 +2284,7 @@ function ChatThread(props: ChatThreadProps) {
                     onPress={() => {
                       hapticLight();
                       const msg = overlayMessage.message;
-                      setReplyingTo({
-                        id: msg.id,
-                        content: msg.content,
-                        senderName: msg.sender?.first_name ?? 'Someone',
-                      });
-                      setEditingMessageId(null);
+                      handleTriggerReply(msg.id);
                       setOverlayMessage(null);
                     }}
                     activeOpacity={0.7}

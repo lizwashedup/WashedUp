@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { withTimeout } from '../lib/withTimeout';
 import { GROUPS_ENABLED } from '../constants/FeatureFlags';
 import { circleDisplay, type DisplayMember } from '../lib/circles/display';
 
@@ -25,6 +24,21 @@ export interface ChatPreview {
   // A DM (unnamed 2-person circle): the row shows the counterpart's face, not a
   // circle monogram. Undefined for plans and real circles.
   is_dm?: boolean;
+}
+
+// Keep the last completed list for each signed-in person for the lifetime of
+// the app process. Keying by user prevents one account's previews from ever
+// appearing if a different account signs in without restarting the app.
+const chatListMemoryCache = new Map<string, ChatPreview[]>();
+
+function sortChatPreviews(previews: ChatPreview[]): ChatPreview[] {
+  const active = previews
+    .filter(preview => !preview.is_past)
+    .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
+  const past = previews
+    .filter(preview => preview.is_past)
+    .sort((a, b) => b.start_time.localeCompare(a.start_time));
+  return [...active, ...past];
 }
 
 /**
@@ -140,7 +154,7 @@ async function fetchCircleChats(userId: string, senderCache?: Map<string, string
     });
 }
 
-export function useChatList() {
+export function useChatList(knownUserId: string | null | undefined) {
   const [chats, setChats] = useState<ChatPreview[]>([]);
   const [loading, setLoading] = useState(true);
   const userIdRef = useRef<string | null>(null);
@@ -150,20 +164,15 @@ export function useChatList() {
   const senderNameCacheRef = useRef<Map<string, string>>(new Map());
 
   const fetchChats = useCallback(async (silent = false) => {
+    if (knownUserId === undefined) return;
+    if (knownUserId === null) {
+      setLoading(false);
+      return;
+    }
     if (!silent) setLoading(true);
     try {
-      // Bound so a stale-session server refresh can't hang the whole list behind
-      // it (the P1 freeze). On timeout, fall back to the CACHED session:
-      // getSession does NO server refresh, so it can't hang; the list still
-      // loads on a stale session instead of going empty. The RLS queries below
-      // still enforce auth via the client token, so this only scopes the reads.
-      let user = (await withTimeout(supabase.auth.getUser(), 3000, { data: { user: null } } as any)).data?.user ?? null;
-      if (!user) {
-        const cached = await withTimeout(supabase.auth.getSession(), 2000, { data: { session: null } } as any);
-        user = cached.data?.session?.user ?? null;
-      }
-      if (!user) return;
-      userIdRef.current = user.id;
+      const userId = knownUserId;
+      userIdRef.current = userId;
 
       const { data: memberships, error: membershipsError } = await supabase
         .from('event_members')
@@ -173,12 +182,53 @@ export function useChatList() {
             id, title, primary_vibe, image_url, start_time, member_count, tickets_url, status
           )
         `)
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .eq('status', 'joined');
 
       if (membershipsError || !memberships) return;
 
       const allEventIds = memberships.map((m: any) => m.events?.id).filter(Boolean);
+
+      // Circle work used to start only after every event preview query finished.
+      // Start it now so the two independent conversation types load together.
+      const circlePreviewsPromise: Promise<ChatPreview[]> = GROUPS_ENABLED
+        ? (async () => {
+            try {
+              return await fetchCircleChats(userId, senderNameCacheRef.current);
+            } catch {
+              return [];
+            }
+          })()
+        : Promise.resolve([]);
+
+      // The membership response already contains enough event information for
+      // a useful first paint. Show those rows before message previews, unread
+      // counts, and avatars finish enriching the list.
+      if (!silent) {
+        const firstPaint = memberships
+          .map((membership: any) => membership.events)
+          .filter((event: any) => event && ((event.member_count ?? 0) >= 2 || event.status === 'cancelled'))
+          .map((event: any): ChatPreview => ({
+            kind: 'event',
+            conversationId: event.id,
+            eventId: event.id,
+            title: event.title,
+            category: event.primary_vibe ?? null,
+            image_url: event.image_url ?? null,
+            start_time: event.start_time,
+            member_count: event.member_count ?? 0,
+            ticket_url: event.tickets_url ?? null,
+            last_message: null,
+            last_message_at: null,
+            unread_count: 0,
+            is_past: event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000),
+            member_avatars: [],
+          }));
+        if (firstPaint.length > 0) {
+          setChats(sortChatPreviews(firstPaint));
+          setLoading(false);
+        }
+      }
 
       // Run all 5 queries in parallel against allEventIds. Member-count drift
       // correction (events.member_count vs real joined rows) used to be a
@@ -202,13 +252,13 @@ export function useChatList() {
           supabase
             .from('chat_reads')
             .select('event_id, last_read_at')
-            .eq('user_id', user.id)
+            .eq('user_id', userId)
             .in('event_id', allEventIds),
           supabase
             .from('messages')
             .select('event_id, created_at')
             .in('event_id', allEventIds)
-            .neq('user_id', user.id)
+            .neq('user_id', userId)
             .order('created_at', { ascending: false })
             .limit(allEventIds.length * 20),
           supabase
@@ -283,7 +333,7 @@ export function useChatList() {
             ticket_url: event.tickets_url ?? null,
             last_message: lastMsg
               ? (() => {
-                  const isOwn = lastMsg.user_id === user.id;
+                  const isOwn = lastMsg.user_id === userId;
                   const senderName = isOwn ? 'You' : (senderNameMap[lastMsg.user_id] ?? null);
                   const text = lastMsg.message_type === 'audio' || lastMsg.audio_url
                     ? 'sent a voice message'
@@ -302,30 +352,19 @@ export function useChatList() {
       // Circle chats are additive and gated. Isolated so any circle-side failure
       // (tables not applied, RLS, network) degrades to an event-only list and can
       // never break the plan chat list.
-      let circlePreviews: ChatPreview[] = [];
-      if (GROUPS_ENABLED) {
-        try {
-          circlePreviews = await fetchCircleChats(user.id, senderNameCacheRef.current);
-        } catch {
-          circlePreviews = [];
-        }
-      }
+      const circlePreviews = await circlePreviewsPromise;
 
       const previews = [...eventPreviews, ...circlePreviews];
       if (previews.length === 0) {
+        chatListMemoryCache.set(userId, []);
         setChats([]);
         setLoading(false);
         return;
       }
 
-      const active = previews
-        .filter(p => !p.is_past)
-        .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
-      const past = previews
-        .filter(p => p.is_past)
-        .sort((a, b) => b.start_time.localeCompare(a.start_time));
-
-      setChats([...active, ...past]);
+      const sorted = sortChatPreviews(previews);
+      chatListMemoryCache.set(userId, sorted);
+      setChats(sorted);
       // Only a COMPLETED load clears the skeleton (T1, doc 121). The old
       // finally-based clear meant a transient auth lock or failed fetch
       // flipped loading off with no data, flashing the "join a plan" empty
@@ -335,10 +374,21 @@ export function useChatList() {
     } catch {
       // keep whatever is on screen; a later refetch reconciles
     }
-  }, []);
+  }, [knownUserId]);
 
   useEffect(() => {
-    fetchChats();
+    if (knownUserId === undefined) return;
+    if (knownUserId === null) {
+      setChats([]);
+      setLoading(false);
+      return;
+    }
+    const cached = chatListMemoryCache.get(knownUserId);
+    if (cached) {
+      setChats(cached);
+      setLoading(false);
+    }
+    void fetchChats(!!cached);
   }, [fetchChats]);
 
   // Optimistic removal for delete-chat / leave-circle (doc 120). Dropping the
