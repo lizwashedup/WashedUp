@@ -58,6 +58,7 @@ import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/
 import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptModal';
 import { KeyboardDoneBar } from '../components/keyboard/KeyboardDoneBar';
 import { logError } from '../lib/logger';
+import { onPostPlanPushPrimerRequest } from '../lib/postPlanPushPrimer';
 import { queryClient } from '../lib/queryClient';
 import { withTimeout } from '../lib/withTimeout';
 import { useSessionLogger } from '../hooks/useSessionLogger';
@@ -213,6 +214,10 @@ export default Sentry.wrap(RootLayout);
 // from the chat banner's `push_banner_dismissed_at`.
 const PUSH_PRIMER_SNOOZE_KEY = 'push_primer_snoozed_at';
 const PUSH_PRIMER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+// The post-plan primer deliberately bypasses the launch primer's snooze (the
+// moment of value outranks a generic "Not now" from days earlier) but keeps
+// its own 7-day cooldown so posting several plans never turns into a nag.
+const POST_PLAN_PRIMER_SEEN_KEY = 'push_primer_post_plan_seen_at';
 
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const router = useRouter();
@@ -306,6 +311,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const [surveyCheckDone, setSurveyCheckDone] = useState(false);
   const prevUserIdRef = useRef<string | null>(null);
   const [showPushPrimer, setShowPushPrimer] = useState(false);
+  const [pushPrimerVariant, setPushPrimerVariant] = useState<'launch' | 'postPlan'>('launch');
   const pushPrimerCheckedRef = useRef(false);
 
   // ── Root-modal sequencer ──────────────────────────────────────────────────
@@ -464,12 +470,40 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // means we already have (or will silently get) a token; 'denied'
         // is a hard iOS denial the primer cannot reverse (Settings owns it).
         if (status !== 'undetermined') return;
+        setPushPrimerVariant('launch');
         setShowPushPrimer(true);
       } catch (e) {
         logError(e, 'layout.pushPrimerCheck');
       }
     })();
   }, [authedUserId, authResolved, reviewCheckDone]);
+
+  // Post-plan primer request from the composer (lib/postPlanPushPrimer).
+  // Re-checks everything at fire time: authed, its own 7-day cooldown, and
+  // permission still undetermined. Bypasses PUSH_PRIMER_SNOOZE_KEY on purpose
+  // (see that key's comment). Never cold-fires the OS prompt: the modal CTA
+  // does, same contract as the launch primer above. The seen-at stamp is
+  // written at show time, so dismissing still counts against the cooldown.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    return onPostPlanPushPrimerRequest(() => {
+      (async () => {
+        try {
+          if (!authedUserId) return;
+          const seenAt = await AsyncStorage.getItem(POST_PLAN_PRIMER_SEEN_KEY);
+          if (seenAt && Date.now() - Number(seenAt) < PUSH_PRIMER_COOLDOWN_MS) return;
+          if (!(await ensureOneSignalReady())) return;
+          const status = await getPushPermissionStatus();
+          if (status !== 'undetermined') return;
+          await AsyncStorage.setItem(POST_PLAN_PRIMER_SEEN_KEY, String(Date.now()));
+          setPushPrimerVariant('postPlan');
+          setShowPushPrimer(true);
+        } catch (e) {
+          logError(e, 'layout.postPlanPushPrimer');
+        }
+      })();
+    });
+  }, [authedUserId]);
 
   useEffect(() => {
     if (authResolved && !splashHiddenRef.current) {
@@ -1108,6 +1142,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       {showPushPrimer && authedUserId && !surveyPlan && !reviewSheetPending && !modalLocked && (
         <PushPrimerModal
           visible={showPushPrimer}
+          variant={pushPrimerVariant}
           onEnable={async () => {
             setShowPushPrimer(false);
             // Only root caller of the system prompt; always passes the real
