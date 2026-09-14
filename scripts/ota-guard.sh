@@ -234,10 +234,27 @@ if [ "$platform" = "ios" ]; then
 
   # These files directly determine the native binary. package.json is checked
   # separately below so harmless script-only additions do not create a fake
-  # incompatibility.
-  if ! git diff --quiet "$target_commit"..HEAD -- app.json eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android; then
+  # incompatibility. app.json gets the same treatment for platform scope:
+  # this is the iOS release-candidate check, and an Android-only app.json
+  # edit (a versionCode bump, an Android permission change) cannot alter the
+  # iOS native interface. Comparing app.json wholesale blocked the 2026-09-13
+  # push-registration OTA behind PR #11's Android permission removal, so the
+  # top-level android block is stripped from BOTH sides before comparing;
+  # every iOS-relevant byte of app.json still hard-blocks on drift.
+  strip_android_block() {
+    node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);if(j.expo&&j.expo.android)delete j.expo.android;if(j.android)delete j.android;process.stdout.write(JSON.stringify(j))})"
+  }
+  target_app_json_ios="$(git show "${target_commit}:app.json" | strip_android_block)"
+  current_app_json_ios="$(strip_android_block < app.json)"
+  if [ -z "$target_app_json_ios" ] || [ -z "$current_app_json_ios" ]; then
+    fail "could not parse app.json (current or at $target_commit) for the iOS-scope comparison."
+  fi
+  if [ "$target_app_json_ios" != "$current_app_json_ios" ]; then
+    fail "app.json changed (outside the Android-only block) after iOS build $target_build_number. Create and verify a new build instead of forcing an OTA."
+  fi
+  if ! git diff --quiet "$target_commit"..HEAD -- eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android; then
     echo "Native-input changes since iOS build $target_build_number:" >&2
-    git diff --name-only "$target_commit"..HEAD -- app.json eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android >&2
+    git diff --name-only "$target_commit"..HEAD -- eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android >&2
     fail "native inputs changed after the target build. Create and verify a new build instead of forcing an OTA."
   fi
 
