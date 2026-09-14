@@ -78,6 +78,7 @@ import PlacePicker, { type PlaceValue } from '../composer/place/PlacePicker';
 import PostConfirmation from '../composer/PostConfirmation';
 import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../components/post/InvitePeopleSection';
 import PeoplePickerSheet, { type PickedPerson } from '../../components/post/PeoplePickerSheet';
+import { requestPostPlanPushPrimer } from '../../lib/postPlanPushPrimer';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -1252,6 +1253,10 @@ export default function PlanComposerV2() {
           setTimeout(() => {
             if (id) router.push(`/plan/${id}` as any);
             else router.replace('/(tabs)/plans');
+            // Moment-of-value push ask, after the celebration ends and the
+            // plan page is on screen. The layout re-checks permission and
+            // cooldowns before showing anything (lib/postPlanPushPrimer).
+            setTimeout(requestPostPlanPushPrimer, 600);
           }, 200);
         }}
       />
@@ -1267,6 +1272,8 @@ export default function PlanComposerV2() {
           setTimeout(() => {
             if (planId) router.push(`/plan/${planId}` as any);
             else router.replace('/(tabs)/plans');
+            // Same moment-of-value ask as onSeePlans, for the share-first exit.
+            setTimeout(requestPostPlanPushPrimer, 600);
           }, 300);
         }}
         planTitle={postedPlanTitle}

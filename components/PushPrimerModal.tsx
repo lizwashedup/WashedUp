@@ -20,9 +20,28 @@ interface Props {
   visible: boolean;
   onEnable: () => void;
   onDismiss: () => void;
+  // 'launch' is the cold-start ask; 'postPlan' fires right after posting a
+  // plan, when the value of hearing about joins is concrete. Copy differs,
+  // behavior is identical.
+  variant?: 'launch' | 'postPlan';
 }
 
-export default function PushPrimerModal({ visible, onEnable, onDismiss }: Props) {
+const COPY = {
+  launch: {
+    heading: 'Stay in the loop',
+    body:
+      'Turn on notifications to know when someone joins your plan and to get ' +
+      'reminders before plans start.',
+  },
+  postPlan: {
+    heading: 'Your plan is up',
+    body:
+      'Turn on notifications so you know the moment someone joins or asks ' +
+      'you a question in the chat.',
+  },
+} as const;
+
+export default function PushPrimerModal({ visible, onEnable, onDismiss, variant = 'launch' }: Props) {
   const dismiss = () => {
     hapticLight();
     onDismiss();
@@ -52,12 +71,9 @@ export default function PushPrimerModal({ visible, onEnable, onDismiss }: Props)
             contentFit="contain"
           />
 
-          <Text style={styles.heading}>Stay in the loop</Text>
+          <Text style={styles.heading}>{COPY[variant].heading}</Text>
 
-          <Text style={styles.body}>
-            Turn on notifications to know when someone joins your plan and to get
-            reminders before plans start.
-          </Text>
+          <Text style={styles.body}>{COPY[variant].body}</Text>
 
           <TouchableOpacity style={styles.primaryButton} onPress={enable} activeOpacity={0.85}>
             <Text style={styles.primaryButtonText}>Turn on notifications</Text>
