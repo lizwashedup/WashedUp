@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { OneSignal, OSNotificationPermission } from '../lib/oneSignalShim';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
 
@@ -111,9 +111,15 @@ export function usePushNotifications(userId?: string | null) {
       if (id && optedIn) upsertDeviceToken(userId, id);
     };
 
-    ensureOneSignalReady().then((ready) => {
-      if (cancelled || !ready) return;
-
+    // Login + token sync, shared by mount and foreground. Idempotent by
+    // design: OneSignal.login with the same id is a no-op server-side, and
+    // upsertDeviceToken conflicts on onesignal_player_id. Measured 2026-09-13:
+    // 382 of 2,868 OneSignal subscription records (57 created that September)
+    // carried no external_user_id, meaning the single mount-time login raced
+    // SDK readiness or died with the session and was never retried. Re-running
+    // on every foreground makes identity linking converge for any user who
+    // opens the app again.
+    const syncIdentity = () => {
       try {
         OneSignal.login(userId);
       } catch (err) {
@@ -126,6 +132,12 @@ export function usePushNotifications(userId?: string | null) {
           if (!cancelled && id) upsertDeviceToken(userId, id);
         })
         .catch(() => {});
+    };
+
+    ensureOneSignalReady().then((ready) => {
+      if (cancelled || !ready) return;
+
+      syncIdentity();
 
       try {
         OneSignal.User.pushSubscription.addEventListener('change', onSubscriptionChange);
@@ -135,8 +147,16 @@ export function usePushNotifications(userId?: string | null) {
       }
     });
 
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      ensureOneSignalReady().then((ready) => {
+        if (!cancelled && ready) syncIdentity();
+      });
+    });
+
     return () => {
       cancelled = true;
+      appStateSub.remove();
       if (attached) {
         try {
           OneSignal.User.pushSubscription.removeEventListener('change', attached);
