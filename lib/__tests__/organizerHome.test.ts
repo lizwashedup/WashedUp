@@ -355,7 +355,8 @@ describe('Build 43 ticket-editor regression contracts', () => {
     expect(source).toContain('ticket name · required');
     expect(source).toContain('give this ticket a name.');
     expect(source).toContain('nameRef.current?.focus()');
-    expect(source).toContain('disabled={busy}');
+    expect(source).toContain('const locked = busy || saving;');
+    expect(source).toContain('disabled={locked}');
     expect(source).not.toContain('disabled={!canSave}');
   });
 
@@ -387,16 +388,17 @@ describe('Paid-ticket journey regression contracts', () => {
     expect(source).toContain('void handleOpenTickets(true)');
     expect(source).toContain('void handleOpenTickets()');
     expect(source).toContain("returnToTickets === '1' ? handleSave");
-    expect(source).toContain('save and return to tickets');
+    expect(source).toContain("returnToTickets === '1' ? 'Save & return'");
     expect(source).toContain('await autosaveInFlightRef.current?.catch(() => undefined);');
   });
 
   it('rechecks the persisted event end time immediately before a paid tier write', () => {
-    const source = readAppSource('app/creator/tickets.tsx');
-    expect(source).toContain('if (draft.price_cents > 0)');
-    expect(source).toContain('await getPaidTicketEventReadiness(id!)');
-    expect(source).toContain("error as Error & { code?: string }");
-    expect(source).toContain("router.push(`/creator/event-form?id=${id}&returnToTickets=1`");
-    expect(source).toContain("readiness.reason === 'missing_end_time'");
+    const helper = readAppSource('lib/creatorTierEditor.ts');
+    const screen = readAppSource('app/creator/tickets.tsx');
+    expect(helper).toContain('if(draft.price_cents>0)');
+    expect(helper).toContain('await getPaidTicketEventReadiness(eventId,scope)');
+    expect(helper).toContain("readiness.reason==='missing_end_time'?'event_end_time_required'");
+    expect(screen).toContain("if (e?.code === 'event_end_time_required')");
+    expect(screen).toContain("router.push(`/creator/event-form?id=${id}&returnToTickets=1`");
   });
 });

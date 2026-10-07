@@ -331,7 +331,7 @@ function TicketSetupScreen({id,setup,scope,active,pageId}:{id:string;setup?:stri
       return {name:row.name,wasEditing:!!input.baseline};
     },
     onSuccess: async ({ name, wasEditing }, input) => {
-      void queryClient.invalidateQueries({queryKey:['ticket-tiers',input.eventId,input.scope.userId]});
+      await invalidateTiers();
       if (!input.scope.isCurrent()) return;
       hapticSuccess(); setEditorVisible(false); setEditingTier(null);
       setNewTierPreset(undefined); setPendingTierDraft(null);
