@@ -85,3 +85,14 @@ Across this feature branch relative to the protected base, the only files change
 5. `docs/chat-reliability-2026-10-06.md` — this review record.
 
 The two test-file updates and documentation changes do not alter the application bundle. The existing feature repair remains JavaScript-only and structurally OTA-compatible with the protected base; nothing is published. No native dependency/configuration change or native-build ledger addition is required. PR #14 and the protected release branch remain untouched.
+
+
+## October 6 later simulator observation
+
+Liz accepted the Safari Open dialog. The existing localdev development launcher then connected manually to `http://127.0.0.1:8846`. Verified the actual `Current d6e3b785 · Local only · Mona loaded` banner. The isolated harness needed its own `SplashScreen.hideAsync()` because it bypasses app startup; this was corrected only in the external fixture, then localdev was closed/relaunched through simulator UI. No app startup source or native configuration changed.
+
+Observed native shared ChatThread rendering, local text send and cleared input, software keyboard/composer placement, synthetic delayed loading and sending, a 500-message history, dragging toward older messages, and the return-to-latest control. A simulated failed send retained its original text and exposed check/retry controls. Actual retry completion was not validated because the fixture receipt checker is a stub; it must be improved first. Main community/topic native tests, measured cold-open/frame timings, long-duration soak, actual network delivery and physical-device validation remain open.
+
+One interaction to investigate: typing immediately after Send in the slow fixture retained the original text alongside subsequent typing after the first message appeared. Source has explicit protection for text typed during draft preparation. Reproduce with a focused actual-composer test before deciding whether to change that behavior; distinguish UI automation timing and fixture effects from a production defect. Existing 252 automated checks remain the recorded result, not proof of complete chat quality.
+
+This continuation changes only this repository evidence file and the separately saved local fixture. Feature application code remains identical to d6e3b785. No release or production changes.
