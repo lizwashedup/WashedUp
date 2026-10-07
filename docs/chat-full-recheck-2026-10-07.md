@@ -1,6 +1,11 @@
 # WashedUp chat: full scoped recheck — October 7, 2026
 
-## Result
+Latest continuation: **2,440 passing tests, 11 unchanged baseline failures,
+168 suites**. The additional adversarial-review section below records the
+storage-preparation and deletion-deadline repairs. Earlier local transport
+results remain separately identified; no new device result is claimed.
+
+## Initial full-recheck result
 
 Reviewed the accumulated chat changes against protected release commit
 `9c2994b10e9f263e98a262e87a9bf7a94ee941c5`, reran the expanded chat/adjacent
@@ -126,3 +131,82 @@ It contains the explicit suite list, repeatable bounded runner, individual logs
 and JSON reports, reconciled summary, typing before/after logs, local transport
 report, stack start/stop logs, TypeScript/auth/export logs, and final candidate
 metadata plus full changed-file list and patch against the protected release.
+
+
+## Additional adversarial review — October 7
+
+Continued from `b29b11bc74f284227b0af7fcb874d98fe05117c0` after Liz requested
+another gap-focused review. Verified the clean isolated feature checkout,
+canonical remote and unchanged protected release ref, then fetched origin.
+Inspected save-queue ordering and recovery, delayed callbacks after navigation,
+attachment session ownership, mutation deadlines, the real library contracts
+behind test doubles, and the user-facing handling of uncertain deletion.
+
+Two further bounded defects were reproduced and repaired:
+
+1. **Stale preparation failures:** a failed attempt-storage write could mark the
+   composer as errored after a subsequent queued write had successfully saved
+   the same original attempt and newer text. The outer preparation catch
+   bypassed the existing write-revision guard. It has been removed in both
+   draft hooks; `persist` now exclusively owns storage error state. Four tests
+   use the real ordered storage helpers, inject failure at AsyncStorage, verify
+   the subsequent durable contents, and verify explicit retry retains the
+   original UUID and next text. No transport starts from the failed preparation.
+   Latest-write failures and stalled storage still expose recovery.
+2. **Unbounded deletes:** shared and topic-owned deletion, plus the topic
+   moderation service, could wait indefinitely for an unanswered request.
+   Each now has a 12-second deadline. Existing identity guards, selected-row
+   rollback and delete filters remain. No automatic repeat/delete or new
+   permissions were added. A timeout is explicitly described as **Removal not
+   confirmed**, with reopening the chat suggested to check the actual outcome.
+   A deadline is not proof that the server failed to commit the removal.
+   Four hook cases cover active and retired accounts; one service case checks
+   moderation filters and single dispatch; one screen case checks truthful copy.
+
+Nine regression executions failed on the preceding implementation (four real
+storage-queue cases, four owned-delete cases, one moderation case). The final
+candidate passes all ten newly added cases, including the timeout-copy check.
+The new screen case also exposed an order-dependent test-fixture leak:
+`spyOn` reused the preset's AppState mock and `mockRestore` cleared its listener
+implementation. The lifecycle test now restores the original mock implementation,
+so subsequent tests still receive removable subscriptions. No application
+cleanup checks were weakened and the full screen suite passes in order.
+
+The complete selected **168-suite** chat/adjacent inventory was rerun in separate
+Jest processes, with final affected-suite reruns replacing earlier results:
+**164 suites passing, 2,440 tests passing, the same 11 baseline tests failing,
+zero pending and no per-suite timeouts.** The four failing suites remain listed
+above. Jest discovery found 561 repository suites; this is deliberately not a
+claim that all 561 or the full release pipeline passed. No unrelated failure
+was repaired or hidden. Temporary diagnosis logs were removed from source.
+TypeScript, auth invariants, diff whitespace and offline iOS JavaScript/Hermes
+export passed. Final export: `/tmp/washedup-chat-adversarial-recheck-export-final-20261007`.
+
+The local transport lab was not rerun in this continuation because its transport
+helpers and schema were unchanged; the preceding 11-scenario run is the latest
+integration evidence. Native/production/Node-20 limitations above remain open.
+No native dependencies or configuration changed; these fixes are structurally
+OTA-compatible and add no future-native-build requirement. Nothing was merged,
+pushed, built natively, installed, deployed, published or sent to members.
+
+Files changed in this continuation:
+
+- `app/community-topic/[id].tsx`
+- `components/chat/__tests__/CommunityTopicEntryLifetime.test.tsx`
+- `hooks/useChat.ts`
+- `hooks/useTopicChat.ts`
+- `hooks/useChatComposerDraft.ts`
+- `hooks/useTopicComposerDraft.ts`
+- `hooks/__tests__/useChat.ownership.test.tsx`
+- `hooks/__tests__/useTopicChat.mutations.test.tsx`
+- `hooks/__tests__/useChatComposerDraft.prepare.test.tsx`
+- `hooks/__tests__/useTopicComposerDraft.test.tsx`
+- `lib/communityChat.ts`
+- `lib/__tests__/communityOperationScope.test.ts`
+- `docs/chat-full-recheck-2026-10-07.md`
+
+New evidence is in the sibling `evidence/adversarial-recheck-20261007/` directory:
+before/after reproductions, suite discovery and selected inventory, individual
+reports, reconciled summary, final checks and candidate/release comparison.
+The earlier evidence remains intact. This audit reduces known uncertainty; it
+does not prove an absence of all defects or replace matching-device testing.

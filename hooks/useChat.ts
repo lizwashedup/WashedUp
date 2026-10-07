@@ -5,7 +5,7 @@ import { Alert } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../lib/supabase';
 import { checkContent } from '../lib/contentFilter';
-import { requestWithDeadline } from '../lib/requestWithDeadline';
+import { requestWithDeadline, RequestDeadlineError } from '../lib/requestWithDeadline';
 import { logError } from '../lib/logger';
 import { editOwnChatMessage, isChatEditRefused } from '../lib/chatMessageEdit';
 import { readLoadedChatReactions } from '../lib/chatReactionReader';
@@ -775,8 +775,8 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     changes.set(messageId, attempt);
     setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== messageId) : prev);
     try {
-      const { error } = await scopedChatRequest(scope, () => supabase.from('messages').delete()
-        .eq('id', messageId).eq('user_id', userId));
+      const { error } = await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').delete()
+        .eq('id', messageId).eq('user_id', userId), 12_000));
       assertChatScope(scope);
       if (error) throw error;
     } catch (error) {
@@ -786,7 +786,9 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
       // A failed delete must not replace a newer history/realtime snapshot.
       if (original) setMessages(prev => scope.isCurrent() && changes.get(messageId) === attempt && !prev.some(m => m.id === messageId)
         ? mergeChatBurst(prev, [original]) : prev);
-      Alert.alert('Could not delete', 'Something went wrong. Please try again.');
+      if (error instanceof RequestDeadlineError) {
+        Alert.alert('Removal not confirmed', 'The connection took too long. Reopen this chat to check whether the message was removed.');
+      } else Alert.alert('Could not delete', 'Something went wrong. Please try again.');
     }
   }, [captureOperation]);
 

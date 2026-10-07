@@ -714,6 +714,7 @@ it('finishes a confirmed new topic send without duplicate receipt reads or waiti
 it('catches up an ordinary topic on foreground return and ignores later returns after blur', async () => {
   const callbacks = new Set<(state: any) => void>();
   const originalState = AppState.currentState;
+  const originalListener = jest.isMockFunction(AppState.addEventListener) ? jest.mocked(AppState.addEventListener).getMockImplementation() : undefined;
   Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
   const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => {
     callbacks.add(callback); return { remove: () => { callbacks.delete(callback); } };
@@ -731,6 +732,21 @@ it('catches up an ordinary topic on foreground return and ignores later returns 
     expect(mockRefresh).toHaveBeenCalledTimes(1);
   } finally {
     act(() => tree?.unmount()); spy.mockRestore();
+    // spyOn reuses the preset's jest.fn; restore its subscription contract.
+    if (originalListener && jest.isMockFunction(AppState.addEventListener)) jest.mocked(AppState.addEventListener).mockImplementation(originalListener);
     Object.defineProperty(AppState, 'currentState', { configurable: true, value: originalState });
   }
+});
+
+it('describes an owned-message delete timeout as unconfirmed instead of a definite refusal', async () => {
+  const { RequestDeadlineError } = jest.requireActual('../../../lib/requestWithDeadline');
+  mockDeleteOwn.mockRejectedValueOnce(new RequestDeadlineError());
+  mockMessages = [{...historyMessage('message-a',1),sender_id:mockViewerId}]; await mount();
+  act(() => topicBubble().props.onLongPress());
+  const remove = topicMenu().buttons.find((button:any) => button.text === 'delete this message');
+  expect(remove).toBeDefined();
+  await act(async () => remove.onPress());
+  expect(alert().title).toBe('Removal not confirmed');
+  expect(alert().message).toContain('Reopen this chat');
+  expect(mockDeleteOwn).toHaveBeenCalledTimes(1);
 });

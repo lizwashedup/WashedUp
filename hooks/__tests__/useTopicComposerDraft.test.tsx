@@ -182,3 +182,35 @@ it('an older confirmation-cleanup failure cannot disable a newer successfully sa
  expect(hook.draft).toMatchObject({text:'Saved next message',attempt:null});
  expect(hook.error).toBe(false);
 });
+
+it.each(['52000000-0000-4000-8000-000000000025',
+ {kind:'main',id:'52000000-0000-4000-8000-000000000025'},
+ {kind:'reply',id:'52000000-0000-4000-8000-000000000025'}])(
+ 'keeps the newer durable %j draft usable after an earlier preparation write fails', async room => {
+  const actual = jest.requireActual('../../lib/topicComposerDraft');
+  const storage = require('@react-native-async-storage/async-storage');
+  mockSave.mockImplementation(actual.saveTopicComposer);
+  mockRead.mockImplementation(actual.readTopicComposer);
+  await act(async () => { tree = create(<Harness room={room}/>); });
+  await act(async () => hook.change({text:'Original awaiting storage'}));
+  let reject!: (error: Error) => void;
+  const blocked = new Promise<void>((_yes,no) => {reject=no;});
+  storage.setItem.mockImplementationOnce(() => blocked);
+  const transport = jest.fn(); let failure: unknown; let preparing!: Promise<void>;
+  act(() => { preparing = hook.prepare({detachText:true}).then(transport).catch(error => {failure=error;}); });
+  await act(async () => {for(let i=0;i<30;i++) await Promise.resolve();});
+  const original = hook.draft.attempt!;
+  await act(async () => hook.change({text:'Next words safely queued'}));
+  await act(async () => {reject(Error('Original write failed'));await preparing;});
+  await act(async () => {for(let i=0;i<30;i++) await Promise.resolve();});
+  expect(failure).toBeInstanceOf(Error);
+  expect(transport).not.toHaveBeenCalled();
+  expect(hook.draft).toMatchObject({text:'Next words safely queued',attempt:original});
+  const saved = await actual.readTopicComposer(room,owner);
+  expect(saved.unsaved).toBe(false);
+  expect(saved.draft).toMatchObject({text:'Next words safely queued',attempt:original});
+  expect(hook.error).toBe(false);
+  let retry: any; await act(async () => {retry=await hook.prepare({detachText:true});});
+  expect(retry.id).toBe(original.id);
+  expect(hook.draft.text).toBe('Next words safely queued');
+ });

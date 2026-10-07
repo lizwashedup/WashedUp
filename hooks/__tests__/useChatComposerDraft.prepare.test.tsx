@@ -186,3 +186,29 @@ it('preserves an identical revision made during reply validation without clearin
   await act(async()=>hook.finish(original));expect(hook.draft.text).toBe('Hello');
  }finally{verify.mockRestore();}
 });
+
+it('keeps a newer durably saved draft usable when the original preparation write rejects', async () => {
+  await act(async () => { tree = create(<Harness />); });
+  await act(async () => hook.change({ text: 'Original awaiting storage' })); await flush();
+  let reject!: (error: Error) => void;
+  const blocked = new Promise<void>((_yes, no) => { reject = no; });
+  jest.mocked(AsyncStorage.setItem).mockImplementationOnce(() => blocked);
+  const transport = jest.fn(); let failure: unknown;
+  let preparing!: Promise<void>;
+  act(() => { preparing = hook.prepare({ detachText: true }).then(transport).catch(error => { failure = error; }); });
+  await flush();
+  const original = hook.draft.attempt!;
+  await act(async () => hook.change({ text: 'Next words safely queued' })); await flush();
+  await act(async () => { reject(Error('Original write failed')); await preparing; }); await flush();
+  expect(failure).toBeInstanceOf(Error);
+  expect(transport).not.toHaveBeenCalled();
+  expect(hook.draft).toMatchObject({ text: 'Next words safely queued', attempt: original });
+  const saved = await jest.requireActual('../../lib/chatComposerDraft').readChatComposer(room, owner);
+  expect(saved.unsaved).toBe(false);
+  expect(saved.draft).toMatchObject({ text: 'Next words safely queued', attempt: original });
+  expect(hook.error).toBe(false);
+  let retry!: ChatDraftAttempt;
+  await act(async () => { retry = await hook.prepare({detachText:true}); });
+  expect(retry.id).toBe(original.id);
+  expect(hook.draft.text).toBe('Next words safely queued');
+});

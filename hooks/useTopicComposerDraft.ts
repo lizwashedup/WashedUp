@@ -34,17 +34,15 @@ export function useTopicComposerDraft(topicId:TopicComposerRoom|undefined,owner:
   // rather than recording it as an uncertain send that cannot be corrected.
   if(!existing&&(!options?.detachText||attempt.edit||attempt.replyId||typeof topicId!=='string'&&topicId.kind==='reply'))await verifyTopicComposerTarget(topicId,attempt,owner);
   if(!owner.isCurrent()||ref.current.owner!==owner)throw Error('This conversation visit changed.');
-  try{
-   const independentDraft=!existing&&attempt.kind==='send'&&options?.detachText;
-   const detach=independentDraft&&revision.current===preparingRevision;
-   const saving=persist({...ref.current.draft,...(detach?{text:'',mentions:null,reply:null}:{}),...(independentDraft?{attemptDetached:true}:{}),attempt});
-   if(detach){try{options?.onDetach?.();}catch{/* controlled value still clears */}}
-   await saving;
-  }
-  catch(error){if(owner.isCurrent()&&ref.current.owner===owner&&ref.current.draft.attempt===attempt)publish({...ref.current,error:true});throw error;}
+  const independentDraft=!existing&&attempt.kind==='send'&&options?.detachText;
+  const detach=independentDraft&&revision.current===preparingRevision;
+  const saving=persist({...ref.current.draft,...(detach?{text:'',mentions:null,reply:null}:{}),...(independentDraft?{attemptDetached:true}:{}),attempt});
+  if(detach){try{options?.onDetach?.();}catch{/* controlled value still clears */}}
+  await saving;
+  // persist alone owns storage error state through its write revision.
   if(!owner.isCurrent())throw Error('This conversation visit changed.');
   return attempt;
- },[topicId,owner,persist,publish]);
+ },[topicId,owner,persist]);
  const finish=useCallback(async(attempt:TopicDraftAttempt)=>{if(!owner?.isCurrent()||ref.current.owner!==owner)return;// Storage cleanup follows a confirmed receipt. Keep recovery visible without
  // turning an already-sent message back into an uncertain send.
  try{await persist(finishTopicComposer(ref.current.draft,attempt));}

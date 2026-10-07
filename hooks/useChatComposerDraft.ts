@@ -62,28 +62,22 @@ export function useChatComposerDraft(room: ConversationKey, owner: ChatOperation
     const attempt = prepareChatComposer(ref.current.draft);
     if (!existing && (!options?.detachText || attempt.edit || attempt.replyId)) await verifyChatComposerTarget(room, attempt, owner);
     if (!current() || ref.current.owner !== owner) throw Error('This conversation visit changed.');
-    try {
-      // The send may start only after its original attempt is durably kept.
-      // Bound this waiter, not the ordered storage operation: timing out must
-      // retain the same UUID and require recovery before any transport.
-      const independentDraft = !existing && !attempt.edit && options?.detachText;
-      const detach = independentDraft && revision.current === preparingRevision;
-      const saving = persist({ ...ref.current.draft,
-        ...(detach ? { text: '', mentions: null, reply: null } : {}),
-        ...(independentDraft ? { attemptDetached: true } : {}), attempt });
-      // Request native clearing at the same handoff as the controlled value.
-      // The original already lives in the ordered draft write.
-      if (detach) { try { options?.onDetach?.(); } catch { /* controlled value still clears */ } }
-      await saving;
-    } catch (error) {
-      if (current() && ref.current.owner === owner && ref.current.draft.attempt === attempt) {
-        publish({ ...ref.current, error: true });
-      }
-      throw error;
-    }
+    // The send may start only after its original attempt is durably kept.
+    // Bound this waiter, not the ordered storage operation: timing out must
+    // retain the same UUID and require recovery before any transport.
+    const independentDraft = !existing && !attempt.edit && options?.detachText;
+    const detach = independentDraft && revision.current === preparingRevision;
+    const saving = persist({ ...ref.current.draft,
+      ...(detach ? { text: '', mentions: null, reply: null } : {}),
+      ...(independentDraft ? { attemptDetached: true } : {}), attempt });
+    // Request native clearing at the same handoff as the controlled value.
+    // The original already lives in the ordered draft write.
+    if (detach) { try { options?.onDetach?.(); } catch { /* controlled value still clears */ } }
+    await saving;
+    // persist alone owns storage error state through its write revision.
     if (!current()) throw Error('This conversation visit changed.');
     return attempt;
-  }, [room, owner, current, persist, publish]);
+  }, [room, owner, current, persist]);
   const finish = useCallback(async (attempt: ChatDraftAttempt) => {
     if (!current() || ref.current.owner !== owner) return;
     try { await persist(finishChatComposer(ref.current.draft, attempt)); }

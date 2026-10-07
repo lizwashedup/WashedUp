@@ -1079,7 +1079,7 @@ export async function getCommunityChatMembers(communityId: string, scope?: Commu
  * RPC needed since the policy already covers it.
  */
 export async function deleteTopicMessage(messageId: string): Promise<void> {
-  const { error } = await supabase.from('community_topic_messages').delete().eq('id', messageId);
+  const { error } = await requestWithDeadline(supabase.from('community_topic_messages').delete().eq('id', messageId), 12_000);
   if (error) throw error;
 }
 

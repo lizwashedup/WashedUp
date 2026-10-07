@@ -684,3 +684,28 @@ it.each(['id', 'topic_id', 'sender_id', 'body', 'image_url', 'reply_to_message_i
  expect(mockTransport.mock.calls.filter(call=>call[1]==='insert')).toHaveLength(1);
  expect(f.chat.messages.some(row=>row.id==='stable-text')).toBe(false);
 });
+
+it.each([false, true])('bounds a stalled topic delete and respects account retirement (%s)', async retire => {
+  jest.useFakeTimers();
+  const deletion = deferred();
+  let pending: Promise<unknown> | undefined;
+  try {
+    const fixture = mount(); await flush();
+    mockTransport.mockReturnValueOnce(deletion.promise);
+    let settled = false;
+    pending = start(() => fixture.chat.deleteMessage('old')).then(value => {settled=true;return value;});
+    await flush();
+    if (retire) {emit('bob');await flush();}
+    await act(async () => jest.advanceTimersByTime(12000)); await flush();
+    expect(settled).toBe(true);
+    expect(await pending).toMatchObject({name:retire ? 'ObsoleteTopicOperationError' : 'RequestDeadlineError'});
+    if (!retire) expect(fixture.chat.messages.some(row => row.id === 'old')).toBe(true);
+    expect(mockTransport).toHaveBeenCalledTimes(1);
+    const before = fixture.chat.messages;
+    await act(async () => deletion.resolve({error:null})); await flush();
+    expect(fixture.chat.messages).toEqual(before);
+  } finally {
+    deletion.resolve({error:null}); await flush(); await pending;
+    jest.useRealTimers();
+  }
+});

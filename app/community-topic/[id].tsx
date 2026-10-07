@@ -9,7 +9,7 @@ import { ChatMentionPicker } from '../../components/chat/ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { ChatBubbleFill } from '../../components/chat/ChatBubbleFill';
 import ProfileButton from '../../components/ProfileButton';
-import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { requestWithDeadline, RequestDeadlineError } from '../../lib/requestWithDeadline';
 import { MessageActionsMenu, type MessageMenu } from '../../components/chat/MessageActionsMenu';
 import { messageActionAccess, messageActionWeb } from '../../components/chat/messageActionAccess';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
@@ -581,7 +581,9 @@ export default function CommunityTopicScreen() {
       if (entryIsCurrent()) hapticLight();
     } catch (e) {
       if (!entryIsCurrent() || isObsoleteTopicOperation(e)) return;
-      setAlertInfo({ title: 'That did not remove', message: friendlyError(e, 'Try again in a moment.') });
+      setAlertInfo(e instanceof RequestDeadlineError
+        ? { title: 'Removal not confirmed', message: 'The connection took too long. Reopen this chat to check whether the message was removed.' }
+        : { title: 'That did not remove', message: friendlyError(e, 'Try again in a moment.') });
     }
   };
 

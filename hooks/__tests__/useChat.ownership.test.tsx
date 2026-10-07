@@ -747,3 +747,34 @@ it('recovers an uncertain text insert from an exact receipt without sending twic
   expect(mockReceipt).toHaveBeenCalledTimes(1);
   expect(f.chat.messages.filter(row => row.id === 'stable-text')).toHaveLength(1);
 });
+
+it.each([false, true])('bounds a stalled delete and respects account retirement (%s)', async retire => {
+  jest.useFakeTimers();
+  const deletion = deferred();
+  let pending: Promise<unknown> | undefined;
+  try {
+    const fixture = mount(); await flush();
+    mockMutation.mockReturnValueOnce(deletion.promise);
+    let settled = false;
+    pending = start(() => fixture.chat.deleteMessage('old')).then(value => {settled=true;return value;});
+    await flush();
+    if (retire) {emitIdentity('bob');await flush();}
+    await act(async () => jest.advanceTimersByTime(12000)); await flush();
+    expect(settled).toBe(true);
+    const outcome = await pending;
+    if (retire) {
+      expect(outcome).toMatchObject({name:'ObsoleteChatOperationError'});
+      expect(Alert.alert).not.toHaveBeenCalled();
+    } else {
+      expect(fixture.chat.messages.some(row => row.id === 'old')).toBe(true);
+      expect(Alert.alert).toHaveBeenCalledWith('Removal not confirmed', expect.any(String));
+    }
+    expect(mockMutation).toHaveBeenCalledTimes(1);
+    const before = fixture.chat.messages;
+    await act(async () => deletion.resolve(success)); await flush();
+    expect(fixture.chat.messages).toEqual(before);
+  } finally {
+    deletion.resolve(success); await flush(); await pending;
+    jest.useRealTimers();
+  }
+});

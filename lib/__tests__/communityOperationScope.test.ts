@@ -638,3 +638,21 @@ it('does not promote missing metadata to confirmed empty reactions after early t
  const onBasicPage=jest.fn();await expect(community.getCommunityBroadcasts('community-a',undefined,scope(),{strictEnrichment:true,onBasicPage})).rejects.toThrow('Metadata failed');
  expect(onBasicPage.mock.calls[0][0].messages[0].metadata_pending).toBe(true);
 });
+
+it('bounds topic moderation deletion without repeating its write', async () => {
+  jest.useFakeTimers();
+  const deletion = pending(); let operation!: Promise<unknown>;
+  try {
+    execute.mockReturnValueOnce(deletion.promise);
+    let settled = false;
+    operation = community.deleteTopicMessage('message-one').catch(error => error).then(value => {settled=true;return value;});
+    await flush(); await jest.advanceTimersByTimeAsync(12000); await flush();
+    expect(settled).toBe(true);
+    expect(await operation).toMatchObject({name:'RequestDeadlineError'});
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({table:'community_topic_messages',operation:'delete',filters:[['id','message-one']]});
+  } finally {
+    deletion.resolve({error:null}); await operation;
+    jest.useRealTimers();
+  }
+});

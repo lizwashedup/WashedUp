@@ -741,11 +741,11 @@ export function useTopicChat(topicId: string | undefined, context?: TopicRoomCon
     const isCurrent = () => isCurrentRoom() && changes.get(messageId) === attempt;
     setMessages((current) => isCurrent() ? current.filter((message) => message.id !== messageId) : current);
     try {
-      const { error } = await supabase
+      const { error } = await requestWithDeadline(supabase
         .from('community_topic_messages')
         .delete()
         .eq('id', messageId)
-        .eq('sender_id', userId);
+        .eq('sender_id', userId), 12_000);
       if (!isCurrent()) throw new ObsoleteTopicOperationError();
       if (error) throw error;
       invalidateLists();
