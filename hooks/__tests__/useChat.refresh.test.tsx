@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useChat, ChatMessage, ConversationKey } from '../useChat';
 
+let mockClosing=false;
 jest.mock('../../lib/supabase', () => ({ supabase: {
+  realtime: {isDisconnecting: () => mockClosing},
   from: jest.fn(), channel: jest.fn(), removeChannel: jest.fn(),
   auth: { getUser: jest.fn(), getSession: jest.fn(), onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })) },
 } }));
@@ -57,6 +59,7 @@ async function emit(event: string, row: ChatMessage) {
 }
 
 beforeEach(() => {
+  mockClosing=false;
   jest.clearAllMocks();
   readMessages.mockReset();
   readProfiles.mockReset().mockResolvedValue({ data: [{ id: 'other', first_name_display: 'Alex', profile_photo_url: 'local-test-photo' }] });
@@ -587,4 +590,20 @@ it('shows a pending text bubble through a three-second acknowledgement and keeps
     cleanup.splice(0).forEach(close => close());
     jest.clearAllTimers(); jest.useRealTimers();
   }
+});
+
+
+it.each(['event','circle'] as const)('joins only the current %s visit after a pending socket close', async kind => {
+ jest.useFakeTimers();try {
+  readMessages.mockResolvedValue(result(message(1)));mockClosing=true;
+  const fixture=mount({kind,id:'room-a'});await flush();
+  fixture.navigate({kind,id:'room-b'});await flush();fixture.navigate({kind,id:'room-a'});await flush();
+  const channels=jest.mocked(supabase.channel).mock.results.map(result=>result.value);
+  expect(channels).toHaveLength(3);
+  expect(new Set(jest.mocked(supabase.channel).mock.calls.map(call=>call[0])).size).toBe(3);
+  channels.forEach(channel=>expect(channel.subscribe).not.toHaveBeenCalled());
+  mockClosing=false;await act(async()=>{jest.advanceTimersByTime(100);});await flush();
+  expect(channels[0].subscribe).not.toHaveBeenCalled();expect(channels[1].subscribe).not.toHaveBeenCalled();
+  expect(channels[2].subscribe).toHaveBeenCalledTimes(1);
+ }finally{cleanup.splice(0).forEach(close=>close());jest.useRealTimers();}
 });

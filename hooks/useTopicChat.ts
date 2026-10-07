@@ -1,3 +1,4 @@
+import { subscribeChatWhenReady, nextChatDataChannelName } from '../lib/chatRealtimeSubscription';
 import { validOptionalMentionDocument, trimChatMentionDocument, sameChatMentionIdentity, type ChatMentionDocument } from '../lib/chatMentionIdentity';
 import type { TopicDraftEdit } from '../lib/topicComposerDraft';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -459,7 +460,7 @@ export function useTopicChat(topicId: string | undefined, context?: TopicRoomCon
     };
 
     const channel = supabase
-      .channel(`community-topic-chat:${topicId}`)
+      .channel(nextChatDataChannelName(`community-topic-chat:${topicId}`))
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'community_topic_messages' }, payload => {
         // PostgreSQL DELETE payloads contain the primary key, not topic_id.
         // Only a message already present in this room needs reconciliation.
@@ -512,9 +513,14 @@ export function useTopicChat(topicId: string | undefined, context?: TopicRoomCon
         void refreshLoadedReactions();
         refreshIfActive();
       }
-    }).subscribe();
+    });
+    const stopWaiting = subscribeChatWhenReady(
+      () => supabase.realtime?.isDisconnecting() ?? false,
+      () => { channel.subscribe(); }, () => active && isCurrentRoom(),
+    );
 
     return () => {
+      stopWaiting();
       active = false;
       queue.pending = false;
       if (realtimeQueueRef.current === queue) realtimeQueueRef.current = null;

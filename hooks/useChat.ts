@@ -1,3 +1,4 @@
+import { subscribeChatWhenReady, nextChatDataChannelName } from '../lib/chatRealtimeSubscription';
 import { validOptionalMentionDocument, sameChatMentionIdentity, type ChatMentionDocument } from '../lib/chatMentionIdentity';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Alert } from 'react-native';
@@ -300,7 +301,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     };
 
     const channel = supabase
-      .channel(channelName)
+      .channel(nextChatDataChannelName(channelName))
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter },
@@ -383,10 +384,14 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
         // through the existing account/room-owned, non-blocking refresh.
         if (!isCurrentRoom() || payload?.status !== 'ok' || payload?.extension !== 'postgres_changes') return;
         await refreshWindowRef.current(true);
-      })
-      .subscribe();
+      });
+    const stopWaiting = subscribeChatWhenReady(
+      () => supabase.realtime?.isDisconnecting() ?? false,
+      () => { channel.subscribe(); }, isCurrentRoom,
+    );
 
     return () => {
+      stopWaiting();
       if (isCurrentRoom()) activeRoomGenerationRef.current = null;
       newestRequestRef.current += 1;
       supabase.removeChannel(channel);

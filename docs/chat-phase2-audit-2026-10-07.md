@@ -113,3 +113,90 @@ Four new regression executions (two cases each for a message and broadcast) repr
 Files changed: `hooks/useCommunityReplyComposer.ts`, `components/communities/__tests__/CommunityCompanionLifetime.test.tsx`, and this audit. Evidence is saved as `evidence/reply-*.log` in the verification pack. This is an isolated JavaScript change requiring no native dependency/build; nothing was released. The open r6 fixture predates this nested-reply follow-up and does not model native nested replies, so it must not be treated as device validation of this fix.
 
 Remaining uncertainty is unchanged: immediate native send-and-type timing, sustained keyboard/scroll behavior, physical-device cold starts, real two-account delivery/reconnect/background operation, and Android. Existing automated evidence is meaningful but does not establish end-to-end WhatsApp parity. The single unresolved original plus next draft remains distinct from a general multi-message offline outbox. No native workaround or broader backend design is asserted complete.
+
+## Follow-up: real local multi-client delivery and reconnect — October 7
+
+Continued from `eeeec2bdb0906c6c58c248591c1f2d6350629df1`. Two physical phones are
+not required for the transport checks completed in this follow-up. A separate
+local Supabase native runtime ran real Auth, PostgreSQL, PostgREST and Realtime
+with two independently authenticated members and a third unrelated account.
+The server and fictional data were isolated outside the app repository. The
+harness restricts HTTP and WebSocket requests to its explicit loopback endpoint
+and verifies a local fixture marker before creating accounts or data.
+
+The initial real-service test reproduced an SDK close/rejoin race: after the
+last channel leaves, `connect()` ignores a new attempt while the previous socket
+is still closing. Main community subscriptions already waited for this state;
+shared and topic subscriptions did not. They now use the same cancellable wait,
+and PostgreSQL data channels receive unique names per visit so a returning room
+does not reuse a channel still leaving. Retired visits cannot join later.
+Broadcast/presence names and typing behavior were not changed. Main community
+subscriptions now reuse the extracted helper while keeping their existing names.
+
+Evidence and checks:
+
+- The unguarded real SDK run timed out at receiver reconnect; its report is
+  `evidence/two-client-reconnect-before.json` in the verification pack.
+- Three new shared/topic hook regression cases all failed against their previous
+  committed implementations. With the repair, **570 tests passed across 12
+  independent chat suites**, including shared/topic refresh and mutations,
+  entry/companion lifetimes, ownership, anchors and community subscriptions.
+  The earlier focused 106-test run overlaps this count; it is not additive.
+- The final local integration run passed **all 10 scenarios**, ending with 78
+  distinct messages: two-way live delivery, Unicode/multiline text, 40 concurrent
+  sends, recovery from a deliberately lost committed-insert response, same-ID
+  retry without duplicate rows/events, 20-message disconnected catch-up, six
+  reconnect cycles, outsider read/receive/insert rejection, sender impersonation
+  rejection, and archived-topic send rejection with retained history.
+- TypeScript, auth invariants, diff whitespace checks and offline local iOS
+  JavaScript/Hermes export passed. Export is at
+  `/tmp/washedup-chat-reconnect-export-20261007`. No native build or OTA was made.
+  The prior aggregate-pipeline and missing standalone-lint limitations still
+  apply; the full repository suite was not rerun or claimed green.
+
+Reproduction instructions are in `scripts/chat-lab/README.md`. CLI 2.120.0 was
+downloaded from the official release and its SHA256 matched the release asset
+digest; it was installed only inside the external lab directory, not globally.
+Supabase documents this experimental [native local runtime](https://supabase.com/docs/guides/local-development/docker-and-native-runtimes).
+The lab uses the existing installed SDK and `ws`, with Node 24 TypeScript
+stripping. No app package, lockfile, native configuration, production secret or
+release configuration changed. The lab service is stopped after verification;
+private local credentials and fictional data remain outside Git for reuse.
+
+These are real service/SDK checks using the app's receipt, merge and subscription
+helpers, **not the complete running app with two native devices**. The scoped
+topic-policy fixture derives from the repository's September 3 policy snapshot;
+it does not prove today's production schema or policy parity. The harness
+explicitly fetches missed history; app hook tests separately cover refresh
+ownership. Two local round-trip samples are diagnostics, not production latency
+or a cold-open benchmark. This bounded run is not a long-duration soak.
+
+The earlier lack of real multi-account transport evidence is now partially
+addressed by this lab. Still open: the intermittent native send-and-type case,
+physical keyboard/scroll performance, exact Build 51 app parity, physical cold
+starts, actual app-to-app background delivery and push, media transfer under
+poor connectivity, and Android. The current r6 native preview predates this
+follow-up and has simulated transport. It is not device validation of these
+changes. Apple's [Simulator testing guidance](https://developer.apple.com/library/archive/documentation/IDEs/Conceptual/iOS_Simulator_Guide/TestingontheiOSSimulator/TestingontheiOSSimulator.html)
+also distinguishes Mac-backed simulation from device performance.
+
+Files changed in this follow-up:
+
+- `hooks/useChat.ts`
+- `hooks/useTopicChat.ts`
+- `hooks/__tests__/useChat.refresh.test.tsx`
+- `hooks/__tests__/useTopicChat.refresh.test.tsx`
+- `lib/communityConversationRealtime.ts`
+- `lib/chatRealtimeSubscription.ts`
+- `lib/__tests__/chatRealtimeSubscription.test.ts`
+- `scripts/chat-lab/run.mjs`
+- `scripts/chat-lab/schema.sql`
+- `scripts/chat-lab/README.md`
+- `docs/chat-phase2-audit-2026-10-07.md`
+
+Feature branch remains `feature/chat-loading-20261006`, based on protected commit
+`9c2994b10e9f263e98a262e87a9bf7a94ee941c5`. The repair is JavaScript-only and
+structurally OTA-compatible; no future native build is required by this change.
+No merge, push, deployment, production mutation, notification, build or release
+was performed. Final branch/base comparison and file inventory are saved in
+`evidence/two-client-final/` in the external verification pack.

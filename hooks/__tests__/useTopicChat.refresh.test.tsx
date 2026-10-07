@@ -12,7 +12,8 @@ jest.mock('../../lib/topicLoadedHistory', () => ({ readLoadedTopicEdits: (...arg
 jest.mock('../../lib/chatReactionReader', () => ({ readLoadedTopicReactions: (...args: any[]) => mockReadLoadedReactions(...args) }));
 const mockInvalidate = jest.fn();
 const mockClient = { invalidateQueries: mockInvalidate };
-const mockRemoveChannel = jest.fn();
+const mockRemoveChannel = jest.fn(), mockSubscribe = jest.fn();
+let mockClosing = false;
 const mockChannels: Array<{ name: string; callbacks: Record<string, (payload?: any) => void> }> = [];
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient }));
 jest.mock('../../lib/communityChat', () => ({ getTopicMessages: (...args: any[]) => mockRead(...args) }));
@@ -20,6 +21,7 @@ jest.mock('../../lib/blocking', () => ({ getBlockedWith: (...args: any[]) => moc
 jest.mock('../../lib/logger', () => ({ logError: jest.fn() }));
 jest.mock('../../lib/contentFilter', () => ({ checkContent: () => ({ ok: true }) }));
 jest.mock('../../lib/supabase', () => ({ supabase: {
+  realtime: {isDisconnecting: () => mockClosing},
   auth: {
     getUser: async () => ({ data: { user: { id: 'viewer' } }, error: null }),
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe: jest.fn() } } }),
@@ -39,7 +41,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
   channel: (name: string) => {
     const callbacks: Record<string, (payload?: any) => void> = {};
     mockChannels.push({ name, callbacks });
-    const channel: any = { on: (kind: string, filter: any, callback: any) => { callbacks[kind === 'system' ? 'system' : filter.table + (filter.event === 'DELETE' ? '_delete' : '')] = callback; return channel; }, subscribe: () => channel };
+    const channel: any = { on: (kind: string, filter: any, callback: any) => { callbacks[kind === 'system' ? 'system' : filter.table + (filter.event === 'DELETE' ? '_delete' : '')] = callback; return channel; }, subscribe: () => {mockSubscribe(name);return channel;} };
     return channel;
   },
   removeChannel: (...args: any[]) => mockRemoveChannel(...args),
@@ -73,6 +75,7 @@ function mount(initial: string | undefined = 'topic-a', initialAnchor: any = nul
 }
 async function flush() { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); }); }
 beforeEach(() => {
+  mockClosing=false;
   jest.clearAllMocks();
   mockRead.mockReset().mockResolvedValue(page([message(10)], true));
   mockBlocked.mockReset().mockResolvedValue(new Set());
@@ -653,4 +656,17 @@ it('an unsuccessful delete superseding an edit does not leave older edit refresh
   act(() => mockChannels[0].callbacks.community_topic_messages({eventType:'UPDATE',new:{id:'message-1'}}));
   await flush();
   expect(fixture.chat.messages[0].body).toBe('Authoritative revision');
+});
+
+
+it('waits for socket close on rapid room return and retires earlier delayed joins', async () => {
+ jest.useFakeTimers();try {
+  mockClosing=true;const fixture=mount();await flush();
+  fixture.navigate('topic-b');await flush();fixture.navigate('topic-a');await flush();
+  expect(mockSubscribe).not.toHaveBeenCalled();
+  expect(new Set(mockChannels.map(channel=>channel.name)).size).toBe(3);
+  mockClosing=false;await act(async()=>{jest.advanceTimersByTime(100);});await flush();
+  expect(mockSubscribe).toHaveBeenCalledTimes(1);
+  expect(mockSubscribe).toHaveBeenCalledWith(mockChannels[2].name);
+ }finally{close.splice(0).forEach(fn=>fn());jest.useRealTimers();}
 });
