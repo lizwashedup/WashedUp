@@ -142,7 +142,10 @@ export const authedUserIdRef: { current: string | null } = { current: null };
  * start (JS runtime reload). No AsyncStorage; the throttle is intentionally
  * session-scoped and would be wrong to persist past app kill.
  */
-const OTP_REUSE_WINDOW_MS = 60_000;
+// Keep this no longer than verify-code.tsx's 30-second resend cooldown. If the
+// reuse window outlives the button cooldown, the first tappable resend is a
+// silent no-op even though the UI tells the person it was accepted.
+const OTP_REUSE_WINDOW_MS = 30_000;
 let lastOtpSent: { phone: string; at: number } | null = null;
 
 export function wasOtpRecentlySent(phone: string): boolean {
