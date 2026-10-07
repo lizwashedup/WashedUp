@@ -1,8 +1,9 @@
 # WashedUp chat: full scoped recheck — October 7, 2026
 
-Latest continuation: **2,510 passing tests, 11 unchanged baseline failures,
-174 suites**. The blocking/inbox section at the end records the reported private
-preview problem, scoped client fixes, research and remaining server questions.
+Latest continuation: **2,557 passing tests, 11 unchanged baseline failures,
+176 suites**, plus **99 isolated PostgreSQL assertions**. The private-chat
+blocking continuation at the end records the client entry/profile safeguards
+and a review-only, undeployed server contact boundary.
 Earlier correctness, simulator and transport results remain separately identified.
 
 ## Initial full-recheck result
@@ -684,3 +685,159 @@ inventories are retained. The temporary dependency symlink is removed before
 commit. These are JavaScript-only, OTA-compatible source changes with no native
 dependency/configuration requirement. Existing release gates still apply.
 Nothing was merged, pushed, published, deployed or released.
+
+
+## Private-chat block entry and save continuation — October 7
+
+**Scope:** Liz clarified that the reported blocked person's photo/message stayed
+in her private chat or inbox, then authorized fixing it. This continues the
+inbox repair at `e2904294535f9c64415fd3b7e249ab2932659437`; it does not identify
+how that person discovered Liz, change production records, or claim that the
+community-chat presentation has been unified.
+
+Verified the existing isolated worktree and clean starting status, fetched
+origin, confirmed `https://github.com/lizwashedup/WashedUp.git`, and confirmed
+protected release commit `9c2994b10e9f263e98a262e87a9bf7a94ee941c5` remains the
+branch base and protected local release ref. Work remains on
+`feature/chat-loading-20261006`. The root instructions, handoff and external
+native-build ledger were reviewed. No nested AGENTS.md files apply.
+
+### Implemented app behavior
+
+- An unnamed two-person Circle/private chat must pass the existing mutual
+  block RPC before its payload reaches the route. A blocked or unverified
+  counterpart returns a neutral unavailable entry: no peer header/photo,
+  conversation composer or retained profile/plan action. Named pairs and
+  larger groups retain their current classification.
+- A confirmed local block retires the viewer's warm Circle query generation
+  and in-flight reads. A pre-block result cannot restore the private chat.
+  Other accounts' caches remain separate. The prior inbox repair still removes
+  the matching preview, photo and row unread count immediately.
+- Mini-profile cards check mutual blocking before private/public profile reads
+  or mark enrichment. A matching block signal retires an already open card.
+  Missing access shows Profile unavailable instead of a synthetic Member card.
+- Only explicit boolean false permits the mutual-block helper to reveal a
+  candidate. Returned errors, thrown failures and malformed/null results hide
+  that candidate. This helper is shared by other existing privacy reads.
+- A new block requires a matching profile update receipt containing the target
+  and all previously read block IDs. The update compares the old array before
+  saving, so a concurrent edit cannot silently replace another device's block.
+  A conflict or uncertain result reports an error and permits an explicit retry;
+  it does not claim success. Retrying first rereads the actual saved list.
+- Auth/profile/write waits are bounded to 12 seconds each. Unmounted and duplicate
+  unscoped confirmations are rejected. Optional reporting still dispatches its
+  existing payload, but its response no longer stalls confirmed block completion.
+  Cache invalidations occur before privacy observers can retire the originating
+  chat scope; stale completion/navigation callbacks remain suppressed.
+
+The bottom-tab unread query currently counts joined-event notifications only;
+it does not count private Circle notifications. No global badge change or
+notification-record mutation was made in this pass.
+
+### Server boundary prepared, not deployed
+
+The checked-in legacy Circle message policies require membership, but do not
+recheck a mutual block on an existing DM. The local fixture first demonstrates
+that gap. The new SQL is deliberately under `docs/database/review-only/`,
+outside the automatic migration inventory.
+
+It adds a current-caller membership/block helper and restrictive SELECT,
+INSERT and UPDATE policies for private messages and their reactions. Existing
+permissive policies cannot bypass that additional boundary. Both block stores
+and directions are honored. History remains stored. Existing named-group,
+larger-group and event behavior is retained by this boundary.
+
+The disposable PostgreSQL 17.11 fixture passed 99 assertions, including the two
+pre-fix demonstrations, all block-store/direction/viewer combinations, ordinary
+sends/reactions, blocked reads/sends/edits/reactions, moving existing content
+into a blocked DM, outsider denial, retained sender checks, anonymous helper
+grants, group preservation and stale-array write rejection. It imports the
+canonical checked-in mutual-block helper. The runner accepts only a local
+PostgreSQL binary directory, creates an empty database, disables TCP, uses a
+private Unix socket, then stops and removes its own database. No project URL,
+production credential, external service or live data is used.
+
+Before any promotion, the effective live RLS, RPC definitions/grants, privileged
+message writers, Realtime behavior and push eligibility must be checked.
+SECURITY DEFINER RPCs/service-role operations can bypass table RLS; this candidate
+does not claim to gate all such paths, erase cached remote images, or restrict
+all profile/Storage endpoints. No existing RPC body was overwritten from an
+unverified historical migration. Production enforcement is therefore **not yet
+established** by these local checks.
+
+### Verification on this continuation
+
+Evidence directory:
+`/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/block-entry-20261007/`.
+
+- Final distinct selected chat/adjacent inventory: **176 suites, 172 passing
+  suites, 2,557 passing tests, 11 unchanged baseline failures, zero pending,
+  zero timeouts**. Each suite ran separately, with at most two concurrently.
+  The final changed block/route suites replace their earlier results in the
+  summary; repeat executions are not added together. The four known failing
+  files and their causes remain listed above.
+- Focused tests cover block receipts, concurrent-list comparison, stalled
+  reporting/reads/writes, duplicate/unmounted confirmations, query-generation
+  retirement, late privacy results, open-profile removal and neutral route
+  behavior with retained actions rejected.
+- TypeScript passed; auth invariants passed; offline iOS JavaScript/Hermes
+  export passed; diff whitespace checks passed. No standalone lint command
+  is configured. Used existing dependencies and Node 24.19, not the pinned
+  Node 20.20.1 environment.
+- Required legacy `qa/guinea-verify-washedup.sh` was attempted: no-cloud-build
+  guard, seven paid-flow Node assertions and 131 ticketing Jest tests passed,
+  then the runner stopped because `deno` is unavailable. That complete legacy
+  pipeline is not represented as passing. These extra checks are not folded
+  into the selected inventory count above.
+- No matching-device, simulator, production RLS or new multi-client Realtime
+  run was performed for this continuation. Earlier simulator/transport results
+  elsewhere in this document remain separately scoped.
+
+### Every file changed in this continuation
+
+| File | Change |
+| --- | --- |
+| `hooks/useBlock.ts` | Exact save receipt, concurrent-array guard, bounded waits, nonblocking report and lifecycle ordering |
+| `hooks/useCircle.ts` | Private entry mutual-block gate and retirement of warm/in-flight data |
+| `components/MiniProfileCard.tsx` | Privacy preflight, open-card retirement and unavailable state |
+| `lib/blocking.ts` | Explicit unblocked receipt; failed/unknown checks hide the candidate |
+| `lib/chatListCache.ts` | Privacy notifications include the blocked person's ID |
+| `hooks/__tests__/useBlock.scope.test.tsx` | Save, timeout, reporting, lifecycle and invalidation regressions |
+| `hooks/__tests__/useCircle.account.test.tsx` | Mutual block, warm-cache, delayed-result and group classification regressions |
+| `components/__tests__/MiniProfileCard.lifetime.test.tsx` | Privacy preflight and open-card regressions |
+| `components/chat/__tests__/CircleChatMenuLifetime.test.tsx` | Unavailable private entry and retired route actions |
+| `lib/__tests__/blocking.test.ts` | Mutual-block helper failure and receipt cases |
+| `docs/database/review-only/20261007120000_private_chat_block_boundary.sql` | Undeployed restrictive message/reaction policy candidate |
+| `supabase/tests/contracts/20261007_private_chat_block_fixture.sql` | Empty-database-only synthetic schema and data |
+| `scripts/db-contracts/test-private-chat-blocks.py` | Disposable, socket-only PostgreSQL test runner |
+| `docs/chat-full-recheck-2026-10-07.md` | This report |
+
+The final evidence also contains `continuation.diff`, `protected-base.diff` and
+`protected-base-files.txt` for the complete accumulated feature comparison with
+the protected release. The full branch includes prior chat reliability work;
+this turn's changed files are the fourteen above.
+
+### Remaining gates and delivery classification
+
+App changes are JavaScript/TypeScript-only and **OTA-compatible in principle**
+with the preserved Build 51 native/dependency contract. They still require the
+normal reviewed integration and guarded release process. The SQL is a separate
+backend candidate requiring live compatibility review and authorized deployment;
+it cannot be delivered through an app OTA. No new native dependency or native
+configuration was added, so the native-build ledger has no new item.
+
+The app remains unpublished. Warm state on another device does not receive an
+immediate local block signal; fresh entry/refresh and server enforcement remain
+necessary. A mutual-block RPC round trip is added to private entry and mini-profile
+opening; matching-device latency is unmeasured. Broader shared-group quote,
+reaction/typing identity presentation and a block-management/unblock screen are
+not completed by this private-chat repair. No evidence establishes the specific
+person's original profile-discovery route or any unauthorized access.
+
+After an approved matching test version is available, test with a dedicated
+second account: open a private chat, block it, confirm the inbox/photo disappears,
+reopen an old chat link, restart the app, and attempt a new message/reaction from
+the other account after the backend candidate has been reviewed and deployed.
+These production-independent preparations do not substitute for that acceptance
+check. No merge, push, OTA, build, deploy, notification send or production change
+was performed.

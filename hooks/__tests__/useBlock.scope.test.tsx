@@ -2,17 +2,25 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useBlock } from '../useBlock';
-import { chatListMemoryCache } from '../../lib/chatListCache';
+import { chatListMemoryCache, subscribeChatListPrivacy } from '../../lib/chatListCache';
 import { consumeChatListDirty } from '../../lib/chatListSignal';
 
 const mockGetUser = jest.fn(), mockRead = jest.fn(), mockWrite = jest.fn(), mockReport = jest.fn(), mockInvalidate = jest.fn();
+const mockWriteFilters = jest.fn();
 const mockQueryClient = { invalidateQueries: mockInvalidate };
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockQueryClient }));
 jest.mock('../../lib/supabase', () => ({ supabase: {
   auth: { getUser: (...args: any[]) => mockGetUser(...args) },
   from: (table: string) => table === 'reports' ? { insert: (...args: any[]) => mockReport(...args) } : {
     select: () => ({ eq: (_key: string, id: string) => ({ single: () => mockRead(id) }) }),
-    update: (value: unknown) => ({ eq: (_key: string, id: string) => mockWrite(id, value) }),
+    update: (value: unknown) => {
+      let id = '';
+      const query: any = {
+        eq: (key: string, next: string) => { if (key === 'id') id = next; else mockWriteFilters(key, next); return query; },
+        is: (key: string, next: null) => { mockWriteFilters(key, next); return query; },
+        select: () => query, maybeSingle: () => mockWrite(id, value),
+      }; return query;
+    },
   },
 } }));
 let tree: ReactTestRenderer, controller: ReturnType<typeof useBlock>;
@@ -29,7 +37,7 @@ beforeEach(() => {
   chatListMemoryCache.clear(); consumeChatListDirty();
   jest.useFakeTimers(); jest.clearAllMocks(); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); current = 'alice';
   mockGetUser.mockResolvedValue(user('alice')); mockRead.mockResolvedValue({ data: { blocked_users: ['existing'] }, error: null });
-  mockWrite.mockResolvedValue({ error: null }); mockReport.mockResolvedValue({ error: null }); mockInvalidate.mockResolvedValue(undefined);
+  mockWrite.mockImplementation(async (id: string, value: any) => ({ data: { id, ...value }, error: null })); mockReport.mockResolvedValue({ error: null }); mockInvalidate.mockResolvedValue(undefined);
 });
 afterEach(async () => { await act(async () => tree?.unmount()); jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
 
@@ -131,4 +139,50 @@ it('does not let an old completion release a new account block attempt', async (
 it('retires an open scoped native confirmation when its hook unmounts', async () => {
   await mount(); await open(scope()); const commit = confirm(); await act(async () => tree.unmount());
   await act(async () => commit()); expect(mockGetUser).not.toHaveBeenCalled(); expect(mockWrite).not.toHaveBeenCalled();
+});
+
+it.each([null, { id: 'bob', blocked_users: ['existing', 'target'] }, { id: 'alice', blocked_users: ['existing'] },
+  { id: 'alice', blocked_users: ['target'] }])('requires a matching saved block receipt: %j', async receipt => {
+  mockWrite.mockResolvedValueOnce({ data: receipt, error: null });
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(after).not.toHaveBeenCalled(); expect(mockReport).not.toHaveBeenCalled();
+  expect(consumeChatListDirty()).toBe(false);
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+});
+it.each([null, [], ['existing']])('compares the stored array before writing so concurrent blocks cannot be overwritten: %j', async stored => {
+  mockRead.mockResolvedValueOnce({ data: { blocked_users: stored }, error: null });
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(mockWriteFilters).toHaveBeenCalledWith('blocked_users', stored === null ? null : `{${stored.join(',')}}`);
+  expect(after).toHaveBeenCalledTimes(1);
+});
+it('finishes a confirmed block even if the best-effort report never resolves', async () => {
+  mockReport.mockReturnValueOnce(new Promise(() => {}));
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(after).toHaveBeenCalledTimes(1); expect(controller.blocking).toBe(false);
+  expect(consumeChatListDirty()).toBe(true);
+});
+it('does not repeat or revive an unscoped confirmation after unmount', async () => {
+  const pending = deferred<any>(); mockGetUser.mockReturnValueOnce(pending.promise);
+  await mount(); await open(); const commit = confirm(); let first!: Promise<void>;
+  act(() => { first = commit(); void commit(); }); expect(mockGetUser).toHaveBeenCalledTimes(1);
+  act(() => tree.unmount()); await act(async () => { pending.resolve(user('alice')); await first; await commit(); });
+  expect(mockWrite).not.toHaveBeenCalled(); expect(after).not.toHaveBeenCalled();
+});
+it.each(['auth', 'read', 'write'] as const)('ends a stalled %s with an error and no false success', async stage => {
+  ({ auth: mockGetUser, read: mockRead, write: mockWrite })[stage].mockReturnValueOnce(new Promise(() => {}));
+  await mount(); await open(scope()); let work!: Promise<void>; act(() => { work = confirm()(); });
+  await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+  await act(async () => { jest.advanceTimersByTime(12_000); await work; });
+  expect(after).not.toHaveBeenCalled(); expect(controller.blocking).toBe(false);
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+});
+
+it('invalidates the initiating account before the privacy signal retires its chat entry', async () => {
+  const stop = subscribeChatListPrivacy(() => { current = 'retired'; });
+  try {
+    await mount(); await open(scope()); await act(async () => confirm()());
+    expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ['profile-blocked'] });
+    expect(mockInvalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: expect.arrayContaining(['alice']) }));
+    expect(consumeChatListDirty()).toBe(true); expect(after).not.toHaveBeenCalled();
+  } finally { stop(); }
 });

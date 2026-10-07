@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCircle } from '../useCircle';
+import { removeBlockedPrivateChatPreviews } from '../../lib/chatListCache';
 import { circleKeys } from '../../lib/circles/keys';
 
 const mockAuthListeners = new Set<(event: string, session: any) => void>();
@@ -232,4 +233,45 @@ it('bounds a stalled Circle RPC without retrying the same timeout automatically'
     await act(async () => { jest.advanceTimersByTime(1); });
     expect(current.data?.circle.name).toBe('A circle');
   } finally { jest.useRealTimers(); }
+});
+
+const dm = () => ({ circle: { id: 'circle-one', name: '' }, members: [
+  { user_id: 'account-a', first_name_display: 'Viewer', profile_photo_url: null },
+  { user_id: 'peer', first_name_display: 'Peer', profile_photo_url: 'private-photo' },
+] });
+it.each([true, null, undefined, 'false'])('does not expose a private header or conversation when mutual block check is %j', async blocked => {
+  mockRpc.mockImplementation(async name => ({ data: name === 'get_circle' ? dm() : blocked, error: null }));
+  await mount(); expect(current.data).toBeNull(); expect(current.isLoading).toBe(false);
+  expect(mockRpc).toHaveBeenCalledWith('yours_is_blocked_between', { p_a: 'account-a', p_b: 'peer' });
+});
+it('waits for explicit unblocked status before exposing a private conversation', async () => {
+  const privacy = deferred<any>();
+  mockRpc.mockImplementation(name => name === 'get_circle' ? Promise.resolve({ data: dm(), error: null }) : privacy.promise);
+  await mount(); expect(current.data).toBeUndefined(); expect(current.isLoading).toBe(true);
+  privacy.resolve({ data: false, error: null }); await flush(); expect(current.data?.members[1].first_name_display).toBe('Peer');
+});
+it('retires warm private data immediately after a local block, including another mounted observer', async () => {
+  let blocked = false, second!: Result;
+  mockRpc.mockImplementation(async name => ({ data: name === 'get_circle' ? dm() : blocked, error: null }));
+  await mount();
+  act(() => tree!.update(<QueryClientProvider client={client}><Harness id="circle-one" />
+    <Harness id="circle-one" capture={r => { second = r; }} /></QueryClientProvider>)); await flush();
+  expect(second.data).toBeTruthy(); const old = current.isCurrentViewer; blocked = true;
+  act(() => removeBlockedPrivateChatPreviews('account-a', 'peer'));
+  expect(current.data).toBeUndefined(); expect(second.data).toBeUndefined(); expect(old()).toBe(false);
+  await flush(); expect(current.data).toBeNull(); expect(second.data).toBeNull();
+});
+it('cannot restore a private room with an unblocked read that finishes after block confirmation', async () => {
+  const stale = deferred<any>(); let reads = 0;
+  mockRpc.mockImplementation(name => name === 'get_circle' ? Promise.resolve({ data: dm(), error: null }) :
+    ++reads === 1 ? stale.promise : Promise.resolve({ data: true, error: null }));
+  await mount(); act(() => removeBlockedPrivateChatPreviews('account-a', 'peer')); await flush();
+  expect(current.data).toBeNull(); stale.resolve({ data: false, error: null }); await flush(); expect(current.data).toBeNull();
+});
+it('leaves a named two-person circle available and ignores another account block signal', async () => {
+  mockRpc.mockImplementation(async () => ({ data: { ...dm(), circle: { id: 'circle-one', name: 'Named circle' } }, error: null }));
+  await mount(); const epoch = current.viewerEpoch;
+  act(() => removeBlockedPrivateChatPreviews('someone-else', 'peer')); await flush();
+  expect(current.data?.circle.name).toBe('Named circle'); expect(current.viewerEpoch).toBe(epoch);
+  expect(mockRpc).toHaveBeenCalledTimes(1);
 });

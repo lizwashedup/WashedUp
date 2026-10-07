@@ -27,11 +27,17 @@ export async function getBlockedWith(
   if (unique.length === 0) return new Set();
   const flags = await Promise.all(
     unique.map(async (id) => {
-      const { data, error } = await supabase.rpc('yours_is_blocked_between', {
-        p_a: currentUserId,
-        p_b: id,
-      });
-      return error ? id : data === true ? id : null;
+      try {
+        const { data, error } = await supabase.rpc('yours_is_blocked_between', {
+          p_a: currentUserId,
+          p_b: id,
+        });
+        // Only an explicit false authorizes visibility. Null/malformed results
+        // and thrown transport failures are as uncertain as returned errors.
+        return !error && data === false ? null : id;
+      } catch {
+        return id;
+      }
     }),
   );
   return new Set(flags.filter((x): x is string => !!x));

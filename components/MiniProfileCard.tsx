@@ -14,6 +14,8 @@ import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
+import { getBlockedWith } from '../lib/blocking';
+import { subscribeChatListPrivacy } from '../lib/chatListCache';
 import MarkIcon from './marks/MarkIcons';
 
 interface MiniProfileCardProps {
@@ -48,6 +50,7 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
   const [identityExpanded, setIdentityExpanded] = useState(false);
   const [authEpoch, setAuthEpoch] = useState(0);
   const revision = useRef(0), mounted = useRef(false);
+  const verifiedViewer = useRef<string | null>(null);
   const visit = useMemo(() => ({ visible, userId, authEpoch }), [visible, userId, authEpoch]);
   const activeVisit = useRef(visit); activeVisit.current = visit;
   const pendingAction = useRef<object | null>(null);
@@ -64,10 +67,16 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
     mounted.current = true;
     const { data: { subscription } } = supabase.auth.onAuthStateChange(event => {
       if (!mounted.current || event === 'INITIAL_SESSION') return;
+      verifiedViewer.current = null;
       pendingAction.current = null;
       setAuthEpoch(++revision.current);
     });
-    return () => { mounted.current = false; pendingAction.current = null; subscription.unsubscribe(); };
+    const stopPrivacy = subscribeChatListPrivacy((viewerId, blockedId) => {
+      if (!mounted.current || verifiedViewer.current !== viewerId || activeVisit.current.userId !== blockedId) return;
+      pendingAction.current = null;
+      setAuthEpoch(++revision.current);
+    });
+    return () => { mounted.current = false; pendingAction.current = null; subscription.unsubscribe(); stopPrivacy(); };
   }, []);
 
   useEffect(() => {
@@ -84,7 +93,10 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
       try {
         const { data: auth, error: authError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
         if (!current() || authError || !auth.user) return;
+        verifiedViewer.current = auth.user.id;
         update({ viewer: auth.user.id });
+        const blocked = await requestWithDeadline(getBlockedWith(auth.user.id, [userId]), 12_000);
+        if (!current() || blocked.has(userId)) return;
         // Keep the existing private-profile read and public fallback, but never
         // publish or continue enrichment after the viewer/target/visit changes.
         const { data, error } = await requestWithDeadline(supabase
@@ -139,6 +151,8 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
           </TouchableOpacity>
           {loading ? (
             <ActivityIndicator size="large" color={Colors.terracotta} style={{ paddingVertical: 40 }} />
+          ) : !profile ? (
+            <Text style={styles.name}>Profile unavailable</Text>
           ) : (
             <>
               {/* Avatar */}

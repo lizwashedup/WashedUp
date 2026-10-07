@@ -11,6 +11,9 @@ import { readObservedUser, retireObservedUserRead } from '../lib/observedUserRea
 import { requestWithDeadline, RequestDeadlineError } from '../lib/requestWithDeadline';
 import { circleKeys } from '../lib/circles/keys';
 import type { CirclePayload } from '../lib/circles/types';
+import { circleDisplay } from '../lib/circles/display';
+import { getBlockedWith } from '../lib/blocking';
+import { subscribeChatListPrivacy } from '../lib/chatListCache';
 
 type CircleIdentity = { viewerId: string | null | undefined; epoch: number; error: Error | null; isLoading: boolean };
 type IdentityCycle = { revision: number; unsubscribe?: () => void; read?: { revision: number; promise: Promise<void> } };
@@ -58,7 +61,13 @@ function createCircleIdentityStore() {
       owner.revision++;
       publishUser(session?.user.id ?? null);
     });
-    owner.unsubscribe = () => subscription.unsubscribe();
+    const stopPrivacy = subscribeChatListPrivacy(viewerId => {
+      if (cycle !== owner || snapshot.viewerId !== viewerId) return;
+      // Retire both warm data and reads already in flight before a blocked DM
+      // can paint its header or mount a writable conversation again.
+      publish({ ...snapshot, epoch: snapshot.epoch + 1 });
+    });
+    owner.unsubscribe = () => { subscription.unsubscribe(); stopPrivacy(); };
     owner.read = { revision, promise: read(owner, revision) };
   };
   return {
@@ -125,7 +134,7 @@ export function useCircle(circleId: string | null | undefined) {
       if (typeof configuredRetry === 'function') return configuredRetry(failures, error);
       return configuredRetry === true || failures < (typeof configuredRetry === 'number' ? configuredRetry : configuredRetry === false ? 0 : 3);
     },
-    queryFn: async ({ signal }): Promise<CirclePayload> => {
+    queryFn: async ({ signal }): Promise<CirclePayload | null> => {
       if (!circleId || !viewerId) throw new Error('This account could not be confirmed.');
       // A shared read can outlive its first component, but never its captured
       // account generation or its final React Query observer.
@@ -142,7 +151,17 @@ export function useCircle(circleId: string | null | undefined) {
       }).abortSignal(signal)), 12_000);
       requireCurrent();
       if (error) throw error;
-      return data as CirclePayload;
+      const payload = data as CirclePayload | null;
+      if (!payload) return null;
+      const display = circleDisplay(payload.circle.name,
+        payload.members.map(member => ({ user_id: member.user_id, name: member.first_name_display,
+          avatar_url: member.profile_photo_url })), viewerId);
+      if (display.isDm && display.otherUserId) {
+        const blocked = await requestWithDeadline(getBlockedWith(viewerId, [display.otherUserId]), 12_000);
+        requireCurrent();
+        if (blocked.has(display.otherUserId)) return null;
+      }
+      return payload;
     },
   });
   const refetch = useCallback(async () => {
