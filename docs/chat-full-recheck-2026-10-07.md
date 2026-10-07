@@ -1,9 +1,9 @@
 # WashedUp chat: full scoped recheck — October 7, 2026
 
-Latest continuation: **2,454 passing tests, 11 unchanged baseline failures,
-170 suites**. The scroll-recheck section at the end records drag ownership,
-bounded message jumps, and the limited r8 native preview checks. Earlier
-transport and device results remain separately identified.
+Latest continuation: **2,467 passing tests, 11 unchanged baseline failures,
+170 suites**. The final crosscheck section at the end records a delayed-send
+scroll correction and another successful local multi-client transport run.
+Earlier simulator and transport results remain separately identified.
 
 ## Initial full-recheck result
 
@@ -325,3 +325,102 @@ and require no new native dependency/configuration; they are OTA-compatible in
 that limited source sense, subject to the existing Build51 integration/release
 gates. They have not been published. Release, push, auth, OTP, account lifecycle,
 backend and native configuration paths have no new diff in this continuation.
+
+## Final crosscheck — October 7, 2026
+
+This requested pass started from clean isolated feature commit
+`204aa642688e410df43cc18ed6de6ac623784de6` on
+`feature/chat-loading-20261006`. The canonical origin and protected release
+commit `9c2994b10e9f263e98a262e87a9bf7a94ee941c5` still match.
+Remote fetch succeeded without changing files or the protected release ref.
+
+### Scope and finding
+
+Reviewed sending/receipt recovery, durable draft ordering, attachment attempts,
+room/account retirement, history/pagination/privacy gates, arrival counters,
+reply/notification anchors, gestures, keyboard layout adapters, foreground
+refresh, network-probe cleanup and Realtime subscription ownership. Selected
+phone-entry/onboarding/OTP/notification-navigation regressions ran as well.
+Account-deletion and native/backend configuration paths were compared for
+unintended changes; no live account deletion or full-schema contract execution
+is claimed in this pass.
+
+One interaction defect was reproduced: a send completed after a reader dragged
+into older history and still forced a jump to the newest message. The previous
+fix stopped layout/keyboard callbacks fighting gestures, but had not covered
+these asynchronous completion callbacks. Seven new component cases failed
+before this repair: shared text and main/topic text/photo/location sends.
+The unchanged-reader control passed, establishing that ordinary follow-after-
+send behavior must be retained.
+
+The shared scroll hook now captures a viewport-choice revision for each send.
+New drag, momentum, wheel/accessibility movement off the edge, or explicit
+Latest/entry reset supersedes that revision. Completion can follow only while
+its captured choice remains current. The guard covers shared text, voice,
+GIF, photo and location completion paths, plus main/topic text, photo and
+location. It changes viewport behavior only: confirmed sends still finish,
+clear the original attempt, retain newer drafts, refresh history and release
+pending controls. Existing account/admission guards still apply.
+
+No other reproducible defect was established in this pass. This means the
+reviewed/tested scope passed its stated checks, not that all possible app bugs
+or native freezes have been ruled out.
+
+### Verification and evidence
+
+- Final complete selected inventory on the updated code: **170 suites,
+  166 passing suites, 2,467 passing tests, 11 failing tests, zero pending,
+  zero timeouts**. The same CreatorToday.approvedEntry (1), CreatorToday.reads
+  (7), communityPageRead (1), setupCommunityLanding (2) baseline failures remain.
+  No additional failure was found. All suites ran in independent Jest processes
+  with two workers and 60-second per-suite bounds.
+- Thirteen cases added: eight mounted-screen cases (including the positive
+  no-new-gesture control) and five scroll-intent lifetime cases. The nine
+  directly affected suites also passed independently: **319 tests**. Counts
+  above are distinct tests, not totals of repeated runs.
+- TypeScript, auth-invariant script, diff whitespace and offline iOS
+  JavaScript/Hermes export passed. Available Node 24.19 used; pinned Node20.20.1
+  unavailable. No standalone lint command configured.
+- Repeated the existing isolated native Supabase fixture lab: **11 scenarios
+  passed**, 186 distinct messages, three authenticated client sessions,
+  60 message reconnect cycles, 20 typing reconnect cycles, 22 observed closing
+  socket windows. Included bidirectional delivery, Unicode, 40 concurrent sends,
+  same-ID deduplication, lost response, 20 missed messages recovered via history,
+  outsider rejection, sender impersonation rejection and archived-room refusal.
+  Production requests: **zero**. The local stack was stopped after verification.
+- This was a bounded local transport run with a fixture schema, not production
+  policy parity, real Storage/media/push, native suspension or phone performance.
+  No new native simulator/phone gesture, cold-start, frame-rate or endurance
+  measurement is claimed. The r8 simulator/tool limitation in the preceding
+  section remains open.
+
+Evidence:
+`/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/final-crosscheck-20261007/`
+contains final selected-suite results, the 319-test affected run, the transport
+report, typecheck/auth/export logs and protected-base/continuation comparisons.
+The pre-fix seven-failure counts were observed in tool output; their individual
+logs were overwritten by the immediate succeeding 177-test run. That limitation
+is recorded in `regression-observations.txt`; the directory called
+`initial-regression-pass` contains the succeeding pass, not a pre-fix log.
+
+### Every file changed in this continuation
+
+- `app/community-thread/[id].tsx`
+- `app/community-topic/[id].tsx`
+- `components/chat/ChatThread.tsx`
+- `components/chat/__tests__/ChatThreadComposerAccessibility.test.tsx`
+- `components/chat/__tests__/CommunityMainEntryLifetime.test.tsx`
+- `components/chat/__tests__/CommunityTopicEntryLifetime.test.tsx`
+- `hooks/useChatScrollFollow.ts`
+- `hooks/__tests__/useChatScrollFollow.test.tsx`
+- `docs/chat-full-recheck-2026-10-07.md`
+
+This change is JavaScript-only and OTA-compatible in source terms; it introduces
+no native dependency or configuration requirement. The existing integration and
+Build51 release gates remain. Nothing was merged, pushed, published, built or
+deployed. No production data, push, auth, OTP, lifecycle, Supabase or native
+configuration was changed. The temporary dependency symlink is removed before
+commit. The remaining practical acceptance step is testing this exact candidate
+on the intended phone binary, especially scrolling during arrivals/delayed sends
+and keyboard transitions; there is no new founder setup requirement for the
+completed code and local transport checks.

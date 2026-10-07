@@ -764,3 +764,26 @@ it('does not snap back during a drag or a same-turn near-edge scroll and layout'
   });
   expect(scroll).not.toHaveBeenCalled();
 });
+
+
+it.each(['text', 'photo', 'location'] as const)('respects a newer reading position during delayed topic %s delivery', async kind => {
+  const pending = deferred();
+  (kind === 'location' ? mockLocation : mockSend).mockReturnValueOnce(pending.promise);
+  mockMessages = [historyMessage('message-a', 1)];
+  await mount();
+  let work!: Promise<unknown>;
+  if (kind === 'text') { type('Delayed message'); act(() => { work = composer().onSend(); }); }
+  if (kind === 'photo') { await act(async () => composer().photo.onPress()); act(() => { work = preview().onSend('Caption'); }); }
+  if (kind === 'location') act(() => { work = location().onConfirm(34, -118, 'Ocean Park'); });
+  await flush();
+  const list = () => tree.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    list().props.onScrollBeginDrag();
+    list().props.onScroll({ nativeEvent: { contentOffset: { y: 600 } } });
+    list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: 600 } } });
+  });
+  await act(async () => { pending.resolve(); await work; }); await flush();
+  expect(scroll).not.toHaveBeenCalled();
+  expect(composer().sending).toBe(false);
+});

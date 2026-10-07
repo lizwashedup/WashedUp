@@ -133,7 +133,7 @@ export default function CommunityThreadScreen() {
   const { anchor, anchorKey, clearAnchor } = useChatMessageAnchor(id, reactionMessageId, reactionMessageSource);
   const listRef = useRef<FlatList<CommunityDeliveryRow>>(null);
   const scrollFollow = useChatScrollFollow(!anchor);
-  const { atBottomRef, followingLatest, setFollowingLatest } = scrollFollow;
+  const { atBottomRef, followingLatest, setFollowingLatest, captureScrollIntent } = scrollFollow;
   const [reactionDetails, setReactionDetails] = useState<ReactionDetailsRequest | null>(null);
   const [messageMenu, setMessageMenu] = useState<MessageMenu | null>(null);
   const [replyRequest, setReplyRequest] = useState<{ messageId: string } | null>(null);
@@ -510,6 +510,7 @@ export default function CommunityThreadScreen() {
     let prepared = false;
     const sendScope = { userId: operationScope.userId, isCurrent: () => operationScope.isCurrent() && sendAttemptRef.current === token };
     let original: Awaited<ReturnType<typeof composerDraft.prepare>> | null = null;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       original = await composerDraft.prepare({ detachText: true, onDetach: () => { composerInputRef.current?.clear(); draftRef.current = ''; setMentionQuery(null); } }); prepared = true;
       if (!sendScope.isCurrent()) return;
@@ -530,8 +531,8 @@ export default function CommunityThreadScreen() {
       await composerDraft.finish(original);
       if (!sendScope.isCurrent()) return;
       refreshMessages(true);
-      if (anchor && original.kind === 'send') { atBottomRef.current = true; setFollowingLatest(true); clearAnchor(); }
-      else if (!anchor) { atBottomRef.current = true; setFollowingLatest(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+      if (anchor && original.kind === 'send' && scrollIntentIsCurrent()) { atBottomRef.current = true; setFollowingLatest(true); clearAnchor(); }
+      else if (!anchor && scrollIntentIsCurrent()) { atBottomRef.current = true; setFollowingLatest(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
     } catch (error) {
       timingOutcome = 'error';
       if (original) composerDraft.restoreFailedText(original);
@@ -659,6 +660,7 @@ export default function CommunityThreadScreen() {
     const session = photoSendSessionRef.current;
     const isCurrent = () => attachmentIsCurrent() && photoAttemptRef.current === attempt;
     const sendScope = { userId: myId, isCurrent };
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       let imageUrl = session.uploadedUrl(asset.uri);
       if (!imageUrl) {
@@ -682,8 +684,8 @@ export default function CommunityThreadScreen() {
       setPendingPhoto(null);
       session.clear();
       refreshMessages(true);
-      if (anchor) { atBottomRef.current = true; setFollowingLatest(true); clearAnchor(); }
-      else { atBottomRef.current = true; setFollowingLatest(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+      if (anchor && scrollIntentIsCurrent()) { atBottomRef.current = true; setFollowingLatest(true); clearAnchor(); }
+      else if (!anchor && scrollIntentIsCurrent()) { atBottomRef.current = true; setFollowingLatest(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
     } catch (e) {
       if (!isCurrent() || isObsoleteCommunityOperation(e)) return;
       setPhotoError(session.hasCaption(asset.uri) ? 'Couldn’t confirm delivery. Retry keeps the same photo and caption.' : friendlyError(e, 'Your photo is kept. Try again.'));
@@ -697,6 +699,7 @@ export default function CommunityThreadScreen() {
     const attempt = {}; locationAttemptRef.current = attempt;
     const session = locationSendSessionRef.current;
     const isCurrent = () => attachmentIsCurrent() && locationAttemptRef.current === attempt;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       const body = encodeCommunityLocation({ latitude, longitude, address });
       await requestWithDeadline(sendCommunityMessage(id, body, undefined, session.idFor(body, null), { userId: myId, isCurrent }), 35_000);
@@ -704,8 +707,8 @@ export default function CommunityThreadScreen() {
       session.clear();
       setLocationPickerOpen(false);
       refreshMessages(true);
-      if (anchor) { atBottomRef.current = true; setFollowingLatest(true); clearAnchor(); }
-      else { atBottomRef.current = true; setFollowingLatest(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+      if (anchor && scrollIntentIsCurrent()) { atBottomRef.current = true; setFollowingLatest(true); clearAnchor(); }
+      else if (!anchor && scrollIntentIsCurrent()) { atBottomRef.current = true; setFollowingLatest(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
       return true;
     } catch {
       return false;

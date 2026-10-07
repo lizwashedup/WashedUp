@@ -544,3 +544,22 @@ it('lets a finger drag win over content and keyboard changes before the first sc
   act(() => list().props.onContentSizeChange(390, 950));
   expect(scroll).not.toHaveBeenCalled();
 });
+
+
+it.each([false, true])('respects a newer scroll gesture during shared text delivery (reader moved: %s)', async moved => {
+  const pending = deferred<boolean>(); mockSend.mockReturnValueOnce(pending.promise);
+  mockChat.messages = [message('existing')]; await mount(); type('Delayed message');
+  act(() => control('Send message').props.onAccessibilityTap()); await flush();
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  const list = () => tree!.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  if (moved) act(() => {
+    list().props.onScrollBeginDrag();
+    list().props.onScroll({ nativeEvent: { contentOffset: { y: 600 } } });
+    list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: 600 } } });
+  });
+  await act(async () => pending.resolve(true)); await flush();
+  if (moved) expect(scroll).not.toHaveBeenCalled();
+  else expect(scroll).toHaveBeenCalledWith({ offset: 0, animated: false });
+  expect(mockSend).toHaveBeenCalledTimes(1);
+});

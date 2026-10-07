@@ -1427,7 +1427,7 @@ function ChatThread(props: ChatThreadProps) {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [unreadBelow, setUnreadBelow] = useState(0);
   const scrollFollow = useChatScrollFollow(!anchorId);
-  const { atBottomRef, followingLatest, setFollowingLatest } = scrollFollow;
+  const { atBottomRef, followingLatest, setFollowingLatest, captureScrollIntent } = scrollFollow;
   const incomingTracker = useRef<{ entry: typeof entry; ids: Set<string>; newest: number } | null>(null);
   useLayoutEffect(() => {
     // A new room or history window starts with its own list position.
@@ -1502,6 +1502,7 @@ function ChatThread(props: ChatThreadProps) {
     const revision = draftRevision.current;
     const contextRevision = draftContextRevision.current;
     let original: ChatDraftAttempt | null = null;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       if (!composerDraft.draft.attempt) {
         const filtered = checkContent(inputTextRef.current.trim());
@@ -1525,7 +1526,7 @@ function ChatThread(props: ChatThreadProps) {
       if (!canWrite()) return;
       timingOutcome = 'ok'; finishTiming();
       await composerDraft.finish(original);
-      if (canWrite()) scrollToBottom();
+      if (canWrite() && scrollIntentIsCurrent()) scrollToBottom();
     } catch (error) {
       timingOutcome = 'error';
       if (!canWrite()) return;
@@ -1540,7 +1541,7 @@ function ChatThread(props: ChatThreadProps) {
       finishTiming(isCurrentEntry() ? timingOutcome : 'retired');
       if (sendingRef.current === token) { sendingRef.current = null; setSendingText(false); }
     }
-  }, [canWrite, draftOwner, uploading, composerDraft, draftRoom, editMessage, sendMessage, entryScope, scrollToBottom, setInputText, stopTyping, changeDraft]);
+  }, [canWrite, draftOwner, uploading, composerDraft, draftRoom, editMessage, sendMessage, entryScope, scrollToBottom, captureScrollIntent, setInputText, stopTyping, changeDraft]);
 
   // Send button morph (mic when empty, send when typing). A single shared value
   // drives the crossfade so the two stacked icon layers animate in opposition.
@@ -1586,6 +1587,7 @@ function ChatThread(props: ChatThreadProps) {
     setDraft({ uri, durationSeconds }); setRecordingMode('draft'); setAudioSending(true); setAudioError(null);
     const attemptScope = { userId: currentUserId, isCurrent: () => audioSendAttempt.current === attempt && canWrite() };
     const requireAttempt = () => { if (!attemptScope.isCurrent()) throw new Error('Voice attempt ended'); };
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       if (!session.url) {
         const url = await requestWithDeadline(uploadAudioToStorage(id, currentUserId, uri, attemptScope, session.sendId), 30_000);
@@ -1595,7 +1597,7 @@ function ChatThread(props: ChatThreadProps) {
       const confirmed = await requestWithDeadline(sendAudio(session.url, session.durationSeconds, attemptScope, session.sendId), 25_000);
       requireAttempt();
       if (!confirmed) throw new Error('Voice delivery is unconfirmed');
-      resetRecording(); scrollToBottom();
+      resetRecording(); if (scrollIntentIsCurrent()) scrollToBottom();
     } catch (error) {
       if (!canWrite()) return;
       logError(error, 'chat.uploadAndSendAudio');
@@ -1606,7 +1608,7 @@ function ChatThread(props: ChatThreadProps) {
         if (canWrite()) setAudioSending(false);
       }
     }
-  }, [canWrite, currentUserId, id, sendAudio, scrollToBottom, resetRecording]);
+  }, [canWrite, currentUserId, id, sendAudio, scrollToBottom, captureScrollIntent, resetRecording]);
 
   const beginRecording = useCallback(async (initialMode: 'holding' | 'locked' = 'holding') => {
     if (!canWrite() || voiceCapture.current || audioSendAttempt.current || voiceStopAttempt.current) return;
@@ -1808,12 +1810,13 @@ function ChatThread(props: ChatThreadProps) {
     let sendId = gifPendingIds.current.get(url);
     if (!sendId) { sendId = Crypto.randomUUID(); gifPendingIds.current.set(url, sendId); }
     setActivePanel(null); setAlertInfo(null);
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       const sent = await requestWithDeadline(sendMessage('', url, undefined, sendId, sendScope), 25_000);
       if (!isCurrent()) return;
       if (!sent) throw Error('GIF delivery is unconfirmed.');
       gifPendingIds.current.delete(url);
-      scrollToBottom();
+      if (scrollIntentIsCurrent()) scrollToBottom();
     } catch {
       if (isCurrent()) setAlertInfo({
         title: 'GIF not confirmed',
@@ -1826,7 +1829,7 @@ function ChatThread(props: ChatThreadProps) {
     } finally {
       if (gifAttempt.current === attempt) gifAttempt.current = null;
     }
-  }, [canWrite, sendMessage, scrollToBottom, entryScope]);
+  }, [canWrite, sendMessage, scrollToBottom, captureScrollIntent, entryScope]);
 
   // Pick first, then preserve the selected batch/caption through explicit retry.
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
@@ -1872,6 +1875,7 @@ function ChatThread(props: ChatThreadProps) {
     const requireAttempt = () => { if (!attemptScope.isCurrent()) throw new Error('Photo attempt ended'); };
     const session = photoSendSessionRef.current;
     const alreadyCaptioned = photoCaptionSentRef.current;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       await sendPhotoBatch(assets, async (asset) => {
         requireAttempt();
@@ -1897,7 +1901,7 @@ function ChatThread(props: ChatThreadProps) {
       if (!canWrite()) return;
       setPendingPhotos([]); setPhotoPreviewOpen(false);
       photoCaptionSentRef.current = false;
-      session.clear(); scrollToBottom();
+      session.clear(); if (scrollIntentIsCurrent()) scrollToBottom();
     } catch (error) {
       if (!canWrite()) return;
       const failure = error as PhotoBatchFailure;
@@ -1914,7 +1918,7 @@ function ChatThread(props: ChatThreadProps) {
         if (canWrite()) setUploading(false);
       }
     }
-  }, [pendingPhotos, currentUserId, sendMessage, scrollToBottom, canWrite, requireEntry, entryScope]);
+  }, [pendingPhotos, currentUserId, sendMessage, scrollToBottom, captureScrollIntent, canWrite, requireEntry, entryScope]);
 
   const handleLocationConfirm = useCallback(async (latitude: number, longitude: number, address: string) => {
     if (!canWrite() || locationAttempt.current) return false;
@@ -1925,17 +1929,18 @@ function ChatThread(props: ChatThreadProps) {
       locationSession.current = { pin, sendId: Crypto.randomUUID() };
     }
     const session = locationSession.current;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       const confirmed = await requestWithDeadline(sendLocation(latitude, longitude, address, attemptScope, session.sendId), 25_000);
       if (!attemptScope.isCurrent()) return false;
-      if (confirmed) { locationSession.current = null; setLocationPickerOpen(false); scrollToBottom(); }
+      if (confirmed) { locationSession.current = null; setLocationPickerOpen(false); if (scrollIntentIsCurrent()) scrollToBottom(); }
       return confirmed;
     } catch {
       return false; // The existing preview retains its pin and presents inline retry.
     } finally {
       if (locationAttempt.current === attempt) locationAttempt.current = null;
     }
-  }, [sendLocation, scrollToBottom, canWrite, entryScope]);
+  }, [sendLocation, scrollToBottom, captureScrollIntent, canWrite, entryScope]);
 
   const composerInputHeight = useChatInputHeight(textInputRef, inputText, conversationFonts.regular, 100, COMMUNITY_CHAT_GROUPING_ENABLED);
   // Keep iOS native multiline sizing: fixed height can stop Fabric size events.

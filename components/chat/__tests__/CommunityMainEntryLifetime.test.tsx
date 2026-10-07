@@ -525,3 +525,25 @@ it('allows a confirmed main send to finish recovery after twelve seconds', async
   expect(composer().sending).toBe(false);expect(input().props.value).toBe('');expect(mockSend).toHaveBeenCalledTimes(1);
  } finally {wait.resolve();await work;jest.useRealTimers();}
 });
+
+
+it.each(['text', 'photo', 'location'] as const)('respects a newer reading position during delayed main %s delivery', async kind => {
+  const pending = deferred();
+  mockSend.mockReturnValueOnce(pending.promise);
+  await mount();
+  let work!: Promise<unknown>;
+  if (kind === 'text') { type('Delayed message'); act(() => { work = composer().onSend(); }); }
+  if (kind === 'photo') { await act(async () => composer().photo.onPress()); act(() => { work = preview().onSend('Caption'); }); }
+  if (kind === 'location') act(() => { work = location().onConfirm(34, -118, 'Ocean Park'); });
+  await flush();
+  const list = () => tree.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    list().props.onScrollBeginDrag();
+    list().props.onScroll({ nativeEvent: { contentOffset: { y: 600 } } });
+    list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: 600 } } });
+  });
+  await act(async () => { pending.resolve(); await work; }); await flush();
+  expect(scroll).not.toHaveBeenCalled();
+  expect(composer().sending).toBe(false);
+});

@@ -146,7 +146,7 @@ export default function CommunityTopicScreen() {
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const scrollFollow = useChatScrollFollow(!anchor);
-  const { atBottomRef, followingLatest: isAtBottom, setFollowingLatest: setIsAtBottom } = scrollFollow;
+  const { atBottomRef, followingLatest: isAtBottom, setFollowingLatest: setIsAtBottom, captureScrollIntent } = scrollFollow;
   const [unreadWhileScrolled, setUnreadWhileScrolled] = useState(0);
   const selectionRef = useRef({ start: 0, end: 0 });
   const composerInputRef = useRef<TextInput>(null);
@@ -531,6 +531,7 @@ export default function CommunityTopicScreen() {
     const resumingOriginal = !!composerDraft.draft.attempt;
     let preparedOriginal = false;
     let original: Awaited<ReturnType<typeof composerDraft.prepare>> | null = null;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       original = await composerDraft.prepare({ detachText: true, onDetach: () => { composerInputRef.current?.clear(); draftRef.current = ''; setMentionQuery(null); } });
       preparedOriginal = true;
@@ -548,12 +549,12 @@ export default function CommunityTopicScreen() {
       await composerDraft.finish(original);
       if (!entryIsCurrent()) return;
       if (original.kind === 'send' && (gated || gateChecking)) { setJustSaidHi(true); queryClient.invalidateQueries({ queryKey: ['topic-said-hi', id, myId] }); }
-      if (anchor && original.kind === 'send') { setIsAtBottom(true); clearAnchor(); }
+      if (anchor && original.kind === 'send' && scrollIntentIsCurrent()) { setIsAtBottom(true); clearAnchor(); }
       else {
         // The confirmed bubble is already present. History refresh owns its
         // own loading/error state and must not keep the composer locked.
         void refreshMessages(true).catch(() => {});
-        if (entryIsCurrent() && !anchor) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+        if (entryIsCurrent() && !anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
       }
     } catch (error) {
       timingOutcome = 'error';
@@ -707,6 +708,7 @@ export default function CommunityTopicScreen() {
     const session = photoSendSessionRef.current;
     const isCurrent = () => attachmentIsCurrent() && photoAttemptRef.current === attempt;
     const sendScope = { userId: myId, isCurrent };
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       let imageUrl = session.uploadedUrl(asset.uri);
       if (!imageUrl) {
@@ -730,8 +732,8 @@ export default function CommunityTopicScreen() {
       setPhotoPreviewOpen(false);
       setPendingPhoto(null);
       session.clear(); photoReplyRef.current = null;
-      if (anchor) { setIsAtBottom(true); clearAnchor(); }
-      else { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+      if (anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); clearAnchor(); }
+      else if (!anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
     } catch (e) {
       if (!isCurrent() || isObsoleteTopicOperation(e)) return;
       setPhotoError(session.hasCaption(asset.uri) ? 'Couldn’t confirm delivery. Retry keeps the same photo and caption.' : friendlyError(e, 'Your photo is kept. Try again.'));
@@ -748,14 +750,15 @@ export default function CommunityTopicScreen() {
     const attempt = {}; locationAttemptRef.current = attempt;
     const session = locationSendSessionRef.current;
     const isCurrent = () => attachmentIsCurrent() && locationAttemptRef.current === attempt;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       const sendId = session.idFor(JSON.stringify({ latitude, longitude, address }), null);
       await requestWithDeadline(sendLocation(latitude, longitude, address, sendId, { userId: myId, isCurrent }), 25_000);
       if (!isCurrent()) return false;
       session.clear();
       setLocationPickerOpen(false);
-      if (anchor) { setIsAtBottom(true); clearAnchor(); }
-      else { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+      if (anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); clearAnchor(); }
+      else if (!anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
       return true;
     } catch (error) {
       if (isCurrent() && !isObsoleteTopicOperation(error)) logError(error, 'communityTopic.sendLocation');
