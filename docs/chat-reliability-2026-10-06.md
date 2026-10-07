@@ -96,3 +96,47 @@ Observed native shared ChatThread rendering, local text send and cleared input, 
 One interaction to investigate: typing immediately after Send in the slow fixture retained the original text alongside subsequent typing after the first message appeared. Source has explicit protection for text typed during draft preparation. Reproduce with a focused actual-composer test before deciding whether to change that behavior; distinguish UI automation timing and fixture effects from a production defect. Existing 252 automated checks remain the recorded result, not proof of complete chat quality.
 
 This continuation changes only this repository evidence file and the separately saved local fixture. Feature application code remains identical to d6e3b785. No release or production changes.
+
+
+## October 6: remove redundant text-send confirmation
+
+The shared Plan/Circle/DM composer previously waited for `sendMessage` to confirm the saved row, then performed another account-scoped read of that message before releasing the send lock. A stalled or failed second read could leave an already-saved message marked unconfirmed. This patch validates the full text intent in the original insert/recovery receipt (UUID, conversation, account, content, user-message type, no image, reply target and mention identity) and uses that validated acknowledgement directly. It eliminates one redundant receipt-read phase on confirmed non-edit text sends. It does not claim a measured production millisecond or percentage improvement.
+
+Unknown deliveries still use the existing bounded lookup, retained original UUID and explicit check/retry. Edits keep their existing extra verification. Media receipt behavior, database schema, auth, notifications, release configuration and native dependencies are unchanged. Account/room retirement is checked before the receipt can finish the composer.
+
+### Verification of this change
+
+- Before implementation, nine new regression cases failed: the redundant composer read and eight wrong-receipt fields. The remaining 173 cases in those two suites passed. After implementation, all these cases pass.
+- Final focused run: **327 tests passed in 10 suites**, normal exit. Suites: useChat.ownership, useChat.refresh, useChat.anchor, ChatThreadEntryLifetime, ChatThreadComposerMedia, ChatThreadComposerAccessibility, useChatComposerDraft, useChatComposerDraft.prepare, chatComposerDraft, ChatKeyboard.adapter. Includes interrupted acknowledgement recovery, retained reply/mention identities, stale accounts/rooms, newer typing, duplicate taps, history anchoring and keyboard lifecycle. Receipt fixtures now supply the complete selected text row rather than only ID/time.
+- TypeScript `tsc --noEmit --pretty false`: passed.
+- `scripts/release/check-auth-invariants.mjs`: passed.
+- `git diff --check`: passed.
+- Offline iOS JavaScript/Hermes export: passed, `/tmp/washedup-chat-send-review-export-20261006`; no native build or publication. Sentry auto-upload disabled. No standalone lint command is configured in this repository.
+- Logs: `/tmp/washedup-send-before.log`, `/tmp/washedup-send-verification.log`, `/tmp/washedup-send-typecheck.log`, `/tmp/washedup-send-export.log`.
+
+### Native observations on this candidate
+
+Restarted localhost Metro and relaunched only `com.washedup.localdev` through Device Hub. The visible `Candidate send-receipt v2 · Local only · Mona loaded` banner identifies the new fixture. It imports the changed shared ChatThread source. Its transport remains synthetic; the actual useChat transport is tested in the focused automated suites, not in this native fixture.
+
+Observed a normal local send appear once and clear the composer; a failed send retain its original and then complete explicit Retry with one bubble and a cleared composer; a delayed send clear its composer before acknowledgement and preserve a separate next draft; and keyboard-to-attachment-to-keyboard handoff followed by five further cycles, with the same draft and software keyboard reported present after each. A Home/background and warm return also retained the confirmed bubble and separate draft. Corrected the fixture receipt checker to consult locally confirmed IDs/text/reply targets instead of always returning true. No real messages were sent.
+
+The older immediate-send-and-type observation was not reproduced when checking that preparation had cleared the composer first. The focused test also verifies typing while acknowledgement is pending. This does not rule out a separate draft-preparation race under slow storage; that remains a specifically identified follow-up, rather than a claimed fix.
+
+The current screenshot tool returned a partly white window image during keyboard review; native accessibility confirmed keys and the retained draft, but that capture cannot establish complete visual alignment or animation smoothness. Earlier visual keyboard observations remain separate. No cold-open, network delivery, frame-rate or physical-device number is reported. The current fixture bypasses startup and uses an existing build-44 local development binary, so its launch time would not establish production Build 51 cold-open speed. Main-community/topic native interaction, a genuinely long-running soak, and real-device/backend validation remain open.
+
+### Complete comparison with protected release
+
+Base remains `9c2994b10e9f263e98a262e87a9bf7a94ee941c5`; feature branch `feature/chat-loading-20261006`. All repository files changed across the feature branch:
+
+1. `app/community-thread/[id].tsx` — community refresh/reconnect/deadline repair from the earlier commit.
+2. `components/chat/ChatThread.tsx` — release text-send lock after validated acknowledgement.
+3. `components/chat/__tests__/ChatThreadEntryLifetime.test.tsx` — confirmed-send/newer-draft regression.
+4. `components/chat/__tests__/CommunityMainQueryIsolation.test.tsx` — community recovery regressions.
+5. `components/keyboard/__tests__/ChatKeyboard.adapter.test.tsx` — repeated keyboard lifecycle coverage.
+6. `hooks/useChat.ts` — validate complete text receipt before confirming delivery.
+7. `hooks/__tests__/useChat.anchor.test.tsx` — realistic complete receipt fixture.
+8. `hooks/__tests__/useChat.ownership.test.tsx` — incorrect receipts, exact recovery and room/account coverage.
+9. `hooks/__tests__/useChat.refresh.test.tsx` — repeated visits, synthetic latency, realistic receipts.
+10. `docs/chat-reliability-2026-10-06.md` — evidence and limitations.
+
+JavaScript-only; structurally OTA-compatible relative to the protected base, subject to normal integration/device checks. No new native-build ledger item is needed. No merge, push, OTA, build submission, backend deployment or production mutation was performed. The protected release checkout/branch is not part of these changes.

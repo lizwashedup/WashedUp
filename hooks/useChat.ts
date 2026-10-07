@@ -849,12 +849,22 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     };
     if (replyToId && replyTo) insertData.reply_to_message_id = replyToId;
 
+    // A text receipt is the final send acknowledgement. Validate the complete
+    // intent here so the composer need not perform a second network round trip.
     const receiptColumns = imageUrl ? 'id, created_at, content, image_url, mention_data'
-      : mentionData ? 'id, created_at, content, mention_data' : 'id, created_at';
-    const checkedReceipt = (result: any) => result.data && (
-      (imageUrl && (result.data.id !== sendId || result.data.content !== (content || '') || result.data.image_url !== imageUrl)) ||
-      (mentionData && (result.data.content !== content || !sameChatMentionIdentity(content, mentionData, result.data.mention_data))))
-        ? { data: null, error: Error('The saved message differs. Your original is kept.') } : result;
+      : `id, created_at, ${parentCol}, user_id, content, message_type, image_url, reply_to_message_id, mention_data`;
+    const checkedReceipt = (result: any) => {
+      const row = result.data;
+      if (!row) return result;
+      const matches = imageUrl
+        ? row.id === sendId && row.content === (content || '') && row.image_url === imageUrl
+          && (!mentionData || sameChatMentionIdentity(content, mentionData, row.mention_data))
+        : row.id === sendId && row[parentCol] === conversationId && row.user_id === userId
+          && row.content === (content || '') && row.message_type === 'user' && !row.image_url
+          && (row.reply_to_message_id ?? null) === (replyToId ?? null)
+          && sameChatMentionIdentity(content, mentionData, row.mention_data);
+      return matches ? result : { data: null, error: Error('The saved message differs. Your original is kept.') };
+    };
     const { receipt: inserted, failure } = await resolveChatSendReceipt(
       async () => checkedReceipt(await scopedChatRequest(scope, () =>
         requestWithDeadline(supabase.from('messages').insert(insertData).select(receiptColumns).single(), 12_000))),

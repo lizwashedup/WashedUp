@@ -152,6 +152,23 @@ it.each(['same', 'room', 'account'] as const)('keeps measured menu opening with 
   else expect(open).not.toHaveBeenCalled();
 });
 
+it('finishes a confirmed text send without a second receipt request and preserves newer typing', async () => {
+  const pending = deferred<boolean>(); mockSend.mockReturnValueOnce(pending.promise);
+  // A redundant confirmation would stall indefinitely on this connection.
+  mockCheckOriginal.mockReturnValue(new Promise(() => {}));
+  await mount(); type('First message'); act(() => sendTap()({}, true)); await flush();
+  expect(input().props.value).toBe('');
+  type('Second message');
+  await act(async () => pending.resolve(true)); await flush();
+  expect(mockCheckOriginal).not.toHaveBeenCalled();
+  expect(input().props.value).toBe('Second message');
+  expect(action('Check original message')).toBeUndefined();
+  act(() => sendTap()({}, true)); await flush();
+  expect(mockSend).toHaveBeenCalledTimes(2);
+  expect(mockSend.mock.calls.map(call => call[0])).toEqual(['First message', 'Second message']);
+  expect(mockSend.mock.calls[0][3]).not.toBe(mockSend.mock.calls[1][3]);
+});
+
 it('keeps an unconfirmed original separate from newer typing and locks duplicate taps', async () => {
   const pending = deferred<boolean>(); mockSend.mockReturnValueOnce(pending.promise);
   await mount(); type('First draft'); const tap = sendTap(); act(() => { tap({}, true); tap({}, true); });

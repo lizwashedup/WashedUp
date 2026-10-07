@@ -1508,7 +1508,9 @@ function ChatThread(props: ChatThreadProps) {
           ? await editMessage(original.id, original.text, entryScope, original.edit.content, original.mentions, original.edit.mentions, { errorPresentation: 'caller' })
           : await sendMessage(original.text, undefined, original.replyId ?? undefined, original.id, entryScope, original.mentions);
         if (!canWrite()) return;
-        if (!confirmed || !await checkChatComposerAttempt(draftRoom, original, draftOwner)) throw Error('Your original message has not been confirmed yet.');
+        // Text sends already return an exact, account-and-room-scoped receipt.
+        // Keep edit verification and the pre-retry check for uncertain attempts.
+        if (!confirmed || (original.edit && !await checkChatComposerAttempt(draftRoom, original, draftOwner))) throw Error('Your original message has not been confirmed yet.');
       }
       if (!canWrite()) return;
       await composerDraft.finish(original);

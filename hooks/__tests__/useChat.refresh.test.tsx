@@ -379,8 +379,8 @@ it('reconciles the exact optimistic UUID while retaining a different in-flight s
   await flush();
   expect(fixture.chat.messages.map(row => row.id)).toEqual([message(1).id, 'send-a', 'optimistic-send-b']);
   await act(async () => {
-    first.resolve({ data: { id: 'send-a', created_at: confirmed.created_at }, error: null });
-    second.resolve({ data: { id: 'send-b', created_at: message(3).created_at }, error: null });
+    first.resolve({ data: confirmed, error: null });
+    second.resolve({ data: message(3, { id: 'send-b', user_id: 'viewer', content: 'Same text' }), error: null });
     await Promise.all([sendFirst, sendSecond]);
   });
   expect(fixture.chat.messages.map(row => row.id)).toEqual([message(1).id, 'send-a', 'send-b']);
