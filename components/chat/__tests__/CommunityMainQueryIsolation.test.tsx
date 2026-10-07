@@ -307,3 +307,22 @@ it('does not accept a late early-paint callback from a departed account',async()
  await act(async()=>{publish(page('private-old'));delayed.resolve(page('private-old'));});await flush();
  expect(rows().map((r:any)=>r.id)).toEqual(['bob-2']);
 });
+
+it('preserves manual main-chat scrolling across layout changes and momentum', async () => {
+  await mount();
+  const list = () => tree.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    list().props.onScrollBeginDrag();
+    list().props.onContentSizeChange(390, 2000);
+    list().props.onScroll({ nativeEvent: { contentOffset: { y: 10 } } });
+    list().props.onLayout();
+  });
+  expect(scroll).not.toHaveBeenCalled();
+  act(() => { list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: 10 } } }); list().props.onMomentumScrollBegin(); });
+  act(() => list().props.onContentSizeChange(390, 2050));
+  expect(scroll).not.toHaveBeenCalled();
+  act(() => list().props.onMomentumScrollEnd({ nativeEvent: { contentOffset: { y: 0 } } }));
+  act(() => list().props.onContentSizeChange(390, 2100));
+  expect(scroll).toHaveBeenCalledWith({ offset: 0, animated: false });
+});

@@ -1,3 +1,4 @@
+import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
 import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { useCommunityLocalDelivery, type CommunityDeliveryRow } from '../../hooks/useCommunityLocalDelivery';
 import { CHAT_SEND_ATTEMPT_DEADLINE_MS } from '../../lib/chatSendReceipt';
@@ -131,8 +132,8 @@ export default function CommunityThreadScreen() {
   const { id, reactionMessageId, reactionMessageSource } = useLocalSearchParams<{ id: string; reactionMessageId?: string; reactionMessageSource?: string }>();
   const { anchor, anchorKey, clearAnchor } = useChatMessageAnchor(id, reactionMessageId, reactionMessageSource);
   const listRef = useRef<FlatList<CommunityDeliveryRow>>(null);
-  const atBottomRef = useRef(true);
-  const [followingLatest, setFollowingLatest] = useState(true);
+  const scrollFollow = useChatScrollFollow(!anchor);
+  const { atBottomRef, followingLatest, setFollowingLatest } = scrollFollow;
   const [reactionDetails, setReactionDetails] = useState<ReactionDetailsRequest | null>(null);
   const [messageMenu, setMessageMenu] = useState<MessageMenu | null>(null);
   const [replyRequest, setReplyRequest] = useState<{ messageId: string } | null>(null);
@@ -877,13 +878,18 @@ export default function CommunityThreadScreen() {
             else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
           }}
           onScrollToIndexFailed={anchorScroll.onScrollToIndexFailed}
+              onScrollBeginDrag={() => {
+                if (!entryIsCurrent()) return;
+                scrollFollow.onScrollBeginDrag(); anchorScroll.cancel();
+              }}
+              onScrollEndDrag={event => { if (entryIsCurrent()) scrollFollow.onScrollEndDrag(event); }}
+              onMomentumScrollBegin={() => { if (entryIsCurrent()) scrollFollow.onMomentumScrollBegin(); }}
+              onMomentumScrollEnd={event => { if (entryIsCurrent()) scrollFollow.onMomentumScrollEnd(event); }}
           onScroll={(event) => {
             if (!entryIsCurrent()) return;
-            const atBottom = event.nativeEvent.contentOffset.y <= 80;
-            atBottomRef.current = atBottom;
-            setFollowingLatest(atBottom);
+            scrollFollow.onScroll(event);
           }}
-          scrollEventThrottle={100}
+          scrollEventThrottle={16}
           ListFooterComponent={broadcastsError || hasNextPage || isFetchingNextPage || isFetchNextPageError ? (
             <View>
               {broadcastsError && (

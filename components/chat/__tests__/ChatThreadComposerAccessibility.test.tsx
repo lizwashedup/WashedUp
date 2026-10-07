@@ -503,6 +503,7 @@ it.each(['ios', 'android'] as const)('uses supported drag-to-dismiss keyboard be
 it.each(['ios', 'android'] as const)('refreshes the visible %s shared chat after suspension without waiting for a socket event', async platform => {
   const callbacks = new Set<(state: any) => void>();
   const originalState = AppState.currentState;
+  const originalListener = jest.isMockFunction(AppState.addEventListener) ? jest.mocked(AppState.addEventListener).getMockImplementation() : undefined;
   Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
   const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => {
     callbacks.add(callback); return { remove: () => { callbacks.delete(callback); } };
@@ -521,6 +522,25 @@ it.each(['ios', 'android'] as const)('refreshes the visible %s shared chat after
     expect(mockRead).toHaveBeenCalledTimes(1);
   } finally {
     act(() => tree?.unmount()); tree = undefined; mockRunFocus = false; mockFocusCleanups.clear(); spy.mockRestore();
+    if (originalListener && jest.isMockFunction(AppState.addEventListener)) jest.mocked(AppState.addEventListener).mockImplementation(originalListener);
     Object.defineProperty(AppState, 'currentState', { configurable: true, value: originalState });
   }
+});
+
+
+it('lets a finger drag win over content and keyboard changes before the first scroll event', async () => {
+  mockChat.messages = [message('existing')]; await mount('ios');
+  const list = () => tree!.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    list().props.onScrollBeginDrag?.();
+    const show = (Keyboard.addListener as jest.Mock).mock.calls.find(([name]) => name === 'keyboardWillShow')[1];
+    show({ endCoordinates: { height: 300 } });
+    list().props.onContentSizeChange(390, 900);
+    list().props.onLayout();
+  });
+  expect(scroll).not.toHaveBeenCalled();
+  act(() => list().props.onScroll({ nativeEvent: { contentOffset: { y: 10 } } }));
+  act(() => list().props.onContentSizeChange(390, 950));
+  expect(scroll).not.toHaveBeenCalled();
 });

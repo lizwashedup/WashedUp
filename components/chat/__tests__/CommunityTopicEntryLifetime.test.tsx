@@ -750,3 +750,17 @@ it('describes an owned-message delete timeout as unconfirmed instead of a defini
   expect(alert().message).toContain('Reopen this chat');
   expect(mockDeleteOwn).toHaveBeenCalledTimes(1);
 });
+
+
+it('does not snap back during a drag or a same-turn near-edge scroll and layout', async () => {
+  mockMessages = Array.from({ length: 60 }, (_, index) => historyMessage(`message-${index+1}`, index+1));
+  await mount();
+  const scroll = jest.spyOn(messageList().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    messageList().props.onScrollBeginDrag?.();
+    messageList().props.onContentSizeChange(390, 5000);
+    messageList().props.onScroll({ nativeEvent: { contentOffset: { y: 10 } } });
+    messageList().props.onLayout();
+  });
+  expect(scroll).not.toHaveBeenCalled();
+});

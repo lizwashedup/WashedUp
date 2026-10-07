@@ -13,11 +13,11 @@ export function useChatMessageAnchor(roomId: string | undefined, messageId: unkn
 }
 
 export function useChatAnchorScroll<T>(list: React.RefObject<FlatList<T> | null>, targetKey: string | null, index: number) {
-  const request = useMemo(() => ({ key: targetKey, attempts: 0, done: false, corrected: false, measured: false }), [targetKey]);
+  const request = useMemo(() => ({ key: targetKey, attempts: 0, done: false, corrected: false, measured: false, cancelled: false }), [targetKey]);
   const active = useRef(request); active.current = request;
   const frame = useRef<number | null>(null);
   const jump = useCallback(() => {
-    if (active.current !== request || !targetKey || index < 0 || request.done || request.attempts >= 5 || !list.current) return;
+    if (active.current !== request || !targetKey || request.cancelled || index < 0 || request.done || request.attempts >= 5 || !list.current) return;
     request.attempts++;
     request.done = true;
     list.current.scrollToIndex({ index, animated: false, viewPosition: 0.35 });
@@ -27,19 +27,26 @@ export function useChatAnchorScroll<T>(list: React.RefObject<FlatList<T> | null>
       frame.current = requestAnimationFrame(jump);
     }
   }, [request, targetKey, index, list]);
+  const cancel = useCallback(() => {
+    request.cancelled = true;
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+  }, [request]);
+  useEffect(() => { request.cancelled = false; return cancel; }, [request, cancel]);
   const schedule = useCallback(() => {
+    if (request.cancelled || active.current !== request) return;
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(jump);
-  }, [jump]);
+  }, [jump, request]);
   useEffect(() => { schedule(); return () => { if (frame.current !== null) cancelAnimationFrame(frame.current); }; }, [schedule]);
   const onScrollToIndexFailed = useCallback((info: { index: number; averageItemLength: number }) => {
-    if (active.current !== request || !targetKey) return;
+    if (active.current !== request || !targetKey || request.cancelled || request.attempts >= 5) return;
     request.done = false;
     list.current?.scrollToOffset({ offset: Math.max(0, info.averageItemLength * info.index), animated: false });
     schedule();
   }, [request, targetKey, list, schedule]);
   const onTargetLayout = useCallback(() => {
-    if (active.current !== request || request.corrected) return;
+    if (active.current !== request || request.cancelled || request.corrected || request.attempts >= 5) return;
     // Virtualized cells can be estimated on the first jump. Correct once after
     // this target actually lays out, then leave subsequent user scrolling alone.
     request.measured = true;
@@ -48,8 +55,7 @@ export function useChatAnchorScroll<T>(list: React.RefObject<FlatList<T> | null>
     if (request.attempts === 0) return;
     request.corrected = true;
     request.done = false;
-    request.attempts = 0;
     schedule();
   }, [request, schedule]);
-  return { schedule, onScrollToIndexFailed, onTargetLayout };
+  return { schedule, cancel, onScrollToIndexFailed, onTargetLayout };
 }

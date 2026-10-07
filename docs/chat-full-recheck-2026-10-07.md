@@ -1,9 +1,9 @@
 # WashedUp chat: full scoped recheck — October 7, 2026
 
-Latest continuation: **2,440 passing tests, 11 unchanged baseline failures,
-168 suites**. The additional adversarial-review section below records the
-storage-preparation and deletion-deadline repairs. Earlier local transport
-results remain separately identified; no new device result is claimed.
+Latest continuation: **2,454 passing tests, 11 unchanged baseline failures,
+170 suites**. The scroll-recheck section at the end records drag ownership,
+bounded message jumps, and the limited r8 native preview checks. Earlier
+transport and device results remain separately identified.
 
 ## Initial full-recheck result
 
@@ -210,3 +210,118 @@ before/after reproductions, suite discovery and selected inventory, individual
 reports, reconciled summary, final checks and candidate/release comparison.
 The earlier evidence remains intact. This audit reduces known uncertainty; it
 does not prove an absence of all defects or replace matching-device testing.
+
+## Scroll recheck — October 7, 2026
+
+Work continued in the existing isolated worktree
+`/Users/liz/Desktop/WashedUp_HQ/washedup-chat-loading-20261006`, on
+`feature/chat-loading-20261006`, from clean commit
+`63a6b81f9d733485545a124a6039f131c52b0e10`.
+`git fetch origin` succeeded. Origin is the canonical
+`https://github.com/lizwashedup/WashedUp.git`. The protected local release ref
+and merge base remain `9c2994b10e9f263e98a262e87a9bf7a94ee941c5`.
+No release ref, production data, native config, dependency or deployment changed.
+
+### Findings and repairs
+
+- Shared, topic and main chat could issue offset-zero scrolls between finger-down
+  and the first scroll event. A native gesture now suspends following immediately;
+  drag/momentum completion resumes it only within two points of the newest edge.
+  Previously the tolerance was 24 points in shared chat and 80 in community chat,
+  enough to pull a partly scrolled older bubble back toward the composer.
+- Topic layout/content callbacks used React state captured before a queued scroll
+  update. They now consult the synchronous position ref, including when scroll
+  and layout callbacks occur before React commits. Community scroll callbacks
+  now receive updates at a 16ms throttle instead of 100ms; this is configuration,
+  not a measured frame-rate claim.
+- Shared reply jumps used an uncancelled 300ms retry with the original array
+  index. They now have at most four index attempts, one pending timer, current
+  message-ID lookup on each attempt, and cancellation for drag, Latest/send,
+  room/account/history-window retirement and unmount. Deletion of the target
+  also ends the attempt. Reply jumps suspend automatic following first.
+- Route-anchor recovery bounded index jumps but still issued approximate offset
+  jumps after exhaustion. Both now stop at the same limit. A drag cancels pending
+  animation frames and late target-layout corrections; unmount retires the request.
+
+Review also covered inverted-list direction, live-edge viewport preservation,
+keyboard-show scrolling, composer measurement/touch gating, arrival counters,
+older-history loading, memoized shared message rendering, and existing privacy
+and entry guards. No native freeze/crash root cause is claimed beyond the
+reproduced conflicting-scroll-command paths.
+
+### Verification
+
+Four added cases failed against the pre-fix behavior: shared drag/layout,
+topic same-turn drag/layout, anchor retry exhaustion and anchor drag takeover.
+The pre-fix combined log also exposed a shared-screen test cleanup problem:
+its foreground test restored an existing AppState mock to an empty function.
+The original mock implementation is now preserved for subsequent tests. This
+is test isolation work, not a production AppState change.
+
+Final inventory: **170 suites; 166 passing suites; 2,454 passing tests;
+11 failures; zero pending; zero suite timeouts.** Fourteen cases were added.
+The same four unrelated baseline suites account for all failures:
+CreatorToday.approvedEntry (1), CreatorToday.reads (7), communityPageRead (1),
+and setupCommunityLanding (2). Baseline reproduction is recorded above.
+Six directly affected suites also passed independently: **164 tests**.
+They cover all three real screen components plus follow/anchor/reply hooks,
+keyboard-versus-drag, momentum, same-turn layout changes, disappearing targets,
+new arrivals shifting indices, duplicate failure callbacks and retired retries.
+Reruns replace earlier results in the inventory rather than increasing totals.
+
+TypeScript `--noEmit`, auth-invariant checks, diff whitespace and offline iOS
+JavaScript/Hermes export passed. There is no standalone lint command configured.
+The available Node runtime is 24.19; the repo-pinned 20.20.1 was not available.
+No native build/install, OTA or backend deployment was performed.
+
+Evidence directory:
+`/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/scroll-recheck-20261007/`
+contains the selected suite inventory, per-suite results, final affected-suite
+results, pre-fix log, check logs and protected-base comparisons.
+
+### Native preview: what was and was not verified
+
+The existing `com.washedup.localdev` preview on the iPhone 17e iOS 26.4 simulator
+was reloaded from the isolated source. Its visible marker is
+`Chat scroll checks r8 · Local only · Mona loaded`. All three real chat screens
+loaded the fictional 500-message mode and navigation remained responsive.
+Topic input focus opened the native software keyboard with long history loaded.
+No real account, message, notification or production endpoint was used.
+
+The preview uses existing localdev 1.0.6/build44 native binaries, actual current
+chat components, and mocked transport/identity/permissions. It is not Build51
+native parity, full community mapped-history integration, or a live-network test.
+The original CI-mode Metro was restarted with interactive reload enabled solely
+for this fixture. UI scroll/drag commands repeatedly returned the control-tool
+error `noWindowsAvailable`, although AX clicks and inspection worked. Therefore
+this pass does **not** certify manual native drag/fling behavior, FPS, cold-open
+latency, or an endurance/soak result. A 500-row mount is not a scroll benchmark.
+
+The remaining useful phone check is fast repeated flicks while messages arrive,
+opening/dismissing the keyboard while reading older messages, and tapping a
+reply then immediately dragging away. Test on the intended native build after
+integration; the control-tool error does not establish an app freeze.
+
+### Every file changed in this continuation
+
+- `app/community-thread/[id].tsx`
+- `app/community-topic/[id].tsx`
+- `components/chat/ChatThread.tsx`
+- `components/chat/__tests__/ChatThreadComposerAccessibility.test.tsx`
+- `components/chat/__tests__/CommunityMainQueryIsolation.test.tsx`
+- `components/chat/__tests__/CommunityTopicEntryLifetime.test.tsx`
+- `hooks/useChatMessageAnchor.ts`
+- `hooks/useChatReplyScroll.ts`
+- `hooks/useChatScrollFollow.ts`
+- `hooks/__tests__/useChatMessageAnchor.test.tsx`
+- `hooks/__tests__/useChatReplyScroll.test.tsx`
+- `hooks/__tests__/useChatScrollFollow.test.tsx`
+- `docs/chat-full-recheck-2026-10-07.md`
+
+The external native fixture's `index.tsx` changed only its verification marker;
+verification logs and exports remain outside the feature checkout. The temporary
+node_modules symlink is removed before commit. These fixes are JavaScript-only
+and require no new native dependency/configuration; they are OTA-compatible in
+that limited source sense, subject to the existing Build51 integration/release
+gates. They have not been published. Release, push, auth, OTP, account lifecycle,
+backend and native configuration paths have no new diff in this continuation.

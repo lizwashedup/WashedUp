@@ -1,3 +1,4 @@
+import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
 import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { useChatMessageAnchor, useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
 import { ChatMessageAnchorNotice } from '../../components/chat/ChatMessageAnchorNotice';
@@ -144,7 +145,8 @@ export default function CommunityTopicScreen() {
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [isAtBottom, setIsAtBottom] = useState(true);
+  const scrollFollow = useChatScrollFollow(!anchor);
+  const { atBottomRef, followingLatest: isAtBottom, setFollowingLatest: setIsAtBottom } = scrollFollow;
   const [unreadWhileScrolled, setUnreadWhileScrolled] = useState(0);
   const selectionRef = useRef({ start: 0, end: 0 });
   const composerInputRef = useRef<TextInput>(null);
@@ -1198,9 +1200,16 @@ export default function CommunityTopicScreen() {
               onLayout={() => {
                 if (!entryIsCurrent()) return;
                 if (anchor) anchorScroll.schedule();
-                else if (isAtBottom) listRef.current?.scrollToOffset({ offset: 0, animated: false });
+                else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
               }}
               onScrollToIndexFailed={anchorScroll.onScrollToIndexFailed}
+              onScrollBeginDrag={() => {
+                if (!entryIsCurrent()) return;
+                scrollFollow.onScrollBeginDrag(); anchorScroll.cancel();
+              }}
+              onScrollEndDrag={event => { if (entryIsCurrent()) scrollFollow.onScrollEndDrag(event); }}
+              onMomentumScrollBegin={() => { if (entryIsCurrent()) scrollFollow.onMomentumScrollBegin(); }}
+              onMomentumScrollEnd={event => { if (entryIsCurrent()) scrollFollow.onMomentumScrollEnd(event); }}
               contentContainerStyle={styles.listContent}
               ListFooterComponent={hasOlder || loadingOlder || olderLoadError ? (
                 <TouchableOpacity style={styles.olderButton} onPress={() => { void loadOlder(); }} disabled={loadingOlder} accessibilityRole="button" accessibilityLabel={olderLoadError ? 'Retry loading earlier messages' : 'Load earlier messages'}>
@@ -1211,15 +1220,14 @@ export default function CommunityTopicScreen() {
               ) : null}
               onScroll={(event) => {
                 if (!entryIsCurrent()) return;
-                const atBottom = event.nativeEvent.contentOffset.y <= 80;
-                setIsAtBottom(atBottom);
+                const atBottom = scrollFollow.onScroll(event);
                 if (atBottom) setUnreadWhileScrolled(0);
               }}
-              scrollEventThrottle={100}
+              scrollEventThrottle={16}
               onContentSizeChange={() => {
                 if (!entryIsCurrent()) return;
                 if (anchor) anchorScroll.schedule();
-                else if (isAtBottom) listRef.current?.scrollToOffset({ offset: 0, animated: false });
+                else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
               }}
               ListEmptyComponent={
                 <Text style={styles.emptyLine}>nobody has said anything here yet. go first.</Text>
@@ -1229,6 +1237,7 @@ export default function CommunityTopicScreen() {
               <TouchableOpacity
                 style={styles.scrollLatestBtn}
                 onPress={() => {
+                  setIsAtBottom(true);
                   listRef.current?.scrollToOffset({ offset: 0, animated: true });
                   setUnreadWhileScrolled(0);
                 }}

@@ -1,3 +1,5 @@
+import { useChatReplyScroll } from '../../hooks/useChatReplyScroll';
+import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
 import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { parseMemberReactionAnchor } from '../../lib/memberChatMessageAnchor';
 import { useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
@@ -736,7 +738,6 @@ const SEND_ARROW_ICON_SIZE = 18;
 // Scroll-to-bottom button thresholds (inverted list: contentOffset.y grows as
 // you scroll up toward older messages; 0 = pinned to newest).
 const SCROLL_SHOW_THRESHOLD = 300;
-const SCROLL_AT_BOTTOM_THRESHOLD = 24;
 const SCROLL_BTN_GAP = 12;
 
 // Inline attachment panel height used until a real keyboard height is observed
@@ -1409,11 +1410,13 @@ function ChatThread(props: ChatThreadProps) {
     }
   }, [props.fetchReportMembers, router, blockUser, isCurrentEntry, moderationScope]);
 
+  const cancelReplyScroll = useRef<() => void>(() => {});
   // Explicit jumps happen immediately. New rows at the live edge do not use
   // visible-position preservation: that would pin the previous message and
   // place the new bubble underneath the composer until server confirmation.
   const scrollToBottom = useCallback(() => {
     if (!isCurrentEntry()) return;
+    cancelReplyScroll.current();
     atBottomRef.current = true;
     setFollowingLatest(true);
     if (anchorId) { clearAnchor(); return; }
@@ -1423,8 +1426,8 @@ function ChatThread(props: ChatThreadProps) {
   // Floating scroll-to-bottom button + "new messages below" counter.
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [unreadBelow, setUnreadBelow] = useState(0);
-  const atBottomRef = useRef(true);
-  const [followingLatest, setFollowingLatest] = useState(!anchorId);
+  const scrollFollow = useChatScrollFollow(!anchorId);
+  const { atBottomRef, followingLatest, setFollowingLatest } = scrollFollow;
   const incomingTracker = useRef<{ entry: typeof entry; ids: Set<string>; newest: number } | null>(null);
   useLayoutEffect(() => {
     // A new room or history window starts with its own list position.
@@ -1438,11 +1441,10 @@ function ChatThread(props: ChatThreadProps) {
   const handleListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!isCurrentEntry()) return;
     const y = e.nativeEvent.contentOffset.y;
-    atBottomRef.current = y <= SCROLL_AT_BOTTOM_THRESHOLD;
-    setFollowingLatest(atBottomRef.current);
+    scrollFollow.onScroll(e);
     setShowScrollBtn(y > SCROLL_SHOW_THRESHOLD);
     if (atBottomRef.current) setUnreadBelow(0);
-  }, [isCurrentEntry]);
+  }, [isCurrentEntry, scrollFollow.onScroll]);
 
   // Track arrivals by identity and time, not array length: pagination adds
   // history above, and a delete plus arrival can leave the length unchanged.
@@ -2056,14 +2058,17 @@ function ChatThread(props: ChatThreadProps) {
   // updates -- depending on enrichedItems directly would re-break the memo every
   // time a new message lands.
   const enrichedItemsRef = useRef(enrichedItems);
-  useEffect(() => { enrichedItemsRef.current = enrichedItems; }, [enrichedItems]);
+  enrichedItemsRef.current = enrichedItems;
+  const replyScrollScope = useMemo(() => ({}), [entry, anchorId]);
+  const replyScroll = useChatReplyScroll(listRef, replyScrollScope,
+    useCallback((msgId: string) => enrichedItemsRef.current.findIndex(item => !('type' in item) && item.id === msgId), []));
+  cancelReplyScroll.current = replyScroll.cancel;
   const handleReplyTap = useCallback((msgId: string) => {
-    const items = enrichedItemsRef.current;
-    const idx = items.findIndex(item => !('type' in item) && item.id === msgId);
-    if (idx >= 0) {
-      listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
-    }
-  }, []);
+    if (!isCurrentEntry()) return;
+    anchorScroll.cancel();
+    setFollowingLatest(false);
+    replyScroll.scrollToMessage(msgId);
+  }, [isCurrentEntry, anchorScroll.cancel, setFollowingLatest, replyScroll.scrollToMessage]);
   const handleAvatarPress = useCallback((uid: string) => {
     if (isCurrentEntry()) setMiniProfileUserId(uid);
   }, [isCurrentEntry]);
@@ -2431,6 +2436,13 @@ function ChatThread(props: ChatThreadProps) {
               if (anchorId) anchorScroll.schedule();
               else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
             }}
+            onScrollBeginDrag={() => {
+              if (!isCurrentEntry()) return;
+              scrollFollow.onScrollBeginDrag(); anchorScroll.cancel(); replyScroll.cancel();
+            }}
+            onScrollEndDrag={event => { if (isCurrentEntry()) scrollFollow.onScrollEndDrag(event); }}
+            onMomentumScrollBegin={() => { if (isCurrentEntry()) scrollFollow.onMomentumScrollBegin(); }}
+            onMomentumScrollEnd={event => { if (isCurrentEntry()) scrollFollow.onMomentumScrollEnd(event); }}
             onScroll={handleListScroll}
             onEndReached={() => { void loadOlder(); }}
             onEndReachedThreshold={0.2}
@@ -2439,11 +2451,9 @@ function ChatThread(props: ChatThreadProps) {
             // side), so the typing dots sit just above the input bar.
             ListHeaderComponent={typingUsers.length > 0 ? <TypingIndicator /> : null}
             onScrollToIndexFailed={(info) => {
-              if (anchorId) { anchorScroll.onScrollToIndexFailed(info); return; }
-              listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
-              setTimeout(() => {
-                listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
-              }, 300);
+              if (!isCurrentEntry()) return;
+              anchorScroll.onScrollToIndexFailed(info);
+              replyScroll.onScrollToIndexFailed(info);
             }}
             ListEmptyComponent={anchorUnavailable ? null :
               <View style={chatStyles.emptyState}>

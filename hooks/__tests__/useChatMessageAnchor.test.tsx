@@ -50,3 +50,27 @@ it('corrects early cell layout on the frame after the first estimated jump', () 
   flush(); expect(list.current.scrollToIndex).toHaveBeenCalledTimes(2);
   act(() => view.unmount());
 });
+
+it('stops every correction when the reader takes over and after retry exhaustion', () => {
+  const list = { current: { scrollToIndex: jest.fn(), scrollToOffset: jest.fn() } };
+  let value!: ReturnType<typeof useChatAnchorScroll>;
+  function Harness() { value = useChatAnchorScroll(list as any, `topic:${id}`, 60); return null; }
+  let view!: ReturnType<typeof create>; act(() => { view = create(<Harness />); }); flush();
+  for (let attempt = 0; attempt < 8; attempt++) {
+    act(() => value.onScrollToIndexFailed({ index: 60, averageItemLength: 64 })); flush();
+  }
+  expect(list.current.scrollToIndex).toHaveBeenCalledTimes(5);
+  expect(list.current.scrollToOffset.mock.calls.length).toBeLessThanOrEqual(4);
+  act(() => view.unmount());
+});
+it('cancels pending and late measured jumps as soon as a manual drag starts', () => {
+  const list = { current: { scrollToIndex: jest.fn(), scrollToOffset: jest.fn() } };
+  let value!: ReturnType<typeof useChatAnchorScroll>;
+  function Harness() { value = useChatAnchorScroll(list as any, `topic:${id}`, 60); return null; }
+  let view!: ReturnType<typeof create>; act(() => { view = create(<Harness />); });
+  act(() => (value as any).cancel?.()); flush();
+  act(() => { value.onTargetLayout(); value.schedule(); value.onScrollToIndexFailed({ index: 60, averageItemLength: 64 }); }); flush();
+  expect(list.current.scrollToIndex).not.toHaveBeenCalled();
+  expect(list.current.scrollToOffset).not.toHaveBeenCalled();
+  act(() => view.unmount());
+});
