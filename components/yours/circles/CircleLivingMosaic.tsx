@@ -8,33 +8,47 @@
  * fills the tile; 2 split as vertical halves; 3 lead with a tall left half;
  * 4 sit as a 2x2 grid. Purely presentational; no fetching here.
  */
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import Colors from '../../../constants/Colors';
 
 const GAP = 2; // Hairline seam between tiles, reads as one woven cover
 
-function Tile({ uri }: { uri: string }) {
+function Tile({ uri, onError }: { uri: string; onError?: (uri: string) => void }) {
   return (
     <Image
       source={{ uri }}
       style={styles.tile}
       contentFit="cover"
       cachePolicy="memory-disk"
+      onError={onError ? () => onError(uri) : undefined}
     />
   );
 }
 
-export default function CircleLivingMosaic({
-  uris,
-  size,
-  radius,
-}: {
+type MosaicProps = {
   uris: string[];
   size: number;
   radius: number;
-}) {
+  /** Optional staged fallback; legacy callers keep their existing rendering. */
+  fallback?: React.ReactNode;
+};
+export default function CircleLivingMosaic(props: MosaicProps) {
+  return props.fallback === undefined ? <MosaicLayout {...props}/> :
+    <ResilientMosaic key={JSON.stringify(props.uris.slice(0, 4))} {...props}/>;
+}
+function ResilientMosaic({ fallback, ...props }: MosaicProps) {
+  const [failed, setFailed] = useState<Set<string>>(() => new Set());
+  const live = useRef(true);
+  useLayoutEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+  const shown = props.uris.slice(0, 4).filter(uri => !failed.has(uri));
+  if (shown.length === 0) return <>{fallback}</>;
+  return <MosaicLayout {...props} uris={shown} onError={uri => {
+    if (live.current) setFailed(previous => new Set(previous).add(uri));
+  }}/>;
+}
+function MosaicLayout({ uris, size, radius, onError }: MosaicProps & { onError?: (uri: string) => void }) {
   const shown = uris.slice(0, 4);
   const frame = { width: size, height: size, borderRadius: radius };
 
@@ -43,7 +57,7 @@ export default function CircleLivingMosaic({
   if (shown.length === 1) {
     return (
       <View style={[styles.frame, frame]}>
-        <Tile uri={shown[0]} />
+        <Tile uri={shown[0]} onError={onError}/>
       </View>
     );
   }
@@ -51,8 +65,8 @@ export default function CircleLivingMosaic({
   if (shown.length === 2) {
     return (
       <View style={[styles.frame, styles.row, frame]}>
-        <View style={styles.col}><Tile uri={shown[0]} /></View>
-        <View style={styles.col}><Tile uri={shown[1]} /></View>
+        <View style={styles.col}><Tile uri={shown[0]} onError={onError}/></View>
+        <View style={styles.col}><Tile uri={shown[1]} onError={onError}/></View>
       </View>
     );
   }
@@ -60,10 +74,10 @@ export default function CircleLivingMosaic({
   if (shown.length === 3) {
     return (
       <View style={[styles.frame, styles.row, frame]}>
-        <View style={styles.col}><Tile uri={shown[0]} /></View>
+        <View style={styles.col}><Tile uri={shown[0]} onError={onError}/></View>
         <View style={styles.col}>
-          <Tile uri={shown[1]} />
-          <Tile uri={shown[2]} />
+          <Tile uri={shown[1]} onError={onError}/>
+          <Tile uri={shown[2]} onError={onError}/>
         </View>
       </View>
     );
@@ -72,12 +86,12 @@ export default function CircleLivingMosaic({
   return (
     <View style={[styles.frame, styles.row, frame]}>
       <View style={styles.col}>
-        <Tile uri={shown[0]} />
-        <Tile uri={shown[1]} />
+        <Tile uri={shown[0]} onError={onError}/>
+        <Tile uri={shown[1]} onError={onError}/>
       </View>
       <View style={styles.col}>
-        <Tile uri={shown[2]} />
-        <Tile uri={shown[3]} />
+        <Tile uri={shown[2]} onError={onError}/>
+        <Tile uri={shown[3]} onError={onError}/>
       </View>
     </View>
   );

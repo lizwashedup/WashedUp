@@ -92,8 +92,10 @@ export const COMMUNITY_CADENCES: Option[] = [
 
 // -- data access --------------------------------------------------------------
 
-export async function fetchMyGrants(): Promise<OperatorGrant[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function fetchMyGrants(expectedUserId?: unknown): Promise<OperatorGrant[]> {
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
+  if (typeof expectedUserId === 'string' && user?.id !== expectedUserId) throw new Error('Application account changed.');
   if (!user) return [];
   const { data, error } = await supabase
     .from('operator_grants')

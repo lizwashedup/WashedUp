@@ -27,7 +27,7 @@ describe('chat and event-form UX contracts', () => {
     expect(thread).toContain("const canTapToReply = message.message_type === 'user' && !message.image_url && !firstUrl;");
     expect(thread).toContain('onStartReply?.(message.id)');
     expect(thread).toContain('onStartReply={!isPast ? handleTriggerReply : undefined}');
-    expect(thread).toContain('requestAnimationFrame(() => textInputRef.current?.focus())');
+    expect(thread).toContain('requestAnimationFrame(() => { if (canWrite()) textInputRef.current?.focus(); });');
   });
 
   it('does not block first paint on secondary chat enrichment', () => {

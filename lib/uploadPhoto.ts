@@ -15,7 +15,7 @@ export async function uploadBase64ToStorage(
   bucket: string,
   path: string,
   base64: string,
-  options?: { upsert?: boolean }
+  options?: { upsert?: boolean; existingIsSuccess?: boolean }
 ): Promise<string> {
   const arrayBuffer = decode(base64);
   const contentType = path.endsWith('.png') ? 'image/png' : 'image/jpeg';
@@ -27,7 +27,12 @@ export async function uploadBase64ToStorage(
       upsert: options?.upsert ?? false,
     });
 
-  if (error) throw error;
+  if (error) {
+    const status = Number((error as any).statusCode ?? (error as any).status);
+    // Only a caller with a stable, unique path may treat an existing object
+    // as the result of its own earlier upload whose response was lost.
+    if (!(options?.existingIsSuccess && status === 409)) throw error;
+  }
 
   const { data: urlData } = supabase.storage
     .from(bucket)
@@ -59,6 +64,7 @@ export function uploadUriToStorage(
   uri: string,
   contentType: string,
   onProgress?: (fraction: number) => void,
+  beforeUpload?: () => Promise<void>,
 ): CancellableUpload {
   let cancelled = false;
   let task: FileSystem.UploadTask | null = null;
@@ -66,6 +72,7 @@ export function uploadUriToStorage(
   const done = (async (): Promise<string | null> => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Not signed in');
+    await beforeUpload?.();
     if (cancelled) return null;
 
     task = FileSystem.createUploadTask(

@@ -11,6 +11,63 @@
  */
 export const verifyCodeSelfRoutingRef = { current: false };
 
+/** One phone-verification visit. It carries navigation evidence, never grants
+ * room access. Root approves its existing ban check; Verify supplies its
+ * existing post-animation destination. Identity changes retire the object. */
+export type VerificationDestinationHandoff = {
+  userId: string | null;
+  destination: string | null;
+  approved: boolean;
+  entryApproved: boolean;
+  routeCommitted: boolean;
+};
+let verificationDestination: VerificationDestinationHandoff | null = null;
+const verificationDestinationListeners = new Set<() => void>();
+const notifyVerificationDestination = () => verificationDestinationListeners.forEach((notify) => notify());
+export function subscribeVerificationDestination(notify: () => void): () => void {
+  verificationDestinationListeners.add(notify);
+  return () => { verificationDestinationListeners.delete(notify); };
+}
+export function getVerificationDestination(): VerificationDestinationHandoff | null { return verificationDestination; }
+export function beginVerificationDestination(userId: string | null = null): VerificationDestinationHandoff {
+  verificationDestination = { userId, destination: null, approved: false, entryApproved: false, routeCommitted: false };
+  notifyVerificationDestination();
+  return verificationDestination;
+}
+export function cancelVerificationDestination(visit?: VerificationDestinationHandoff | null): void {
+  if (visit && verificationDestination !== visit) return;
+  verificationDestination = null;
+  notifyVerificationDestination();
+}
+export function observeVerificationAccount(userId: string | null): VerificationDestinationHandoff | null {
+  const visit = verificationDestination;
+  if (!visit) return null;
+  if (!userId || (visit.userId && visit.userId !== userId)) {
+    cancelVerificationDestination(visit);
+    return null;
+  }
+  visit.userId = userId;
+  return visit;
+}
+export function approveVerificationDestination(visit: VerificationDestinationHandoff | null, userId: string): void {
+  if (!visit || verificationDestination !== visit || visit.userId !== userId) return;
+  visit.approved = true;
+  notifyVerificationDestination();
+}
+export function completeVerificationDestination(visit: VerificationDestinationHandoff | null, userId: string, destination: string): void {
+  if (!visit || verificationDestination !== visit || visit.userId !== userId) return;
+  visit.destination = destination;
+  notifyVerificationDestination();
+}
+/** Only the tabs profile/phone guard grants permission to resume a protected
+ * destination. Arriving at tabs or merely receiving an auth identity does not. */
+export function approveVerificationEntry(visit: VerificationDestinationHandoff | null, userId: string): void {
+  if (!visit || verificationDestination !== visit || visit.userId !== userId || !visit.routeCommitted) return;
+  visit.destination = '/(tabs)/plans';
+  visit.entryApproved = true;
+  notifyVerificationDestination();
+}
+
 /**
  * Timestamp of the most recent app-initiated redirect to the unauthed
  * route (e.g., delete-account flow's `router.replace(unauthedRoute())`

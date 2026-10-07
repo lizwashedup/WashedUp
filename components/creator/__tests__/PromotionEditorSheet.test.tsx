@@ -1,0 +1,20 @@
+import React from 'react';
+import { Text, TextInput } from 'react-native';
+import { act, create } from 'react-test-renderer';
+import { PromotionEditorSheet } from '../PromotionEditorSheet';
+jest.mock('../../../lib/haptics',()=>({hapticLight:jest.fn()}));
+jest.mock('react-native-safe-area-context',()=>jest.requireActual('react-native-safe-area-context/jest/mock').default);
+let screen:ReturnType<typeof create>;
+const onSave=jest.fn(),onClose=jest.fn();
+const props={visible:true,busy:false,draftKey:'draft',onSave,onClose};
+function field(name:string,value:string){act(()=>screen.root.findAllByType(TextInput).find(n=>n.props.accessibilityLabel===name)!.props.onChangeText(value));}
+const save=()=>screen.root.findByProps({accessibilityLabel:'Save promotion code'}).props.onPress();
+const text=()=>screen.root.findAllByType(Text).flatMap(n=>[n.props.children]).flat(Infinity).join(' ');
+beforeEach(()=>{jest.clearAllMocks();onSave.mockResolvedValue(undefined);act(()=>{screen=create(<PromotionEditorSheet {...props}/>);});field('Code','earlybird');field('Discount (%)','25');});
+afterEach(()=>act(()=>screen.unmount()));
+it('saves normalized code through existing callback',async()=>{await act(async()=>{save();});expect(onSave).toHaveBeenCalledWith(expect.objectContaining({code:'EARLYBIRD',discount_type:'percent',discount_value:25,max_uses:null}));});
+it.each([['Discount (%)','-25'],['Discount (%)','25.5'],['Maximum uses','2.5'],['Starts','2026-02-31'],['Starts','2026-13-01']])('rejects malformed %s %s',async(name,value)=>{field(name,value);await act(async()=>{save();});expect(onSave).not.toHaveBeenCalled();});
+it('rejects a reversed window',async()=>{field('Starts','2026-09-20');field('Ends','2026-09-19');await act(async()=>{save();});expect(onSave).not.toHaveBeenCalled();});
+it('keeps the exact draft after lost response and retries it',async()=>{onSave.mockRejectedValueOnce(Error('lost'));await act(async()=>{save();});expect(text()).toContain('Your code is kept');expect(screen.root.findAllByType(TextInput).every(n=>!n.props.editable)).toBe(true);await act(async()=>{save();});expect(onSave).toHaveBeenCalledTimes(2);expect(onSave.mock.calls[1][0]).toEqual(onSave.mock.calls[0][0]);});
+it('blocks synchronous duplicate saves and dismissal while saving',async()=>{let done!:()=>void;onSave.mockImplementation(()=>new Promise<void>(r=>done=r));act(()=>{save();save();});expect(onSave).toHaveBeenCalledTimes(1);act(()=>screen.root.findByProps({accessibilityLabel:'Close code editor'}).props.onPress());expect(onClose).not.toHaveBeenCalled();await act(async()=>done());});
+it('preserves draft while hidden and resets only for a different draft',()=>{act(()=>screen.update(<PromotionEditorSheet {...props} visible={false}/>));act(()=>screen.update(<PromotionEditorSheet {...props}/>));expect(screen.root.findAllByType(TextInput)[0].props.value).toBe('earlybird');act(()=>screen.update(<PromotionEditorSheet {...props} draftKey="next"/>));expect(screen.root.findAllByType(TextInput)[0].props.value).toBe('');});

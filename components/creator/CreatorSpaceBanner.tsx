@@ -1,3 +1,5 @@
+import { GoldSurfaceFill } from './GoldSurfaceFill';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 /**
  * The approved organizer's front door (7-21 order: the entry must be
  * impossible to miss). Renders ONLY for a signed-in account with an
@@ -12,6 +14,7 @@ import { ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticMedium } from '../../lib/haptics';
+import { CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
 import {
   creatorLandingRoute,
   getCreatorAccess,
@@ -20,6 +23,7 @@ import {
 } from '../../lib/creatorMode';
 
 export function CreatorSpaceBanner() {
+  const {fonts} = useAfterglowFonts(true,'creator');
   const [access, setAccess] = useState<CreatorAccess | null>(null);
 
   useEffect(() => {
@@ -35,16 +39,19 @@ export function CreatorSpaceBanner() {
       style={styles.card}
       onPress={() => {
         hapticMedium();
-        router.replace(creatorLandingRoute(access));
+        if (CREATOR_PAGES_ENABLED) router.push('/creator/pages');
+        else router.replace(creatorLandingRoute(access));
       }}
+      accessibilityRole="button"
+      accessibilityLabel="Open your creator pages"
       activeOpacity={0.85}
     >
-      <View style={styles.body}>
+      <GoldSurfaceFill radius={16} /><View style={styles.body}>
         {/* copy to the taste gate */}
-        <Text style={styles.title}>your creator space is ready</Text>
-        <Text style={styles.meta}>events, tickets, your page. it all lives here.</Text>
+        <Text style={[styles.title,{fontFamily:fonts.medium}]}>your creator space is ready</Text>
+        <Text style={[styles.meta,{fontFamily:fonts.regular}]}>events, tickets, your page. it all lives here.</Text>
       </View>
-      <ChevronRight size={18} color={Colors.terracotta} strokeWidth={2.5} />
+      <View><ChevronRight size={18} color={Colors.asphalt} strokeWidth={2.5} /></View>
     </TouchableOpacity>
   );
 }
@@ -52,8 +59,8 @@ export function CreatorSpaceBanner() {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.white,
-    borderRadius: 12,
-    borderWidth: 1.5,
+    borderRadius: 16,
+    borderWidth: 0,
     borderColor: Colors.terracotta,
     padding: 14,
     marginHorizontal: 16,
@@ -63,6 +70,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   body: { flex: 1, gap: 2 },
-  title: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  title: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   meta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
 });

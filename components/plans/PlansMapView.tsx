@@ -209,7 +209,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
   }, []);
 
   const filteredPlans = plans.filter((p) => {
-    if (!p.location_lat || !p.location_lng) return false;
+    if (p.location_lat == null || p.location_lng == null) return false;
     if (selectedFilter && (p.category?.toLowerCase() !== selectedFilter.toLowerCase())) return false;
     if (heartFilter && !wishlistedSet[p.id]) return false;
     if (!matchesWhen(p.start_time, whenFilter, now)) return false;
@@ -225,7 +225,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
       }
       return plan;
     });
-    if (plan.location_lat && plan.location_lng && mapRef.current) {
+    if (plan.location_lat != null && plan.location_lng != null && mapRef.current) {
       mapRef.current.animateToRegion({
         latitude: plan.location_lat - 0.02,
         longitude: plan.location_lng,
@@ -321,6 +321,14 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
           </TouchableOpacity>
         </View>
       </View>
+
+      {filteredPlans.length === 0 && <View style={styles.emptyCard} accessibilityLiveRegion="polite">
+        <Text style={styles.cardTitle}>No plans to show on the map</Text>
+        <Text style={styles.cardMetaText}>{plans.some(p => p.location_lat != null && p.location_lng != null)
+          ? 'Try changing your filters, or return to the list.'
+          : 'These plans don’t have map locations yet. You can still browse them in the list.'}</Text>
+        <TouchableOpacity style={styles.emptyAction} onPress={onClose} accessibilityRole="button"><Text style={styles.categoryPillText}>Back to plans</Text></TouchableOpacity>
+      </View>}
 
       {/* Selected plan card */}
       {selectedPlan && (
@@ -428,6 +436,8 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  emptyCard: { position: 'absolute', bottom: 24, left: 16, right: 16, backgroundColor: Colors.white, borderRadius: 16, padding: 16, gap: 8 },
+  emptyAction: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center' },
 
   topBar: {
     position: 'absolute',

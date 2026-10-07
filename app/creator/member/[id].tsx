@@ -1,3 +1,4 @@
+import { EventMediaImage } from '../../../components/events/EventMediaImage';
 /**
  * C-11 member detail. Today the roster row only ever showed name, role,
  * joined date, and a remove button; this is the drill-down a leader gets by
@@ -161,7 +162,7 @@ export default function MemberDetailScreen() {
   const renderHistoryRow = (h: MemberEventHistoryItem, idx: number) => (
     <View key={`${h.eventId}-${idx}`} style={styles.historyRow}>
       {h.imageUrl ? (
-        <Image source={{ uri: h.imageUrl }} style={styles.historyThumb} contentFit="cover" />
+        <EventMediaImage eventId={h.eventId} reference={h.imageUrl} style={styles.historyThumb} contentFit="cover" />
       ) : (
         <View style={[styles.historyThumb, styles.historyThumbFallback]}>
           {h.kind === 'ticket' ? (

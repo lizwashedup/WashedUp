@@ -8,12 +8,14 @@ export function isPlanPast(
   endTime: string | Date | null | undefined,
   now: string | Date | number = Date.now(),
 ): boolean {
-  const start = typeof startTime === 'string' ? new Date(startTime) : startTime;
-  const cutoff = endTime
-    ? typeof endTime === 'string' ? new Date(endTime) : endTime
-    : new Date(start.getTime() + 3 * 60 * 60 * 1000);
-  const current = typeof now === 'number' ? new Date(now) : typeof now === 'string' ? new Date(now) : now;
+  const cutoff = getPlanCutoff(startTime, endTime);
+  const current = typeof now === 'number' ? now : new Date(now).getTime();
   return cutoff <= current;
+}
+
+/** The same explicit-end / three-hour fallback cutoff used by isPlanPast. */
+export function getPlanCutoff(startTime: string | Date, endTime?: string | Date | null): number {
+  return endTime ? new Date(endTime).getTime() : new Date(startTime).getTime() + 3 * 60 * 60 * 1000;
 }
 
 // Format a plan's start as "Fri, Jun 10, 3:45 PM", pinned to LA time rather

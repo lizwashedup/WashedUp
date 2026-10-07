@@ -1,0 +1,35 @@
+import React from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { TextInput, TouchableOpacity } from 'react-native';
+const mockTiers=jest.fn(),mockSave=jest.fn(),mockAccess=jest.fn(),mockBack=jest.fn();
+let mockTierId='new',mockCurrent=true;
+const mockScope={userId:'creator',isCurrent:()=>mockCurrent};
+jest.mock('../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:mockScope,account:{epoch:1}})}));
+jest.mock('../../../lib/creatorTicketRead',()=>({canReadCreatorTickets:()=>mockAccess()}));
+jest.mock('../../../lib/creatorEventEntry',()=>({resolveCreatorEventEntry:async()=>({kind:'ordinary'})}));
+jest.mock('../../../lib/creatorMode',()=>({getCreatorAccess:async()=>({hasEventHostGrant:true}),canManageEvents:()=>false}));
+jest.mock('../../../lib/creatorTierEditor',()=>({saveCreatorTier:(...a:any[])=>mockSave(...a)}));
+jest.mock('../../../lib/ticketing',()=>({...jest.requireActual('../../../lib/ticketing'),getTiers:(...a:any[])=>mockTiers(...a)}));
+jest.mock('../../../lib/haptics',()=>({hapticLight:jest.fn(),hapticSuccess:jest.fn(),hapticError:jest.fn()}));
+jest.mock('expo-router',()=>({useLocalSearchParams:()=>({id:'event',tierId:mockTierId}),router:{back:()=>mockBack()},Stack:{Screen:()=>null}}));
+jest.mock('react-native-safe-area-context',()=>jest.requireActual('react-native-safe-area-context/jest/mock').default);
+jest.mock('../pages/PageFrame',()=>({PageFrame:({children}:any)=>children,PageAction:()=>null,pageStyles:{small:{}}}));
+jest.mock('../../composer/CollapsibleCalendar',()=>()=>null);
+jest.mock('../../composer/TimePicker',()=>({__esModule:true,default:(props:any)=>require('react').createElement('TimePicker',props)}));
+import Screen from '../../../app/creator/rsvp-settings';
+let tree:ReactTestRenderer,client:QueryClient;
+const text=()=>JSON.stringify(tree.toJSON());
+const settle=()=>act(async()=>{await new Promise(r=>setTimeout(r,20));});
+async function mount(){client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{gcTime:0}}});await act(async()=>{tree=create(<QueryClientProvider client={client}><Screen/></QueryClientProvider>);});await settle();await settle();}
+function input(name:string,value:string){act(()=>tree.root.findAllByType(TextInput).find(n=>n.props.accessibilityLabel===name)!.props.onChangeText(value));}
+const save=()=>tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='save')!.props.onPress();
+beforeEach(()=>{jest.clearAllMocks();mockTierId='new';mockCurrent=true;mockAccess.mockResolvedValue(true);mockTiers.mockResolvedValue([]);mockSave.mockResolvedValue({id:'saved'});});
+afterEach(()=>{if(tree)act(()=>tree.unmount());client?.clear();});
+it('denies admission before reading private tiers',async()=>{mockAccess.mockResolvedValue(false);await mount();expect(mockTiers).not.toHaveBeenCalled();expect(tree.root.findAllByType(TextInput)).toHaveLength(0);});
+it('distinguishes a failed lookup from a missing RSVP and offers retry',async()=>{mockTierId='existing';mockTiers.mockRejectedValue(Error('offline'));await mount();expect(text()).toContain('Couldn’t load the saved RSVP.');expect(tree.root.findAllByType(TextInput)).toHaveLength(0);expect(mockSave).not.toHaveBeenCalled();});
+it('does not create a new tier for a missing edit ID',async()=>{mockTierId='missing';await mount();expect(text()).toContain('no longer available');expect(tree.root.findAllByType(TextInput)).toHaveLength(0);});
+it('does not convert a paid ticket through the free RSVP route',async()=>{mockTierId='paid';mockTiers.mockResolvedValue([{id:'paid',price_cents:1200}]);await mount();expect(tree.root.findAllByType(TextInput)).toHaveLength(0);});
+it.each(['2.5','-2','0'])('rejects invalid capacity %s',async(value)=>{await mount();input('RSVP name','Sunday picnic');input('Total places',value);await act(async()=>save());expect(mockSave).not.toHaveBeenCalled();expect(text()).toContain('positive whole number');});
+it('keeps exact draft/ID through failure and retries without a new ID',async()=>{mockSave.mockRejectedValueOnce(Error('lost')).mockResolvedValueOnce({id:'saved'});await mount();input('RSVP name','Sunday picnic');input('Total places','24');const oldPicker=tree.root.findAllByType('TimePicker' as any)[0].props.onChange;await act(async()=>save());expect(mockBack).not.toHaveBeenCalled();act(()=>oldPicker(4,'00','PM'));expect(tree.root.findAllByType(TextInput).every(n=>!n.props.editable)).toBe(true);await act(async()=>save());expect(mockSave.mock.calls[1]).toEqual(mockSave.mock.calls[0]);expect(mockSave.mock.calls[0][2]).toMatchObject({price_cents:0,quantity_cap:24,per_order_max:null});expect(mockBack).toHaveBeenCalledTimes(1);});
+it('ignores duplicate taps and retired-visit success',async()=>{let done!:(v:any)=>void;mockSave.mockImplementation(()=>new Promise(r=>done=r));await mount();input('RSVP name','Sunday picnic');act(()=>{save();save();});await settle();expect(mockSave).toHaveBeenCalledTimes(1);mockCurrent=false;await act(async()=>done({id:'saved'}));expect(mockBack).not.toHaveBeenCalled();});

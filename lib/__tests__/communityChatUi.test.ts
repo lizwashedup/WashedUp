@@ -10,7 +10,7 @@ describe('community chat presentation helpers', () => {
   it('replaces the partial mention without disturbing text after the caret', () => {
     expect(insertMentionAt('hey @sa tomorrow', 7, 'Sage')).toEqual({
       text: 'hey @Sage tomorrow',
-      caret: 9,
+      caret: 10,
     });
   });
 

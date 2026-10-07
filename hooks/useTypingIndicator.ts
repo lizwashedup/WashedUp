@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 // Ephemeral typing state over a Supabase Realtime Broadcast channel. This is
@@ -22,6 +22,11 @@ interface TypingPayload {
   isTyping?: boolean;
 }
 
+export interface TypingOperationScope {
+  readonly userId: string;
+  readonly isCurrent: () => boolean;
+}
+
 export function useTypingIndicator(
   eventId: string | undefined,
   currentUserId: string | null,
@@ -29,8 +34,13 @@ export function useTypingIndicator(
   // Plan chats keep the original `typing:${id}` channel byte-identical; circle/DM
   // chats use a distinct namespace so the two never cross.
   kind: 'event' | 'circle' | 'community-topic' = 'event',
+  scope?: TypingOperationScope | null,
 ) {
-  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
+  const visit = useMemo(() => ({}), [eventId, currentUserId, kind, scope]);
+  const activeVisit = useRef<object | null>(null);
+  const isCurrent = useCallback(() => activeVisit.current === visit && scope !== null &&
+    (!scope || (scope.userId === currentUserId && scope.isCurrent())), [visit, scope, currentUserId]);
+  const [typingState, setTypingState] = useState<{ visit: object | null; users: TypingUser[] }>({ visit: null, users: [] });
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const subscribedRef = useRef(false);
@@ -38,14 +48,19 @@ export function useTypingIndicator(
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const peersRef = useRef<Map<string, { name: string; expiresAt: number }>>(new Map());
 
+  useLayoutEffect(() => {
+    activeVisit.current = visit;
+    return () => { if (activeVisit.current === visit) activeVisit.current = null; };
+  }, [visit]);
+
   useEffect(() => {
-    if (!eventId) return;
+    setTypingState({ visit, users: [] });
+    if (!eventId || !isCurrent()) return;
     subscribedRef.current = false;
 
     const flush = () => {
-      setTypingUsers(
-        Array.from(peersRef.current.entries()).map(([userId, v]) => ({ userId, name: v.name })),
-      );
+      if (!isCurrent()) return;
+      setTypingState({ visit, users: Array.from(peersRef.current.entries()).map(([userId, v]) => ({ userId, name: v.name })) });
     };
 
     const channelName = kind === 'event'
@@ -58,6 +73,7 @@ export function useTypingIndicator(
     });
 
     channel.on('broadcast', { event: 'typing' }, ({ payload }) => {
+      if (!isCurrent()) return;
       const p = payload as TypingPayload;
       if (!p?.userId || p.userId === currentUserId) return;
       if (p.isTyping) {
@@ -72,13 +88,14 @@ export function useTypingIndicator(
     });
 
     channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') subscribedRef.current = true;
+      if (isCurrent() && status === 'SUBSCRIBED') subscribedRef.current = true;
     });
     channelRef.current = channel;
 
     // Self-healing prune: if a peer's "stopped" event never arrives, their
     // entry expires on its own so the indicator can't get stuck on.
     const pruneTimer = setInterval(() => {
+      if (!isCurrent()) return;
       const now = Date.now();
       let changed = false;
       peersRef.current.forEach((v, k) => {
@@ -100,24 +117,25 @@ export function useTypingIndicator(
       channelRef.current = null;
       supabase.removeChannel(channel);
     };
-  }, [eventId, currentUserId, kind]);
+  }, [eventId, currentUserId, kind, visit, isCurrent]);
 
   const sendTyping = useCallback(
     (isTyping: boolean) => {
-      if (!subscribedRef.current || !currentUserId) return;
-      channelRef.current?.send({
+      if (!isCurrent() || !subscribedRef.current || !currentUserId) return;
+      void channelRef.current?.send({
         type: 'broadcast',
         event: 'typing',
         payload: { userId: currentUserId, name: currentUserName ?? 'Someone', isTyping },
-      });
+      }).catch(() => { /* Ephemeral state expires if a send is unavailable. */ });
     },
-    [currentUserId, currentUserName],
+    [currentUserId, currentUserName, isCurrent],
   );
 
   // Call on each keystroke. Throttles the outgoing "typing" to once per
   // TYPING_BROADCAST_THROTTLE_MS and (re)arms an idle timer that sends a
   // "stopped" after TYPING_IDLE_STOP_MS of no further keystrokes.
   const broadcastTyping = useCallback(() => {
+    if (!isCurrent()) return;
     const now = Date.now();
     if (now - lastSentRef.current > TYPING_BROADCAST_THROTTLE_MS) {
       lastSentRef.current = now;
@@ -125,20 +143,22 @@ export function useTypingIndicator(
     }
     if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
     stopTimerRef.current = setTimeout(() => {
+      if (!isCurrent()) return;
       lastSentRef.current = 0;
       sendTyping(false);
     }, TYPING_IDLE_STOP_MS);
-  }, [sendTyping]);
+  }, [sendTyping, isCurrent]);
 
   // Immediately announce we stopped (e.g. right after sending a message).
   const stopTyping = useCallback(() => {
+    if (!isCurrent()) return;
     if (stopTimerRef.current) {
       clearTimeout(stopTimerRef.current);
       stopTimerRef.current = null;
     }
     lastSentRef.current = 0;
     sendTyping(false);
-  }, [sendTyping]);
+  }, [sendTyping, isCurrent]);
 
-  return { typingUsers, broadcastTyping, stopTyping };
+  return { typingUsers: typingState.visit === visit && isCurrent() ? typingState.users : [], broadcastTyping, stopTyping };
 }

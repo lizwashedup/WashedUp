@@ -1,3 +1,4 @@
+import { EventMediaImage } from '../../components/events/EventMediaImage';
 /**
  * Organizer/producer home (CTO scope item 06; design spec item 04
  * "Distinct community-creator and organization/producer workspace shells";
@@ -18,9 +19,8 @@
  * New Block B screen: uses the Q2 event-surface tokens (constants/
  * EventDesign.ts) already adopted by the sibling ticket screens (tickets.tsx,
  * attendees.tsx, door.tsx, payouts.tsx), not the older parchment/asphalt set
- * this tab bar's community screens still use. Primary actions are 10px
- * radius, never a pill (Figma-ready build spec, supersedes the older pill
- * guidance for this surface).
+ * this tab bar's community screens still use. Primary actions now follow
+ * the approved shared creator sunset treatment.
  */
 
 import React, { useMemo } from 'react';
@@ -31,8 +31,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { AlertTriangle, ChevronRight, Flame, Plus, ScanLine, Ticket, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
-import { EventAction, EventSpacing, EventSurface, EventType } from '../../constants/EventDesign';
-import { FontSizes, LineHeights } from '../../constants/Typography';
+import { EventAction, EventSpacing, EventSurface } from '../../constants/EventDesign';
+import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCreatorEvents } from '../../lib/creatorMode';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { getFollowerCount } from '../../lib/organizerFollows';
@@ -41,10 +41,14 @@ import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { formatEventDateLA } from '../../lib/laDate';
 import { daysUntilLabel, failedPayoutLabel, hasUnpublishedTickets, inventoryLabel, lowInventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
 import { supabase } from '../../lib/supabase';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
 import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
 
 export default function OrganizerHomeScreen() {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
 
   const { data: userId = null } = useQuery({
@@ -53,10 +57,12 @@ export default function OrganizerHomeScreen() {
     staleTime: Infinity,
   });
 
-  const { data: organizerProfile = null, isPending: organizerProfilePending } = useQuery({
+  const profileQuery = useQuery({
     queryKey: ['organizer-profile'],
     queryFn: getMyOrganizerProfile,
   });
+
+  const { data: organizerProfile = null, isPending: organizerProfilePending } = profileQuery;
 
   // event-host-only has no led communities; shares events.tsx's cache key
   // shape so the two tabs read the same list instead of double-fetching.
@@ -66,7 +72,7 @@ export default function OrganizerHomeScreen() {
   // loading, and isLoading is isPending && isFetching in this query-client
   // major version. isPending alone stays true across that whole gap, which
   // is what actually gates the false "nothing on the calendar" flash below.
-  const { data: allEvents = [], isPending: eventsPending } = useQuery({
+  const eventsQuery = useQuery({
     queryKey: ['creator-events-tab', 'organization'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -75,22 +81,27 @@ export default function OrganizerHomeScreen() {
     },
     enabled: access != null,
   });
+  const { data: allEvents = [], isPending: eventsPending } = eventsQuery;
   const events = allEvents.filter((event) => eventBelongsToWorkspace(event, 'organization', null));
 
   const nextEvent = useMemo(() => pickNextUpcomingEvent(events), [events]);
   const draftEvent = useMemo(() => events.find((event) => event.status === 'Draft') ?? null, [events]);
   const draftHasTicketSetup = !!draftEvent && hasUnpublishedTickets(draftEvent.tiers);
 
-  const { data: tiers = [] } = useQuery({
+  const tiersQuery = useQuery({
     queryKey: ['organizer-home-tiers', nextEvent?.id],
     queryFn: () => getTiers(nextEvent!.id),
     enabled: !!nextEvent,
   });
-  const { data: attendees = [] } = useQuery({
+  const attendeesQuery = useQuery({
     queryKey: ['organizer-home-attendees', nextEvent?.id],
     queryFn: () => getEventAttendees(nextEvent!.id),
     enabled: !!nextEvent,
   });
+  const { data: tiers = [] } = tiersQuery;
+  const { data: attendees = [] } = attendeesQuery;
+  const inventoryError = tiersQuery.isError || attendeesQuery.isError;
+  const inventoryPending = tiersQuery.isPending || attendeesQuery.isPending;
   const counts = countAttendees(attendees);
   const capacity = useMemo(() => sumTierCapacity(tiers), [tiers]);
 
@@ -101,11 +112,11 @@ export default function OrganizerHomeScreen() {
   // (an open-ended event) never counts as low, same contract isLowInventory
   // already enforces for cap <= 0.
   const capacityLeft = capacity != null ? capacity - counts.sold : null;
-  const showLowInventory = !!nextEvent && capacityLeft != null && isLowInventory(capacityLeft, capacity!);
+  const showLowInventory = !inventoryError && !inventoryPending && !!nextEvent && capacityLeft != null && isLowInventory(capacityLeft, capacity!);
 
   // dormant until proposal 68 applies (lib/organizerFollows.ts): null hides
   // this section entirely rather than showing a fake zero.
-  const { data: followerCount = null } = useQuery({
+  const followersQuery = useQuery({
     queryKey: ['organizer-follower-count', userId],
     queryFn: () => getFollowerCount({ kind: 'organizer', id: userId! }),
     enabled: !!userId,
@@ -115,14 +126,18 @@ export default function OrganizerHomeScreen() {
   // Build 35 Screen 01 exception surfacing: ticket_payouts.status='failed'
   // across this organizer's events. Empty array hides the card entirely,
   // same "no fake zero" convention as followerCount above.
-  const { data: failedPayouts = [] } = useQuery({
+  const payoutsQuery = useQuery({
     queryKey: ['organizer-home-failed-payouts', userId, 'organization'],
     queryFn: () => getFailedPayouts([], userId!),
     enabled: !!userId && access != null,
     staleTime: 30_000,
   });
 
-  const producerName = organizerProfile?.display_name?.toLowerCase() || 'your events';
+  const { data: followerCount = null } = followersQuery;
+  const { data: failedPayouts = [] } = payoutsQuery;
+  const producerName = organizerProfile?.display_name || 'Your events';
+  const inventoryText = inventoryError ? 'Ticket counts unavailable' : inventoryPending ? 'Checking tickets…' : inventoryLabel(counts.sold, capacity);
+  const checkInText = attendeesQuery.isError ? 'Check-in count unavailable' : attendeesQuery.isPending ? 'Checking attendance…' : `${counts.checkedIn} of ${counts.sold} checked in`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -136,8 +151,10 @@ export default function OrganizerHomeScreen() {
             routine next-event card on purpose -- a stuck payout matters
             regardless of which event it's on. failure_message is an
             internal Stripe/webhook string, never shown here verbatim. */}
+        {payoutsQuery.isError && <OrganizationReadState label="Payout status" query={payoutsQuery} />}
         {failedPayouts.length > 0 && (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.exceptionCard}
             onPress={() => router.push('/creator/payouts' as never)}
             activeOpacity={0.85}
@@ -147,7 +164,7 @@ export default function OrganizerHomeScreen() {
               {/* LIZ COPY */}
               <Text style={styles.exceptionKicker}>payout issue</Text>
               <Text style={styles.urgencyTitle}>{failedPayoutLabel(failedPayouts.length)}</Text>
-              <Text style={styles.urgencyMeta} numberOfLines={1}>
+              <Text style={styles.urgencyMeta}>
                 {failedPayouts.length === 1
                   ? `${failedPayouts[0].eventTitle} · we're retrying automatically`
                   : "we're retrying automatically · see getting paid"}
@@ -163,6 +180,7 @@ export default function OrganizerHomeScreen() {
             the routine next-event card below. */}
         {showLowInventory && (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.lowInventoryCard}
             onPress={() => router.push(`/creator/tickets?id=${nextEvent!.id}` as never)}
             activeOpacity={0.85}
@@ -172,7 +190,7 @@ export default function OrganizerHomeScreen() {
               {/* LIZ COPY */}
               <Text style={styles.lowInventoryKicker}>almost sold out</Text>
               <Text style={styles.urgencyTitle}>{lowInventoryLabel(capacityLeft!)}</Text>
-              <Text style={styles.urgencyMeta} numberOfLines={1}>{nextEvent!.title}</Text>
+              <Text style={styles.urgencyMeta}>{nextEvent!.title}</Text>
             </View>
             <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
           </TouchableOpacity>
@@ -180,6 +198,7 @@ export default function OrganizerHomeScreen() {
 
         {!eventsPending && draftEvent && (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.draftCard}
             onPress={() => router.push(
               (draftHasTicketSetup
@@ -187,12 +206,11 @@ export default function OrganizerHomeScreen() {
                 : `/creator/event-form?id=${draftEvent.id}`) as never,
             )}
             activeOpacity={0.85}
-            accessibilityRole="button"
             accessibilityLabel={`Continue draft: ${draftEvent.title}`}
           >
             <View style={styles.urgencyBody}>
               <Text style={styles.draftKicker}>draft saved</Text>
-              <Text style={styles.urgencyTitle} numberOfLines={1}>{draftEvent.title}</Text>
+              <Text style={styles.urgencyTitle}>{draftEvent.title}</Text>
               <Text style={styles.urgencyMeta}>
                 {draftHasTicketSetup
                   ? 'your ticket is saved. finish making it sellable.'
@@ -203,42 +221,51 @@ export default function OrganizerHomeScreen() {
           </TouchableOpacity>
         )}
 
+        {eventsQuery.isError && <OrganizationReadState label="Events" query={eventsQuery} />}
         {eventsPending ? (
           <View style={[styles.emptyCard, styles.loadingCard]}>
             <ActivityIndicator size="small" color={EventAction.primary} />
+            <Text style={styles.emptyText}>Loading your events…</Text>
           </View>
         ) : nextEvent ? (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.urgencyCard}
+            accessibilityLabel={`Attendees for ${nextEvent.title}`}
+            accessibilityHint={inventoryText}
             onPress={() => router.push(`/creator/attendees?id=${nextEvent.id}` as never)}
             activeOpacity={0.85}
           >
-            <NextEventThumb imageUrl={nextEvent.image_url} title={nextEvent.title} />
+            <NextEventThumb eventId={nextEvent.id} imageUrl={nextEvent.image_url} title={nextEvent.title} />
             <View style={styles.urgencyBody}>
               {/* LIZ COPY: real urgency, not a countdown gimmick */}
               <Text style={styles.urgencyWhen}>{daysUntilLabel(nextEvent.event_date!)}</Text>
-              <Text style={styles.urgencyTitle} numberOfLines={1}>{nextEvent.title}</Text>
-              <Text style={styles.urgencyMeta} numberOfLines={1}>
+              <Text style={styles.urgencyTitle}>{nextEvent.title}</Text>
+              <Text style={styles.urgencyMeta}>
                 {[formatEventDateLA(nextEvent.event_date ?? ''), nextEvent.venue].filter(Boolean).join(' · ')}
               </Text>
-              <Text style={styles.urgencyInventory}>{inventoryLabel(counts.sold, capacity)}</Text>
+              <Text style={styles.urgencyInventory}>{inventoryText}</Text>
             </View>
             <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
           </TouchableOpacity>
-        ) : !draftEvent ? (
+        ) : !draftEvent && !eventsQuery.isError ? (
           // LIZ COPY: invitation, never a bare "nothing yet" (matches events.tsx's own empty hint)
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>nothing on the calendar yet. put one on and it lives here.</Text>
-            <TouchableOpacity style={styles.emptyBtn} onPress={() => router.push('/creator/event-form')} activeOpacity={0.85}>
-              <Plus size={16} color={EventAction.onPrimary} strokeWidth={2.5} />
-              {/* LIZ COPY */}
-              <Text style={styles.emptyBtnText}>put on an event</Text>
+            <TouchableOpacity accessibilityRole="button" style={styles.emptyBtn} onPress={() => router.push('/creator/event-form')} activeOpacity={0.85}>
+              <CreatorActionFill />
+              <View style={styles.actionContent}>
+                <Plus size={16} color={EventAction.onPrimary} strokeWidth={2.5} />
+                <Text style={styles.emptyBtnText}>put on an event</Text>
+              </View>
             </TouchableOpacity>
           </View>
         ) : null}
 
+        {nextEvent && inventoryError && <OrganizationReadState label="Ticket counts" query={{ isFetching: tiersQuery.isFetching || attendeesQuery.isFetching, refetch: () => Promise.all([tiersQuery.refetch(), attendeesQuery.refetch()]) }} />}
         {nextEvent && (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.linkRow}
             onPress={() => router.push(`/creator/attendees?id=${nextEvent.id}` as never)}
             activeOpacity={0.8}
@@ -247,7 +274,7 @@ export default function OrganizerHomeScreen() {
             <View style={{ flex: 1 }}>
               {/* LIZ COPY */}
               <Text style={styles.linkRowTitle}>who's coming</Text>
-              <Text style={styles.linkRowMeta}>{inventoryLabel(counts.sold, capacity)}</Text>
+              <Text style={styles.linkRowMeta}>{inventoryText}</Text>
             </View>
             <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
           </TouchableOpacity>
@@ -257,6 +284,7 @@ export default function OrganizerHomeScreen() {
             only reachable through the events tab's per-event row */}
         {nextEvent && (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.linkRow}
             onPress={() => { router.push(`/creator/check-in?id=${nextEvent.id}` as never); }}
             activeOpacity={0.8}
@@ -265,7 +293,7 @@ export default function OrganizerHomeScreen() {
             <View style={{ flex: 1 }}>
               {/* LIZ COPY */}
               <Text style={styles.linkRowTitle}>check in</Text>
-              <Text style={styles.linkRowMeta}>{counts.checkedIn} of {counts.sold} checked in</Text>
+              <Text style={styles.linkRowMeta}>{checkInText}</Text>
             </View>
             <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
           </TouchableOpacity>
@@ -273,6 +301,7 @@ export default function OrganizerHomeScreen() {
 
         {/* dormant until proposal 68 applies (lib/organizerFollows.ts): the
             section simply does not exist for anyone until then, no fake zero */}
+        {followersQuery.isError && <OrganizationReadState label="Followers" query={followersQuery} />}
         {followerCount != null && (
           <View style={styles.followersCard}>
             <Users size={18} color={EventAction.primary} strokeWidth={2} />
@@ -288,6 +317,7 @@ export default function OrganizerHomeScreen() {
             offering to message an audience that doesn't exist as a concept yet */}
         {followerCount != null && (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.linkRow}
             onPress={() => router.push('/organizer-broadcast' as never)}
             activeOpacity={0.8}
@@ -302,7 +332,7 @@ export default function OrganizerHomeScreen() {
         )}
 
         <Text style={styles.sectionLabel}>money</Text>
-        <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/creator/payouts' as never)} activeOpacity={0.8}>
+        <TouchableOpacity accessibilityRole="button" style={styles.linkRow} onPress={() => router.push('/creator/payouts' as never)} activeOpacity={0.8}>
           <View style={{ flex: 1 }}>
             {/* LIZ COPY — updated 2026-09-01: "orders" -> "purchases" per Scene handoff §14
                 (no backend vocab in copy); matches creator/payouts.tsx's own "purchases"
@@ -313,19 +343,20 @@ export default function OrganizerHomeScreen() {
           <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/creator/organizer-profile')} activeOpacity={0.8}>
+        {profileQuery.isError && <OrganizationReadState label="Organization details" query={profileQuery} />}
+        <TouchableOpacity accessibilityRole="button" style={styles.linkRow} onPress={() => router.push('/creator/organizer-profile')} activeOpacity={0.8}>
           <View style={{ flex: 1 }}>
             {/* LIZ COPY */}
             <View style={styles.linkRowTitleLine}>
               <Text style={styles.linkRowTitle}>your organization</Text>
-              {!organizerProfilePending && !organizerProfile && (
+              {!organizerProfilePending && !profileQuery.isError && !organizerProfile && (
                 <View style={styles.setupBadge} accessibilityLabel="organization setup needed">
                   <Text style={styles.setupBadgeText}>set up</Text>
                 </View>
               )}
             </View>
             <Text style={styles.linkRowMeta}>
-              {organizerProfile ? 'the name your events wear' : 'set it up. takes a minute.'}
+              {organizerProfile ? 'the name your events wear' : profileQuery.isError ? 'Details could not be loaded.' : organizerProfilePending ? 'Loading organization details…' : 'set it up. takes a minute.'}
             </Text>
           </View>
           <ChevronRight size={18} color={Colors.tertiary} strokeWidth={2} />
@@ -336,10 +367,12 @@ export default function OrganizerHomeScreen() {
             it is about the event already up, this is the next action once
             you've read all of that, not a distraction ahead of it */}
         {nextEvent && (
-          <TouchableOpacity style={styles.postBtn} onPress={() => router.push('/creator/event-form')} activeOpacity={0.85}>
-            <Plus size={16} color={EventAction.onPrimary} strokeWidth={2.5} />
-            {/* LIZ COPY */}
-            <Text style={styles.postBtnText}>put on another event</Text>
+          <TouchableOpacity accessibilityRole="button" style={styles.postBtn} onPress={() => router.push('/creator/event-form')} activeOpacity={0.85}>
+            <CreatorActionFill />
+            <View style={styles.actionContent}>
+              <Plus size={16} color={EventAction.onPrimary} strokeWidth={2.5} />
+              <Text style={styles.postBtnText}>put on another event</Text>
+            </View>
           </TouchableOpacity>
         )}
       </ScrollView>
@@ -347,10 +380,12 @@ export default function OrganizerHomeScreen() {
   );
 }
 
-function NextEventThumb({ imageUrl, title }: { imageUrl: string | null; title: string }) {
-  const [broken, setBroken] = React.useState(false);
-  if (imageUrl && !broken) {
-    return <Image source={{ uri: imageUrl }} style={styles.thumb} contentFit="cover" onError={() => setBroken(true)} />;
+function NextEventThumb({ eventId, imageUrl, title }: { eventId: string; imageUrl: string | null; title: string }) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
+  const [brokenReference, setBrokenReference] = React.useState<string | null>(null);
+  if (imageUrl && brokenReference !== imageUrl) {
+    return <EventMediaImage eventId={eventId} reference={imageUrl} style={styles.thumb} contentFit="cover" onError={() => setBrokenReference(imageUrl)} />;
   }
   return (
     <View style={[styles.thumb, styles.thumbFallback]}>
@@ -361,17 +396,32 @@ function NextEventThumb({ imageUrl, title }: { imageUrl: string | null; title: s
 
 const THUMB_SIZE = 56;
 
-const styles = StyleSheet.create({
+function OrganizationReadState({ label, query }: { label: string; query: { isFetching: boolean; refetch: () => Promise<unknown> } }) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
+  return <View style={styles.readState} accessibilityLiveRegion="polite">
+    <Text style={styles.linkRowTitle}>{label} unavailable</Text>
+    <TouchableOpacity style={styles.retry} accessibilityRole="button" accessibilityLabel={`Retry ${label.toLowerCase()}`} disabled={query.isFetching} onPress={() => void query.refetch()}>
+      <Text style={styles.retryText}>{query.isFetching ? 'Checking…' : 'Retry'}</Text>
+    </TouchableOpacity>
+  </View>;
+}
+
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  readState: { paddingVertical: 12, gap: 4 },
+  retry: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignSelf: 'flex-start' },
+  retryText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: EventAction.primary },
+  actionContent: { zIndex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center' },
   container: { flex: 1, backgroundColor: EventSurface.base },
   content: { padding: EventSpacing.md, gap: EventSpacing.sm },
   kicker: {
-    fontFamily: EventType.bodyBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: EventAction.primary,
     letterSpacing: 1.5,
   },
   title: {
-    fontFamily: EventType.display,
+    fontFamily: fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
@@ -401,7 +451,7 @@ const styles = StyleSheet.create({
     marginTop: EventSpacing.xs,
   },
   draftKicker: {
-    fontFamily: EventType.bodyBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: EventAction.primary,
     letterSpacing: 0.6,
@@ -419,7 +469,7 @@ const styles = StyleSheet.create({
     marginTop: EventSpacing.xs,
   },
   exceptionKicker: {
-    fontFamily: EventType.bodyBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: EventAction.error,
     letterSpacing: 0.6,
@@ -437,27 +487,27 @@ const styles = StyleSheet.create({
     marginTop: EventSpacing.xs,
   },
   lowInventoryKicker: {
-    fontFamily: EventType.bodyBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: EventAction.scarcity,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
-  urgencyBody: { flex: 1, gap: 2 },
+  urgencyBody: { flex: 1, minWidth: 0, gap: 4 },
   urgencyWhen: {
-    fontFamily: EventType.bodyBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: EventAction.scarcity,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
-  urgencyTitle: { fontFamily: EventType.bodyBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
-  urgencyMeta: { fontFamily: EventType.body, fontSize: FontSizes.bodySM, color: Colors.secondary },
-  urgencyInventory: { fontFamily: EventType.bodyMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, marginTop: 2 },
+  urgencyTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyLG, lineHeight: LineHeights.bodyLG, color: Colors.darkWarm },
+  urgencyMeta: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary },
+  urgencyInventory: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, marginTop: 2 },
 
-  thumb: { width: THUMB_SIZE, height: THUMB_SIZE, borderRadius: 12 },
+  thumb: { width: THUMB_SIZE, height: THUMB_SIZE, borderRadius: 12, alignSelf: 'flex-start' },
   thumbFallback: { backgroundColor: EventAction.soft, alignItems: 'center', justifyContent: 'center' },
-  thumbLetter: { fontFamily: EventType.display, fontSize: FontSizes.displaySM, color: EventAction.primary },
+  thumbLetter: { fontFamily: fonts.display, fontSize: FontSizes.displaySM, color: EventAction.primary },
 
   emptyCard: {
     backgroundColor: EventSurface.card,
@@ -468,33 +518,35 @@ const styles = StyleSheet.create({
     gap: EventSpacing.sm,
     marginTop: EventSpacing.xs,
   },
-  emptyText: { fontFamily: EventType.body, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.secondary },
+  emptyText: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.secondary },
   loadingCard: { alignItems: 'center', justifyContent: 'center', minHeight: 64 },
   emptyBtn: {
+    minHeight: 44, overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     backgroundColor: EventAction.primary,
-    borderRadius: 10,
+    borderRadius: 24,
     paddingVertical: 12,
   },
-  emptyBtnText: { fontFamily: EventType.bodyBold, fontSize: FontSizes.bodyMD, color: EventAction.onPrimary },
+  emptyBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: EventAction.onPrimary },
 
   postBtn: {
+    minHeight: 44, overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     backgroundColor: EventAction.primary,
-    borderRadius: 10,
+    borderRadius: 24,
     paddingVertical: 12,
     marginTop: EventSpacing.xs,
   },
-  postBtnText: { fontFamily: EventType.bodyBold, fontSize: FontSizes.bodyMD, color: EventAction.onPrimary },
+  postBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: EventAction.onPrimary },
 
   sectionLabel: {
-    fontFamily: EventType.bodyBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.tertiary,
     letterSpacing: 0.8,
@@ -514,8 +566,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  followersCount: { fontFamily: EventType.displayBold, fontSize: FontSizes.displaySM, color: Colors.darkWarm },
-  followersLabel: { fontFamily: EventType.body, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  followersCount: { fontFamily: fonts.display, fontSize: FontSizes.displaySM, color: Colors.darkWarm },
+  followersLabel: { flex: 1, fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary },
 
   linkRow: {
     flexDirection: 'row',
@@ -528,8 +580,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  linkRowTitle: { fontFamily: EventType.bodyBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  linkRowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: EventSpacing.xs },
+  linkRowTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  linkRowTitleLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: EventSpacing.xs },
   setupBadge: {
     backgroundColor: EventAction.successFill,
     borderRadius: 999,
@@ -538,6 +590,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
-  setupBadgeText: { fontFamily: EventType.bodyBold, fontSize: FontSizes.micro, color: Colors.brandDeep },
-  linkRowMeta: { fontFamily: EventType.body, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 2 },
+  setupBadgeText: { fontFamily: fonts.semibold, fontSize: FontSizes.micro, color: Colors.brandDeep },
+  linkRowMeta: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary, marginTop: 2 },
 });
+
+}

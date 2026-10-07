@@ -14,8 +14,11 @@ import { ArrowLeft } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticError } from '../../lib/haptics';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { SceneDetailColors as Scene } from '../../constants/Colors';
+import { LinearGradient } from 'expo-linear-gradient';
+import ProfileButton from '../../components/ProfileButton';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { FontSizes, LineHeights, type AfterglowFontFamilies } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import {
   Field,
@@ -34,10 +37,34 @@ import {
   fetchMyGrants,
   submitApplication,
 } from '../../lib/operatorApplications';
+import { useApplicationFormGuidance } from '../../components/creator/useApplicationFormGuidance';
 import { buildEventApplication, missingEventApplicationFields } from '../../lib/operatorApplicationForms';
+
+
+const sentenceCaseOptions = (options: typeof EVENT_CATEGORIES) => options.map(option => ({ ...option, label: option.label.charAt(0).toUpperCase() + option.label.slice(1) }));
+const APPLICANT_TYPE_LABELS = APPLICANT_TYPES.map(option => ({
+  ...option,
+  label: ({ just_me: 'Just me', producer_promoter: 'Event producer or promoter', venue: 'Venue', artist: 'Artist or performer', business_brand: 'Business or brand', other: 'Something else' } as Record<string, string>)[option.key] ?? option.label,
+}));
+const FIELD_ERRORS: Record<string, string> = {
+  "what are you?": "Choose the option that best describes you.",
+  "tell us": "Describe your work.",
+  "your name": "Enter your name.",
+  "the name people know you by": "Enter the name people will see on your events.",
+  "what kind of events?": "Choose at least one event category.",
+  "how often?": "Choose how often you put on events.",
+  "show us proof (at least one link)": "Add at least one link.",
+  "where's your spot?": "Enter your venue’s address.",
+  "how do people get tickets today?": "Choose how people get tickets.",
+  "tell us about what you run": "Tell us about your events.",
+  "agree to the terms": "Agree to the creator terms to submit."
+};
 
 export default function ApplyEventsScreen() {
   const router = useRouter();
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const appearance = React.useMemo(() => ({ fonts, application: true }), [fonts]);
+  const styles = React.useMemo(() => createStyles(fonts), [fonts]);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
@@ -102,17 +129,15 @@ export default function ApplyEventsScreen() {
   };
   const missingFields = missingEventApplicationFields(applicationDraft);
   const valid = missingFields.length === 0;
+  const guidance = useApplicationFormGuidance(missingFields, FIELD_ERRORS);
 
   // What's still unfilled, in the form's own words, so a tap on the greyed
-  // "send it in" explains itself instead of doing nothing.
+  // submit action explains itself instead of doing nothing.
   const attemptSubmit = () => {
     if (submitting) return;
     if (!valid) {
       hapticError();
-      setAlertInfo({
-        title: 'Almost there',
-        message: `A few things still need filling in:\n\n• ${missingFields.join('\n• ')}`,
-      });
+      guidance.revealFirstInvalid();
       return;
     }
     handleSubmit();
@@ -126,96 +151,100 @@ export default function ApplyEventsScreen() {
       setDone(true);
     } catch (e: any) {
       hapticError();
-      setAlertInfo({ title: 'that did not go through', message: friendlyError(e, 'something went wrong, try again in a moment.') });
+      setAlertInfo({ title: 'That did not go through', message: friendlyError(e, 'Try again in a moment. Your answers are still here.') });
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <LinearGradient colors={[Scene.upper, Scene.middle, Scene.lower]} locations={Scene.gradientLocations} style={styles.container}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} hitSlop={12}>
-          <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.headerBtn} hitSlop={8}>
+          <ArrowLeft size={22} color={Scene.text} strokeWidth={2.5} />
         </TouchableOpacity>
+        <Text style={styles.headerLabel}>Organization application</Text>
+        <ProfileButton surface="scene" />
       </View>
 
       {done ? (
-        <Confirmation onDone={() => router.back()} />
+        <Confirmation appearance={appearance} title="Application received" doneLabel="Done" onDone={() => router.back()} />
       ) : (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-            <Text style={styles.title}>put on events</Text>
+          <ScrollView ref={guidance.scrollRef} onLayout={guidance.onViewportLayout} onContentSizeChange={guidance.onContentSizeChange} onScrollBeginDrag={guidance.cancelReveal} onTouchStart={guidance.cancelReveal} style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+            <Text accessibilityRole="header" style={styles.title}>Apply for an organization</Text>
             <Text style={styles.intro}>
-              post one-off events to the scene. a human reads every application and replies within a day.
+              Tell us about your business, venue, team, or the events you create yourself.
             </Text>
+            <Text style={styles.reviewNote}>We’ll review new applications when the refreshed Scene is ready.</Text>
 
-            <ChoiceList
-              label="what are you?"
-              options={APPLICANT_TYPES}
+            <ChoiceList guidance={guidance.field("what are you?")} appearance={appearance}
+              label="Which best describes you?"
+              options={APPLICANT_TYPE_LABELS}
               selected={applicantType}
               onSelect={setApplicantType}
             />
             {applicantType === 'other' && (
-              <Field label="tell us" value={applicantTypeOther} onChange={setApplicantTypeOther} maxLength={120} />
+              <Field guidance={guidance.field("tell us")} appearance={appearance} label="How would you describe your work?" value={applicantTypeOther} onChange={setApplicantTypeOther} maxLength={120} />
             )}
 
-            <Field label="your name" value={yourName} onChange={setYourName} maxLength={80} />
+            <Field guidance={guidance.field("your name")} appearance={appearance} label="Your name" value={yourName} onChange={setYourName} maxLength={80} />
             {applicantType && !isJustMe && (
-              <Field
-                label="the name people know you by"
-                hint="your business, venue, or producer name. this is the name that shows on your event listings."
+              <Field guidance={guidance.field("the name people know you by")} appearance={appearance}
+                label="Public name"
+                hint="The business, venue, or creator name people will see on your event listings."
                 value={publicName}
                 onChange={setPublicName}
                 maxLength={80}
               />
             )}
 
-            <ChipMulti
-              label="what kind of events?"
-              options={EVENT_CATEGORIES}
+            <ChipMulti guidance={guidance.field("what kind of events?")} appearance={appearance}
+              label="What kinds of events do you create?"
+              options={sentenceCaseOptions(EVENT_CATEGORIES)}
               selected={categories}
               onToggle={(key) =>
                 setCategories((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
               }
             />
 
-            <ChoiceList label="how often?" options={EVENT_FREQUENCIES} selected={frequency} onSelect={setFrequency} />
+            <ChoiceList guidance={guidance.field("how often?")} appearance={appearance} label="How often do you put on events?" options={sentenceCaseOptions(EVENT_FREQUENCIES)} selected={frequency} onSelect={setFrequency} />
 
-            <LinksInput
-              label="show us proof."
-              hint="instagram, a past event page, your website, your venue's page."
+            <LinksInput guidance={guidance.field("show us proof (at least one link)")} appearance={appearance}
+              label="Links to your work"
+              hint="Add at least one link to your website, social profile, venue, or a past event."
               links={proofLinks}
               onChange={setProofLinks}
             />
 
             {isVenue && (
-              <Field label="where's your spot?" hint="your venue's address." value={venueAddress} onChange={setVenueAddress} maxLength={160} />
+              <Field guidance={guidance.field("where's your spot?")} appearance={appearance} label="Venue address" hint="The address of your venue." value={venueAddress} onChange={setVenueAddress} maxLength={160} />
             )}
 
-            <ChoiceList
-              label="how do people get tickets today?"
-              options={TICKETING_OPTIONS}
+            <ChoiceList guidance={guidance.field("how do people get tickets today?")} appearance={appearance}
+              label="How do people get tickets today?"
+              options={sentenceCaseOptions(TICKETING_OPTIONS)}
               selected={ticketing}
               onSelect={setTicketing}
             />
             {needsProvider && (
-              <Field label="which one?" value={ticketingProvider} onChange={setTicketingProvider} placeholder="eventbrite, dice, our own site..." maxLength={80} autoCapitalize="none" />
+              <Field appearance={appearance} label="Ticketing provider (optional)" value={ticketingProvider} onChange={setTicketingProvider} placeholder="Eventbrite, DICE, or your own website" maxLength={80} autoCapitalize="none" />
             )}
 
-            <Field
-              label="tell us about what you run."
-              hint="two or three sentences, what a stranger should feel at your events."
+            <Field guidance={guidance.field("tell us about what you run")} appearance={appearance}
+              label="Tell us about your events"
+              hint="In two or three sentences, describe what people can expect."
               value={about}
               onChange={setAbout}
               multiline
               maxLength={400}
             />
 
-            <TermsCheck checked={terms} onToggle={() => setTerms((t) => !t)} />
-            <SubmitButton inactive={!valid} submitting={submitting} onPress={attemptSubmit} />
+            <TermsCheck guidance={guidance.field("agree to the terms")} appearance={appearance} checked={terms} onToggle={() => setTerms((t) => !t)} />
+            <SubmitButton appearance={appearance} label="Submit application" inactive={!valid} submitting={submitting} onPress={attemptSubmit} />
           </ScrollView>
         </KeyboardAvoidingView>
       )}
@@ -228,26 +257,31 @@ export default function ApplyEventsScreen() {
         onClose={() => setAlertInfo(null)}
       />
     </SafeAreaView>
+    </LinearGradient>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
-  header: { paddingHorizontal: 16, paddingVertical: 8 },
-  headerBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  content: { paddingHorizontal: 24, paddingBottom: 60 },
+const createStyles = (fonts: AfterglowFontFamilies) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: Scene.lower },
+  safe: { flex: 1 },
+  scroll: { flex: 1 },
+  header: { paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerLabel: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Scene.text },
+  headerBtn: { width: 44, height: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  content: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 },
+  reviewNote: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Scene.supporting, borderLeftWidth: 2, borderLeftColor: Scene.action, paddingLeft: 12, marginBottom: 24 },
   title: {
-    fontFamily: Fonts.display,
+    fontFamily: fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
-    color: Colors.darkWarm,
-    marginBottom: 4,
+    color: Scene.text,
+    marginBottom: 12,
   },
   intro: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    lineHeight: LineHeights.bodyMD,
-    color: Colors.secondary,
-    marginBottom: 24,
+    fontFamily: fonts.regular,
+    fontSize: FontSizes.bodyLG,
+    lineHeight: LineHeights.bodyLG,
+    color: Scene.supporting,
+    marginBottom: 16,
   },
 });

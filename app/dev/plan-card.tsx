@@ -59,7 +59,7 @@ export default function PlanCardDevScreen() {
 
         <Text style={styles.heading}>Current card</Text>
         <Text style={styles.context}>Default control</Text>
-        <PlanCard plan={REVIEW_PLAN} onWishlist={() => {}} onCreatorPress={() => {}} />
+        <PlanCard plan={REVIEW_PLAN} layout="creator-first" onWishlist={() => {}} onCreatorPress={() => {}} />
       </ScrollView>
     </SafeAreaView>
   );

@@ -12,7 +12,7 @@
  * and the EAS-secret-backed EXPO_PUBLIC_GOOGLE_MAPS_API_KEY - no new dep, no
  * new key.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,8 +20,8 @@ import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplet
 import * as Location from 'expo-location';
 import { ChevronLeft, MapPin, Search } from 'lucide-react-native';
 
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { hapticLight } from '../../../lib/haptics';
 import { addRecentPlace, loadRecentPlaces, relativeUsed, type RecentPlace } from './recentPlaces';
 
@@ -37,16 +37,29 @@ export interface PlaceValue {
 interface PlacePickerProps {
   value: PlaceValue | null;
   onChange: (v: PlaceValue | null) => void;
+  appearance?: { fonts: AfterglowFontFamilies };
 }
 
 /** Google Static Maps preview with a terracotta marker. An image (no native
  *  MapView), so it can never crash the composer on a modal-dismiss race. */
-function staticMapUrl(lat: number, lng: number): string {
-  const marker = `color:0xB5522E%7C${lat},${lng}`;
+function staticMapUrl(lat: number, lng: number, color: string): string {
+  const marker = `color:0x${color.replace('#', '')}%7C${lat},${lng}`;
   return (
     `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}` +
     `&zoom=15&size=600x240&scale=2&markers=${marker}&key=${GOOGLE_MAPS_API_KEY}`
   );
+}
+
+function PlaceMap({ lat, lng, appearance }: { lat: number; lng: number; appearance?: PlacePickerProps['appearance'] }) {
+  const [failed, setFailed] = useState(false), live = useRef(true);
+  useLayoutEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+  const s = useMemo(() => appearance ? { ...styles, ...placeAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
+  const accent = appearance ? AfterglowColors.clay : Colors.terracotta;
+  return <View style={s.mapWrap}>
+    {failed || !GOOGLE_MAPS_API_KEY ? <View style={s.mapFallback}><MapPin size={22} color={accent} strokeWidth={2} /></View> :
+      <Image source={{ uri: staticMapUrl(lat, lng, accent) }} style={s.map} contentFit="cover" accessible={false}
+        onError={() => { if (live.current) setFailed(true); }} />}
+  </View>;
 }
 
 function milesBetween(aLat: number, aLng: number, bLat: number, bLng: number): number {
@@ -59,20 +72,34 @@ function milesBetween(aLat: number, aLng: number, bLat: number, bLng: number): n
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
 
-export default function PlacePicker({ value, onChange }: PlacePickerProps) {
-  const [searching, setSearching] = useState(false);
+export default function PlacePicker({ value, onChange, appearance }: PlacePickerProps) {
+  const [visit, setVisit] = useState<object | null>(null);
+  const searching = visit !== null;
+  const live = useRef(true), currentVisit = useRef<object | null>(null), pendingPick = useRef<object | null>(null);
+  const [picking, setPicking] = useState(false);
+  useLayoutEffect(() => { live.current = true; return () => { live.current = false; currentVisit.current = null; pendingPick.current = null; }; }, []);
   const [query, setQuery] = useState('');
   const [recents, setRecents] = useState<RecentPlace[]>([]);
   const [distanceMi, setDistanceMi] = useState<number | null>(null);
-  const [mapFailed, setMapFailed] = useState(false);
-
-  // Reset the static-map fallback whenever the chosen place changes.
-  useEffect(() => { setMapFailed(false); }, [value?.lat, value?.lng]);
+  const s = useMemo(() => appearance ? { ...styles, ...placeAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
+  const accent = appearance ? AfterglowColors.clay : Colors.terracotta;
+  const current = (forVisit: object | null, attempt?: object) => live.current && !!forVisit && currentVisit.current === forVisit &&
+    (!attempt || pendingPick.current === attempt);
+  const open = () => {
+    if (!live.current) return;
+    const next = {}; currentVisit.current = next; pendingPick.current = null;
+    setPicking(false); setVisit(next); setQuery('');
+  };
+  const close = (forVisit: object | null) => {
+    if (!current(forVisit)) return;
+    currentVisit.current = null; pendingPick.current = null;
+    setVisit(null); setQuery(''); setPicking(false);
+  };
 
   // Load recents when the search sheet opens.
   useEffect(() => {
-    if (searching) loadRecentPlaces().then(setRecents);
-  }, [searching]);
+    if (visit) loadRecentPlaces().then(places => { if (current(visit)) setRecents(places); });
+  }, [visit]);
 
   // Best-effort distance for the chosen place (last-known position, no prompt).
   useEffect(() => {
@@ -93,14 +120,17 @@ export default function PlacePicker({ value, onChange }: PlacePickerProps) {
     return () => { cancelled = true; };
   }, [value?.lat, value?.lng]);
 
-  const commit = async (v: PlaceValue) => {
+  const commit = async (v: PlaceValue, forVisit: object | null, attempt: object) => {
+    if (!current(forVisit, attempt)) return;
     onChange(v);
     await addRecentPlace(v, Date.now());
-    setSearching(false);
-    setQuery('');
+    if (current(forVisit, attempt)) close(forVisit);
   };
 
   const handlePick = async (data: any, details: any) => {
+    const forVisit = visit;
+    if (!current(forVisit)) return;
+    const attempt = {}; pendingPick.current = attempt; setPicking(true);
     hapticLight();
     const lat: number | null = details?.geometry?.location?.lat ?? null;
     const lng: number | null = details?.geometry?.location?.lng ?? null;
@@ -115,7 +145,7 @@ export default function PlacePicker({ value, onChange }: PlacePickerProps) {
         /* neighborhood stays null */
       }
     }
-    await commit({ name, lat, lng, neighborhood });
+    await commit({ name, lat, lng, neighborhood }, forVisit, attempt);
   };
 
   const hasCoords = value != null && value.lat != null && value.lng != null;
@@ -127,44 +157,33 @@ export default function PlacePicker({ value, onChange }: PlacePickerProps) {
   return (
     <View>
       {value ? (
-        <View style={styles.chosen}>
+        <View style={s.chosen}>
           {hasCoords ? (
-            <View style={styles.mapWrap}>
-              {mapFailed || !GOOGLE_MAPS_API_KEY ? (
-                <View style={styles.mapFallback}>
-                  <MapPin size={22} color={Colors.terracotta} strokeWidth={2} />
-                </View>
-              ) : (
-                <Image
-                  source={{ uri: staticMapUrl(value.lat!, value.lng!) }}
-                  style={styles.map}
-                  contentFit="cover"
-                  onError={() => setMapFailed(true)}
-                />
-              )}
-            </View>
+            <PlaceMap key={JSON.stringify([value.lat, value.lng, accent])} lat={value.lat!} lng={value.lng!} appearance={appearance}/>
           ) : null}
-          <View style={styles.chosenInfoRow}>
-            <View style={styles.chosenInfo}>
-              <Text style={styles.chosenName} numberOfLines={1}>{value.name}</Text>
-              <Text style={styles.chosenHood} numberOfLines={1}>
-                {value.neighborhood ? `${value.neighborhood} · Los Angeles` : 'Los Angeles'}
-              </Text>
+          <View style={s.chosenInfoRow}>
+            <View style={s.chosenInfo}>
+              <Text style={s.chosenName} numberOfLines={appearance ? undefined : 1}>{value.name}</Text>
+              {(!appearance || !!value.neighborhood) && <Text style={s.chosenHood} numberOfLines={appearance ? undefined : 1}>
+                {appearance ? value.neighborhood : value.neighborhood ? `${value.neighborhood} · Los Angeles` : 'Los Angeles'}
+              </Text>}
               {distanceMi != null ? (
-                <Text style={styles.chosenDist}>{distanceMi.toFixed(1)} mi away</Text>
+                <Text style={s.chosenDist}>{distanceMi.toFixed(1)} mi away</Text>
               ) : null}
             </View>
-            <TouchableOpacity onPress={() => { hapticLight(); setSearching(true); }} hitSlop={8} activeOpacity={0.7}>
-              <Text style={styles.changeText}>change place</Text>
+            <TouchableOpacity onPress={() => { hapticLight(); open(); }} style={appearance ? s.change : undefined} hitSlop={8} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityLabel={appearance ? 'Change place' : 'change place'} accessibilityState={{ expanded: searching }}>
+              <Text style={s.changeText} numberOfLines={1}>{appearance ? 'Change' : 'change place'}</Text>
             </TouchableOpacity>
           </View>
         </View>
       ) : (
         // Skipped: just the search field. The place-skip nudge is owned by the
         // composer's nudge arbiter (at most one gold line shows), not here.
-        <TouchableOpacity style={styles.searchField} onPress={() => setSearching(true)} activeOpacity={0.7}>
-          <Search size={15} color={Colors.secondary} strokeWidth={2} />
-          <Text style={styles.searchPlaceholder}>add a place (optional)</Text>
+        <TouchableOpacity style={s.searchField} onPress={open} activeOpacity={0.7} accessibilityRole="button"
+          accessibilityLabel={appearance ? 'Add a place (optional)' : 'add a place (optional)'} accessibilityState={{ expanded: searching }}>
+          <Search size={15} color={appearance ? AfterglowColors.muted : Colors.secondary} strokeWidth={2} />
+          <Text style={s.searchPlaceholder}>{appearance ? 'Add a place (optional)' : 'add a place (optional)'}</Text>
         </TouchableOpacity>
       )}
       {renderSearchModal()}
@@ -173,17 +192,18 @@ export default function PlacePicker({ value, onChange }: PlacePickerProps) {
 
   function renderSearchModal() {
     return (
-      <Modal visible={searching} animationType="slide" onRequestClose={() => setSearching(false)} presentationStyle="pageSheet">
-        <SafeAreaView style={styles.modal} edges={['top', 'bottom']}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => { setSearching(false); setQuery(''); }} hitSlop={10}>
-              <ChevronLeft size={24} color={Colors.darkWarm} />
+      <Modal visible={searching} animationType="slide" onRequestClose={() => close(visit)} presentationStyle="pageSheet">
+        <SafeAreaView style={s.modal} edges={['top', 'bottom']} accessibilityViewIsModal onAccessibilityEscape={() => close(visit)}>
+          <View style={s.modalHeader}>
+            <TouchableOpacity onPress={() => close(visit)} style={appearance ? s.close : undefined} hitSlop={10}
+              accessibilityRole="button" accessibilityLabel="Cancel place search">
+              <ChevronLeft size={24} color={appearance ? AfterglowColors.ink : Colors.darkWarm} />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>add a place</Text>
-            <View style={styles.modalHeaderSpacer} />
+            <Text style={s.modalTitle} accessibilityRole="header">{appearance ? 'Add a place' : 'add a place'}</Text>
+            <View style={s.modalHeaderSpacer} />
           </View>
           <GooglePlacesAutocomplete
-            placeholder="search for a place"
+            placeholder={appearance ? 'Search for a place' : 'search for a place'}
             fetchDetails
             onPress={handlePick}
             query={{
@@ -197,50 +217,57 @@ export default function PlacePicker({ value, onChange }: PlacePickerProps) {
             enablePoweredByContainer={false}
             keepResultsAfterBlur
             textInputProps={{
-              placeholderTextColor: Colors.inkSoft,
-              onChangeText: setQuery,
+              placeholderTextColor: appearance ? AfterglowColors.muted : Colors.inkSoft,
+              onChangeText: (next: string) => { if (current(visit)) setQuery(next); },
               autoFocus: true,
+              accessibilityLabel: 'Search for a place',
             }}
             styles={{
-              container: styles.acContainer,
-              textInputContainer: styles.acInputContainer,
-              textInput: styles.acInput,
-              row: styles.acRow,
-              description: styles.acDescription,
-              separator: styles.acSeparator,
+              container: s.acContainer,
+              textInputContainer: s.acInputContainer,
+              textInput: s.acInput,
+              row: s.acRow,
+              description: s.acDescription,
+              separator: s.acSeparator,
             }}
             renderRow={(row: any) => (
-              <View style={styles.resultRow}>
-                <View style={styles.resultIcon}>
-                  <MapPin size={14} color={Colors.terracotta} strokeWidth={2} />
+              <View style={s.resultRow}>
+                <View style={s.resultIcon}>
+                  <MapPin size={14} color={accent} strokeWidth={2} />
                 </View>
-                <View style={styles.resultInfo}>
-                  <Text style={styles.resultName} numberOfLines={1}>
+                <View style={s.resultInfo}>
+                  <Text style={s.resultName} numberOfLines={appearance ? undefined : 1}>
                     {row?.structured_formatting?.main_text ?? row?.description}
                   </Text>
                   {row?.structured_formatting?.secondary_text ? (
-                    <Text style={styles.resultSub} numberOfLines={1}>{row.structured_formatting.secondary_text}</Text>
+                    <Text style={s.resultSub} numberOfLines={appearance ? undefined : 1}>{row.structured_formatting.secondary_text}</Text>
                   ) : null}
                 </View>
               </View>
             )}
           />
+          {appearance && picking && <Text style={s.choosing} accessibilityLiveRegion="polite">Choosing place…</Text>}
           {query.length === 0 && recents.length > 0 ? (
-            <View style={styles.recentsWrap}>
-              <Text style={styles.recentsLabel}>recent places</Text>
+            <View style={s.recentsWrap}>
+              <Text style={s.recentsLabel}>{appearance ? 'Recent places' : 'recent places'}</Text>
               {recents.map((r) => (
                 <TouchableOpacity
                   key={`${r.name}-${r.usedAt}`}
-                  style={styles.resultRow}
+                  style={s.resultRow}
                   activeOpacity={0.7}
-                  onPress={() => { hapticLight(); commit({ name: r.name, lat: r.lat, lng: r.lng, neighborhood: r.neighborhood }); }}
+                  accessibilityRole="button" accessibilityLabel={r.name}
+                  onPress={() => {
+                    if (!current(visit)) return;
+                    const attempt = {}; pendingPick.current = attempt; setPicking(true); hapticLight();
+                    void commit({ name: r.name, lat: r.lat, lng: r.lng, neighborhood: r.neighborhood }, visit, attempt);
+                  }}
                 >
-                  <View style={styles.resultIconMuted}>
-                    <MapPin size={14} color={Colors.secondary} strokeWidth={2} />
+                  <View style={s.resultIconMuted}>
+                    <MapPin size={14} color={appearance ? AfterglowColors.muted : Colors.secondary} strokeWidth={2} />
                   </View>
-                  <View style={styles.resultInfo}>
-                    <Text style={styles.resultName} numberOfLines={1}>{r.name}</Text>
-                    <Text style={styles.resultSub} numberOfLines={1}>
+                  <View style={s.resultInfo}>
+                    <Text style={s.resultName} numberOfLines={appearance ? undefined : 1}>{r.name}</Text>
+                    <Text style={s.resultSub} numberOfLines={appearance ? undefined : 1}>
                       {r.neighborhood ? `${r.neighborhood} · ${relativeUsed(r.usedAt, Date.now())}` : relativeUsed(r.usedAt, Date.now())}
                     </Text>
                   </View>
@@ -255,6 +282,7 @@ export default function PlacePicker({ value, onChange }: PlacePickerProps) {
 }
 
 const styles = StyleSheet.create({
+  close: {}, change: {}, choosing: {},
   // Skipped
   searchField: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -317,3 +345,34 @@ const styles = StyleSheet.create({
     color: Colors.terracotta, paddingHorizontal: 16, marginBottom: 8,
   },
 });
+
+function placeAppearance(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  searchField: { ...styles.searchField, minHeight: 48, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderRadius: 4 },
+  searchPlaceholder: { flex: 1, ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted },
+  chosen: { ...styles.chosen, borderRadius: 4, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line },
+  mapWrap: { ...styles.mapWrap, height: 100, backgroundColor: AfterglowColors.avatar },
+  mapFallback: { ...styles.mapFallback, backgroundColor: AfterglowColors.avatar },
+  chosenInfoRow: { ...styles.chosenInfoRow, paddingVertical: 8, gap: 8 },
+  chosenInfo: { flex: 1, minWidth: 0 },
+  chosenName: { ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+  chosenHood: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 2 },
+  chosenDist: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 2 },
+  change: { minWidth: 44, minHeight: 44, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  changeText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.clay },
+  modal: { flex: 1, backgroundColor: AfterglowColors.paper },
+  modalHeader: { ...styles.modalHeader, paddingVertical: 8, borderBottomColor: AfterglowColors.line },
+  close: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  modalTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink, flexShrink: 1 },
+  modalHeaderSpacer: { width: 44 },
+  acInput: { ...styles.acInput, ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.ink,
+    minHeight: 48, borderRadius: 4, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line },
+  acDescription: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.ink },
+  resultRow: { ...styles.resultRow, minHeight: 56, paddingVertical: 12, borderBottomColor: AfterglowColors.subtleLine },
+  resultIcon: { ...styles.resultIcon, borderRadius: 4, backgroundColor: AfterglowColors.avatar },
+  resultIconMuted: { ...styles.resultIconMuted, borderRadius: 4, backgroundColor: AfterglowColors.avatar },
+  resultInfo: { flex: 1, minWidth: 0 },
+  resultName: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+  resultSub: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 2 },
+  recentsLabel: { ...AfterglowType.section, fontFamily: fonts.semibold, color: AfterglowColors.muted, paddingHorizontal: 16, marginBottom: 8 },
+  choosing: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, paddingVertical: 12, paddingHorizontal: 16 },
+}); }

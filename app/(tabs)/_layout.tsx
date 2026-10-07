@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import Colors from '../../constants/Colors';
+import {CreatorActionFill} from '../../components/creator/CreatorActionFill';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { Image } from 'expo-image';
 import { supabase } from '../../lib/supabase';
@@ -19,6 +20,7 @@ import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsS
 import { SCENE_STAGE, getSeenSceneStage, SCENE_BADGE_KEY } from '../../lib/sceneStage';
 import { TermsReacceptance } from '../../components/legal/TermsReacceptance';
 import { getOrder } from '../../lib/ticketing';
+import { getVerificationDestination, approveVerificationEntry } from '../../lib/navState';
 import {
   clearPendingDestination,
   peekPendingCheckout,
@@ -28,6 +30,7 @@ import {
 function PostTabIcon() {
   return (
     <View style={styles.postButton}>
+      <CreatorActionFill />
       <Ionicons name="add" size={28} color={Colors.white} />
     </View>
   );
@@ -92,6 +95,7 @@ async function fetchUnreadChatCount(): Promise<number> {
 export default function TabLayout() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
+  const [verificationGateRevision, setVerificationGateRevision] = useState(0);
 
   // Audit findings 2 and 5, consumed HERE because reaching the tabs is the
   // proof that the person is fully inside the app: past the auth gate, the
@@ -99,6 +103,9 @@ export default function TabLayout() {
   // bypass a gate, and it survives the signed-out bounce (and the trip out
   // to Stripe) that used to destroy it.
   useEffect(() => {
+    // The verified-entry handoff has one root-owned consumer, after its
+    // existing ban/profile/phone checks. Do not race that checkout-first pass.
+    if (getVerificationDestination()) return;
     let cancelled = false;
     (async () => {
       // a finished checkout outranks a saved link: they just paid
@@ -108,12 +115,13 @@ export default function TabLayout() {
         const pendingOrder = await getOrder(orderId).catch(() => null);
         if (cancelled) return;
         if (pendingOrder && pendingOrder.status !== 'pending') {
-          await clearPendingDestination();
+          await clearPendingDestination(() => !cancelled);
+          if (cancelled) return;
           router.replace(`/tickets/order/${orderId}` as never);
           return;
         }
       }
-      const href = await consumePendingDestination();
+      const href = await consumePendingDestination(() => !cancelled);
       if (cancelled || !href) return;
       router.push(href as never);
     })();
@@ -136,6 +144,12 @@ export default function TabLayout() {
       .catch(() => {});
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserId(session?.user?.id ?? null);
+      const visit = getVerificationDestination();
+      if (session?.user && visit && !visit.entryApproved) {
+        // A transient gate timeout keeps the link buffered. A recovered auth
+        // event retries this visit's gate without changing legacy tab routing.
+        setVerificationGateRevision((revision) => revision + 1);
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -148,6 +162,8 @@ export default function TabLayout() {
   // start doesn't fire two identical profile selects.
   useEffect(() => {
     let cancelled = false;
+    const verificationVisit = getVerificationDestination();
+    const isCurrent = () => !cancelled && (!verificationVisit || getVerificationDestination() === verificationVisit);
     (async () => {
       // Bounded so a stale/expired token or slow network can't hang the
       // tab mount. On timeout we simply don't run this secondary guard —
@@ -157,17 +173,20 @@ export default function TabLayout() {
         4000,
         { data: { user: null } } as any,
       );
-      if (!user || cancelled) return;
+      if (!user || !isCurrent()) return;
       const [profile, needsPhone] = await Promise.all([
         withTimeout(getAuthProfile(queryClient, user.id), 4000, null),
         fetchNeedsPhoneMigration(),
       ]);
-      if (!profile || cancelled) return;
+      if (!profile || !isCurrent()) return;
       const dest = authedDest({
         onboarding_status: profile?.onboarding_status ?? null,
         referral_source: profile?.referral_source ?? null,
         needs_phone_migration: needsPhone,
       });
+      if (dest === '/(tabs)/plans') {
+        approveVerificationEntry(verificationVisit, user.id);
+      }
       // Phone-gate enforcement belongs to app launch (checkAuth) and a
       // genuine fresh login (root listener), NOT a tab-mount guard that
       // re-runs whenever (tabs) remounts (foreground, freezeOnBlur thaw,
@@ -180,7 +199,7 @@ export default function TabLayout() {
       }
     })();
     return () => { cancelled = true; };
-  }, [queryClient]);
+  }, [queryClient, verificationGateRevision]);
 
   const { data: unreadChats = 0 } = useQuery({
     queryKey: UNREAD_CHATS_KEY,
@@ -227,11 +246,15 @@ export default function TabLayout() {
         until the status RPC exists; shows only on a confirmed server
         answer, so an offline open is never blocked. */}
     <TermsReacceptance enabled={!!userId} />
+    {/* Hidden routes remain navigable but are not visible tabs. Explicit labels
+        keep iOS from announcing those routes in the five-tab count. */}
     <Tabs
       screenOptions={{
         headerShown: false,
         lazy: true,
-        freezeOnBlur: true,
+        // Keep inactive screens mounted without suspending the tab tree.
+        // Suspense freezing reproduced a persistent layout/retry loop on iOS.
+        freezeOnBlur: false,
         tabBarActiveTintColor: '#2C1810',
         tabBarInactiveTintColor: '#A09385',
         tabBarStyle: {
@@ -254,6 +277,7 @@ export default function TabLayout() {
         options={{
           title: 'Plans',
           tabBarLabel: 'Plans',
+          tabBarAccessibilityLabel: Platform.OS === 'ios' ? 'Plans, tab, 1 of 5' : 'Plans',
           tabBarIcon: ({ color }) => (
             <Image
               source={require('../../assets/wave-icon.png')}
@@ -269,6 +293,7 @@ export default function TabLayout() {
         options={{
           title: 'Scene',
           tabBarLabel: 'Scene',
+          tabBarAccessibilityLabel: Platform.OS === 'ios' ? 'Scene, tab, 2 of 5' : 'Scene',
           tabBarIcon: ({ color }) => (
             <View>
               <Ionicons name="compass-outline" size={26} color={color} />
@@ -282,6 +307,7 @@ export default function TabLayout() {
         options={{
           title: 'Post',
           tabBarLabel: '',
+          tabBarAccessibilityLabel: Platform.OS === 'ios' ? 'Post a plan, tab, 3 of 5' : 'Post a plan',
           tabBarIcon: () => <PostTabIcon />,
         }}
       />
@@ -290,6 +316,7 @@ export default function TabLayout() {
         options={{
           title: 'Chats',
           tabBarLabel: 'Chats',
+          tabBarAccessibilityLabel: Platform.OS === 'ios' ? 'Chats, tab, 4 of 5' : 'Chats',
           tabBarIcon: ({ color }) => <Ionicons name="chatbubble-outline" size={24} color={color} />,
           tabBarBadge: unreadChats > 0 ? (unreadChats > 9 ? '9+' : unreadChats) : undefined,
           tabBarBadgeStyle: { backgroundColor: '#B5522E' },
@@ -300,6 +327,7 @@ export default function TabLayout() {
         options={{
           title: 'Your People',
           tabBarLabel: 'Yours',
+          tabBarAccessibilityLabel: Platform.OS === 'ios' ? 'Yours, tab, 5 of 5' : 'Yours',
           // Warm gold count of people waiting to be added (a "loop", not an
           // alarm: gold, never red). Clears on open via markRequestsSeen.
           tabBarBadge:

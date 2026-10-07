@@ -1,0 +1,23 @@
+import React from 'react';
+import {act,create,type ReactTestRenderer} from 'react-test-renderer';
+const mockQuery=jest.fn(),mockLegacyRead=jest.fn();let mockParams:any,mockFlag=true;
+jest.mock('expo-router',()=>({useLocalSearchParams:()=>mockParams,router:{back:()=>{}},Stack:{Screen:()=>null},Redirect:()=>null}));
+jest.mock('../../../constants/FeatureFlags',()=>({get CREATOR_PAGES_ENABLED(){return mockFlag;},COMMUNITIES_ENABLED:true}));
+jest.mock('../../../components/creator/pages/PublicOrganizationPageScreen',()=>({__esModule:true,default:()=>null}));
+jest.mock('../../../lib/organizerProfile',()=>({getOrganizationPage:(...a:unknown[])=>mockLegacyRead(...a)}));
+jest.mock('../../../lib/organizerFollows',()=>({}));
+jest.mock('../../../lib/haptics',()=>({}));
+jest.mock('../../../components/yours/state/useAuthUserId',()=>({useAuthUserId:()=>({data:null})}));
+jest.mock('@tanstack/react-query',()=>({useQuery:(...a:unknown[])=>mockQuery(...a),useMutation:()=>({}),useQueryClient:()=>({})}));
+jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View}));
+import Route from '../[id]';
+import PublicOrganizationPageScreen from '../../../components/creator/pages/PublicOrganizationPageScreen';
+import {Redirect} from 'expo-router';
+let tree:ReactTestRenderer;
+beforeEach(()=>{jest.clearAllMocks();mockFlag=true;mockParams={id:'page',identity:'page'};mockQuery.mockReturnValue({isLoading:true});});
+afterEach(()=>act(()=>tree?.unmount()));
+it('routes an explicit new page identity without calling legacy profile/follow hooks',()=>{act(()=>{tree=create(<Route/>);});expect(tree.root.findByType(PublicOrganizationPageScreen).props.pageId).toBe('page');expect(mockQuery).not.toHaveBeenCalled();});
+it('retains existing organization account addresses and their query identity',async()=>{mockParams={id:'legacy-account'};act(()=>{tree=create(<Route/>);});expect(tree.root.findAllByType(PublicOrganizationPageScreen)).toHaveLength(0);const query=mockQuery.mock.calls[0][0];expect(query.queryKey).toEqual(['organization-page','legacy-account']);await query.queryFn();expect(mockLegacyRead).toHaveBeenCalledWith('legacy-account');});
+it('does not silently reinterpret a disabled new-page route as a legacy account',()=>{mockFlag=false;act(()=>{tree=create(<Route/>);});expect(tree.root.findByType(Redirect).props.href).toBe('/(tabs)/explore');expect(mockQuery).not.toHaveBeenCalled();});
+
+it('carries an update context only into the explicit new page route',()=>{mockParams={id:'page',identity:'page',update:'saved-update'};act(()=>{tree=create(<Route/>);});expect(tree.root.findByType(PublicOrganizationPageScreen).props.updateId).toBe('saved-update');expect(mockQuery).not.toHaveBeenCalled();});

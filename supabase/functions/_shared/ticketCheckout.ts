@@ -84,10 +84,10 @@ export function planAddonLineItems(addonTotalCents: number, rows: AddonRow[]): P
   };
 }
 
-export type PriorSessionAction = 'already_paid' | 'expired' | 'reusable' | 'replace';
+export type PriorSessionAction = 'already_paid' | 'expired' | 'reusable' | 'replace' | 'unknown';
 
 export interface PriorSessionSnapshot {
-  status: string;
+  status: string | null;
   payment_status?: string | null;
   url?: string | null;
   amount_total?: number | null;
@@ -99,8 +99,13 @@ export interface PriorSessionSnapshot {
 export function planPriorSessionReuse(prior: PriorSessionSnapshot, expectedTotalCents: number): PriorSessionAction {
   if (prior.status === 'complete' || prior.payment_status === 'paid') return 'already_paid';
   if (prior.status === 'expired') return 'expired';
-  if (prior.status === 'open' && typeof prior.url === 'string' && prior.amount_total === expectedTotalCents) {
+  if (prior.status === 'open' && typeof prior.url === 'string' && prior.url.length > 0 && prior.amount_total === expectedTotalCents) {
     return 'reusable';
   }
-  return 'replace';
+  return prior.status === 'open' ? 'replace' : 'unknown';
+}
+
+// The order, not a function invocation, owns the provider creation attempt.
+export function providerCheckoutKey(orderId: string): string {
+  return `ticket-checkout:v1:${orderId}`;
 }

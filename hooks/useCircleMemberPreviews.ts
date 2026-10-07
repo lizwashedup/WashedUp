@@ -10,6 +10,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import type { CirclePlansScope } from './useCirclePlans';
 import type { MemberPreview } from '../lib/circles/types';
 
 export type CircleMemberPreviews = Record<string, MemberPreview[]>;
@@ -17,15 +18,29 @@ export type CircleMemberPreviews = Record<string, MemberPreview[]>;
 export function useCircleMemberPreviews(
   circleIds: string[],
   userId: string | null | undefined,
+  scope?: CirclePlansScope,
 ) {
   // Stable, order-independent key so cache hits survive list re-ordering.
   const idsKey = [...circleIds].sort().join(',');
 
   return useQuery({
-    queryKey: ['circleMemberPreviews', userId ?? '', idsKey],
+    queryKey: scope ? ['circleMemberPreviews', userId ?? '', idsKey, scope.epoch] : ['circleMemberPreviews', userId ?? '', idsKey],
     enabled: !!userId && circleIds.length > 0,
-    queryFn: async (): Promise<CircleMemberPreviews> => {
-      const { data: rows, error } = await supabase
+    queryFn: async ({ signal }): Promise<CircleMemberPreviews> => {
+      const requireCurrent = () => {
+        if (signal.aborted || (scope && (!scope.userId || scope.userId !== userId || !scope.isCurrent()))) {
+          throw new Error('This circle directory request is no longer current.');
+        }
+      };
+      requireCurrent();
+      if (scope) {
+        const { data: auth, error: authError } = await supabase.auth.getUser();
+        requireCurrent();
+        if (authError) throw authError;
+        if (auth.user?.id !== scope.userId) throw new Error('This account changed. Please try again.');
+      }
+      requireCurrent();
+      const request = supabase
         .from('circle_members')
         .select(
           'circle_id, user_id, joined_at, profiles_public!inner(first_name_display, profile_photo_url)',
@@ -33,6 +48,8 @@ export function useCircleMemberPreviews(
         .in('circle_id', circleIds)
         .eq('status', 'joined')
         .order('joined_at');
+      const { data: rows, error } = await (scope ? request.abortSignal(signal) : request);
+      requireCurrent();
       if (error) throw error;
 
       const byCircle: CircleMemberPreviews = {};

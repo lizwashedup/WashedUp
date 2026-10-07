@@ -1,3 +1,5 @@
+import { isProtectedEventMedia } from './eventMediaSource';
+import type {EventMediaGuard} from './eventMediaGuard';
 /**
  * The event page body (proposal 70, applied): an ordered block array on
  * explore_events.description_blocks, trigger-validated server-side.
@@ -81,8 +83,12 @@ function describeSize(bytes: number): string {
 export async function pickAndUploadEventContentImages(
   eventId: string,
   maxCount: number,
+  guard?: EventMediaGuard,
+  uploadPreparedImage?: (uri:string)=>Promise<string>,
 ): Promise<MediaUploadResult> {
+  await guard?.check();
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  await guard?.check();
   if (!perm.granted) return { paths: [], problems: [] };
   const res = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
@@ -90,10 +96,12 @@ export async function pickAndUploadEventContentImages(
     allowsMultipleSelection: true,
     selectionLimit: maxCount,
   });
+  await guard?.check();
   if (res.canceled || !res.assets?.length) return { paths: [], problems: [] };
   const paths: string[] = [];
   const problems: string[] = [];
   for (const asset of res.assets.slice(0, maxCount)) {
+    await guard?.check();
     try {
       // reject BEFORE the upload starts, with the real number (law 15)
       if (asset.fileSize && asset.fileSize > IMAGE_MAX_BYTES) {
@@ -106,17 +114,22 @@ export async function pickAndUploadEventContentImages(
         { compress: BLOCK_IMAGE_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true },
       );
       if (!manipulated.base64) continue;
-      const path = `${eventId}/${Crypto.randomUUID()}.jpg`;
-      await uploadBase64ToStorage(EVENT_CONTENT_BUCKET, path, manipulated.base64);
+      await guard?.check();
+      let path:string;
+      if(uploadPreparedImage)path=await uploadPreparedImage(manipulated.uri);
+      else{path=`${eventId}/${Crypto.randomUUID()}.jpg`;await uploadBase64ToStorage(EVENT_CONTENT_BUCKET,path,manipulated.base64);}
+      await guard?.check();
       paths.push(path);
     } catch {
-      problems.push('one photo did not upload. try that one again.');
+      await guard?.check();
+      problems.push(uploadPreparedImage?'A photo was not added. Check its saved upload below.':'one photo did not upload. try that one again.');
     }
   }
   return { paths, problems };
 }
 
 export function eventContentPublicUrl(path: string): string {
+  if (isProtectedEventMedia(path)) throw new Error("Protected event media requires an authorized reader.");
   return supabase.storage.from(EVENT_CONTENT_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
@@ -130,10 +143,13 @@ export interface VideoPick {
 }
 
 /** Step 1: choose and VALIDATE, before a byte moves. */
-export async function pickEventContentVideo(): Promise<{ pick: VideoPick | null; problem: string | null }> {
+export async function pickEventContentVideo(guard?: EventMediaGuard): Promise<{ pick: VideoPick | null; problem: string | null }> {
+  await guard?.check();
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  await guard?.check();
   if (!perm.granted) return { pick: null, problem: null };
   const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], quality: 1 });
+  await guard?.check();
   if (res.canceled || !res.assets?.[0]) return { pick: null, problem: null };
   const asset = res.assets[0];
 
@@ -162,13 +178,24 @@ export function uploadEventContentVideo(
   eventId: string,
   pick: VideoPick,
   onProgress: (fraction: number) => void,
+  guard?: EventMediaGuard,
+  uploadPreparedVideo?: (uri:string,onProgress:(fraction:number)=>void)=>{done:Promise<string|null>;cancel:()=>void},
 ): { done: Promise<string | null>; cancel: () => void } {
   const path = `${eventId}/${Crypto.randomUUID()}.mp4`;
-  const upload = uploadUriToStorage(EVENT_CONTENT_BUCKET, path, pick.uri, VIDEO_MIME, onProgress);
-  return {
-    done: upload.done.then((url) => (url ? path : null)),
-    cancel: upload.cancel,
-  };
+  let cancelled=false;
+  let upload:ReturnType<typeof uploadUriToStorage>|undefined;
+  const done=(async()=>{
+    await guard?.check();
+    if(cancelled)return null;
+    const progress=(fraction:number)=>{if(!cancelled)onProgress(fraction);};
+    upload=uploadPreparedVideo?uploadPreparedVideo(pick.uri,progress)
+      :uploadUriToStorage(EVENT_CONTENT_BUCKET,path,pick.uri,VIDEO_MIME,progress,guard?()=>guard.check():undefined);
+    const url=await upload.done;
+    if(cancelled||!url)return null;
+    await guard?.check();
+    return cancelled?null:uploadPreparedVideo?url:path;
+  })();
+  return {done,cancel:()=>{cancelled=true;upload?.cancel();}};
 }
 
 /** Step 3: the poster frame, chosen client-side from the LOCAL file via
@@ -191,7 +218,10 @@ const POSTER_QUALITY = 0.85;
 export async function uploadPosterFrame(
   eventId: string,
   frame: SharedRef<'image'>,
+  guard?: EventMediaGuard,
+  uploadPreparedPoster?: (uri:string)=>Promise<string>,
 ): Promise<string | null> {
+  await guard?.check();
   try {
     const rendered = await ImageManipulatorModule.manipulate(frame)
       .resize({ width: POSTER_WIDTH })
@@ -202,10 +232,14 @@ export async function uploadPosterFrame(
       base64: true,
     });
     if (!saved.base64) return null;
-    const path = `${eventId}/${Crypto.randomUUID()}.jpg`;
-    await uploadBase64ToStorage(EVENT_CONTENT_BUCKET, path, saved.base64);
+    await guard?.check();
+    let path:string;
+    if(uploadPreparedPoster)path=await uploadPreparedPoster(saved.uri);
+    else{path=`${eventId}/${Crypto.randomUUID()}.jpg`;await uploadBase64ToStorage(EVENT_CONTENT_BUCKET,path,saved.base64);}
+    await guard?.check();
     return path;
   } catch {
+    await guard?.check();
     return null;
   }
 }

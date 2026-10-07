@@ -1,4 +1,4 @@
-import { resolveManagePlanImageUrl } from '../plan-photo-edit';
+import { resolveManagePlanImageUrl } from '../../../lib/planPhotoEdit';
 
 describe('resolveManagePlanImageUrl', () => {
   it('passes through an existing uploaded https photo unchanged', () => {

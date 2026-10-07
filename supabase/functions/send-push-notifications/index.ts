@@ -1,6 +1,18 @@
+import { resolveCreatorJoinPushTargets, creatorJoinPushData, isCreatorJoinNotice } from '../_shared/creatorJoinPushTargets.ts';
+import { resolveMemberChatPushTargets, isMemberChatPushNotice, memberChatPushData } from '../_shared/memberChatPushTargets.ts';
+import { resolvePageInvitationPushTargets, pageInvitationPushData } from '../_shared/pageInvitationPushTargets.ts';
+import { resolveAttendeeMessagePushTargets, attendeeMessagePushData, isAttendeeNoticeCandidate } from '../_shared/attendeeMessagePushTargets.ts';
+import { resolveCommunityChatPushTargets, communityChatPushData, isCommunityChatPushNotice } from '../_shared/communityChatPushTargets.ts';
+import { resolveCreatorPagePushTargets, creatorPagePushData } from '../_shared/creatorPagePushTargets.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { isAuthorizedRunToken } from '../_shared/runTokenAuth.ts';
+import { classifyOneSignalCreateResult } from '../_shared/oneSignalCreateResult.ts';
 
+// Member chat dependency: 20260922013000_member_reaction_push_message.sql
+// must accompany this worker. Unknown access never falls through to a send.
+// Scene dependency: 20260916223000_scene_event_reminder_queue.sql must
+// accompany this worker. Missing/unknown dispatch decisions retry Scene broadcasts;
+// they must never fall through to an unchecked provider send. Local candidate only.
 // Dual-send fanout: per-recipient routing between OneSignal and Expo Push.
 //
 // During the OneSignal cutover window we have two populations of users:
@@ -46,7 +58,17 @@ Deno.serve(async (req) => {
   const ONESIGNAL_APP_ID = Deno.env.get('ONESIGNAL_APP_ID')!;
   const ONESIGNAL_REST_API_KEY = Deno.env.get('ONESIGNAL_REST_API_KEY')!;
 
-  await supabase.rpc('expire_stale_notifications');
+  // The claim helper does not itself filter expires_at. Do not claim or send
+  // anything if the expiry sweep failed, or expired alerts can escape.
+  try {
+    const { error: expiryError } = await supabase.rpc('expire_stale_notifications');
+    if (expiryError) throw expiryError;
+  } catch (error) {
+    console.error('[send-push] notification expiry check failed:', error);
+    return new Response(JSON.stringify({ error: 'Notification expiry check failed' }), {
+      status: 503, headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   // Step 1: Discover both transport populations.
   //
@@ -66,8 +88,10 @@ Deno.serve(async (req) => {
       .select('user_id')
       .range(offset, offset + PAGE_SIZE - 1);
     if (osErr) {
-      console.warn('[send-push] device_tokens read failed:', osErr.message);
-      break;
+      console.error('[send-push] device_tokens read failed:', osErr.message);
+      return new Response(JSON.stringify({ error: 'OneSignal audience lookup failed' }), {
+        status: 503, headers: { 'Content-Type': 'application/json' },
+      });
     }
     for (const r of (osRows ?? []) as Array<{ user_id: string }>) {
       oneSignalUserIds.add(r.user_id);
@@ -84,8 +108,10 @@ Deno.serve(async (req) => {
       .not('expo_push_token', 'is', null)
       .range(offset, offset + PAGE_SIZE - 1);
     if (expoErr) {
-      console.warn('[send-push] profiles read failed:', expoErr.message);
-      break;
+      console.error('[send-push] profiles read failed:', expoErr.message);
+      return new Response(JSON.stringify({ error: 'legacy push audience lookup failed' }), {
+        status: 503, headers: { 'Content-Type': 'application/json' },
+      });
     }
     for (const p of (expoRows ?? []) as Array<{ id: string; expo_push_token: string | null }>) {
       if (p.expo_push_token) expoTokenByUser.set(p.id, p.expo_push_token);
@@ -178,7 +204,14 @@ Deno.serve(async (req) => {
     // a revert (next inserts retrigger and the row will be re-eligible).
   }
 
+  let creatorJoinsSuppressed = 0;
+  let pageUpdatesSuppressed = 0;
+  let communityChatsSuppressed = 0;
+  let memberChatsSuppressed = 0;
+  let invitationsSuppressed = 0;
+  let invitationsHeld = 0;
   let oneSignalSent = 0;
+  let oneSignalNoSubscription = 0;
   let expoSent = 0;
   const failedIds: string[] = [];
 
@@ -196,10 +229,27 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Step 5a: OneSignal send. Per-row POST. Reverts claim on non-2xx so the
-  // next trigger picks the row up again.
+  // Step 5a: OneSignal send. Reuse the notification row ID on every retry so
+  // OneSignal can deduplicate creation within its 30-day idempotency window.
+  // A created message is provider acceptance, not confirmed device delivery.
   for (const n of oneSignalQueue) {
     try {
+      // Recheck immediately before this provider request, including any
+      // unfollow/block while earlier notifications in the batch were sent.
+      const joinTarget = (await resolveCreatorJoinPushTargets(supabase, [n])).get(n.id);
+      if (joinTarget && !joinTarget.eligible) { creatorJoinsSuppressed++; continue; }
+      const pageInvitationTarget = (await resolvePageInvitationPushTargets(supabase, [n])).get(n.id);
+      if (pageInvitationTarget && !pageInvitationTarget.eligible) { invitationsSuppressed++; continue; }
+      const target = (await resolveCreatorPagePushTargets(supabase, [n])).get(n.id);
+      if (target && !target.eligible) { pageUpdatesSuppressed++; continue; }
+      const chatTarget = (await resolveCommunityChatPushTargets(supabase, [n])).get(n.id);
+      if (chatTarget && !chatTarget.eligible) { communityChatsSuppressed++; continue; }
+      const attendeeTarget = (await resolveAttendeeMessagePushTargets(supabase, [n])).get(n.id);
+      if(attendeeTarget?.invitationDecision==='suppress'){invitationsSuppressed++;continue;}
+      if(attendeeTarget?.invitationDecision==='hold'){invitationsHeld++;failedIds.push(n.id);continue;}
+      const memberTarget = (await resolveMemberChatPushTargets(supabase, [n])).get(n.id);
+      if (memberTarget && !memberTarget.eligible) { memberChatsSuppressed++; continue; }
+      const payload = joinTarget && !joinTarget.legacy ? creatorJoinPushData(joinTarget) : pageInvitationTarget ? pageInvitationPushData(pageInvitationTarget) : attendeeTarget ? attendeeMessagePushData(attendeeTarget) : chatTarget ? communityChatPushData(chatTarget) : target ? creatorPagePushData(target) : memberTarget ? memberChatPushData(memberTarget) : { type: n.type, eventId: n.event_id, circleId: n.circle_id, topicId: n.topic_id };
       const res = await fetch(ONESIGNAL_API_URL, {
         method: 'POST',
         headers: {
@@ -208,17 +258,30 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           app_id: ONESIGNAL_APP_ID,
+          idempotency_key: n.id,
           target_channel: 'push',
           include_aliases: { external_id: [n.user_id] },
           headings: { en: n.title },
           contents: { en: n.body },
-          data: { type: n.type, eventId: n.event_id, circleId: n.circle_id, topicId: n.topic_id },
+          data: payload,
           ios_badgeType: 'SetTo',
           ios_badgeCount: badgeCounts[n.user_id] ?? 1,
         }),
       });
       if (res.ok) {
-        oneSignalSent += 1;
+        const result = await res.json();
+        const outcome = classifyOneSignalCreateResult(result);
+        if (outcome === 'created') {
+          oneSignalSent += 1;
+        } else if (outcome === 'no-recipients') {
+          oneSignalNoSubscription += 1;
+          console.warn(`[send-push] OneSignal created no message for notification ${n.id}`);
+        } else {
+          // Do not discard an uncertain receipt as an unsubscribed recipient.
+          // A retry keeps n.id for OneSignal's creation deduplication.
+          failedIds.push(n.id);
+          recordError('onesignal', 'Unrecognized message creation receipt', res.status);
+        }
       } else {
         failedIds.push(n.id);
         recordError('onesignal', await res.text().catch(() => '(no body)'), res.status);
@@ -236,7 +299,7 @@ Deno.serve(async (req) => {
     to: string;
     title: string;
     body: string | null;
-    data: { type: string; eventId: string | null; circleId: string | null; topicId: string | null };
+    data: { type: string; eventId?: string | null; circleId?: string | null; topicId?: string | null; notificationId?: string; creatorPageId?: string; creatorPageBroadcastId?: string; pageInvitationId?: string; communityMemberId?: string; exploreEventId?: string; communityId?: string | null; communityBroadcastId?: string | null };
     sound: string;
     badge: number;
   };
@@ -262,9 +325,113 @@ Deno.serve(async (req) => {
   const expoTickets: ExpoTicket[] = [];
 
   for (let i = 0; i < expoMessages.length; i += 100) {
-    const batch = expoMessages.slice(i, i + 100);
-    const batchUserIds = expoUserIdByIndex.slice(i, i + 100);
-    const batchNotifIds = expoNotifIdByIndex.slice(i, i + 100);
+    let entries = expoMessages.slice(i, i + 100).map((message,j) => ({ message, userId: expoUserIdByIndex[i+j], notificationId: expoNotifIdByIndex[i+j] }));
+    const joinEntries = entries.filter(e => isCreatorJoinNotice(e.message.data));
+    if (joinEntries.length) {
+      try {
+        const targets = await resolveCreatorJoinPushTargets(supabase, joinEntries.map(e => ({ id: e.notificationId, user_id: e.userId, type: e.message.data.type })));
+        entries = entries.filter(e => {
+          const target = targets.get(e.notificationId);
+          if (!target) return true;
+          if (!target.eligible) { creatorJoinsSuppressed++; return false; }
+          if (!target.legacy) e.message.data = creatorJoinPushData(target);
+          return true;
+        });
+      } catch {
+        failedIds.push(...joinEntries.map(e => e.notificationId));
+        recordError('expo', 'Join notification sources could not be confirmed');
+        entries = entries.filter(e => !isCreatorJoinNotice(e.message.data));
+      }
+    }
+    const invitationEntries = entries.filter(e => e.message.data.type === 'page_team_invitation');
+    if (invitationEntries.length) {
+      try {
+        const targets = await resolvePageInvitationPushTargets(supabase, invitationEntries.map(e => ({id:e.notificationId,user_id:e.userId,type:e.message.data.type})));
+        entries = entries.filter(e => {
+          const target = targets.get(e.notificationId);
+          if (!target) return true;
+          if (!target.eligible) { invitationsSuppressed++; return false; }
+          e.message.data = pageInvitationPushData(target); return true;
+        });
+      } catch {
+        failedIds.push(...invitationEntries.map(e => e.notificationId));
+        recordError('expo','Page invitation targets could not be confirmed');
+        entries = entries.filter(e => e.message.data.type !== 'page_team_invitation');
+      }
+    }
+    const pageEntries = entries.filter(e => e.message.data.type === 'creator_page_update');
+    if (pageEntries.length) {
+      try {
+        const targets = await resolveCreatorPagePushTargets(supabase, pageEntries.map(e => ({ id: e.notificationId, user_id: e.userId, type: e.message.data.type })));
+        entries = entries.filter(e => {
+          const target = targets.get(e.notificationId);
+          if (!target) return true; // ordinary notification
+          if (!target.eligible) { pageUpdatesSuppressed++; return false; }
+          e.message.data = creatorPagePushData(target); return true;
+        });
+      } catch {
+        failedIds.push(...pageEntries.map(e => e.notificationId));
+        recordError('expo', 'Page update targets could not be confirmed');
+        entries = entries.filter(e => e.message.data.type !== 'creator_page_update');
+      }
+    }
+    const chatEntries = entries.filter(e => isCommunityChatPushNotice({ id: e.notificationId, user_id: e.userId, type: e.message.data.type, topic_id: e.message.data.topicId }));
+    if (chatEntries.length) {
+      try {
+        const targets = await resolveCommunityChatPushTargets(supabase, chatEntries.map(e => ({ id: e.notificationId, user_id: e.userId, type: e.message.data.type, topic_id: e.message.data.topicId })));
+        entries = entries.filter(e => {
+          const target = targets.get(e.notificationId);
+          if (!target) return true;
+          if (!target.eligible) { communityChatsSuppressed++; return false; }
+          e.message.data = communityChatPushData(target); return true;
+        });
+      } catch {
+        failedIds.push(...chatEntries.map(e => e.notificationId));
+        recordError('expo', 'Community notification eligibility could not be confirmed');
+        const failed = new Set(chatEntries.map(e => e.notificationId));
+        entries = entries.filter(e => !failed.has(e.notificationId));
+      }
+    }
+    const attendeeEntries = entries.filter(e => isAttendeeNoticeCandidate({type:e.message.data.type,event_id:e.message.data.eventId}));
+    if (attendeeEntries.length) {
+      try {
+        const targets = await resolveAttendeeMessagePushTargets(supabase, attendeeEntries.map(e => ({id:e.notificationId,user_id:e.userId,type:e.message.data.type,event_id:e.message.data.eventId})));
+        entries=entries.filter(e=>{
+          const target=targets.get(e.notificationId);
+          if(target?.invitationDecision==='suppress'){invitationsSuppressed++;return false;}
+          if(target?.invitationDecision==='hold'){invitationsHeld++;failedIds.push(e.notificationId);return false;}
+          if(target)e.message.data=attendeeMessagePushData(target);
+          return true;
+        });
+      } catch {
+        const unresolved = new Set(attendeeEntries.map(e => e.notificationId));
+        failedIds.push(...unresolved);
+        recordError('expo','Broadcast event targets could not be confirmed');
+        entries = entries.filter(e => !unresolved.has(e.notificationId));
+      }
+    }
+    const memberNotice = (e: typeof entries[number]) => ({id:e.notificationId,user_id:e.userId,type:e.message.data.type,event_id:e.message.data.eventId,circle_id:e.message.data.circleId,topic_id:e.message.data.topicId});
+    const memberEntries = entries.filter(e => isMemberChatPushNotice(memberNotice(e)));
+    if (memberEntries.length) {
+      try {
+        const targets = await resolveMemberChatPushTargets(supabase, memberEntries.map(memberNotice));
+        entries = entries.filter(e => {
+          const target = targets.get(e.notificationId);
+          if (!target) return true;
+          if (!target.eligible) { memberChatsSuppressed++; return false; }
+          e.message.data = memberChatPushData(target); return true;
+        });
+      } catch {
+        const unresolved = new Set(memberEntries.map(e => e.notificationId));
+        failedIds.push(...unresolved);
+        recordError('expo', 'Member chat notification eligibility could not be confirmed');
+        entries = entries.filter(e => !unresolved.has(e.notificationId));
+      }
+    }
+    if (!entries.length) continue;
+    const batch = entries.map(e => e.message);
+    const batchUserIds = entries.map(e => e.userId);
+    const batchNotifIds = entries.map(e => e.notificationId);
     try {
       const res = await fetch(EXPO_PUSH_URL, {
         method: 'POST',
@@ -352,13 +519,21 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Step 6: Revert claims for hard failures (mirrors the OneSignal-only
-  // version's revert behavior; converts "permanently lost" into "delayed").
+  // Step 6: Release failed/uncertain attempts for a later send pass. Successful
+  // creations and confirmed empty audiences stay claimed. A release failure
+  // must surface as an operational error; these rows are not retryable yet.
+  let claimReleaseFailed = false;
   if (failedIds.length > 0) {
-    await supabase
-      .from('app_notifications')
-      .update({ push_sent: false })
-      .in('id', failedIds);
+    try {
+      const { error: releaseError } = await supabase
+        .from('app_notifications')
+        .update({ push_sent: false })
+        .in('id', failedIds);
+      if (releaseError) throw releaseError;
+    } catch (error) {
+      claimReleaseFailed = true;
+      console.error('[send-push] failed notification claims could not be released:', error);
+    }
   }
 
   return new Response(
@@ -366,10 +541,18 @@ Deno.serve(async (req) => {
       sent: oneSignalSent + expoSent,
       total: notifications.length,
       oneSignalSent,
+      ...(creatorJoinsSuppressed ? { creatorJoinsSuppressed } : {}),
+      ...(pageUpdatesSuppressed ? { pageUpdatesSuppressed } : {}),
+      ...(communityChatsSuppressed ? { communityChatsSuppressed } : {}),
+      ...(memberChatsSuppressed ? { memberChatsSuppressed } : {}),
+      ...(invitationsSuppressed ? {invitationsSuppressed} : {}),
+      ...(invitationsHeld ? {invitationsHeld} : {}),
+      oneSignalNoSubscription,
       expoSent,
       failed: failedIds.length,
       errorSamples,
+      ...(claimReleaseFailed ? { error: 'Failed notification claims could not be released' } : {}),
     }),
-    { headers: { 'Content-Type': 'application/json' } },
+    { status: claimReleaseFailed ? 503 : 200, headers: { 'Content-Type': 'application/json' } },
   );
 });

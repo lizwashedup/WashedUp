@@ -25,6 +25,11 @@ import { useSubmitGuard } from '../../hooks/useSubmitGuard';
 import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 import PhoneInput from '../../components/auth/PhoneInput';
 import { getKnownAccount, lastFour, nationalDigits } from '../../lib/knownAccount';
+import { fetchNeedsPhoneMigration } from '../../lib/authGate';
+import { authedDest } from '../../lib/authRouting';
+import { getAuthProfile } from '../../hooks/useProfile';
+import { queryClient } from '../../lib/queryClient';
+import { withTimeout } from '../../lib/withTimeout';
 
 const TERMS_URL = 'https://washedup.app/terms';
 const PRIVACY_URL = 'https://washedup.app/privacy';
@@ -35,6 +40,11 @@ export default function PhoneEntryScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const activeVisit = useRef(true);
+  useEffect(() => {
+    activeVisit.current = true;
+    return () => { activeVisit.current = false; };
+  }, []);
   // An account already signed in on this device. Present ONLY when a session
   // ended on its own; a deliberate log out clears the marker, so choosing to
   // leave still lands on the cold screen. Never a token, just the number.
@@ -89,15 +99,25 @@ export default function PhoneEntryScreen() {
       // duplicate auth.users row and orphan the existing user's data —
       // the bug originally patched in commit 5cf9927 via signOut+resignin.
       //
-      // The correct flow for an authed user without a phone is the
-      // migration-gate (auth.updateUser({phone}) → phone_change verifyOtp
-      // on the SAME user id). authedDest() already routes them there;
-      // this guard is the per-screen safety net.
+      // An existing session alone does not mean a phone is missing. Reuse
+      // the root's server-backed routing so registered members return to
+      // their account without the obsolete add-number detour. A definite
+      // missing-phone result still preserves same-account verification.
       const { data: { session: existingSession } } = await supabase.auth.getSession();
       if (existingSession?.user?.id) {
-        submit.release();
-        setSubmitting(false);
-        router.replace('/migration-gate');
+        const userId = existingSession.user.id;
+        const [profile, needsPhone] = await Promise.all([
+          withTimeout(getAuthProfile(queryClient, userId), 4000, null),
+          fetchNeedsPhoneMigration(),
+        ]);
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (!activeVisit.current || currentSession?.user?.id !== userId) return;
+        if (!profile) throw new Error('Unable to confirm account destination');
+        router.replace(authedDest({
+          onboarding_status: profile.onboarding_status,
+          referral_source: profile.referral_source,
+          needs_phone_migration: needsPhone,
+        }) as never);
         return;
       }
       // If we've sent an OTP to this number recently (e.g., user backed out

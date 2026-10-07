@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,22 +9,22 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Search, Plus, Users, ChevronRight } from 'lucide-react-native';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { AfterglowColors, CreatorSurfaceColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { RADII, SEARCH } from '../../../constants/YoursDesign';
+import { CreatorActionFill } from '../../creator/CreatorActionFill';
+import { ScaledText } from '../../ScaledText';
 import { COPY } from '../state/constants';
 import { isRecentlyActive, compareByFirstName } from '../../../lib/yours/personDisplay';
 import WarmPersonAvatar from './WarmPersonAvatar';
 import PeopleGridCell from './PeopleGridCell';
+import PeopleListRow, { PeopleRecentPerson, type PeopleAppearance } from './PeopleListRow';
 import type { AnchorRect } from '../../menu/MenuCard';
 import type { YoursGridPerson } from '../../../lib/yours/types';
 
 const COLS = 3;
 const GAP = 8;
-// Explicit half-width gap for the dual CTAs (flex:1 was rendering them unequal;
-// the grid uses explicit widths reliably, so we match that). Widths themselves
-// come from useWindowDimensions inside the component so they track the live
-// window (split-screen / multi-window), never a stale module-load snapshot.
+// Keep the legacy grid geometry; scoped actions measure their own parent.
 const CTA_GAP = 10;
 
 /**
@@ -46,6 +46,7 @@ export default function PeopleScreen({
   onLongPressPerson,
   onAddPeople,
   onCreateCircle,
+  appearance,
 }: {
   people: YoursGridPerson[];
   query: string;
@@ -57,12 +58,18 @@ export default function PeopleScreen({
   onLongPressPerson: (p: YoursGridPerson, rect: AnchorRect) => void;
   onAddPeople: () => void;
   onCreateCircle: () => void;
+  appearance?: PeopleAppearance;
 }) {
+  const s = useMemo(() => appearance ? { ...styles, ...peopleAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
   const searching = query.trim().length > 0;
 
-  const { width: screenW } = useWindowDimensions();
+  const { width: screenW, fontScale } = useWindowDimensions();
+  const [parentWidth, setParentWidth] = useState<number | null>(null);
   const cellW = (screenW - SEARCH.horizontalInset * 2 - GAP * (COLS - 1)) / COLS;
-  const ctaW = (screenW - SEARCH.horizontalInset * 2 - CTA_GAP) / 2;
+  const actionWidth = Math.max(0, (appearance ? parentWidth ?? screenW : screenW) - SEARCH.horizontalInset * 2);
+  // At larger text sizes, give each label a full row rather than clipping it.
+  const stackedActions = !!appearance && (fontScale > 1 || actionWidth < 160 * 2 + CTA_GAP);
+  const ctaW = stackedActions ? actionWidth : (actionWidth - CTA_GAP) / 2;
 
   // When a search begins, the sections above the field collapse; snap the
   // scroll back to the top so the field (and results) are in view even if the
@@ -79,12 +86,13 @@ export default function PeopleScreen({
   const grid = useMemo(() => [...people].sort(compareByFirstName), [people]);
 
   const SearchField = (
-    <View style={styles.search}>
-      <Search size={SEARCH.iconSize} color={Colors.tertiary} strokeWidth={2} />
+    <View style={s.search}>
+      <Search size={SEARCH.iconSize} color={appearance ? AfterglowColors.muted : Colors.tertiary} strokeWidth={2} />
       <TextInput
-        style={styles.searchInput}
+        style={s.searchInput}
+        accessibilityLabel="Search your people or an exact handle"
         placeholder={COPY.searchPlaceholder}
-        placeholderTextColor={Colors.tertiary}
+        placeholderTextColor={appearance ? AfterglowColors.muted : Colors.tertiary}
         value={query}
         onChangeText={onQueryChange}
         autoCorrect={false}
@@ -98,25 +106,35 @@ export default function PeopleScreen({
   return (
     <ScrollView
       ref={scrollRef}
-      style={styles.fill}
-      contentContainerStyle={styles.content}
+      onLayout={appearance ? event => {
+        const width = event.nativeEvent.layout.width;
+        if (Number.isFinite(width) && width > 0) setParentWidth(width);
+      } : undefined}
+      style={s.fill}
+      contentContainerStyle={s.content}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >
       {/* HERO: recently with you (collapses while searching) */}
       {!searching && warm.length > 0 && (
-        <View style={styles.warmSection}>
-          <View style={styles.warmHeader}>
-            <Text style={styles.warmTitle}>{COPY.peopleWarmTitle}</Text>
-            <View style={styles.warmDot} />
+        <View style={s.warmSection}>
+          <View style={s.warmHeader}>
+            <Text style={s.warmTitle}>{appearance ? 'Recent people' : COPY.peopleWarmTitle}</Text>
+            {!appearance && <View style={s.warmDot} />}
           </View>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.warmRow}
+            contentContainerStyle={s.warmRow}
           >
             {warm.map((p) => (
-              <WarmPersonAvatar
+              appearance ? <PeopleRecentPerson
+                key={p.user_id}
+                person={p}
+                appearance={appearance}
+                onPress={onPersonPress}
+                onLongPress={onLongPressPerson}
+              /> : <WarmPersonAvatar
                 key={p.user_id}
                 person={p}
                 onPress={onPersonPress}
@@ -124,7 +142,7 @@ export default function PeopleScreen({
               />
             ))}
           </ScrollView>
-          <View style={styles.divider} />
+          <View style={s.divider} />
         </View>
       )}
 
@@ -134,26 +152,26 @@ export default function PeopleScreen({
       {!searching && pendingRequests > 0 && (
         <Pressable
           onPress={onRequestsPress}
-          style={({ pressed }) => (pressed ? styles.giftPressed : undefined)}
+          style={({ pressed }) => (pressed ? s.giftPressed : undefined)}
           accessibilityRole="button"
           accessibilityLabel={COPY.peopleGiftTitle(pendingRequests)}
         >
-          <View style={styles.giftBanner}>
-            <View style={styles.giftAccent} />
-            <View style={styles.giftText}>
-              <Text style={styles.giftTitle}>
+          <View style={s.giftBanner}>
+            {!appearance && <View style={s.giftAccent} />}
+            <View style={s.giftText}>
+              <Text style={s.giftTitle}>
                 {COPY.peopleGiftTitle(pendingRequests)}
               </Text>
-              <Text style={styles.giftSub} numberOfLines={1}>
-                {COPY.peopleGiftSub(pendingRequests)}
+              <Text style={s.giftSub} numberOfLines={1}>
+                {appearance ? 'Review requests' : COPY.peopleGiftSub(pendingRequests)}
               </Text>
             </View>
-            <ChevronRight size={20} color={Colors.asphalt} strokeWidth={2} />
+            <ChevronRight size={20} color={appearance ? AfterglowColors.ink : Colors.asphalt} strokeWidth={2} />
           </View>
         </Pressable>
       )}
 
-      <View style={styles.searchWrap}>{SearchField}</View>
+      <View style={s.searchWrap}>{SearchField}</View>
 
       {searching ? (
         // Inline results (PeopleSearchResults renders a plain View); this
@@ -161,43 +179,48 @@ export default function PeopleScreen({
         searchResults
       ) : (
         <>
-          {/* Dual CTAs: explicit half-width Pressables with the fill applied
-              directly (the "Done" button pattern; inner-View + width:'100%'
-              nesting was rendering them unequal/overflowing). */}
-          <View style={styles.ctaRow}>
+          {/* Keep equal action widths within the measured content area. */}
+          <View style={[s.ctaRow, stackedActions && { flexDirection: 'column' }]}>
             <Pressable
-              style={({ pressed }) => (pressed ? styles.ctaPressed : undefined)}
+              style={({ pressed }) => (pressed ? s.ctaPressed : undefined)}
               onPress={onAddPeople}
               accessibilityRole="button"
               accessibilityLabel="Add people"
             >
-              <View style={[styles.ctaBtn, { width: ctaW }, styles.ctaOutlined]}>
-                <Plus size={16} color={Colors.terracotta} strokeWidth={2.4} />
-                <Text style={styles.ctaOutlinedText} numberOfLines={1}>
-                  {COPY.peopleListAdd}
-                </Text>
+              <View style={[s.ctaBtn, { width: ctaW }, s.ctaOutlined]}>
+                <Plus size={16} color={appearance ? AfterglowColors.clay : Colors.terracotta} strokeWidth={2.4} />
+                <ScaledText style={[s.ctaOutlinedText, appearance && { textAlign: 'center' }]} numberOfLines={1}>
+                  {appearance ? 'Add people' : COPY.peopleListAdd}
+                </ScaledText>
               </View>
             </Pressable>
             <Pressable
-              style={({ pressed }) => (pressed ? styles.ctaPressed : undefined)}
+              style={({ pressed }) => (pressed ? s.ctaPressed : undefined)}
               onPress={onCreateCircle}
               accessibilityRole="button"
               accessibilityLabel="Create a circle"
             >
-              <View style={[styles.ctaBtn, { width: ctaW }, styles.ctaFilled]}>
-                <Users size={16} color={Colors.white} strokeWidth={2.2} />
-                <Text style={styles.ctaFilledText} numberOfLines={1}>
-                  {COPY.peopleCreateCircle}
-                </Text>
+              <View style={[s.ctaBtn, { width: ctaW }, s.ctaFilled]}>
+                {appearance && <CreatorActionFill />}
+                <Users size={16} color={appearance ? AfterglowColors.white : Colors.white} strokeWidth={2.2} />
+                <ScaledText style={[s.ctaFilledText, appearance && { textAlign: 'center' }]} numberOfLines={1}>
+                  {appearance ? 'Create a circle' : COPY.peopleCreateCircle}
+                </ScaledText>
               </View>
             </Pressable>
           </View>
 
           {/* Everyone grid (label renders uppercase via textTransform) */}
-          <Text style={styles.sectionLabel}>{COPY.peopleEveryone(grid.length)}</Text>
-          <View style={styles.gridWrap}>
+          <Text style={s.sectionLabel}>{COPY.peopleEveryone(grid.length)}</Text>
+          <View style={s.gridWrap}>
             {grid.map((p) => (
-              <PeopleGridCell
+              appearance ? <PeopleListRow
+                key={p.user_id}
+                person={p}
+                appearance={appearance}
+                onPress={onPersonPress}
+                onLongPress={onLongPressPerson}
+              /> : <PeopleGridCell
                 key={p.user_id}
                 person={p}
                 width={cellW}
@@ -207,7 +230,7 @@ export default function PeopleScreen({
             ))}
           </View>
 
-          <View style={styles.bottomSpacer} />
+          <View style={s.bottomSpacer} />
         </>
       )}
     </ScrollView>
@@ -368,3 +391,30 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: { height: 24 },
 });
+
+
+/** Per-screen opt-in. No data or global palette changes. */
+function peopleAppearance(fonts: AfterglowFontFamilies) {
+  return StyleSheet.create({
+    fill: { flex: 1, backgroundColor: AfterglowColors.paper },
+    content: { paddingBottom: 100, paddingTop: 16 },
+    warmHeader: { ...styles.warmHeader, marginBottom: 8 },
+    warmTitle: { ...AfterglowType.section, fontFamily: fonts.semibold, color: AfterglowColors.muted },
+    warmRow: { paddingHorizontal: H, gap: 12, paddingBottom: 0 },
+    divider: { ...styles.divider, backgroundColor: AfterglowColors.subtleLine, marginTop: 12 },
+    giftBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, marginHorizontal: H, marginTop: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AfterglowColors.subtleLine },
+    giftTitle: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    giftSub: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.clay, marginTop: 2 },
+    searchWrap: { paddingTop: 14 },
+    search: { ...styles.search, minHeight: 46, height: undefined, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: AfterglowColors.line, backgroundColor: AfterglowColors.white },
+    searchInput: { flex: 1, minWidth: 0, minHeight: 38, ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.ink },
+    ctaRow: { ...styles.ctaRow, marginTop: 16, marginBottom: 24 },
+    ctaBtn: { ...styles.ctaBtn, minHeight: 46, height: undefined, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 24, borderWidth: 1 },
+    ctaOutlined: { borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, backgroundColor: Colors.cardBg },
+    ctaOutlinedText: { ...AfterglowType.section, fontFamily: fonts.semibold, color: AfterglowColors.clay, flexShrink: 1 },
+    ctaFilled: { ...styles.ctaFilled, backgroundColor: AfterglowColors.clay, borderColor: CreatorSurfaceColors.goldEdge, shadowOpacity: 0.24, elevation: 3 },
+    ctaFilledText: { ...AfterglowType.section, fontFamily: fonts.semibold, color: AfterglowColors.white, flexShrink: 1 },
+    sectionLabel: { ...AfterglowType.section, fontFamily: fonts.semibold, color: AfterglowColors.muted, paddingHorizontal: H, marginBottom: 8 },
+    gridWrap: { paddingHorizontal: H },
+  });
+}

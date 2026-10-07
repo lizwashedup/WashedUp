@@ -1,7 +1,6 @@
 import React, { useRef } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { Image } from 'expo-image';
-import { Sparkles } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { RADII, AVATAR_INITIAL_RATIO } from '../../../constants/YoursDesign';
@@ -89,7 +88,6 @@ function PeopleGridCell({
           ) : isMilestone ? (
             <View style={styles.milestoneRow}>
               <Text style={styles.milestone}>{COPY.ppStatPlans(person.shared_count)}</Text>
-              <Sparkles size={11} color={Colors.goldAccent} strokeWidth={2} />
             </View>
           ) : person.shared_count > 0 ? (
             <Text style={styles.count}>{COPY.ppStatPlans(person.shared_count)}</Text>
@@ -194,8 +192,7 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.tertiary,
   },
-  // Milestone celebration: bold count + a small gold Sparkles mark (gold as a
-  // decorative icon, never gold text) + the card's gold top-accent.
+  // Milestone celebration uses a bold count and the card’s gold top accent.
   milestoneRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   milestone: {
     fontFamily: Fonts.sansBold,

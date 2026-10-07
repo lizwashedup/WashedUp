@@ -1,3 +1,4 @@
+import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
 /**
  * Creator mode: menu. Numbers plus the symmetric exit (doc 08: switch back
  * lives on the last tab, the way Airbnb does it).
@@ -131,13 +132,7 @@ export default function CreatorMenuScreen() {
         {workspace === 'community' && <CommunitySwitcher access={access} />}
 
         {/* switch back rides directly beneath the identity card (slice 0) */}
-        <TouchableOpacity
-          style={styles.switchBtn}
-          onPress={() => router.replace('/(tabs)/profile')}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.switchBtnText}>switch back to you</Text>
-        </TouchableOpacity>
+        <BackToYoursButton />
         <Text style={styles.switchHint}>
           your plans, chats, and people are exactly where you left them.
         </Text>

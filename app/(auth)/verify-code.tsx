@@ -23,7 +23,7 @@ import { withTimeout } from '../../lib/withTimeout';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { formatDisplay, formatToE164, isValidUSPhone } from '../../lib/phoneFormat';
 import { authedDest } from '../../lib/authRouting';
-import { verifyCodeSelfRoutingRef, postAuthTransitionRef, wasOtpRecentlySent, markOtpSent } from '../../lib/navState';
+import { verifyCodeSelfRoutingRef, postAuthTransitionRef, wasOtpRecentlySent, markOtpSent, authedUserIdRef, getVerificationDestination, observeVerificationAccount, beginVerificationDestination, cancelVerificationDestination, completeVerificationDestination, type VerificationDestinationHandoff } from '../../lib/navState';
 import { AUTH_PROFILE_KEY, type AuthProfile, invalidateAuthProfile } from '../../hooks/useProfile';
 import OtpInput, { type OtpInputHandle } from '../../components/auth/OtpInput';
 import { BrandedAlert } from '../../components/BrandedAlert';
@@ -98,6 +98,7 @@ export default function VerifyCodeScreen() {
   const cooldownRef = useRef(RESEND_COOLDOWN_S);
   const otpStateRef = useRef<OtpState>('idle');
   const isMountedRef = useRef(true);
+  const destinationVisitRef = useRef<VerificationDestinationHandoff | null>(null);
 
   // Bail out if we landed here with no phone (e.g. someone deep-linked
   // /verify-code directly). Without a phone, verifyOtp would always fail
@@ -112,6 +113,7 @@ export default function VerifyCodeScreen() {
   // the self-routing flag so a back-out mid-animation can't leave the
   // root auth listener permanently muted.
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       if (holdTimerRef.current) {
@@ -119,6 +121,8 @@ export default function VerifyCodeScreen() {
         holdTimerRef.current = null;
       }
       verifyCodeSelfRoutingRef.current = false;
+      const visit = destinationVisitRef.current;
+      if (visit && !visit.routeCommitted) cancelVerificationDestination(visit);
     };
   }, []);
 
@@ -161,6 +165,10 @@ export default function VerifyCodeScreen() {
       verifyingRef.current = true;
       setVerifying(true);
       setMicroError(null);
+      const destinationVisit = beginVerificationDestination(mode === 'migration' ? authedUserIdRef.current : null);
+      destinationVisitRef.current = destinationVisit;
+      const isCurrent = () => isMountedRef.current && destinationVisitRef.current === destinationVisit
+        && getVerificationDestination() === destinationVisit;
       try {
         // 'sms' verifies a fresh signInWithOtp; 'phone_change' verifies an
         // updateUser({ phone }) call from the migration gate (existing user
@@ -171,10 +179,13 @@ export default function VerifyCodeScreen() {
           token,
           type: verifyType,
         });
+        if (!isCurrent()) return;
         if (error) throw error;
 
         const e164 = formatToE164(phone);
         const { data: { user: verifiedUser } } = await supabase.auth.getUser();
+        if (!isCurrent()) return;
+        if (verifiedUser && observeVerificationAccount(verifiedUser.id) !== destinationVisit) return;
 
         // Post-commit assertion (migration only): verifyOtp can return
         // success while Supabase fails to actually attach the phone to
@@ -205,6 +216,7 @@ export default function VerifyCodeScreen() {
           easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: false,
         }).start();
+        let phoneSynced: Promise<boolean> = Promise.resolve(true);
         if (verifiedUser) {
           // Update the cached profile synchronously so the tabs guard reads
           // the new phone on the next mount instead of the stale cached null.
@@ -219,28 +231,32 @@ export default function VerifyCodeScreen() {
           // so we manually sync to profiles. New signups are covered by the
           // trigger writing NULLIF(NEW.phone, '') on auth.users INSERT.
           //
-          // We fire-and-forget the request to avoid blocking the 600ms success
-          // animation, but on error we (a) cancel the pending navigation so the
-          // alert is readable, (b) invalidate the optimistic cache so the next
-          // read fetches truth from DB, and (c) surface the failure to the user
-          // so they can retry instead of silently landing on tabs with a phone
-          // that didn't actually save.
+          // Start the sync alongside the success hold, but require it to
+          // finish before navigation. A late failure must not arrive after
+          // this account has already entered a protected destination.
           if (mode === 'migration') {
-            supabase
-              .from('profiles')
-              .update({ phone_number: e164 })
-              .eq('id', verifiedUser.id)
-              .then(({ error: syncError }) => {
-                if (!syncError) return;
-                console.warn('[phone-auth] profiles.phone_number sync failed:', syncError.message);
-                invalidateAuthProfile(queryClient, verifiedUser.id);
-                if (!isMountedRef.current) return;
-                if (holdTimerRef.current) {
-                  clearTimeout(holdTimerRef.current);
-                  holdTimerRef.current = null;
-                }
-                setSyncFailedAlert(true);
-              });
+            phoneSynced = withTimeout(
+              supabase.from('profiles').update({ phone_number: e164 }).eq('id', verifiedUser.id),
+              4000,
+              { error: { message: 'timeout' } } as any,
+            ).then(({ error: syncError }) => {
+              if (!syncError) return true;
+              throw syncError;
+            }).catch((syncError) => {
+              if (!isCurrent()) return false;
+              console.warn('[phone-auth] profiles.phone_number sync failed:', syncError.message);
+              invalidateAuthProfile(queryClient, verifiedUser.id);
+              // Keep the visit suspended behind the existing continue alert.
+              // Dismissal proposes Tabs through the same ban/entry checks;
+              // account changes or leaving the screen still cancel it.
+              verifyCodeSelfRoutingRef.current = false;
+              if (holdTimerRef.current) {
+                clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = null;
+              }
+              setSyncFailedAlert(true);
+              return false;
+            });
           }
         }
 
@@ -252,7 +268,9 @@ export default function VerifyCodeScreen() {
         // an onboarding-incomplete user resumes at the correct step.
         holdTimerRef.current = setTimeout(async () => {
           holdTimerRef.current = null;
+          if (!isCurrent() || !(await phoneSynced) || !isCurrent()) return;
           if (!verifiedUser) {
+            cancelVerificationDestination(destinationVisit);
             router.replace('/onboarding/basics');
             return;
           }
@@ -267,15 +285,21 @@ export default function VerifyCodeScreen() {
               .maybeSingle(),
             4000,
             { data: null } as any,
-          );
+          ).catch(() => ({ data: null }));
+          if (!isCurrent()) return;
           const next = authedDest({
             onboarding_status: profile?.onboarding_status,
             referral_source: profile?.referral_source,
             needs_phone_migration: false,
           });
-          router.replace(next as never);
+          // Root commits this proposal only after its ban check approves
+          // the same visit. Tabs then approves the profile/phone entry gate.
+          completeVerificationDestination(destinationVisit, verifiedUser.id, next);
         }, SUCCESS_HOLD_MS);
       } catch (e: unknown) {
+        if (!isCurrent()) return;
+        cancelVerificationDestination(destinationVisit);
+        verifyCodeSelfRoutingRef.current = false;
         hapticError();
         setOtpState('error');
         const status = (e as { status?: number } | null)?.status;
@@ -305,6 +329,7 @@ export default function VerifyCodeScreen() {
         // editable=false when focus() fires and iOS rejects it (no keyboard).
         holdTimerRef.current = setTimeout(() => {
           holdTimerRef.current = null;
+          if (!isMountedRef.current || destinationVisitRef.current !== destinationVisit) return;
           setCode('');
           setOtpState('idle');
           setMicroError(null);
@@ -312,7 +337,7 @@ export default function VerifyCodeScreen() {
         }, ERROR_HOLD_MS);
       } finally {
         verifyingRef.current = false;
-        setVerifying(false);
+        if (isMountedRef.current) setVerifying(false);
       }
     },
     [phone, mode, successAnim],
@@ -486,11 +511,12 @@ export default function VerifyCodeScreen() {
         message="we'll ask again next time you open the app."
         onClose={() => {
           setSyncFailedAlert(false);
-          // User did verify the OTP — auth.users.phone is set correctly. Only
-          // the profiles sync failed. Land them in the app; on the next cold
-          // start checkAuth will read the DB truth (phone_number=null) and
-          // route them back through migration-gate to retry.
-          router.replace('/(tabs)/plans');
+          // Preserve the existing continue action after a profiles-only sync
+          // failure. The confirmed auth phone remains the gate's source of
+          // truth, and root/Tabs must approve this visit before resuming it.
+          const visit = destinationVisitRef.current;
+          if (!isMountedRef.current || getVerificationDestination() !== visit || !visit?.userId) return;
+          completeVerificationDestination(visit, visit.userId, '/(tabs)/plans');
         }}
       />
     </Animated.View>

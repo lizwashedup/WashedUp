@@ -9,16 +9,16 @@
 
 import React, { useState } from 'react';
 import { Modal, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { Image } from 'expo-image';
+import { EventMediaImage } from './EventMediaImage';
+import { EventMediaVideo } from './EventMediaVideo';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 import { hapticLight } from '../../lib/haptics';
-import { useVideoPlayer, VideoView } from 'expo-video';
-import Colors from '../../constants/Colors';
+import Colors, { SceneDetailColors } from '../../constants/Colors';
 import { EventSurface } from '../../constants/EventDesign';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import LinkifiedText from '../LinkifiedText';
-import { eventContentPublicUrl, type DescriptionBlock } from '../../lib/eventContent';
+import { type DescriptionBlock } from '../../lib/eventContent';
 import { EventFaqCards } from './EventFaqCards';
 
 const BODY_IMAGE_HEIGHT = 220;
@@ -28,37 +28,20 @@ const BODY_VIDEO_ASPECT = 16 / 9;
 
 /** law 1: the media zones are the ONE place the base goes warm-dark, so
  *  real footage reads cinematic against the cream page. */
-function BodyVideo({ path, poster }: { path: string; poster?: string }) {
-  const player = useVideoPlayer(eventContentPublicUrl(path), (p) => {
-    p.loop = false;
-  });
-  return (
-    <View style={styles.videoFrame}>
-      {/* law 16: the persisted poster paints INSTANTLY under the player,
-          so the frame is never black while the video buffers */}
-      {!!poster && (
-        <Image
-          source={{ uri: eventContentPublicUrl(poster) }}
-          style={styles.videoPoster}
-          contentFit="cover"
-        />
-      )}
-      <VideoView
-        player={player}
-        style={styles.video}
-        contentFit="contain"
-        nativeControls
-      />
-    </View>
-  );
+function BodyVideo({ eventId, path, poster }: { eventId: string; path: string; poster?: string }) {
+  return <View style={styles.videoFrame}>
+    {!!poster && <EventMediaImage eventId={eventId} reference={poster} kind="poster" style={styles.videoPoster} contentFit="cover" />}
+    <EventMediaVideo eventId={eventId} path={path} style={styles.video} />
+  </View>;
 }
 
 interface EventBodyBlocksProps {
   eventId: string;
   blocks: DescriptionBlock[];
+  surface?: 'light' | 'scene';
 }
 
-export function EventBodyBlocks({ eventId, blocks }: EventBodyBlocksProps) {
+export function EventBodyBlocks({ eventId, blocks, surface = 'light' }: EventBodyBlocksProps) {
   const markerPlaced = blocks.some((b) => b.type === 'faq');
   // P2 (law 3): tapping a body image opens the lightbox on the warm-dark
   // media ground - the proof-of-good reads cinematic full-screen
@@ -69,22 +52,24 @@ export function EventBodyBlocks({ eventId, blocks }: EventBodyBlocksProps) {
       {blocks.map((block, index) => {
         if (block.type === 'text') {
           return (
-            <LinkifiedText key={`t-${index}`} text={block.content} style={styles.bodyText} />
+            <LinkifiedText key={`t-${index}`} text={block.content} style={[styles.bodyText, surface === 'scene' && { color: SceneDetailColors.text }]} linkStyle={surface === 'scene' ? { color: SceneDetailColors.text } : undefined} />
           );
         }
         if (block.type === 'image') {
-          const uri = eventContentPublicUrl(block.path);
+          const path = block.path;
           return (
             <TouchableOpacity
               key={`i-${index}`}
               activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel={block.alt ? `Open photo: ${block.alt}` : "Open event photo"}
               onPress={() => {
                 hapticLight();
-                setLightbox(uri);
+                setLightbox(path);
               }}
             >
-              <Image
-                source={{ uri }}
+              <EventMediaImage
+                eventId={eventId} reference={path} kind="image"
                 style={styles.bodyImage}
                 contentFit="cover"
                 accessibilityLabel={block.alt}
@@ -93,19 +78,19 @@ export function EventBodyBlocks({ eventId, blocks }: EventBodyBlocksProps) {
           );
         }
         if (block.type === 'video') {
-          return <BodyVideo key={`v-${index}`} path={block.path} poster={block.poster} />;
+          return <BodyVideo key={`v-${index}`} eventId={eventId} path={block.path} poster={block.poster} />;
         }
-        return <EventFaqCards key={`f-${index}`} eventId={eventId} />;
+        return <EventFaqCards key={`f-${index}`} eventId={eventId} surface={surface} />;
       })}
-      {!markerPlaced && <EventFaqCards eventId={eventId} />}
+      {!markerPlaced && <EventFaqCards eventId={eventId} surface={surface} />}
 
       <Modal visible={!!lightbox} transparent animationType="fade" onRequestClose={() => setLightbox(null)}>
         <Pressable style={styles.lightbox} onPress={() => setLightbox(null)}>
           {!!lightbox && (
-            <Image source={{ uri: lightbox }} style={styles.lightboxImage} contentFit="contain" />
+            <EventMediaImage eventId={eventId} reference={lightbox} kind="image" style={styles.lightboxImage} contentFit="contain" />
           )}
           <SafeAreaView style={styles.lightboxClose} pointerEvents="box-none">
-            <TouchableOpacity onPress={() => setLightbox(null)} hitSlop={12} style={styles.lightboxCloseBtn}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close photo" onPress={() => setLightbox(null)} hitSlop={12} style={styles.lightboxCloseBtn}>
               <X size={22} color={EventSurface.onMedia} strokeWidth={2} />
             </TouchableOpacity>
           </SafeAreaView>

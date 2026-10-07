@@ -61,6 +61,34 @@ export function laWallTimeToUTC(
   return new Date(utc);
 }
 
+/** Reject impossible calendar dates and LA clock times (including the spring DST gap). */
+export function isValidLAWallTime(
+  year: number, month0: number, day: number, hour24: number, minute: number,
+): boolean {
+  if (![year, month0, day, hour24, minute].every(Number.isInteger) ||
+      month0 < 0 || month0 > 11 || day < 1 || day > 31 ||
+      hour24 < 0 || hour24 > 23 || minute < 0 || minute > 59) return false;
+  const calendarDay = new Date(Date.UTC(year, month0, day));
+  if (calendarDay.getUTCFullYear() !== year || calendarDay.getUTCMonth() !== month0 || calendarDay.getUTCDate() !== day) return false;
+  const resolved = getLAWallParts(laWallTimeToUTC(year, month0, day, hour24, minute));
+  return !!resolved && resolved.y === year && resolved.m === month0 && resolved.d === day &&
+    resolved.hour24 === hour24 && resolved.minute === minute;
+}
+
+/** An end clock at or before the start clock means the next LA calendar day. */
+export function resolveOvernightLAEnd(
+  year: number, month0: number, day: number,
+  startHour24: number, startMinute: number, endHour24: number, endMinute: number,
+): Date | null {
+  const overnight = endHour24 * 60 + endMinute <= startHour24 * 60 + startMinute;
+  const chosenDay = new Date(Date.UTC(year, month0, day + (overnight ? 1 : 0)));
+  const endYear = chosenDay.getUTCFullYear();
+  const endMonth = chosenDay.getUTCMonth();
+  const endDay = chosenDay.getUTCDate();
+  if (!isValidLAWallTime(endYear, endMonth, endDay, endHour24, endMinute)) return null;
+  return laWallTimeToUTC(endYear, endMonth, endDay, endHour24, endMinute);
+}
+
 export const DEFAULT_EVENT_START_TIME = '19:00:00';
 
 // A bare HH:MM[:SS] is an LA wall time. Handing `${date}T${time}` to

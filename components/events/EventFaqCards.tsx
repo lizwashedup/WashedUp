@@ -9,7 +9,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
+import Colors, { SceneDetailColors as Scene } from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
@@ -22,9 +22,10 @@ interface EventFaq {
 
 interface EventFaqCardsProps {
   eventId: string;
+  surface?: 'light' | 'scene';
 }
 
-export function EventFaqCards({ eventId }: EventFaqCardsProps) {
+export function EventFaqCards({ eventId, surface = 'light' }: EventFaqCardsProps) {
   const [openId, setOpenId] = useState<string | null>(null);
 
   const { data: faqs = [] } = useQuery({
@@ -46,13 +47,16 @@ export function EventFaqCards({ eventId }: EventFaqCardsProps) {
   return (
     <View style={styles.section}>
       {/* copy to the taste gate (doc 76 §2) */}
-      <Text style={styles.sectionTitle}>good to know</Text>
+      <Text style={[styles.sectionTitle, surface === 'scene' && { color: Scene.text }]}>good to know</Text>
       {faqs.map((faq) => {
         const open = openId === faq.id;
         return (
           <TouchableOpacity
             key={faq.id}
-            style={styles.card}
+            accessibilityRole="button"
+            accessibilityLabel={faq.question}
+            accessibilityState={{ expanded: open }}
+            style={[styles.card, surface === 'scene' && { backgroundColor: Scene.surface, borderColor: Scene.border }]}
             onPress={() => {
               hapticLight();
               setOpenId(open ? null : faq.id);
@@ -60,15 +64,15 @@ export function EventFaqCards({ eventId }: EventFaqCardsProps) {
             activeOpacity={0.85}
           >
             <View style={styles.cardHeader}>
-              <Text style={styles.question}>{faq.question}</Text>
+              <Text style={[styles.question, surface === 'scene' && { color: Scene.text }]}>{faq.question}</Text>
               <ChevronDown
                 size={16}
-                color={Colors.warmGray}
+                color={surface === 'scene' ? Scene.supporting : Colors.warmGray}
                 strokeWidth={2}
                 style={open ? styles.chevronOpen : undefined}
               />
             </View>
-            {open && <Text style={styles.answer}>{faq.answer}</Text>}
+            {open && <Text style={[styles.answer, surface === 'scene' && { color: Scene.supporting }]}>{faq.answer}</Text>}
           </TouchableOpacity>
         );
       })}

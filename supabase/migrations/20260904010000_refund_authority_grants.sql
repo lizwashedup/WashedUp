@@ -430,7 +430,9 @@ $$;
 REVOKE ALL ON FUNCTION public.has_refund_authority(uuid, uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.grant_refund_authority(uuid, uuid, uuid, boolean) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.revoke_refund_authority(uuid) FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.record_refund_issuance(uuid, uuid, boolean, text, text, integer[], integer, text) FROM PUBLIC, anon;
+-- Revoke authenticated explicitly: Supabase default privileges can grant it
+-- EXECUTE independently of PUBLIC. Only the verified service writes this audit.
+REVOKE ALL ON FUNCTION public.record_refund_issuance(uuid, uuid, boolean, text, text, integer[], integer, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.has_refund_authority(uuid, uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.grant_refund_authority(uuid, uuid, uuid, boolean) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.revoke_refund_authority(uuid) TO authenticated;
@@ -507,6 +509,10 @@ BEGIN
       AND cmd IN ('INSERT', 'UPDATE')
   ) THEN
     RAISE EXCEPTION 'SELF-TEST FAIL: a client-facing INSERT/UPDATE policy exists (mutation must stay RPC-only)';
+  END IF;
+  IF has_function_privilege('authenticated', 'public.record_refund_issuance(uuid,uuid,boolean,text,text,integer[],integer,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.record_refund_issuance(uuid,uuid,boolean,text,text,integer[],integer,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SELF-TEST FAIL: refund audit writer must be service-only';
   END IF;
   RAISE NOTICE 'refund authority schema self-test passed';
 END $$;

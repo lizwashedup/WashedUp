@@ -1,3 +1,6 @@
+import { ChatSizedText } from './chat/ChatSizedText';
+import { CreatorActionFill } from './creator/CreatorActionFill';
+import { useAfterglowFonts } from '../hooks/useAfterglowFonts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
@@ -5,7 +8,7 @@ import { router } from 'expo-router';
 import { Bell, User } from 'lucide-react-native';
 import React, { useRef, useState } from 'react';
 import { AppState, AppStateStatus, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Colors from '../constants/Colors';
+import Colors, { SceneDetailColors } from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { INBOX_COUNT_KEY, PROFILE_PHOTO_KEY } from '../constants/QueryKeys';
 import InboxModal from './InboxModal';
@@ -55,12 +58,14 @@ async function fetchInboxCount(): Promise<number> {
   return activeInviteCount + (notifs.count ?? 0);
 }
 
-export default function ProfileButton() {
+export default function ProfileButton({ surface = 'light', compact = false }: { surface?: 'light' | 'scene'; compact?: boolean }) {
+  const { fonts: promptFonts } = useAfterglowFonts(true, 'creator');
   const [showInbox, setShowInbox] = useState(false);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
   const hasCheckedPrompt = useRef(false);
 
   const handleProfilePress = async () => {
+    if (compact) { router.push('/(tabs)/profile'); return; }
     if (!hasCheckedPrompt.current) {
       const seen = await AsyncStorage.getItem(PROFILE_PROMPT_KEY).catch(() => null);
       hasCheckedPrompt.current = true;
@@ -88,6 +93,7 @@ export default function ProfileButton() {
 
   const { data: inboxCount = 0 } = useQuery({
     queryKey: INBOX_COUNT_KEY,
+    enabled: !compact,
     queryFn: fetchInboxCount,
     // ProfileButton is mounted on nearly every screen, so this poll runs
     // continuously for the whole session. Slowed 30s -> 60s to cut steady
@@ -98,6 +104,7 @@ export default function ProfileButton() {
 
   const { data: userId } = useQuery({
     queryKey: ['auth-user-id'],
+    enabled: !compact,
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       return user?.id ?? null;
@@ -111,7 +118,7 @@ export default function ProfileButton() {
   // (this component mounts on almost every screen, so the unconditional
   // triple-fetch was steady wasted load — incident 2026-05-18).
   React.useEffect(() => {
-    if (photoUrl) return;
+    if (photoUrl || compact) return;
     const t1 = setTimeout(() => refetch(), 800);
     const t2 = setTimeout(() => refetch(), 2500);
     const t3 = setTimeout(() => refetch(), 6000);
@@ -120,7 +127,7 @@ export default function ProfileButton() {
       clearTimeout(t2);
       clearTimeout(t3);
     };
-  }, [refetch, photoUrl]);
+  }, [refetch, photoUrl, compact]);
 
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
@@ -131,20 +138,21 @@ export default function ProfileButton() {
 
   return (
     <View style={styles.wrapper}>
-      <TouchableOpacity
+      {!compact && <TouchableOpacity
         style={styles.envelopeBtn}
         onPress={() => setShowInbox(true)}
         accessibilityLabel="Inbox"
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
-        <Bell size={20} color={inboxCount > 0 ? '#B5522E' : '#78695C'} strokeWidth={1.5} />
+        <Bell size={20} color={surface === 'scene' ? SceneDetailColors.text : inboxCount > 0 ? Colors.terracotta : Colors.secondary} strokeWidth={1.5} />
         {inboxCount > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{inboxCount > 9 ? '9+' : inboxCount}</Text>
           </View>
         )}
-      </TouchableOpacity>
+      </TouchableOpacity>}
       <TouchableOpacity
+        accessibilityRole="button"
         style={styles.container}
         onPress={handleProfilePress}
         accessibilityLabel="Profile"
@@ -161,13 +169,13 @@ export default function ProfileButton() {
             <User size={20} color={Colors.asphalt} strokeWidth={2} />
           )}
         </View>
-        <Text style={styles.label}>Profile</Text>
+        {!compact && <ChatSizedText style={[styles.label, surface === 'scene' && { color: SceneDetailColors.text }]}>Profile</ChatSizedText>}
       </TouchableOpacity>
-      <InboxModal
+      {!compact && <InboxModal
         visible={showInbox}
         onClose={() => setShowInbox(false)}
         userId={userId ?? null}
-      />
+      />}
       <Modal
         visible={showProfilePrompt}
         transparent
@@ -177,8 +185,8 @@ export default function ProfileButton() {
       >
         <Pressable style={styles.promptOverlay} onPress={() => dismissPrompt(false)}>
           <Pressable style={styles.promptCard} onPress={() => {}}>
-            <Text style={styles.promptTitle}>Complete your profile!</Text>
-            <Text style={styles.promptBody}>
+            <Text style={[styles.promptTitle,{fontFamily:promptFonts.display}]}>Complete your profile!</Text>
+            <Text style={[styles.promptBody,{fontFamily:promptFonts.regular}]}>
               Tell people a little about you so they get excited to meet you.
             </Text>
             <TouchableOpacity
@@ -186,7 +194,7 @@ export default function ProfileButton() {
               onPress={() => dismissPrompt(true)}
               activeOpacity={0.8}
             >
-              <Text style={styles.promptButtonText}>Let's do it</Text>
+              <CreatorActionFill /><Text style={[styles.promptButtonText,{fontFamily:promptFonts.medium}]}>Let's do it</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>

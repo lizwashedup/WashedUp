@@ -1,3 +1,4 @@
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
 /**
  * Creator mode: the swapped tab shell (doc 08). A separate route group so
  * personal tabs and creator tabs never mix. Entered from the profile
@@ -19,12 +20,12 @@ import { Redirect, Tabs, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActivityIndicator, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Sun, CalendarDays, Megaphone, UsersRound, Menu } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
-import { getCreatorAccess, hasCreatorAccess, creatorShellKind } from '../../lib/creatorMode';
+import { COMMUNITIES_ENABLED, CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
+import { hasCreatorAccess, creatorShellKind } from '../../lib/creatorMode';
 import { hydrateSelectedCommunity } from '../../lib/selectedCommunity';
 import { hydrateWorkspace, useWorkspace } from '../../lib/workspaceContext';
 import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
@@ -33,11 +34,7 @@ export default function CreatorLayout() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const viewingAsEventHost = useViewAsEventHost();
-  const { data: access, isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['creator-access'],
-    queryFn: getCreatorAccess,
-    staleTime: 30_000,
-  });
+  const { data: access, isLoading, isError, refetch, isFetching } = useCreatorAccessRead();
   const workspace = useWorkspace(access);
 
   // Restore the persisted community selection and product-level workspace
@@ -78,7 +75,9 @@ export default function CreatorLayout() {
   // as before: plans while the flag is off, profile once it is on, so the
   // area stays dark to the public either way.
   if (!hasCreatorAccess(access)) {
-    return <Redirect href={COMMUNITIES_ENABLED ? '/(tabs)/profile' : '/(tabs)/plans'} />;
+    // New page access does not replace existing grants or led-community roles.
+    // Only callers without legacy entitlement return to the unified chooser.
+    return <Redirect href={CREATOR_PAGES_ENABLED ? '/creator/pages' : COMMUNITIES_ENABLED ? '/(tabs)/profile' : '/(tabs)/plans'} />;
   }
 
   // A creator can hold both independent approvals. The persisted workspace
@@ -103,7 +102,9 @@ export default function CreatorLayout() {
       screenOptions={{
         headerShown: false,
         lazy: true,
-        freezeOnBlur: true,
+        // Keep inactive screens mounted without suspending the tab tree.
+        // Suspense freezing reproduced a persistent layout/retry loop on iOS.
+        freezeOnBlur: false,
         tabBarActiveTintColor: Colors.darkWarm,
         tabBarInactiveTintColor: Colors.warmGray,
         tabBarStyle: {

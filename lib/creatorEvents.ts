@@ -1,3 +1,4 @@
+import type {EventMediaGuard} from './eventMediaGuard';
 /**
  * Operator event create and edit, against the batch-15 RPCs.
  *
@@ -20,18 +21,7 @@ import { uploadBase64ToStorage } from './uploadPhoto';
 import { type DescriptionBlock } from './eventContent';
 
 // LIZ COPY: starter event categories (taste call 1)
-export const EVENT_CATEGORIES = [
-  'music',
-  'comedy',
-  'nightlife',
-  'food and drink',
-  'art',
-  'fitness and outdoors',
-  'community',
-  'film',
-  'markets',
-  'gaming',
-];
+export { EVENT_CATEGORIES } from './eventCategories';
 
 export interface OperatorEventFields {
   title: string;
@@ -46,6 +36,7 @@ export interface OperatorEventFields {
   venue: string;
   venue_address: string;
   category: string;
+  categories?: string[];
   external_url: string;
   ticket_price: string;
   public_name: string;
@@ -86,17 +77,9 @@ export async function probeConfirmationMessage(
   return { open: true, value: typeof raw === 'string' && raw.trim() ? raw : null };
 }
 
-// ─── C-18: offer type (CTO scope item 9, draft migration 20260818120000) ──
-// That migration (explore_events.offer_type + event_offer_sessions +
-// set_event_offer_sessions) is REVIEW ONLY -- not applied, and this file
-// must never apply it. Same join-gate shape as the confirmation-message
-// door above: probe first, only read/write the column once it is
-// confirmed live. Unlike confirmation_message there is no RPC param for
-// this on operator_create/update_explore_event even in the draft migration
-// (it deliberately left those RPCs untouched -- see the migration's own
-// header), so the write is a standalone column update, never folded into
-// the full-overwrite RPC payload; it cannot null any of that RPC's fields
-// because it is not one of its params.
+// C-18: probe the inherited label column, then save through the authorized
+// offer setter. Older backends retain a checked direct-update fallback only
+// when the new RPC is absent. Never fall back after an uncertain response.
 export const OFFER_TYPE_COLUMN = 'offer_type';
 
 /** Mirrors probeConfirmationMessage exactly: a missing column reads as door-closed, never as an error. */
@@ -112,16 +95,21 @@ export async function probeOfferType(
   return { open: true, value: typeof raw === 'string' ? raw : null };
 }
 
-/**
- * Best-effort write, mirrors setOperatorEventCoords: throws on failure so
- * the caller (event-form's syncOfferType) can swallow it the same way a
- * missing pin never blocks a save. A missing column (42703, pre-migration)
- * or an RLS refusal both just fail this call -- the picker still worked,
- * this activates the moment the column and its write grant exist.
- */
+/** Save the selected label without changing other event fields. A zero-row
+ * legacy write is unconfirmed; callers must not treat it as a saved choice. */
 export async function setEventOfferType(eventId: string, offerType: string): Promise<void> {
-  const { error } = await supabase.from('explore_events').update({ [OFFER_TYPE_COLUMN]: offerType }).eq('id', eventId);
+  const { data, error } = await supabase.rpc('operator_set_event_offer_type', {
+    p_event_id: eventId, p_offer_type: offerType,
+  });
+  if (error?.code === 'PGRST202') {
+    const legacy = await supabase.from('explore_events').update({ [OFFER_TYPE_COLUMN]: offerType })
+      .eq('id', eventId).select(`id,${OFFER_TYPE_COLUMN}`).maybeSingle();
+    if (legacy.error) throw legacy.error;
+    if (legacy.data?.id !== eventId || legacy.data?.[OFFER_TYPE_COLUMN] !== offerType) throw new Error('The event offer could not be confirmed. Check this event before trying again.');
+    return;
+  }
   if (error) throw error;
+  if (!data || data.event_id !== eventId || data.offer_type !== offerType) throw new Error('The event offer could not be confirmed. Check this event before trying again.');
 }
 
 export interface OperatorEventRow extends OperatorEventFields {
@@ -142,7 +130,7 @@ export interface OperatorEventRow extends OperatorEventFields {
 export async function getOperatorEvent(eventId: string): Promise<OperatorEventRow | null> {
   const { data, error } = await supabase
     .from('explore_events')
-    .select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id, latitude, longitude, ticket_capacity')
+    .select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, categories, external_url, ticket_price, public_name, pin_to_chat, status, community_id, host_user_id, latitude, longitude, ticket_capacity')
     .eq('id', eventId)
     .maybeSingle();
   if (error) throw error;
@@ -158,6 +146,7 @@ export async function getOperatorEvent(eventId: string): Promise<OperatorEventRo
     venue: data.venue ?? '',
     venue_address: data.venue_address ?? '',
     category: data.category ?? '',
+    categories: Array.isArray(data.categories)?data.categories:undefined,
     external_url: data.external_url ?? '',
     ticket_price: data.ticket_price != null ? String(data.ticket_price) : '',
     public_name: data.public_name ?? '',
@@ -259,7 +248,8 @@ export async function createOperatorEvent(
     fields.confirmation_message !== undefined
       ? { [CONFIRMATION_MESSAGE_RPC_PARAM]: fields.confirmation_message }
       : {};
-  const { data, error } = await supabase.rpc('operator_create_explore_event', {
+  const { data, error } = await supabase.rpc(fields.categories ? 'operator_create_explore_event_with_categories' : 'operator_create_explore_event', {
+    ...(fields.categories?{p_categories:fields.categories}:{}),
     ...confirmationMessage,
     p_title: fields.title,
     p_description: fields.description || null,
@@ -293,7 +283,8 @@ export async function updateOperatorEvent(
     fields.confirmation_message !== undefined
       ? { [CONFIRMATION_MESSAGE_RPC_PARAM]: fields.confirmation_message }
       : {};
-  const { error } = await supabase.rpc('operator_update_explore_event', {
+  const { error } = await supabase.rpc(fields.categories ? 'operator_update_explore_event_with_categories' : 'operator_update_explore_event', {
+    ...(fields.categories?{p_categories:fields.categories}:{}),
     ...confirmationMessage,
     p_event_id: eventId,
     p_title: fields.title,
@@ -375,10 +366,12 @@ export async function announceEventToMembers(eventId: string): Promise<void> {
 }
 
 /** Pick, compress, and upload an event poster. Returns the public URL or null on cancel. */
-export async function pickAndUploadEventImage(): Promise<string | null> {
+export async function pickAndUploadEventImage(guard?: EventMediaGuard, uploadPreparedCover?: (uri:string)=>Promise<string>): Promise<string | null> {
+  await guard?.check();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  await guard?.check();
   if (!perm.granted) return null;
   const res = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
@@ -388,6 +381,7 @@ export async function pickAndUploadEventImage(): Promise<string | null> {
     // selection time so the creator approves the same frame guests will see.
     aspect: [4, 5],
   });
+  await guard?.check();
   if (res.canceled || !res.assets?.[0]) return null;
   const manipulated = await ImageManipulator.manipulateAsync(
     res.assets[0].uri,
@@ -395,5 +389,9 @@ export async function pickAndUploadEventImage(): Promise<string | null> {
     { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true },
   );
   if (!manipulated.base64) return null;
-  return uploadBase64ToStorage('event-images', `${user.id}/${Crypto.randomUUID()}.jpg`, manipulated.base64);
+  await guard?.check();
+  const url=uploadPreparedCover ? await uploadPreparedCover(manipulated.uri)
+    : await uploadBase64ToStorage('event-images', `${user.id}/${Crypto.randomUUID()}.jpg`, manipulated.base64);
+  await guard?.check();
+  return url;
 }

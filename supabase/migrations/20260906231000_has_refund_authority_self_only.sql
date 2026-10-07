@@ -18,10 +18,9 @@
 -- request's own authenticated caller id. Self-or-service_role covers every real caller
 -- with no new carve-out.
 --
--- NOT applied anywhere, NOT run against a live or disposable Postgres this session (no
--- working harness -- same caveat as recent same-night migrations in this repo). Needs a
--- real apply-and-test pass and Josh's explicit go before this can ever be called done, per
--- this repo's own Release Discipline (clients/washed-up/CLAUDE.md).
+-- September 16: the service-role/no-subject regression is verified with the full
+-- predecessor self-tests and a rollback-only isolated permission contract. No
+-- lasting schema or runtime deployment. Production approval remains separate.
 
 BEGIN;
 
@@ -45,11 +44,11 @@ BEGIN
   -- NULL-safe (2026-09-06, security-review catch): a plain <> comparison goes
   -- to NULL (not true) when either side is NULL, which would fail OPEN here --
   -- exactly the leak this migration exists to close. auth.uid() IS NULL is
-  -- checked explicitly first; IS DISTINCT FROM (NULL-safe <>) covers the role
-  -- check, matching the existing precedent in
+  -- checked explicitly for ordinary callers; IS DISTINCT FROM (NULL-safe <>)
+  -- covers both comparisons, matching the existing precedent in
   -- 20260829210000_ticket_receipt_resend_rate_limit.sql.
-  IF auth.uid() IS NULL
-     OR (auth.role() IS DISTINCT FROM 'service_role' AND p_user_id <> auth.uid())
+  IF auth.role() IS DISTINCT FROM 'service_role'
+     AND (auth.uid() IS NULL OR p_user_id IS DISTINCT FROM auth.uid())
   THEN
     RETURN false;
   END IF;

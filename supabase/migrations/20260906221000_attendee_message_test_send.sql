@@ -1,3 +1,5 @@
+-- September16 local candidate: Scene column prerequisite is now 20260904060000.
+-- Preserve all inherited self-tests; the later atomic/test-target migrations supersede this draft RPC.
 -- REVIEW ONLY. Forward migration. Do not apply without explicit approval.
 --
 -- Send-test-to-yourself: two new, deliberately narrow RPCs so a creator can
@@ -169,7 +171,7 @@ BEGIN
   -- inflate this count.
   SELECT count(*) INTO v_sent_today
   FROM public.app_notifications
-  WHERE event_id = p_event_id
+  WHERE explore_event_id = p_event_id
     AND user_id = v_uid
     AND actor_user_id = v_uid
     AND type = 'broadcast'
@@ -184,7 +186,7 @@ BEGIN
   -- actually see it -- no attendee_message_sends row, no opt-out check, no
   -- ticket_orders/explore_event_rsvps read.
   INSERT INTO public.app_notifications
-    (user_id, type, title, body, event_id, actor_user_id, status, push_sent, push_suppressed)
+    (user_id, type, title, body, explore_event_id, actor_user_id, status, push_sent, push_suppressed)
   VALUES
     (v_uid, 'broadcast', v_subject, v_body, p_event_id, v_uid, 'unread', false, false)
   RETURNING id INTO v_id;
@@ -403,7 +405,7 @@ BEGIN
 
     SELECT count(*) INTO v_notif_count FROM public.app_notifications
     WHERE id = v_notif_id AND user_id = v_real_event_owner AND actor_user_id = v_real_event_owner
-      AND event_id = v_real_event_id AND type = 'broadcast'
+      AND explore_event_id = v_real_event_id AND event_id IS NULL AND type = 'broadcast'
       AND title = 'test subject' AND body = 'test body';
     IF v_notif_count <> 1 THEN
       RAISE EXCEPTION 'SELF-TEST FAIL: organizer test-send did not land exactly 1 correct app_notifications row';

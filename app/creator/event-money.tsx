@@ -1,109 +1,81 @@
-/**
- * Event money tab (Build 35 Screen 07): the event-scoped financial
- * reconciliation view -- gross, processing, our 4%, refunds, and net, plus
- * payout status. Reuses MoneySummaryCard (components/creator/MoneySummaryCard)
- * unchanged, the same card already proven on the Attendees screen, rather
- * than recomputing the same money math a second time.
- *
- * Finance-gated per the delta matrix (Screen 07: "Finance sees refund and
- * payout data; Editor does not by default"). A solo event host
- * (hasEventHostGrant, no community) also sees their own event's numbers,
- * mirroring the existing gate on the account-wide getting-paid screen
- * (app/creator/payouts.tsx) -- RLS (is_ticketing_organizer) is the real
- * security boundary underneath both; this client check only decides which
- * UI renders. Read-only: no refund or payout action lives on this screen.
- * Refunds stay on Attendees (Screen 05), where they already work; Screen 45
- * (per-purchase detail plus an audit-logged action trail) is separate,
- * unbuilt scope that needs its own migration.
- */
+import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {ActivityIndicator,StyleSheet,Text,View} from 'react-native';
+import {useLocalSearchParams,router} from 'expo-router';
+import {useCreatorPageScope} from '../../hooks/useCreatorPageScope';
+import {useCreatorPageRead} from '../../hooks/useCreatorPageRead';
+import {useAfterglowFonts} from '../../hooks/useAfterglowFonts';
+import {loadEventEarnings} from '../../lib/eventEarnings';
+import {eventSummaryId} from '../../lib/eventSummary';
+import {requestWithDeadline} from '../../lib/requestWithDeadline';
+import type {CreatorPageScope} from '../../lib/creatorPageReview';
+import type {CreatorAccess} from '../../lib/creatorMode';
+import {EventEarningsView} from '../../components/creator/EventEarningsView';
+import {PageFrame,PageAction,pageStyles as s} from '../../components/creator/pages/PageFrame';
+import {AfterglowColors as C,CreatorSurfaceColors} from '../../constants/Colors';
+import {FontSizes} from '../../constants/Typography';
 
-import React from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, router } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Lock } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
-import { countAttendees, getEventAttendees, getEventMoneySummary, sumRefundedCentsOnPaidOrders } from '../../lib/ticketAttendees';
-import { getCreatorAccess, canManageFinance, type CreatorAccess } from '../../lib/creatorMode';
-import { MoneySummaryCard } from '../../components/creator/MoneySummaryCard';
-
-/**
- * Screen-level finance gate: Finance/Owner/Admin (canManageFinance), or a
- * solo event host looking at their own event (hasEventHostGrant). Mirrors
- * payouts.tsx's established gate (`!hasEventHostGrant && !canManageFinance`)
- * at the per-event screen -- RLS still scopes the actual rows to events this
- * user really organizes, so this only decides what the UI shows.
- */
-export function canSeeEventMoney(
-  access: Pick<CreatorAccess, 'hasEventHostGrant'> | null | undefined,
-  canFinance: boolean,
-): boolean {
-  return canFinance || !!access?.hasEventHostGrant;
-}
-
-export default function EventMoneyScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-
-  const { data: access, isLoading: accessLoading } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const canSeeMoney = canSeeEventMoney(access, canManageFinance(access));
-
-  const { data: attendees = [], isLoading: attendeesLoading } = useQuery({
-    queryKey: ['event-attendees', id],
-    queryFn: () => getEventAttendees(id!),
-    enabled: !!id && canSeeMoney,
-    staleTime: 10_000,
+/** Legacy helper retained for callers; the screen now checks exact-event finance authority. */
+export function canSeeEventMoney(access:Pick<CreatorAccess,'hasEventHostGrant'>|null|undefined,canFinance:boolean){return canFinance||!!access?.hasEventHostGrant;}
+export default function EventMoneyScreen(){
+ const params=useLocalSearchParams<{id?:string;pageId?:string}>(),id=eventSummaryId(params.id),pageId=eventSummaryId(params.pageId);
+ const {scope,account}=useCreatorPageScope(`earnings:${pageId??''}:${id??''}`),{fonts}=useAfterglowFonts(true,'creator');
+ const visit=useMemo(()=>({}),[scope,id,pageId]),latestVisit=useRef(visit),mounted=useRef(true);
+ latestVisit.current=visit;
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+ const ownedScope=useMemo(()=>scope?{userId:scope.userId,isCurrent:()=>mounted.current&&latestVisit.current===visit&&scope.isCurrent()}:null,[scope,visit]);
+ const gate=useRef({visit,ready:false,isPayee:false});
+ const retryLock=useRef<object|null>(null),[retryVisit,setRetryVisit]=useState<object|null>(null);
+ const retrying=retryVisit===visit;
+ const read=useCallback(async(initiatingScope:CreatorPageScope)=>{
+  let reading=true;
+  const owned={userId:initiatingScope.userId,isCurrent:()=>reading&&initiatingScope.isCurrent()};
+  try{
+   if(!owned.isCurrent())throw Error('This visit has ended.');
+   const result=id?await requestWithDeadline(loadEventEarnings(id,pageId,owned),12_000):null;
+   if(!owned.isCurrent())throw Error('This visit has ended.');
+   if(!result&&gate.current.visit===visit)gate.current.ready=false;
+   return result;
+  }catch(error){if(gate.current.visit===visit)gate.current.ready=false;throw error;}
+  finally{reading=false;}
+ },[id,pageId,visit]);
+ const {data,error,loading,refresh}=useCreatorPageRead(ownedScope,read);
+ const ready=!!ownedScope?.isCurrent()&&!loading&&!retrying&&retryLock.current!==visit&&!error&&!account.error&&!account.isLoading&&!!data;
+ gate.current={visit,ready,isPayee:!!data?.isPayee};
+ const current=()=>mounted.current&&latestVisit.current===visit&&(ownedScope?.isCurrent()??account.isCurrent());
+ const retry=()=>{
+  if(!id||!current()||retryLock.current===visit||loading||account.isLoading)return;
+  retryLock.current=visit;gate.current.ready=false;setRetryVisit(visit);
+  void(account.error?account.retry():refresh()).catch(()=>undefined).finally(()=>{
+   if(retryLock.current===visit)retryLock.current=null;
+   if(mounted.current&&latestVisit.current===visit)setRetryVisit(null);
   });
-  const { data: money, isLoading: moneyLoading } = useQuery({
-    queryKey: ['event-money-summary', id],
-    queryFn: () => getEventMoneySummary(id!),
-    enabled: !!id && canSeeMoney,
-    staleTime: 10_000,
-  });
-
-  const refundedCents = sumRefundedCentsOnPaidOrders(attendees);
-  const ticketsSold = countAttendees(attendees).sold;
-  const loading = accessLoading || (canSeeMoney && (attendeesLoading || moneyLoading));
-
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="back">
-          <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2} />
-        </TouchableOpacity>
-        {/* copy to the taste gate */}
-        <Text style={styles.headerTitle}>money</Text>
-      </View>
-
-      {loading ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color={Colors.terracotta} /></View>
-      ) : !canSeeMoney ? (
-        <View style={styles.centered}>
-          <Lock size={28} color={Colors.textLight} strokeWidth={2} />
-          {/* copy to the taste gate -- honest, not a dead end */}
-          <Text style={styles.restricted}>money details are visible to this event&apos;s finance team and owner.</Text>
-        </View>
-      ) : money ? (
-        <ScrollView contentContainerStyle={styles.body}>
-          <MoneySummaryCard money={money} ticketsSold={ticketsSold} refundedCents={refundedCents} />
-        </ScrollView>
-      ) : (
-        <View style={styles.centered}>
-          {/* copy to the taste gate */}
-          <Text style={styles.empty}>couldn&apos;t load money for this event.</Text>
-        </View>
-      )}
-    </SafeAreaView>
-  );
+ };
+ const navigate=(path:string,payeeOnly=false)=>{
+  if(current()&&gate.current.visit===visit&&gate.current.ready&&(!payeeOnly||gate.current.isPayee))router.push(path as never);
+ };
+ const confirmed=!!ownedScope?.isCurrent()&&!account.isLoading&&!account.error&&!!data;
+ const updating=loading||retrying;
+ const back=()=>{
+  if(!current())return;
+  if(router.canGoBack())router.back();
+  else if(id)router.replace({pathname:'/creator/event-summary',params:{id,...(pageId?{pageId}:{})}} as never);
+  else router.replace('/creator/pages' as never);
+ };
+ return <PageFrame title="Event earnings" onBack={back} onRefresh={retry} refreshing={confirmed&&updating}>
+  {!id?<Text style={[s.body,{fontFamily:fonts.regular}]}>Choose an event to view its earnings.</Text>
+  :confirmed?<>
+    {(updating||error)&&<View style={styles.recovery} accessibilityRole={error?'alert':undefined}>
+      <Text style={[styles.recoveryText,{fontFamily:fonts.regular}]}>{updating?'Updating earnings. Showing the last confirmed figures.':'Earnings couldn’t be refreshed. Showing the last confirmed figures.'}</Text>
+      {(error||retrying)&&<PageAction title={updating?'Retrying…':'Try again'} compact singleLine disabled={updating} onPress={retry}/>}
+    </View>}
+    <EventEarningsView data={data!} disabled={!ready} onSetup={()=>navigate('/creator/payouts',true)} onSupport={()=>navigate('/creator/help')} onRefresh={retry}/>
+   </>
+  :account.isLoading||updating?<ActivityIndicator accessibilityLabel="Loading earnings" color={C.clay}/>
+  :account.error||error?<View style={s.notice}><Text accessibilityRole="alert" style={[s.body,{fontFamily:fonts.regular}]}>We couldn’t load this event’s earnings. Check again to see the latest figures.</Text><PageAction title="Try again" compact singleLine onPress={retry}/></View>
+  :<Text style={[s.body,{fontFamily:fonts.regular}]}>Earnings are available to this event’s owner and finance team.</Text>}
+ </PageFrame>;
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12 },
-  headerTitle: { flex: 1, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 12 },
-  empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center' },
-  restricted: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center', lineHeight: 20 },
-  body: { paddingBottom: 40 },
+const styles=StyleSheet.create({
+ recovery:{padding:12,marginBottom:16,borderWidth:1,borderColor:CreatorSurfaceColors.goldEdge,borderRadius:14,backgroundColor:C.white,flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:12},
+ recoveryText:{flexGrow:1,flexBasis:150,minWidth:0,fontSize:FontSizes.bodySM,lineHeight:20,color:C.muted},
 });

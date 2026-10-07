@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,8 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
@@ -19,15 +19,16 @@ import {
   UserMinus,
   Flag,
 } from 'lucide-react-native';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { RADII } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
 import { buildComposerWithPerson } from '../../../lib/composerLink';
+import { useObservedUser, type ObservedUser } from '../../../hooks/useObservedUser';
 import { usePersonProfile } from '../../../hooks/usePersonProfile';
-import { useGetOrCreateDm } from '../../../hooks/useGetOrCreateDm';
-import { usePeopleConnectionMutations } from '../../../hooks/usePeopleConnectionMutations';
+import { useGetOrCreateDm, isObsoleteDmOperation } from '../../../hooks/useGetOrCreateDm';
+import { usePeopleConnectionMutations, isObsoletePeopleConnection } from '../../../hooks/usePeopleConnectionMutations';
 import { useBlock } from '../../../hooks/useBlock';
 import { BrandedAlert } from '../../BrandedAlert';
 import MenuCard, { type AnchorRect } from '../../menu/MenuCard';
@@ -37,6 +38,13 @@ import type {
   PersonProfileMutualFace,
 } from '../../../lib/yours/types';
 import { initialOf } from '../../../lib/yours/personDisplay';
+
+type Appearance = { fonts: AfterglowFontFamilies };
+const AppearanceContext = createContext<Appearance | undefined>(undefined);
+function useProfileStyles() {
+  const appearance = useContext(AppearanceContext);
+  return { appearance, styles: useMemo(() => appearance ? { ...baseStyles, ...profileAppearance(appearance.fonts) } : baseStyles, [appearance]) };
+}
 
 /** "Sat, Jun 14", pinned to the LA clock plans live on (no dashes). */
 function fmtDate(iso: string): string {
@@ -73,6 +81,7 @@ function MutualFaces({
   faces: PersonProfileMutualFace[];
   total: number;
 }) {
+  const { styles, appearance } = useProfileStyles();
   if (total <= 0) return null;
   const lead = faces[0]?.first_name_display ?? 'someone';
   return (
@@ -81,18 +90,12 @@ function MutualFaces({
         <View style={styles.mutualStack}>
           {faces.map((f, i) => (
             <View key={f.user_id} style={[styles.mutualFace, i > 0 && styles.mutualFaceOverlap]}>
-              {f.profile_photo_url ? (
-                <Image source={{ uri: f.profile_photo_url }} style={styles.mutualImg} contentFit="cover" />
-              ) : (
-                <Text style={styles.mutualInitial}>
-                  {initialOf(f.first_name_display)}
-                </Text>
-              )}
+              <ProfilePhoto key={JSON.stringify([f.user_id, f.profile_photo_url])} name={f.first_name_display} uri={f.profile_photo_url} small />
             </View>
           ))}
         </View>
       )}
-      <Text style={styles.mutualText} numberOfLines={2}>
+      <Text style={styles.mutualText} numberOfLines={appearance ? undefined : 2}>
         {COPY.ppMutuals(lead, total)}
       </Text>
     </View>
@@ -100,7 +103,9 @@ function MutualFaces({
 }
 
 /** Back chevron always; overflow only when there is a real profile to act on. */
-function TopBar({ onMore }: { onMore?: (anchor: AnchorRect) => void }) {
+function TopBar({ onMore, onBack, busy = false }: { onMore?: (anchor: AnchorRect) => void; onBack: () => void; busy?: boolean }) {
+  const { styles, appearance } = useProfileStyles();
+  const color = appearance ? AfterglowColors.ink : Colors.asphalt;
   const moreRef = useRef<View>(null);
   const press = () => {
     if (!onMore) return;
@@ -111,24 +116,26 @@ function TopBar({ onMore }: { onMore?: (anchor: AnchorRect) => void }) {
   return (
     <View style={styles.topBar}>
       <Pressable
-        onPress={() => router.back()}
+        onPress={onBack}
         hitSlop={12}
         style={styles.iconBtn}
         accessibilityRole="button"
-        accessibilityLabel={COPY.keepBack}
+        accessibilityLabel="Back"
       >
-        <ChevronLeft size={24} color={Colors.asphalt} />
+        <ChevronLeft size={24} color={color} />
       </Pressable>
       {onMore ? (
         <Pressable
           ref={moreRef}
           onPress={press}
+          disabled={busy}
+          accessibilityState={{ disabled: busy }}
           hitSlop={12}
           style={styles.iconBtn}
           accessibilityRole="button"
-          accessibilityLabel={COPY.keepMore}
+          accessibilityLabel="More options"
         >
-          <MoreHorizontal size={22} color={Colors.asphalt} />
+          <MoreHorizontal size={22} color={color} />
         </Pressable>
       ) : (
         <View style={styles.iconBtn} />
@@ -137,30 +144,32 @@ function TopBar({ onMore }: { onMore?: (anchor: AnchorRect) => void }) {
   );
 }
 
+function ProfilePhoto({ name, uri, small = false }: { name: string | null; uri: string | null; small?: boolean }) {
+  const { styles } = useProfileStyles();
+  const [failed, setFailed] = useState(false);
+  const mounted = useRef(false);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  return uri && !failed ? <Image source={{ uri }} style={small ? styles.mutualImg : styles.avatarImg} contentFit="cover"
+    recyclingKey={uri} onError={() => { if (mounted.current) setFailed(true); }} /> :
+    <Text style={small ? styles.mutualInitial : styles.avatarInitial}>{initialOf(name)}</Text>;
+}
 function Avatar({ name, photoUrl }: { name: string | null; photoUrl: string | null }) {
-  return (
-    <View style={styles.avatar}>
-      {photoUrl ? (
-        <Image source={{ uri: photoUrl }} style={styles.avatarImg} contentFit="cover" />
-      ) : (
-        <Text style={styles.avatarInitial}>
-          {initialOf(name)}
-        </Text>
-      )}
-    </View>
-  );
+  const { styles } = useProfileStyles();
+  return <View style={styles.avatar}><ProfilePhoto key={JSON.stringify([name, photoUrl])} name={name} uri={photoUrl}/></View>;
 }
 
 function SectionLabel({ children }: { children: string }) {
+  const { styles } = useProfileStyles();
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
-function UpcomingRow({ row }: { row: PersonProfileUpcoming }) {
+function UpcomingRow({ row, onOpen }: { row: PersonProfileUpcoming; onOpen: (id: string) => void }) {
+  const { styles, appearance } = useProfileStyles();
   const [pressed, setPressed] = useState(false);
   const date = fmtDate(row.start_time);
   return (
     <Pressable
-      onPress={() => router.push(`/plan/${row.event_id}` as never)}
+      onPress={() => onOpen(row.event_id)}
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
       style={[styles.planRow, pressed && styles.planRowPressed]}
@@ -169,10 +178,10 @@ function UpcomingRow({ row }: { row: PersonProfileUpcoming }) {
     >
       <View style={styles.dateDot} />
       <View style={styles.planText}>
-        <Text style={styles.planTitle} numberOfLines={1}>
+        <Text style={styles.planTitle} numberOfLines={appearance ? undefined : 1}>
           {row.title}
         </Text>
-        <Text style={styles.planMeta} numberOfLines={1}>
+        <Text style={styles.planMeta} numberOfLines={appearance ? undefined : 1}>
           {row.neighborhood ? `${date} · ${row.neighborhood}` : date}
         </Text>
       </View>
@@ -180,11 +189,12 @@ function UpcomingRow({ row }: { row: PersonProfileUpcoming }) {
   );
 }
 
-function PastRow({ row }: { row: PersonProfilePast }) {
+function PastRow({ row, onOpen }: { row: PersonProfilePast; onOpen: (id: string) => void }) {
+  const { styles, appearance } = useProfileStyles();
   const [pressed, setPressed] = useState(false);
   return (
     <Pressable
-      onPress={() => router.push(`/plan/${row.event_id}` as never)}
+      onPress={() => onOpen(row.event_id)}
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
       style={[styles.planRow, pressed && styles.planRowPressed]}
@@ -192,7 +202,7 @@ function PastRow({ row }: { row: PersonProfilePast }) {
       accessibilityLabel={`${row.title}. ${fmtDate(row.date)}.`}
     >
       <Text style={styles.pastDate}>{fmtDate(row.date)}</Text>
-      <Text style={styles.pastTitle} numberOfLines={1}>
+      <Text style={styles.pastTitle} numberOfLines={appearance ? undefined : 1}>
         {row.title}
       </Text>
     </Pressable>
@@ -207,88 +217,142 @@ function PastRow({ row }: { row: PersonProfilePast }) {
  * not-found. No albums (those are keep-page only). Source:
  * individual-profile-page-spec.md.
  */
-export default function PersonProfilePage({
-  userId,
-  targetId,
-}: {
+export interface PersonProfilePageProps {
   userId: string;
   targetId: string;
-}) {
-  const { data: profile, isLoading } = usePersonProfile(userId, targetId);
+  appearance?: Appearance;
+}
+type Visit = { focused: boolean; retired: boolean };
+type MenuVisit = { visit: Visit; action: 'message' | 'plan' | 'remove' | 'block' | null };
+export default function PersonProfilePage(props: PersonProfilePageProps) {
+  return <AppearanceContext.Provider value={props.appearance}><ObservedProfile key={JSON.stringify([props.userId, props.targetId])} {...props}/></AppearanceContext.Provider>;
+}
+function ObservedProfile(props: PersonProfilePageProps) {
+  const viewer = useObservedUser();
+  return <ProfileVisit key={JSON.stringify([viewer.viewerId, viewer.epoch])} {...props} viewer={viewer}/>;
+}
+function ProfileVisit({ userId, targetId, viewer }: PersonProfilePageProps & { viewer: ObservedUser }) {
+  const { styles, appearance } = useProfileStyles();
+  const focused = useIsFocused();
+  const mounted = useRef(false);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const identityReady = viewer.viewerId === userId && !!userId && !viewer.error && !viewer.isLoading && viewer.isCurrent();
+  const identity = useRef(identityReady); identity.current = identityReady;
+  const accountCurrent = useCallback(() => mounted.current && identity.current && viewer.isCurrent(), [viewer.isCurrent]);
+  const readScope = useMemo(() => ({ userId, epoch: viewer.epoch, isCurrent: accountCurrent }), [userId, viewer.epoch, accountCurrent]);
+  const query = usePersonProfile(identityReady ? userId : null, identityReady ? targetId : null, readScope);
+  const profile = identityReady && !query.isError && query.data?.user_id === targetId ? query.data : null;
+  const latestProfile = useRef(profile); latestProfile.current = profile;
+  const visitRef = useRef<Visit>({ focused, retired: false });
+  if (visitRef.current.focused !== focused) visitRef.current = { focused, retired: false };
+  const visit = visitRef.current;
+  const isCurrent = useCallback(() => accountCurrent() && visitRef.current === visit && visit.focused && !visit.retired, [accountCurrent, visit]);
+  const readable = () => isCurrent() && latestProfile.current?.user_id === targetId;
   const getOrCreateDm = useGetOrCreateDm();
   const { remove } = usePeopleConnectionMutations(userId);
-  const { blockUser } = useBlock();
-
-  const [messagePressed, setMessagePressed] = useState(false);
-  const [planPressed, setPlanPressed] = useState(false);
-  const [moreAnchor, setMoreAnchor] = useState<AnchorRect | null>(null);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [removeConfirmVisible, setRemoveConfirmVisible] = useState(false);
-
-  const name = profile?.first_name_display ?? 'them';
-
-  const onMessage = () => {
-    if (!profile || getOrCreateDm.isPending) return;
-    hapticSelection();
-    getOrCreateDm.mutate(profile.user_id, {
-      onSuccess: (circleId) => router.push(`/(tabs)/chats/circle/${circleId}` as never),
-      onError: () => {},
-    });
+  const { blockUser, blocking } = useBlock();
+  const pending = useRef<{ visit: Visit; kind: 'message' | 'remove' | 'retry' } | null>(null);
+  const [work, setWork] = useState<typeof pending.current>(null);
+  const busy = work?.visit === visit ? work.kind : null;
+  const [feedback, setFeedback] = useState<{ visit: Visit; text: string } | null>(null);
+  const report = (text: string) => { if (isCurrent()) setFeedback({ visit, text }); };
+  const begin = (kind: NonNullable<typeof pending.current>['kind']) => {
+    if (!isCurrent() || blocking || pending.current?.visit === visit) return null;
+    const attempt = { visit, kind }; pending.current = attempt; setWork(attempt); setFeedback(null); return attempt;
   };
-
+  const finish = (attempt: NonNullable<typeof pending.current>) => {
+    if (pending.current !== attempt) return;
+    pending.current = null; if (isCurrent()) setWork(null);
+  };
+  const navigate = (href?: string) => {
+    if (!isCurrent()) return;
+    visit.retired = true;
+    try { if (href) router.push(href as never); else router.back(); }
+    catch { visit.retired = false; report('Couldn’t open that page. Try again.'); }
+  };
+  const back = () => {
+    if (!mounted.current || visitRef.current !== visit || !visit.focused || visit.retired) return;
+    visit.retired = true; router.back();
+  };
+  const [messagePressed, setMessagePressed] = useState(false), [planPressed, setPlanPressed] = useState(false);
+  const [menu, setMenu] = useState<{ session: MenuVisit; anchor: AnchorRect; open: boolean } | null>(null);
+  const activeMenu = useRef<MenuVisit | null>(null);
+  const [confirmation, setConfirmation] = useState<Visit | null>(null);
+  const confirmationRef = useRef(confirmation); confirmationRef.current = confirmation;
+  const onMessage = async () => {
+    if (!readable()) return; const attempt = begin('message'); if (!attempt) return; hapticSelection();
+    try {
+      const circleId = await getOrCreateDm.mutateAsync(targetId, { scope: { userId, isCurrent: readable } });
+      if (!readable() || pending.current !== attempt) return;
+      if (typeof circleId !== 'string' || !circleId.trim()) throw new Error('Unconfirmed chat');
+      navigate(`/(tabs)/chats/circle/${circleId}`);
+    } catch (error) { if (!isObsoleteDmOperation(error)) report(COPY.keepMessageError); }
+    finally { finish(attempt); }
+  };
   const onMakePlan = () => {
-    if (!profile) return;
-    hapticSelection();
-    router.push(
-      buildComposerWithPerson(profile.user_id, profile.first_name_display, profile.profile_photo_url) as never,
-    );
+    if (!readable() || pending.current?.visit === visit || blocking) return;
+    const person = latestProfile.current!; hapticSelection();
+    navigate(buildComposerWithPerson(person.user_id, person.first_name_display, person.profile_photo_url));
   };
-
   const onMore = (anchor: AnchorRect) => {
-    setMoreAnchor(anchor);
-    setMoreOpen(true);
+    if (!readable() || pending.current?.visit === visit || blocking || activeMenu.current?.visit === visit) return;
+    const session: MenuVisit = { visit, action: null }; activeMenu.current = session; setMenu({ session, anchor, open: true });
   };
-
-  // Open the destructive confirm only after the MenuCard's dismiss animation
-  // finishes, so two Modals never co-mount (the iOS present-while-dismissing
-  // trap). The block flow uses a system Alert (not an RN Modal), so it is safe
-  // to fire directly from the closing menu.
-  const confirmRemove = () => setTimeout(() => setRemoveConfirmVisible(true), 180);
-  // Gate navigation on success: the connection-mutation hook invalidates the
-  // grid + profile/keep caches onSuccess (severed access). Navigating before the
-  // write lands could strand the user on a stale page or hide a failure.
-  const doRemove = () => {
-    remove.mutate(targetId, {
-      onSuccess: () => router.back(),
-      onError: () => Alert.alert('', COPY.ppRemoveError),
-    });
+  const queueMenu = (action: MenuVisit['action']) => {
+    if (!readable() || !menu || activeMenu.current !== menu.session || menu.session.visit !== visit || menu.session.action) return;
+    menu.session.action = action;
   };
-  const onReportBlock = () => blockUser(targetId, name, () => router.back());
-
-  const goKeep = () => router.push(`/person/${targetId}` as never);
-
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <TopBar />
-        <View style={styles.center}>
-          <ActivityIndicator color={Colors.terracotta} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // Null payload: denied (non-mutual / severed / blocked) or nonexistent. They
-  // look identical by design (no teaser, no explanation, no red).
-  if (!profile) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <TopBar />
-        <View style={styles.center}>
-          <Text style={styles.notFound}>{COPY.ppNotFound}</Text>
-        </View>
-      </SafeAreaView>
-    );
+  const closeMenu = () => {
+    if (!isCurrent() || !menu || activeMenu.current !== menu.session) return;
+    setMenu({ ...menu, open: false });
+  };
+  const onMenuClosed = () => {
+    if (!readable() || !menu || activeMenu.current !== menu.session || menu.session.visit !== visit) return;
+    const action = menu.session.action; activeMenu.current = null; setMenu(null);
+    if (action === 'message') void onMessage();
+    else if (action === 'plan') onMakePlan();
+    else if (action === 'remove') { confirmationRef.current = visit; setConfirmation(visit); }
+    else if (action === 'block') {
+      const person = latestProfile.current!;
+      void blockUser(targetId, person.first_name_display?.trim() || 'this person', () => { if (isCurrent()) navigate(); }, { userId, isCurrent });
+    }
+  };
+  const doRemove = async () => {
+    if (!readable() || confirmationRef.current !== visit) return; const attempt = begin('remove'); if (!attempt) return;
+    try {
+      await remove.mutateAsync(targetId, { scope: { userId, isCurrent, canDispatch: readable } });
+      if (isCurrent() && pending.current === attempt) navigate();
+    } catch (error) {
+      if (!isObsoletePeopleConnection(error) && isCurrent()) {
+        confirmationRef.current = null; setConfirmation(null); report(COPY.ppRemoveError);
+      }
+    } finally { finish(attempt); }
+  };
+  const closeConfirmation = () => { if (isCurrent()) { confirmationRef.current = null; setConfirmation(null); } };
+  const openPlan = (id: string) => {
+    if (!readable() || pending.current?.visit === visit || blocking) return;
+    const person = latestProfile.current!;
+    if (![...(person.upcoming ?? []), ...(person.past ?? [])].some(plan => plan.event_id === id)) return;
+    navigate(`/plan/${id}`);
+  };
+  const goKeep = () => { if (readable() && pending.current?.visit !== visit && !blocking) navigate(`/person/${targetId}`); };
+  const retry = async () => {
+    if (query.isFetching) return; const attempt = begin('retry'); if (!attempt) return;
+    try { await query.refetch(); } catch { /* The query owns its retry error. */ } finally { finish(attempt); }
+  };
+  const name = profile?.first_name_display?.trim() || 'them';
+  const handle = profile?.handle?.trim().replace(/^@+/, '');
+  const waiting = viewer.isLoading || (identityReady && (query.isLoading || (query.isFetching && !profile))) || busy === 'retry';
+  const currentFeedback = feedback?.visit === visit ? feedback.text : null;
+  const color = appearance ? AfterglowColors.ink : Colors.asphalt;
+  const topBar = <TopBar onBack={back} onMore={profile ? onMore : undefined} busy={!!busy || blocking}/>;
+  if (waiting || viewer.error || !identityReady || query.isError || !profile) {
+    return <SafeAreaView style={styles.container} edges={['top']}>{topBar}<View style={styles.center}>
+      {waiting ? <><ActivityIndicator color={appearance ? AfterglowColors.clay : Colors.terracotta} accessibilityLabel="Loading profile"/><Text style={styles.statusText}>Loading profile…</Text></> :
+       viewer.error ? <><Text style={styles.statusTitle}>Couldn’t check your account.</Text><Pressable style={styles.retry} accessibilityRole="button" accessibilityLabel="Try again to check account" onPress={() => { if (mounted.current && visitRef.current === visit && focused && !visit.retired) void viewer.retry(); }}><Text style={styles.retryText}>Try again</Text></Pressable></> :
+       identityReady && query.isError ? <><Text style={styles.statusTitle}>Couldn’t load this profile.</Text><Pressable style={styles.retry} accessibilityRole="button" accessibilityLabel="Try again to load profile" onPress={() => { void retry(); }}><Text style={styles.retryText}>Try again</Text></Pressable></> :
+       <Text style={styles.notFound}>{appearance ? 'This profile isn’t available.' : COPY.ppNotFound}</Text>}
+    </View></SafeAreaView>;
   }
 
   // Defensive: the RPC coalesces these to [] / 0, but never deref a null array.
@@ -309,7 +373,8 @@ export default function PersonProfilePage({
   // Trust line, anti-zero: joined is always shown; plans-created + phone-verified
   // only when real. The warm new-here marker stands in for the track record while
   // new (never "unproven" framing). Honest signals only.
-  const trustParts: string[] = [COPY.ppJoined(fmtMonthYear(profile.joined_at))];
+  const joined = fmtMonthYear(profile.joined_at);
+  const trustParts: string[] = joined ? [COPY.ppJoined(joined)] : [];
   if (!profile.is_new && profile.plans_created > 0) {
     trustParts.push(COPY.ppCreated(profile.plans_created));
   }
@@ -317,10 +382,12 @@ export default function PersonProfilePage({
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TopBar onMore={onMore} />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <Avatar name={profile.first_name_display} photoUrl={profile.profile_photo_url} />
-        <Text style={styles.name}>{name}</Text>
+      {topBar}
+      <ScrollView showsVerticalScrollIndicator contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <View style={styles.identityRow}>
+          <Avatar name={profile.first_name_display} photoUrl={profile.profile_photo_url} />
+          <View style={styles.identityText}><Text style={styles.name}>{name}</Text>{!!handle && <Text style={styles.handle}>{`@${handle}`}</Text>}</View>
+        </View>
 
         {profile.neighborhood ? (
           <Text style={styles.place}>{profile.neighborhood}</Text>
@@ -341,44 +408,47 @@ export default function PersonProfilePage({
         <MutualFaces faces={mutualFaces} total={profile.mutual_count} />
 
         {profile.is_new ? <Text style={styles.newHere}>{COPY.ppNewHere}</Text> : null}
-        <Text style={styles.trust}>{trustParts.join(' · ')}</Text>
+        {!!trustParts.length && <Text style={styles.trust}>{trustParts.join(' · ')}</Text>}
+        {!!currentFeedback && <Text style={styles.feedback} accessibilityRole="alert">{currentFeedback}</Text>}
 
         <View style={styles.actions}>
           <Pressable
-            style={[styles.actionBtn, styles.actionGold, messagePressed && styles.actionPressed, getOrCreateDm.isPending && styles.actionDisabled]}
-            onPress={onMessage}
+            style={[styles.actionBtn, styles.actionGold, messagePressed && styles.actionPressed, (busy === 'message') && styles.actionDisabled]}
+            onPress={() => { void onMessage(); }}
             onPressIn={() => setMessagePressed(true)}
             onPressOut={() => setMessagePressed(false)}
-            disabled={getOrCreateDm.isPending}
+            disabled={!!busy || blocking}
             accessibilityRole="button"
-            accessibilityState={{ disabled: getOrCreateDm.isPending }}
-            accessibilityLabel={`${COPY.keepMessage} ${name}`}
+            accessibilityState={{ disabled: !!busy || blocking, busy: busy === 'message' }}
+            accessibilityLabel={busy === 'message' ? `Opening chat with ${name}` : `Message ${name}`}
           >
-            {getOrCreateDm.isPending ? (
-              <ActivityIndicator color={Colors.asphalt} />
+            {(busy === 'message') ? (
+              <ActivityIndicator color={color} />
             ) : (
               <>
-                <MessageCircle size={16} color={Colors.asphalt} />
-                <Text style={styles.actionGoldText}>{COPY.keepMessage}</Text>
+                <MessageCircle size={16} color={color} />
+                <Text style={styles.actionGoldText} numberOfLines={1}>Message</Text>
               </>
             )}
           </Pressable>
           <Pressable
             style={[styles.actionBtn, styles.actionPrimary, planPressed && styles.actionPressed]}
             onPress={onMakePlan}
+            disabled={!!busy || blocking}
+            accessibilityState={{ disabled: !!busy || blocking }}
             onPressIn={() => setPlanPressed(true)}
             onPressOut={() => setPlanPressed(false)}
             accessibilityRole="button"
-            accessibilityLabel={COPY.keepMakePlan}
+            accessibilityLabel="Make a plan"
           >
             <CalendarPlus size={16} color={Colors.white} />
-            <Text style={styles.actionPrimaryText}>{COPY.keepMakePlan}</Text>
+            <Text style={styles.actionPrimaryText} numberOfLines={1}>{appearance ? 'Make a plan' : COPY.keepMakePlan}</Text>
           </Pressable>
         </View>
 
         {/* The two pages point at each other. */}
-        <Pressable onPress={goKeep} hitSlop={8} style={styles.keepLink} accessibilityRole="button">
-          <Text style={styles.keepLinkText}>{COPY.ppKeepLink(name)}</Text>
+        <Pressable onPress={goKeep} hitSlop={8} style={styles.keepLink} accessibilityRole="button" accessibilityLabel={`View your shared plans with ${name}`}>
+          <Text style={styles.keepLinkText}>{appearance ? 'Your shared plans' : COPY.ppKeepLink(name)}</Text>
         </Pressable>
 
         {isBrandNew ? (
@@ -391,16 +461,16 @@ export default function PersonProfilePage({
               <View style={styles.section}>
                 <SectionLabel>{COPY.profileComingUp}</SectionLabel>
                 {upcoming.map((u) => (
-                  <UpcomingRow key={u.event_id} row={u} />
+                  <UpcomingRow key={u.event_id} row={u} onOpen={openPlan} />
                 ))}
               </View>
             )}
 
             {hasPast && (
               <View style={styles.section}>
-                <SectionLabel>{COPY.ppStorySoFar}</SectionLabel>
+                <SectionLabel>{appearance ? 'Past plans' : COPY.ppStorySoFar}</SectionLabel>
                 {past.map((p) => (
-                  <PastRow key={p.event_id} row={p} />
+                  <PastRow key={p.event_id} row={p} onOpen={openPlan} />
                 ))}
                 {moreInPast > 0 && (
                   <Text style={styles.moreCount}>{`and ${moreInPast} more`}</Text>
@@ -415,62 +485,33 @@ export default function PersonProfilePage({
         )}
       </ScrollView>
 
-      <MenuCard
-        visible={moreOpen}
-        onClose={() => setMoreOpen(false)}
-        anchor={moreAnchor}
-        placement="top-right"
+      <MenuCard key={menu ? `${targetId}:${viewer.epoch}:${menu.session.visit === visit}` : 'closed'}
+        appearance={appearance} visible={!!menu && menu.open && menu.session.visit === visit && readable()}
+        onClose={closeMenu} onClosed={onMenuClosed} anchor={menu?.anchor ?? null} placement="top-right"
         rows={[
-          {
-            key: 'message',
-            icon: MessageCircle,
-            label: COPY.menuMessage,
-            subtitle: COPY.menuMessageSub,
-            onPress: onMessage,
-          },
-          {
-            key: 'plan',
-            icon: CalendarPlus,
-            label: COPY.menuMakePlan,
-            subtitle: COPY.menuMakePlanSub,
-            onPress: onMakePlan,
-          },
-          {
-            key: 'remove',
-            icon: UserMinus,
-            label: COPY.profileRemove,
-            subtitle: COPY.profileRemoveSub,
-            muted: true,
-            dividerBefore: true,
-            onPress: confirmRemove,
-          },
-          {
-            key: 'report',
-            icon: Flag,
-            label: COPY.ppReport,
-            subtitle: COPY.ppReportSub,
-            muted: true,
-            onPress: onReportBlock,
-          },
+          { key: 'message', icon: MessageCircle, label: COPY.menuMessage, subtitle: COPY.menuMessageSub, onPress: () => queueMenu('message') },
+          { key: 'plan', icon: CalendarPlus, label: COPY.menuMakePlan, subtitle: COPY.menuMakePlanSub, onPress: () => queueMenu('plan') },
+          { key: 'remove', icon: UserMinus, label: COPY.profileRemove, subtitle: COPY.profileRemoveSub, muted: true, dividerBefore: true, onPress: () => queueMenu('remove') },
+          { key: 'report', icon: Flag, label: appearance ? 'Block' : COPY.ppReport, subtitle: appearance ? 'Review before blocking' : COPY.ppReportSub, muted: true, onPress: () => queueMenu('block') },
         ]}
       />
+      <BrandedAlert appearance={appearance} visible={confirmation === visit && isCurrent()} title={COPY.profileRemove} message={COPY.removeConfirm}
+        buttons={[{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { void doRemove(); } }]}
+        onClose={closeConfirmation}/>
 
-      <BrandedAlert
-        visible={removeConfirmVisible}
-        title={COPY.profileRemove}
-        message={COPY.removeConfirm}
-        buttons={[
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: doRemove },
-        ]}
-        onClose={() => setRemoveConfirmVisible(false)}
-      />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.cream },
+  identityRow: {}, identityText: {},
+  handle: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, textAlign: 'center', marginTop: 4 },
+  statusTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, textAlign: 'center' },
+  statusText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, marginTop: 10 },
+  retry: { minHeight: 44, paddingHorizontal: 18, paddingVertical: 12, marginTop: 16, justifyContent: 'center' },
+  retryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  feedback: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.errorRed, paddingHorizontal: 20, marginTop: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   topBar: {
     flexDirection: 'row',
@@ -715,3 +756,54 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+
+function profileAppearance(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  container: { ...baseStyles.container, backgroundColor: AfterglowColors.paper },
+  center: { ...baseStyles.center, padding: 24 },
+  iconBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  scroll: { paddingTop: 12, paddingBottom: 40 },
+  identityRow: { flexDirection: 'row', gap: 16, alignItems: 'center', paddingHorizontal: 20 },
+  identityText: { flex: 1, minWidth: 0, gap: 4 },
+  avatar: { ...baseStyles.avatar, width: 80, height: 80, borderRadius: 40, backgroundColor: AfterglowColors.avatar, alignSelf: 'auto' },
+  avatarInitial: { ...AfterglowType.identity, fontFamily: fonts.semibold, color: AfterglowColors.clay },
+  name: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink },
+  handle: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted },
+  place: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, paddingHorizontal: 20, marginTop: 14 },
+  bio: { ...AfterglowType.title, fontFamily: fonts.regular, color: AfterglowColors.ink, paddingHorizontal: 20, marginTop: 12 },
+  tags: { ...baseStyles.tags, justifyContent: 'flex-start', paddingHorizontal: 20, gap: 6 },
+  tag: { ...baseStyles.tag, borderRadius: 4, backgroundColor: AfterglowColors.paper },
+  tagText: { ...AfterglowType.caption, fontFamily: fonts.medium, color: AfterglowColors.muted },
+  mutuals: { ...baseStyles.mutuals, justifyContent: 'flex-start', paddingHorizontal: 20, marginTop: 16 },
+  mutualFace: { ...baseStyles.mutualFace, width: 28, height: 28, borderRadius: 14, backgroundColor: AfterglowColors.avatar, borderColor: AfterglowColors.paper },
+  mutualInitial: { ...AfterglowType.caption, fontFamily: fonts.semibold, color: AfterglowColors.clay },
+  mutualText: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, flexShrink: 1 },
+  newHere: { ...AfterglowType.caption, fontFamily: fonts.medium, color: AfterglowColors.ink, backgroundColor: AfterglowColors.paper, borderRadius: 4, alignSelf: 'flex-start', marginHorizontal: 20, marginTop: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  trust: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted, paddingHorizontal: 20, marginTop: 10 },
+  actions: { ...baseStyles.actions, marginTop: 20 },
+  actionBtn: { ...baseStyles.actionBtn, borderRadius: 4, minHeight: 46, paddingHorizontal: 8, paddingVertical: 12 },
+  actionGold: { backgroundColor: AfterglowColors.paper, borderWidth: 1, borderColor: AfterglowColors.line },
+  actionGoldText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+  actionPrimary: { backgroundColor: AfterglowColors.clay },
+  actionPrimaryText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.white },
+  keepLink: { ...baseStyles.keepLink, minHeight: 44, marginTop: 8, paddingHorizontal: 20, justifyContent: 'center' },
+  keepLinkText: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.clay },
+  section: { marginTop: 24 },
+  sectionLabel: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink, paddingHorizontal: 20, marginBottom: 8 },
+  planRow: { ...baseStyles.planRow, marginHorizontal: 20, paddingHorizontal: 0, paddingVertical: 14, minHeight: 60, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AfterglowColors.subtleLine },
+  planRowPressed: { backgroundColor: AfterglowColors.paper },
+  dateDot: { ...baseStyles.dateDot, backgroundColor: AfterglowColors.clay },
+  planTitle: { ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+  planMeta: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 3 },
+  pastDate: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, width: 88 },
+  pastTitle: { ...AfterglowType.title, fontFamily: fonts.medium, color: AfterglowColors.ink, flex: 1, minWidth: 0 },
+  moreCount: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, paddingHorizontal: 20, marginTop: 10 },
+  stats: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 24, paddingHorizontal: 20 },
+  emptyBlock: { marginTop: 24, paddingHorizontal: 20 },
+  emptyHeadline: { ...AfterglowType.title, fontFamily: fonts.regular, color: AfterglowColors.muted },
+  notFound: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.muted, textAlign: 'center' },
+  statusTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink, textAlign: 'center' },
+  statusText: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 10 },
+  retryText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.clay },
+  feedback: { ...AfterglowType.body, fontFamily: fonts.regular, color: Colors.errorRed, paddingHorizontal: 20, marginTop: 16 },
+}); }

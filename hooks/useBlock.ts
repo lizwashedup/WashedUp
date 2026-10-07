@@ -1,8 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { yoursKeys } from '../lib/yours/keys';
+
+export interface BlockOperationScope {
+  userId: string;
+  isCurrent: () => boolean;
+}
 
 /**
  * Apple Guideline 1.2: Blocking must (1) notify the developer of inappropriate content,
@@ -10,13 +15,20 @@ import { yoursKeys } from '../lib/yours/keys';
  */
 export function useBlock() {
   const [blocking, setBlocking] = useState(false);
+  const [owner, setOwner] = useState<{ scope?: BlockOperationScope } | null>(null);
+  const pending = useRef<{ scope?: BlockOperationScope } | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const queryClient = useQueryClient();
 
   const blockUser = async (
     blockedId: string,
     blockedName: string,
     onSuccess?: () => void,
+    scope?: BlockOperationScope,
   ) => {
+    const isCurrent = () => !scope || (mounted.current && scope.isCurrent());
+    if (!isCurrent()) return;
     Alert.alert(
       `Block ${blockedName}?`,
       `${blockedName} won't appear in your feed or be able to contact you. They won't be notified.`,
@@ -26,23 +38,31 @@ export function useBlock() {
           text: 'Block',
           style: 'destructive',
           onPress: async () => {
+            if (!isCurrent() || (scope && pending.current && (!pending.current.scope || pending.current.scope.isCurrent()))) return;
+            const attempt = { scope }; pending.current = attempt; setOwner(attempt);
             setBlocking(true);
             try {
-              const { data: { user } } = await supabase.auth.getUser();
+              const { data: { user }, error: authError } = await supabase.auth.getUser();
+              if (!isCurrent() || (scope && user?.id !== scope.userId)) return;
+              if (scope && authError) throw authError;
               if (!user) return;
 
-              const { data: profile } = await supabase
+              const { data: profile, error: readError } = await supabase
                 .from('profiles')
                 .select('blocked_users')
                 .eq('id', user.id)
                 .single();
+              if (!isCurrent()) return;
+              if (scope && readError) throw readError;
 
               const current: string[] = profile?.blocked_users ?? [];
               if (!current.includes(blockedId)) {
-                await supabase
+                const { error: writeError } = await supabase
                   .from('profiles')
                   .update({ blocked_users: [...current, blockedId] })
                   .eq('id', user.id);
+                if (!isCurrent()) return;
+                if (scope && writeError) throw writeError;
 
                 // Apple 1.2: Notify developer of inappropriate content when user blocks
                 try {
@@ -57,6 +77,7 @@ export function useBlock() {
                   // Report insert is best-effort; block still succeeds
                 }
               }
+              if (!isCurrent()) return;
 
               // Apple 1.2: Instant removal from feed — invalidate all relevant queries
               queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
@@ -73,6 +94,7 @@ export function useBlock() {
               queryClient.invalidateQueries({ queryKey: ['explore-wishlists'] });
               queryClient.invalidateQueries({ queryKey: ['wishlists'] });
               queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
+              queryClient.invalidateQueries({ queryKey: ['topic-first-message'] });
 
               // Yours surfaces: sever the blocked person from the grid + their
               // profile/keep caches so access dies on the next read (the block
@@ -89,12 +111,15 @@ export function useBlock() {
 
               onSuccess?.();
               setTimeout(() => {
-                Alert.alert('Blocked', `${blockedName} has been blocked.`);
+                if (isCurrent()) Alert.alert('Blocked', `${blockedName} has been blocked.`);
               }, 300);
             } catch {
-              Alert.alert('Error', 'Could not block user. Please try again.');
+              if (isCurrent()) Alert.alert('Error', 'Could not block user. Please try again.');
             } finally {
-              setBlocking(false);
+              if (!scope || pending.current === attempt) {
+                pending.current = null;
+                if (isCurrent()) { setBlocking(false); setOwner(null); }
+              }
             }
           },
         },
@@ -102,5 +127,5 @@ export function useBlock() {
     );
   };
 
-  return { blockUser, blocking };
+  return { blockUser, blocking: blocking && (!owner?.scope || (mounted.current && owner.scope.isCurrent())) };
 }

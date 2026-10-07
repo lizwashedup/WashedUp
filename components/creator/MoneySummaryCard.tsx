@@ -1,13 +1,15 @@
+import {useAfterglowFonts} from '../../hooks/useAfterglowFonts';
 /**
  * Per-event money breakdown for the organizer (parity gap O-06). Mirrors
  * web's src/components/communities/creator/MoneySummaryCard.tsx one-for-one
  * -- same headline logic, same row set, same net formula.
  */
 
+import {useMemo} from 'react';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { type AfterglowFontFamilies, FontSizes } from '../../constants/Typography';
 import { formatCents } from '../../lib/ticketing';
 import type { EventMoneySummary } from '../../lib/ticketAttendees';
 
@@ -15,6 +17,7 @@ interface MoneySummaryCardProps {
   money: EventMoneySummary;
   ticketsSold: number;
   refundedCents: number;
+  inset?: boolean;
 }
 
 function day(iso: string | null): string {
@@ -45,6 +48,8 @@ export function headline(m: EventMoneySummary, netToYouCents: number): string {
 }
 
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  const {fonts}=useAfterglowFonts(true, 'creator');
+  const styles=useMemo(()=>createStyles(fonts),[fonts]);
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -53,10 +58,12 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
   );
 }
 
-export function MoneySummaryCard({ money, ticketsSold, refundedCents }: MoneySummaryCardProps) {
+export function MoneySummaryCard({ money, ticketsSold, refundedCents, inset = true }: MoneySummaryCardProps) {
+  const {fonts}=useAfterglowFonts(true, 'creator');
+  const styles=useMemo(()=>createStyles(fonts),[fonts]);
   const netToYouCents = computeNetToYouCents(money, refundedCents);
   return (
-    <View style={styles.card} accessibilityLabel="money summary">
+    <View style={[styles.card, !inset && {marginHorizontal:0}]} accessibilityLabel="money summary">
       <Text style={styles.headline}>{headline(money, netToYouCents)}</Text>
       <View style={styles.rows}>
         <Row label="tickets sold" value={String(ticketsSold)} />
@@ -77,16 +84,16 @@ export function MoneySummaryCard({ money, ticketsSold, refundedCents }: MoneySum
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
   card: {
     backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
     padding: 16, marginHorizontal: 20, marginBottom: 12, gap: 4,
   },
-  headline: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt, lineHeight: 20 },
+  headline: { fontFamily: fonts.medium, fontSize: FontSizes.bodyMD, color: Colors.asphalt, lineHeight: 20 },
   rows: { marginTop: 6, borderTopWidth: 1, borderTopColor: Colors.inputBg, paddingTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: Colors.inputBg },
-  rowLabel: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
-  rowValue: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.asphalt },
-  rowValueStrong: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  footer: { marginTop: 4, fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.textMedium },
-});
+  rowLabel: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  rowValue: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: Colors.asphalt },
+  rowValueStrong: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  footer: { marginTop: 4, fontFamily: fonts.regular, fontSize: FontSizes.caption, color: Colors.textMedium },
+}); }

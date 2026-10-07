@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@18';
+import { beginRefundRequest, recordRefundRequestOutcome, refundRequestIdIsValid, refundRequestTargetHash } from '../_shared/refundRequestReceipt.ts';
 /**
  * ticket-refund v5 — the refund door, REWRITTEN 2026-07-27 against applied
  * proposal 89 v3 (Cowork ruling: v4 was a loaded misfire — it computed
@@ -154,8 +155,17 @@ Deno.serve(async (req)=>{
       error: 'invalid body'
     });
   }
+  if (!body || typeof body !== 'object') return json(400, { error: 'invalid body' });
+  if (body.action !== undefined && body.action !== 'preview' && body.action !== 'refund') return json(400, { error: 'invalid action' });
+  const requestId = body.client_request_id;
+  if (requestId !== undefined && !refundRequestIdIsValid(requestId)) return json(400, { error: 'invalid refund request' });
   const orderId = body.order_id ?? '';
   const action = body.action === 'preview' ? 'preview' : 'refund';
+  const hasReview = body.reviewed_amount_cents !== undefined || body.reviewed_position_count !== undefined;
+  if (hasReview && (!Number.isSafeInteger(body.reviewed_amount_cents) || body.reviewed_amount_cents < 0
+    || !Number.isSafeInteger(body.reviewed_position_count) || body.reviewed_position_count < 1)) {
+    return json(400, { error: 'invalid refund confirmation' });
+  }
   if (!orderId) return json(400, {
     error: 'order_id is required'
   });
@@ -232,49 +242,16 @@ Deno.serve(async (req)=>{
   // a delegate is never the literal owner, so a reason is mandatory --
   // record_refund_issuance enforces this again at the DB layer.
   const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
-  if (isDelegate && action === 'refund' && reason === '') {
-    return json(400, {
-      error: 'a reason is required when issuing a refund as a granted delegate, not the owner'
-    });
-  }
-  // dual identity (an organizer buying their own ticket): the §5 gate must
-  // still be answered for the BUYER half, or the wallet never shows the
-  // affordance even when the gate says yes (seat-confirmed fix, 2026-08-01)
-  if (isBuyer) {
-    const { data: gate, error: gateErr } = await service.rpc('can_buyer_self_refund', {
-      p_order_id: orderId
-    });
-    if (gateErr) return json(500, {
-      error: 'could not check the refund window'
-    });
-    canSelfRefund = gate === true;
-  }
-  if (order.status !== 'paid') {
-    if (action === 'preview') {
-      return json(200, {
-        ok: true,
-        allowed: false,
-        can_self_refund: false,
-        kind,
-        refund_amount_cents: 0,
-        position_count: 0,
-        reason: `order is ${order.status}`
-      });
-    }
-    return json(409, {
-      error: `order is ${order.status}, not refundable`
-    });
-  }
-  const allowed = isOrganizer || isDelegate || canSelfRefund;
-  // ═══ CONCURRENCY (fix 2): the claim is taken BEFORE compute and BEFORE any
-  // Stripe call, so a second refund racing this one is refused while nothing
-  // has moved. record_ticket_refund's own `for update` runs only AFTER Stripe,
-  // so on its own it can detect a double-spend but never prevent one. Taking
-  // the claim first also stops compute's numbers from going stale underneath
-  // us: nothing else can void a position while we hold it. Every exit from
-  // here on goes through respond(), which releases the claim exactly once.
   let releaseClaim: (() => PromiseLike<unknown>) | null = null;
+  let providerDispatched = false;
+  let requestIdentity: { requestId: string; orderId: string; requesterId: string } | null = null;
+  const saveReceipt = async (body) => {
+    if (!requestIdentity) return;
+    try { await recordRefundRequestOutcome(service, requestIdentity, providerDispatched, body); }
+    catch { console.error('ticket-refund: request receipt could not be recorded', orderId, requestId); }
+  };
   const respond = async (status, body)=>{
+    await saveReceipt(body);
     if (releaseClaim) {
       const release = releaseClaim;
       releaseClaim = null;
@@ -286,18 +263,75 @@ Deno.serve(async (req)=>{
         console.error('ticket-refund: claim release failed', orderId, err?.message);
       }
     }
-    return json(status, body);
+    return json(status, { ...body, ...(requestIdentity ? {
+      client_request_id: requestIdentity.requestId, requester_user_id: requestIdentity.requesterId, order_id: requestIdentity.orderId,
+      request_state: !providerDispatched ? 'not-started' : body.ok === true ? 'complete' : body.stripe_refund_id ? 'confirmed' : 'unknown',
+    } : {}) });
   };
+  if (action === 'refund' && requestId) {
+    const identity = { requestId, orderId, requesterId: callerId };
+    const hash = await refundRequestTargetHash({ kind, positions: positionsArg, reason,
+      reviewedAmount: hasReview ? body.reviewed_amount_cents : null, reviewedCount: hasReview ? body.reviewed_position_count : null });
+    const started = await beginRefundRequest(service, identity, hash);
+    // Only the request that inserted this record may settle it. A duplicate
+    // cannot replay provider work or replace an original pending receipt.
+    if (started !== 'started') return json(started === 'unavailable' ? 503 : 409, {
+      error: started === 'unavailable' ? 'could not save the refund request' : 'refund request already received; check its status',
+    });
+    requestIdentity = identity;
+  }
+
+  if (isDelegate && action === 'refund' && reason === '') {
+    return await respond(400, {
+      error: 'a reason is required when issuing a refund as a granted delegate, not the owner'
+    });
+  }
+  // dual identity (an organizer buying their own ticket): the §5 gate must
+  // still be answered for the BUYER half, or the wallet never shows the
+  // affordance even when the gate says yes (seat-confirmed fix, 2026-08-01)
+  if (isBuyer) {
+    const { data: gate, error: gateErr } = await service.rpc('can_buyer_self_refund', {
+      p_order_id: orderId
+    });
+    if (gateErr) return await respond(500, {
+      error: 'could not check the refund window'
+    });
+    canSelfRefund = gate === true;
+  }
+  if (order.status !== 'paid') {
+    if (action === 'preview') {
+      return await respond(200, {
+        ok: true,
+        allowed: false,
+        can_self_refund: false,
+        kind,
+        refund_amount_cents: 0,
+        position_count: 0,
+        reason: `order is ${order.status}`
+      });
+    }
+    return await respond(409, {
+      error: `order is ${order.status}, not refundable`
+    });
+  }
+  const allowed = isOrganizer || isDelegate || canSelfRefund;
+  // ═══ CONCURRENCY (fix 2): the claim is taken BEFORE compute and BEFORE any
+  // Stripe call, so a second refund racing this one is refused while nothing
+  // has moved. record_ticket_refund's own `for update` runs only AFTER Stripe,
+  // so on its own it can detect a double-spend but never prevent one. Taking
+  // the claim first also stops compute's numbers from going stale underneath
+  // us: nothing else can void a position while we hold it. Every exit from
+  // here on goes through respond(), which releases the claim exactly once.
   // left undefined (not null) on the preview path: Stripe's RequestOptions
   // types idempotencyKey as string | undefined, and preview never reaches it
   let idempotencyKey: string | undefined;
   if (action === 'refund') {
     // these two gates move ahead of the claim so a refused caller never takes
     // (and never has to release) a claim
-    if (!allowed) return json(403, {
+    if (!allowed) return await respond(403, {
       error: 'this order is outside its refund window'
     });
-    if (!order.stripe_payment_intent_id) return json(409, {
+    if (!order.stripe_payment_intent_id) return await respond(409, {
       error: 'order has no captured payment'
     });
     idempotencyKey = refundClaimKey(orderId, kind, positionsArg);
@@ -307,12 +341,12 @@ Deno.serve(async (req)=>{
     });
     if (claimErr) {
       console.error('ticket-refund: claim failed', orderId, claimErr.code, claimErr.message);
-      return json(500, {
+      return await respond(500, {
         error: 'could not start the refund.'
       });
     }
     if (claimed !== 'claimed') {
-      return json(409, {
+      return await respond(409, {
         // wording chosen so lib/ticketing.ts humanRefundError maps each to the
         // right shipped line without any client change: 'busy' falls to the
         // retry line, the other to the already-refunded line
@@ -392,6 +426,13 @@ Deno.serve(async (req)=>{
       position_count: c.position_count
     });
   }
+  // Existing claim holds the purchase while SQL computes its remaining seats.
+  // A creator's confirmed amount must still match before any provider work.
+  // Older clients omit this snapshot and keep their original contract.
+  if (hasReview && (body.reviewed_amount_cents !== c.refund_amount_cents
+    || body.reviewed_position_count !== c.position_count)) {
+    return await respond(409, { error: 'refund details changed; review the amount again' });
+  }
   const stripe = new Stripe(stripeKey, {
     apiVersion: '2025-08-27.basil',
     httpClient: Stripe.createFetchHttpClient()
@@ -420,6 +461,7 @@ Deno.serve(async (req)=>{
     // organizer_cancel / admin: buyer made whole to the T-share; the
     // proportional booleans are CORRECT here (doc 99 / 89 v3 law)
     try {
+      providerDispatched = true;
       const refund = await stripe.refunds.create({
         payment_intent: order.stripe_payment_intent_id,
         amount: c.refund_amount_cents,
@@ -433,6 +475,7 @@ Deno.serve(async (req)=>{
         idempotencyKey
       });
       refundId = refund.id;
+      await saveReceipt({ stripe_refund_id: refundId });
     } catch (err) {
       // seat-required fix (2026-07-27): raw Stripe messages stay in the logs
       console.error('ticket-refund: cancel refund failed', err?.message);
@@ -472,6 +515,7 @@ Deno.serve(async (req)=>{
     }
     // leg 1: refund FACE to the buyer (this id keys the ledger)
     try {
+      providerDispatched = true;
       const refund = await stripe.refunds.create({
         payment_intent: order.stripe_payment_intent_id,
         amount: c.refund_amount_cents,
@@ -483,6 +527,7 @@ Deno.serve(async (req)=>{
         idempotencyKey
       });
       refundId = refund.id;
+      await saveReceipt({ stripe_refund_id: refundId });
     } catch (err) {
       console.error('ticket-refund: voluntary refund failed', err?.message);
       return await respond(502, {

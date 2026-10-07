@@ -11,6 +11,7 @@ jest.mock('../../supabase', () => ({ supabase: { rpc: mockRpc } }));
 const {
   parseAddOrAcceptOutcome,
   sendOrAcceptPeopleRequest,
+  UnconfirmedPeopleConnectionError,
 } = require('../connectionRequests');
 
 beforeEach(() => mockRpc.mockReset());
@@ -77,6 +78,26 @@ describe('sendOrAcceptPeopleRequest', () => {
       sendOrAcceptPeopleRequest({ recipientId: 'target-5', context: 'handle_lookup' }),
     ).rejects.toThrow('blocked');
   });
+
+  it.each([null, undefined, 'some_future_outcome', { outcome: 'requested' }, ['now_connected']])('does not fabricate request confirmation from RPC data %p', async data => {
+    mockRpc.mockResolvedValueOnce({ data, error: null });
+    await expect(sendOrAcceptPeopleRequest({ recipientId: 'target-5', context: 'handle_lookup' }))
+      .rejects.toBeInstanceOf(UnconfirmedPeopleConnectionError);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves a server rejection even if data contains a recognized success string', async () => {
+    const error = new Error('cannot_re_request'); mockRpc.mockResolvedValueOnce({ data: 'requested', error });
+    await expect(sendOrAcceptPeopleRequest({ recipientId: 'target-5', context: 'handle_lookup' })).rejects.toBe(error);
+  });
+
+  it('allows an explicit same-target retry to receive the server’s reconciled outcome', async () => {
+    const args = { recipientId: 'target-5', context: 'handle_lookup' };
+    mockRpc.mockResolvedValueOnce({ data: null, error: null }).mockResolvedValueOnce({ data: 'already_connected', error: null });
+    await expect(sendOrAcceptPeopleRequest(args)).rejects.toBeInstanceOf(UnconfirmedPeopleConnectionError);
+    await expect(sendOrAcceptPeopleRequest(args)).resolves.toBe('already_connected');
+    expect(mockRpc.mock.calls[0]).toEqual(mockRpc.mock.calls[1]);
+  });
 });
 
 describe('parseAddOrAcceptOutcome', () => {
@@ -87,9 +108,8 @@ describe('parseAddOrAcceptOutcome', () => {
     },
   );
 
-  it('falls back to "requested" for an unrecognized value instead of ever silently implying a connection exists', () => {
-    expect(parseAddOrAcceptOutcome('some_future_outcome')).toBe('requested');
-    expect(parseAddOrAcceptOutcome(null)).toBe('requested');
-    expect(parseAddOrAcceptOutcome(undefined)).toBe('requested');
+  it.each([null, undefined, '', ' requested ', 'REQUESTED', 'some_future_outcome', false, 1, { outcome: 'requested' }, ['requested']])('rejects unconfirmed outcome %p instead of inventing Requested', raw => {
+    expect(() => parseAddOrAcceptOutcome(raw)).toThrow(UnconfirmedPeopleConnectionError);
+    expect(() => parseAddOrAcceptOutcome(raw)).toThrow('We couldn’t confirm your request. Try again.');
   });
 });

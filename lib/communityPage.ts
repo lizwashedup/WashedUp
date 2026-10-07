@@ -8,6 +8,8 @@
  * event, join) is app logic here, matching web.
  */
 
+import { communityClassificationProblems } from './communityClassification';
+import { communityCoverReference } from './publishedPageCover';
 import { supabase } from './supabase';
 import { getTodayInLA } from './laDate';
 import type { CommunityBlock } from './communityBlocks';
@@ -33,11 +35,18 @@ export interface CommunityPageEvent {
   public_name: string | null;
 }
 
+export interface PublishedCommunityClassification {
+  discovery_area: string;
+  categories: string[];
+}
+
 export interface CommunityPageData {
   community: CommunityPageCommunity;
   blocks: CommunityBlock[];
   events: CommunityPageEvent[];
   memberCount: number | null;
+  /** Absent for existing communities that have not published classification. */
+  classification?: PublishedCommunityClassification | null;
 }
 
 export async function getCommunityPage(communityId: string): Promise<CommunityPageData | null> {
@@ -52,7 +61,7 @@ export async function getCommunityPage(communityId: string): Promise<CommunityPa
   const { y, m, d } = getTodayInLA();
   const todayStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
-  const [{ data: blocks }, { data: events }, { data: memberCount }] = await Promise.all([
+  const [blockResult, eventResult, countResult, classificationResult] = await Promise.all([
     supabase
       .from('community_blocks')
       .select('id, community_id, block_type, position, visible, content')
@@ -68,13 +77,27 @@ export async function getCommunityPage(communityId: string): Promise<CommunityPa
       .order('event_date', { ascending: true })
       .limit(6),
     supabase.rpc('get_community_member_count', { p_community_id: communityId }),
+    // Only published metadata; this read starts after the community is admitted.
+    supabase
+      .from('creator_page_discovery_publications')
+      .select('page_id, discovery_area, categories')
+      .eq('page_id', communityId)
+      .maybeSingle(),
   ]);
 
+  // A failed companion read must not masquerade as missing page content or
+  // an empty event list. Preserve the query's previous complete page on retry.
+  for (const result of [blockResult, eventResult, countResult, classificationResult]) if (result.error) throw result.error;
+  const published = classificationResult.data;
+  if (published && (published.page_id !== communityId || Object.keys(communityClassificationProblems(published)).length > 0)) {
+    throw new Error('Published community classification could not be read.');
+  }
   return {
     community: community as CommunityPageCommunity,
-    blocks: (blocks ?? []) as CommunityBlock[],
-    events: (events ?? []) as CommunityPageEvent[],
-    memberCount: typeof memberCount === 'number' ? memberCount : null,
+    blocks: (blockResult.data ?? []) as CommunityBlock[],
+    events: (eventResult.data ?? []) as CommunityPageEvent[],
+    memberCount: typeof countResult.data === 'number' ? countResult.data : null,
+    classification: published ? { discovery_area: published.discovery_area, categories: [...published.categories] } : null,
   };
 }
 
@@ -87,11 +110,13 @@ export interface MyCommunity {
   accent_color: string | null;
   role: 'leader' | 'co_leader' | 'admin' | 'events' | 'member_care' | 'finance' | 'member';
   cover_image: string | null;
+  cover_media_id?: string | null;
   member_count: number | null;
 }
 
 export async function getMyCommunities(): Promise<MyCommunity[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error: accountError } = await supabase.auth.getUser();
+  if (accountError) throw accountError;
   if (!user) return [];
   const { data: rows, error } = await supabase
     .from('community_members')
@@ -124,10 +149,10 @@ export async function getMyCommunities(): Promise<MyCommunity[]> {
       ),
     ),
   ]);
-  const coverById = new Map<string, string>();
+  const coverById = new Map<string, ReturnType<typeof communityCoverReference>>();
   for (const b of (covers ?? []) as any[]) {
-    const first = Array.isArray(b.content?.images) ? b.content.images[0] : null;
-    if (first && !coverById.has(b.community_id)) coverById.set(b.community_id, first);
+    const cover = communityCoverReference(b.content);
+    if (cover.hasCover && !coverById.has(b.community_id)) coverById.set(b.community_id, cover);
   }
   const countById = new Map(counts);
 
@@ -137,7 +162,8 @@ export async function getMyCommunities(): Promise<MyCommunity[]> {
     name: m.c.name,
     accent_color: m.c.accent_color ?? null,
     role: m.role,
-    cover_image: coverById.get(m.c.id) ?? null,
+    cover_image: coverById.get(m.c.id)?.images[0] ?? null,
+    cover_media_id: coverById.get(m.c.id)?.mediaId ?? null,
     member_count: countById.get(m.c.id) ?? null,
   }));
 }

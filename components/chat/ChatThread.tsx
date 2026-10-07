@@ -1,4 +1,18 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
+import { parseMemberReactionAnchor } from '../../lib/memberChatMessageAnchor';
+import { useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
+import { ChatMessageAnchorNotice } from './ChatMessageAnchorNotice';
+import { addChatMentionReference, rebaseChatMentions, readChatMentionDocument } from '../../lib/chatMentionIdentity';
+import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
+import LinkifiedText from '../LinkifiedText';
+import { ChatMentionPicker } from './ChatMentionPicker';
+import { findMentionMembers } from '../../lib/chatMentions';
+import { mentionQueryAt, insertMentionAt } from '../../lib/communityChatUi';
+import { ChatBubbleFill } from './ChatBubbleFill';
+import ProfileButton from '../ProfileButton';
+import { messageActionAccess, messageActionWeb } from './messageActionAccess';
+import { MessageActionsMenu, type MessageMenu } from './MessageActionsMenu';
+import { MEMBER_REDESIGN_APPEARANCE_ENABLED, memberPresentationFonts } from '../../constants/MemberAppearance';
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -18,12 +32,14 @@ import {
   AppState,
   BackHandler,
   LayoutChangeEvent,
+  useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 import * as Notifications from 'expo-notifications'; // setBadgeCountAsync only -- local-only API, no server call. OneSignal SDK doesn't expose direct badge clear; revisit during cleanup.
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Crypto from 'expo-crypto';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -33,30 +49,56 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 let Clipboard: typeof import('expo-clipboard') | null = null;
 try { Clipboard = require('expo-clipboard'); } catch {}
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
-import Animated, { FadeIn, useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
+import Animated, { FadeIn, useSharedValue, useAnimatedStyle, withSpring, withTiming, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
+import { IOSKeyboardDock, IOSKeyboardViewport, useAnimatedKeyboard } from '../keyboard/ChatKeyboard';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../lib/supabase';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import Colors, { AfterglowColors } from '../../constants/Colors';
+import { Fonts, FontSizes, ChatType, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
+import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { ChatContextHeader, chatHeaderActionStyle } from './ChatContextHeader';
+import { CreatorActionFill } from '../creator/CreatorActionFill';
+import { ChatPhotoAttachment } from './ChatPhotoAttachment';
+import { createChatMessageAppearance } from './chatMessageAppearance';
+import { createChatComposerAppearance } from './chatComposerAppearance';
+import { useChatInputHeight } from '../../hooks/useChatInputHeight';
+import { ChatPhotoViewer, useChatPhotoSelection } from './ChatPhotoViewer';
 import type { AnchorRect } from '../menu/MenuCard';
 import SunriseIcon from '../yours/icons/SunriseIcon';
 import ChatPlanCard from './ChatPlanCard';
 import { openUrl, soleUrlIn } from '../../lib/url';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
-import { useChat, ChatMessage, MessageReaction, ReplyTo } from '../../hooks/useChat';
+import { isChatEditRefused } from '../../lib/chatMessageEdit';
+import { checkContent } from '../../lib/contentFilter';
+import { restoreChatDraft } from '../../lib/restoreChatDraft';
+import { PhotoBatchFailure, sendPhotoBatch } from '../../lib/chatPhotoBatch';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { PhotoSendSession } from '../../lib/photoSendSession';
+import { useChatComposerDraft } from '../../hooks/useChatComposerDraft';
+import { checkChatComposerAttempt, verifyChatComposerTarget, type ChatDraftAttempt } from '../../lib/chatComposerDraft';
+import { useChat, isObsoleteChatOperation, isUnconfirmedChatReaction, ChatMessage, MessageReaction, ReplyTo } from '../../hooks/useChat';
+import { friendlyError } from '../../lib/friendlyError';
 import MiniProfileCard from '../MiniProfileCard';
 import AttachmentPanel, { AttachmentKey } from '../chat/AttachmentSheet';
-import MediaPanel from '../chat/MediaPanel';
+import MediaPanel, { isChatGifPickerAvailable } from '../chat/MediaPanel';
 import LocationPickerModal from '../chat/LocationPickerModal';
 import PhotoPreviewModal from '../chat/PhotoPreviewModal';
 import ReactionEmojiPicker from '../chat/ReactionEmojiPicker';
+import { ReactionChips } from './ReactionChips';
+import { ReactionDetailsSheet, type ReactionDetailsRequest } from './ReactionDetailsSheet';
+import { reactionEmoji, reactionKeyForEmoji, topicReactionCounts } from '../../lib/communityReactionChips';
 import LinkPreviewCard from '../chat/LinkPreviewCard';
 import TypingIndicator from '../chat/TypingIndicator';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
+import { useActiveChatPresence } from '../../hooks/useActiveChatPresence';
 import ScrollToBottomButton from '../chat/ScrollToBottomButton';
 import VoicePlayer from '../chat/VoicePlayer';
+import { ChatSizedText } from './ChatSizedText';
+import { ChatLocationPreview } from './ChatLocationPreview';
+import { chatLocationLabel, parsePlanChatLocation } from '../../lib/chatLocation';
 import VoiceRecorder, { RecorderUiMode } from '../chat/VoiceRecorder';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { uploadAudioToStorage } from '../../lib/uploadAudio';
@@ -65,7 +107,8 @@ import { ReportModal } from '../modals/ReportModal';
 import { useBlock } from '../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerForPushNotifications, getPushPermissionStatus } from '../../hooks/usePushNotifications';
+import { registerPushNotificationsWithResult, getPushPermissionStatus } from '../../hooks/usePushNotifications';
+import { pushRegistrationFeedback } from '../notifications/pushRegistrationFeedback';
 
 // ─── Shared chat surface ────────────────────────────────────────────────────────
 // ChatThread is the ONE polished chat body shared by plan, circle, and DM chats.
@@ -92,12 +135,16 @@ export type ChatThreadHeaderMenu =
 export interface ChatThreadProps {
   kind: 'event' | 'circle';
   id: string;
+  reactionMessageId?: string | string[];
+  reactionMessageSource?: string | string[];
   // Header
   title: string;
   subtitle: string | null;
   members: ChatThreadMember[];
   viewContextLabel: string;
   onViewContext: () => void;
+  locationLabel?: string | null;
+  calendarAction?: { label: string; onPress: () => void };
   headerMenu: ChatThreadHeaderMenu;
   // System-message rewriting (plan title); undefined leaves system copy verbatim.
   contextTitle?: string;
@@ -168,17 +215,6 @@ function fitImage(natural: { w: number; h: number } | null) {
   return { width: Math.round(width), height: Math.round(height) };
 }
 
-const MENTION_SUGGESTION_LIMIT = 6;
-// Matches an "@name" being typed right at the caret (start of text or after
-// whitespace), capturing the partial name. Returns null when the caret isn't in
-// a mention, which closes the autocomplete.
-const MENTION_AT_CARET = /(?:^|\s)@([\p{L}\p{N}_]*)$/u;
-function mentionQueryAt(text: string, caret: number): string | null {
-  const before = text.slice(0, Math.max(0, Math.min(caret, text.length)));
-  const m = before.match(MENTION_AT_CARET);
-  return m ? m[1] : null;
-}
-
 // A message that is only 1-3 emoji (no letters/numbers) renders large with no
 // bubble, like iMessage/WhatsApp. Hermes may lack Intl.Segmenter, so fall back
 // to a code-point count; over-counting a ZWJ sequence just renders it as a
@@ -192,43 +228,8 @@ function isEmojiOnly(text: string): boolean {
   return count <= 3;
 }
 
-// Splits on URLs and @mentions in one pass. URLs come first so an @ inside a
-// URL stays part of the link. Mentions are only highlighted when the @name
-// matches a known chat member (passed in lowercased), so a stray "@" is plain.
-const TOKEN_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+|@[\p{L}\p{N}_]+)/giu;
-
-function LinkedText({ text, style, linkStyle, mentionNames, mentionStyle }: {
-  text: string;
-  style: any;
-  linkStyle?: any;
-  mentionNames?: Set<string>;
-  mentionStyle?: any;
-}) {
-  const parts = text.split(TOKEN_PATTERN);
-  if (parts.length === 1) return <Text style={style}>{text}</Text>;
-
-  return (
-    <Text style={style}>
-      {parts.map((part, i) => {
-        if (!part) return null;
-        if (URL_PATTERN.test(part)) {
-          return (
-            <Text
-              key={i}
-              style={[linkStyle ?? { textDecorationLine: 'underline' as const }]}
-              onPress={() => openUrl(part)}
-            >
-              {part}
-            </Text>
-          );
-        }
-        if (mentionNames && part[0] === '@' && mentionNames.has(part.slice(1).toLowerCase())) {
-          return <Text key={i} style={mentionStyle}>{part}</Text>;
-        }
-        return <Text key={i}>{part}</Text>;
-      })}
-    </Text>
-  );
+function LinkedText(props: React.ComponentProps<typeof LinkifiedText>) {
+  return <LinkifiedText {...props} fullUrls/>;
 }
 
 // ─── Location helpers ─────────────────────────────────────────────────────────
@@ -256,8 +257,13 @@ interface BubbleProps {
   isGrouped: boolean;
   currentUserId: string;
   contextTitle?: string;
-  onPhotoPress?: (url: string) => void;
+  onPhotoPress?: (url: string, messageId: string) => void;
+  photoMaxWidth: number;
+  conversationFonts: AfterglowFontFamilies;
   onReaction?: (messageId: string, emoji?: string) => void;
+  onAddReaction?: (messageId: string) => void;
+  onViewReactions?: (messageId: string) => void;
+  reactionsDisabled?: boolean;
   onMessageLongPress?: (message: ChatMessage, isOwn: boolean) => void;
   onStartReply?: (messageId: string) => void;
   onReplyTap?: (messageId: string) => void;
@@ -269,7 +275,8 @@ interface BubbleProps {
 // Anchored exact-match so legacy name-embedded lines are never double-prefixed.
 const BARE_SYSTEM_TEMPLATES = /^(joined the plan|had to leave the plan|cancelled this plan)$/i;
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, onReaction, onMessageLongPress, onStartReply, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
+const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, photoMaxWidth, conversationFonts, onReaction, onAddReaction, onViewReactions, reactionsDisabled, onMessageLongPress, onStartReply, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
+  const messageAppearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? createChatMessageAppearance(conversationFonts) : null, [conversationFonts]);
   if (message.message_type === 'system') {
     // A system message carrying a plan reference renders as the compact plan card
     // (invite delivery), not as system text.
@@ -295,7 +302,7 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
     }
     return (
       <View style={bubbleStyles.systemRow}>
-        <Text style={bubbleStyles.systemText}>{displayContent}</Text>
+        <Text style={[bubbleStyles.systemText, messageAppearance?.day]}>{displayContent}</Text>
       </View>
     );
   }
@@ -339,6 +346,11 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
   // and links keep their existing tap action; long-press and swipe still expose
   // Reply for those message types.
   const canTapToReply = message.message_type === 'user' && !message.image_url && !firstUrl;
+  // Media owns its individual accessible controls (map, photo viewer, playback).
+  // The wrapper retains the physical long-press without grouping those controls
+  // into a second, non-functional screen-reader button.
+  const hasInteractiveMedia = !!message.image_url || message.message_type === 'location'
+    || (message.message_type === 'audio' && !!message.audio_url);
   // Cache the emoji-only verdict per content -- the regex/Segmenter test is
   // cheap individually but runs for every bubble on every list re-render.
   const isEmojiOnlyMsg = useMemo(() => isEmojiOnly(message.content), [message.content]);
@@ -352,8 +364,8 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
   const imageDisplaySize = useMemo(() => fitImage(imgSize), [imgSize]);
 
   const borderRadius = isOwn
-    ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 2 }
-    : { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 2, borderBottomRightRadius: 18 };
+    ? { borderTopLeftRadius: 14, borderTopRightRadius: 14, borderBottomLeftRadius: 14, borderBottomRightRadius: 5 }
+    : { borderTopLeftRadius: 14, borderTopRightRadius: 14, borderBottomLeftRadius: 5, borderBottomRightRadius: 14 };
 
   return (
     <View
@@ -363,7 +375,7 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
         // Reaction badge is absolutely positioned at bottom:-12 of the bubble.
         // Without extra clearance below, it overlaps the sender label of the
         // next message. Bump marginBottom only when there's a badge to clear.
-        totalReactions > 0 && bubbleStyles.rowWithReaction,
+        !COMMUNITY_CHAT_GROUPING_ENABLED && totalReactions > 0 && bubbleStyles.rowWithReaction,
       ]}
     >
       {!isOwn && (
@@ -378,8 +390,8 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               {message.sender?.avatar_url ? (
                 <Image source={{ uri: message.sender.avatar_url }} style={bubbleStyles.avatar} contentFit="cover" />
               ) : (
-                <View style={[bubbleStyles.avatar, bubbleStyles.avatarFallback]}>
-                  <Text style={bubbleStyles.avatarInitial}>
+                <View style={[bubbleStyles.avatar, bubbleStyles.avatarFallback, messageAppearance?.avatar]}>
+                  <Text style={[bubbleStyles.avatarInitial, messageAppearance?.avatarInitial]}>
                     {message.sender?.first_name?.[0]?.toUpperCase() ?? '?'}
                   </Text>
                 </View>
@@ -389,14 +401,7 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
         </View>
       )}
 
-      <View style={[bubbleStyles.bubbleWrapper, isOwn ? bubbleStyles.wrapperOwn : bubbleStyles.wrapperOther]}>
-        {!isOwn && showName && (
-          <Text style={bubbleStyles.senderLine}>
-            <Text style={bubbleStyles.senderName}>{message.sender?.first_name ?? 'Someone'}</Text>
-            <Text style={bubbleStyles.senderDot}> · </Text>
-            <Text style={bubbleStyles.senderTime}>{formatMessageTime(message.created_at)}</Text>
-          </Text>
-        )}
+      <View style={[bubbleStyles.bubbleWrapper, isOwn ? bubbleStyles.wrapperOwn : bubbleStyles.wrapperOther]} {...messageActionWeb(handleLongPress)}>
 
         <Pressable
           onPress={bubbleUrl
@@ -405,8 +410,12 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               ? () => onStartReply?.(message.id)
               : undefined}
           onLongPress={handleLongPress}
+          {...messageActionAccess(handleLongPress)}
           delayLongPress={400}
-          accessibilityRole="button"
+          accessible={hasInteractiveMedia ? false : undefined}
+          accessibilityRole={hasInteractiveMedia ? undefined : 'button'}
+          accessibilityActions={hasInteractiveMedia ? undefined : [{ name: 'messageActions', label: 'Message actions and reactions' }]}
+          onAccessibilityAction={hasInteractiveMedia ? undefined : event => { if (event.nativeEvent.actionName === 'messageActions') handleLongPress(); }}
           accessibilityHint={bubbleUrl
             ? 'Opens this link'
             : canTapToReply
@@ -419,17 +428,23 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               bubbleStyles.bubbleText,
               isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
               borderRadius,
+              messageAppearance?.bubble, isOwn && messageAppearance?.bubbleOwn,
             ]}>
               <VoicePlayer
                 uri={message.audio_url}
                 durationSeconds={message.duration_seconds ?? 0}
                 isOwn={isOwn}
+                appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined}
               />
             </View>
           ) : !!message.image_url ? (
             <View>
+              {COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatPhotoAttachment
+                uri={message.image_url} senderName={message.sender?.first_name} fonts={conversationFonts}
+                maxWidth={photoMaxWidth} onOpen={() => onPhotoPress?.(message.image_url!, message.id)} onLongPress={handleLongPress}
+              /> : (
               <Pressable
-                onPress={() => onPhotoPress?.(message.image_url!)}
+                onPress={() => onPhotoPress?.(message.image_url!, message.id)}
                 onLongPress={handleLongPress}
                 delayLongPress={400}
               >
@@ -450,25 +465,30 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
                   }}
                 />
               </Pressable>
+              )}
               {!!message.content?.trim() && (
-                <Text style={[bubbleStyles.imageCaption, isOwn && bubbleStyles.imageCaptionOwn]}>
+                <Text style={[bubbleStyles.imageCaption, isOwn && bubbleStyles.imageCaptionOwn, messageAppearance?.body]}>
                   {message.content}
                 </Text>
               )}
             </View>
           ) : message.message_type === 'location' ? (() => {
-            let lat = 0, lng = 0, address = '';
-            try { const p = JSON.parse(message.content); lat = p.lat; lng = p.lng; address = p.address; } catch {}
+            const location = parsePlanChatLocation(message.content);
             return (
               <Pressable
-                onPress={() => openLocationInMaps(lat, lng, address)}
+                onPress={location ? () => openLocationInMaps(location.latitude, location.longitude, location.address) : undefined}
+                onLongPress={handleLongPress}
+                accessibilityRole={location ? 'button' : undefined}
+                accessibilityLabel={location ? `Open map for ${chatLocationLabel(location)}` : 'Location unavailable'}
                 style={[
                   bubbleStyles.bubble,
                   bubbleStyles.locationBubble,
                   isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
                   borderRadius,
+              messageAppearance?.bubble, isOwn && messageAppearance?.bubbleOwn,
                 ]}
               >
+                {COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatLocationPreview location={location} fonts={conversationFonts} isOwn={isOwn} /> : <>
                 <View style={bubbleStyles.locationPinRow}>
                   <Ionicons name="location" size={15} color={isOwn ? Colors.white : Colors.terracotta} />
                   <Text style={[bubbleStyles.locationLabel, isOwn && bubbleStyles.locationLabelOwn]}>
@@ -476,11 +496,12 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
                   </Text>
                 </View>
                 <Text style={[bubbleStyles.locationAddress, isOwn && bubbleStyles.locationAddressOwn]} numberOfLines={2}>
-                  {address}
+                  {location ? chatLocationLabel(location) : 'Location unavailable'}
                 </Text>
                 <Text style={[bubbleStyles.locationTapHint, isOwn && bubbleStyles.locationTapHintOwn]}>
-                  Tap to open in Maps
+                  {location ? 'Tap to open in Maps' : 'Ask for a new pin'}
                 </Text>
+                </>}
               </Pressable>
             );
           })() : isEmojiOnlyMsg && !message.reply_to ? (
@@ -496,34 +517,40 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               bubbleStyles.bubbleText,
               isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
               borderRadius,
+              messageAppearance?.bubble, isOwn && messageAppearance?.bubbleOwn,
             ]}>
+              {isOwn && COMMUNITY_CHAT_GROUPING_ENABLED && <ChatBubbleFill/>}
+              {!isOwn && showName && <Text style={bubbleStyles.senderName}>{message.sender?.first_name ?? 'Someone'}</Text>}
               {message.reply_to && (
                 <TouchableOpacity
                   onPress={() => onReplyTap?.(message.reply_to!.id)}
-                  style={[bubbleStyles.replyQuote, isOwn ? bubbleStyles.replyQuoteOwn : bubbleStyles.replyQuoteOther]}
+                  style={[bubbleStyles.replyQuote, isOwn ? bubbleStyles.replyQuoteOwn : bubbleStyles.replyQuoteOther, messageAppearance?.quote, isOwn && messageAppearance?.quoteOwn]}
                   activeOpacity={0.7}
                 >
-                  <Text style={[bubbleStyles.replyQuoteName, isOwn && bubbleStyles.replyQuoteNameOwn]}>
+                  <Text style={[bubbleStyles.replyQuoteName, isOwn && bubbleStyles.replyQuoteNameOwn, messageAppearance?.quoteName, isOwn && messageAppearance?.bodyOwn]}>
                     {message.reply_to.sender_name ?? 'Someone'}
                   </Text>
-                  <Text style={[bubbleStyles.replyQuoteText, isOwn && bubbleStyles.replyQuoteTextOwn]} numberOfLines={2}>
+                  <Text style={[bubbleStyles.replyQuoteText, isOwn && bubbleStyles.replyQuoteTextOwn, messageAppearance?.quoteBody, isOwn && messageAppearance?.bodyOwn]} numberOfLines={2}>
                     {message.reply_to.content}
                   </Text>
                 </TouchableOpacity>
               )}
               <LinkedText
                 text={message.content}
-                style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn]}
-                linkStyle={isOwn ? bubbleStyles.linkOwn : bubbleStyles.linkOther}
+                mentionDocument={message.mention_data}
+                onMentionPress={onAvatarPress}
+                style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn, messageAppearance?.body, isOwn && messageAppearance?.bodyOwn]}
+                linkStyle={messageAppearance ? isOwn ? messageAppearance.linkOwn : messageAppearance.link : isOwn ? bubbleStyles.linkOwn : bubbleStyles.linkOther}
                 mentionNames={mentionNames}
-                mentionStyle={isOwn ? bubbleStyles.mentionOwn : bubbleStyles.mention}
+                mentionStyle={messageAppearance ? isOwn ? messageAppearance.mentionOwn : messageAppearance.mention : isOwn ? bubbleStyles.mentionOwn : bubbleStyles.mention}
               />
               {firstUrl && <LinkPreviewCard url={firstUrl} isOwn={isOwn} />}
+              <ChatSizedText style={[bubbleStyles.inlineTime, isOwn && bubbleStyles.inlineTimeOwn]}>{formatMessageTime(message.created_at)}</ChatSizedText>
             </View>
           )}
 
-          {totalReactions > 0 && (
-            <View style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther, iReacted && bubbleStyles.reactionBadgeMine]}>
+          {!COMMUNITY_CHAT_GROUPING_ENABLED && totalReactions > 0 && (
+            <TouchableOpacity onPress={event => { event.stopPropagation(); onViewReactions?.(message.id); }} accessibilityRole="button" accessibilityLabel={`${totalReactions} reactions. See who reacted`} hitSlop={12} style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther, iReacted && bubbleStyles.reactionBadgeMine]}>
               {uniqueEmojis.map((emoji) => (
                 <Text key={emoji} style={bubbleStyles.reactionEmoji}>
                   {emoji === 'heart' ? '\u2764\uFE0F' : emoji}
@@ -532,47 +559,57 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
               {totalReactions > 1 && (
                 <Text style={bubbleStyles.reactionCount}>{totalReactions}</Text>
               )}
-            </View>
+            </TouchableOpacity>
           )}
         </Pressable>
-
+        {(message.image_url || message.message_type === 'location' || message.message_type === 'audio' || (isEmojiOnlyMsg && !message.reply_to)) && (
+          <ChatSizedText style={bubbleStyles.inlineTime}>{!isOwn && showName ? `${message.sender?.first_name ?? 'Someone'} · ` : ''}{formatMessageTime(message.created_at)}</ChatSizedText>
+        )}
+        {COMMUNITY_CHAT_GROUPING_ENABLED && totalReactions > 0 && <ReactionChips attached
+          reactions={topicReactionCounts(reactions, currentUserId)}
+          onViewReactions={onViewReactions ? () => onViewReactions(message.id) : undefined}
+          onReact={key => { if (!isOwn && !reactionsDisabled) onReaction?.(message.id, key); }}
+          onAddReaction={!isOwn && onAddReaction ? () => onAddReaction(message.id) : undefined}
+          disabled={isOwn || reactionsDisabled}
+          appearance={{ fonts: conversationFonts }}
+        />}
       </View>
     </View>
   );
 });
 
 const bubbleStyles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 2, paddingHorizontal: 16 },
+  row: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 2, paddingHorizontal: 12 },
   rowOwn: { justifyContent: 'flex-end' },
   rowOther: { justifyContent: 'flex-start' },
   // Extra clearance below a row that has a reaction badge dangling
   // 12px below the bubble. 16px = badge offset (12) + breathing room (4).
   rowWithReaction: { marginBottom: 16 },
-  avatarSlot: { width: 28, marginRight: 8, alignSelf: 'flex-end' },
-  avatar: { width: 28, height: 28, borderRadius: 14 },
+  avatarSlot: { width: 24, marginRight: 6, alignSelf: 'flex-start', marginTop: 3 },
+  avatar: { width: 24, height: 24, borderRadius: 12 },
   avatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
   avatarInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
-  bubbleWrapper: { maxWidth: '80%', gap: 3 },
+  bubbleWrapper: { maxWidth: '84%', flexShrink: 1 },
   wrapperOwn: { alignItems: 'flex-end' },
   wrapperOther: { alignItems: 'flex-start' },
   senderLine: { marginBottom: 2, marginLeft: 4 },
-  senderName: { fontWeight: '700', fontSize: 12, color: Colors.terracotta },
+  senderName: { ...ChatType.sender, fontFamily: Fonts.sansSemibold, color: Colors.terracotta, marginBottom: 3 },
   senderDot: { fontSize: 10, color: Colors.tertiary },
   senderTime: { fontSize: 10, color: Colors.secondary },
   bubble: { overflow: 'hidden' },
-  bubbleText: { paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleText: { paddingHorizontal: 11, paddingVertical: 7 },
   bubbleOwn: { backgroundColor: Colors.terracotta },
   bubbleOther: {
-    backgroundColor: Colors.dividerWarm,
+    backgroundColor: Colors.cardBg,
   },
-  messageText: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 22 },
+  messageText: { ...ChatType.message, fontFamily: Fonts.sans, color: Colors.darkWarm },
   emojiOnly: { fontSize: 44, lineHeight: 54, paddingVertical: 2 },
   emojiOnlyWrap: { paddingVertical: 6, paddingHorizontal: 10 },
   imageCaption: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 21, marginTop: 6, maxWidth: 260 },
   imageCaptionOwn: { color: Colors.darkWarm },
   messageTextOwn: { color: Colors.white },
-  inlineTime: { fontSize: 10, color: Colors.tertiary, textAlign: 'right', marginTop: 3 },
-  inlineTimeOwn: { color: 'rgba(255,255,255,0.6)' },
+  inlineTime: { ...ChatType.time, fontFamily: Fonts.sans, color: Colors.secondary, textAlign: 'right', alignSelf: 'flex-end', marginLeft: 14, marginTop: 2 },
+  inlineTimeOwn: { color: Colors.overlayWhiteLight },
   linkOther: { textDecorationLine: 'underline' as const, color: Colors.terracotta },
   linkOwn: { textDecorationLine: 'underline' as const, color: Colors.white },
   mention: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
@@ -622,15 +659,15 @@ const bubbleStyles = StyleSheet.create({
     paddingLeft: 8,
     paddingVertical: 4,
     marginBottom: 6,
-    borderRadius: 4,
+    borderRadius: 10,
   },
   replyQuoteOwn: {
-    borderLeftColor: 'rgba(255,255,255,0.5)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderLeftColor: Colors.overlayWhite,
+    backgroundColor: Colors.overlayLight,
   },
   replyQuoteOther: {
     borderLeftColor: Colors.terracotta,
-    backgroundColor: 'rgba(0,0,0,0.04)',
+    backgroundColor: Colors.inputBg,
   },
   replyQuoteName: {
     fontFamily: Fonts.sansBold,
@@ -639,16 +676,15 @@ const bubbleStyles = StyleSheet.create({
     marginBottom: 1,
   },
   replyQuoteNameOwn: {
-    color: 'rgba(255,255,255,0.85)',
+    color: Colors.overlayWhiteLight,
   },
   replyQuoteText: {
     fontFamily: Fonts.sans,
-    fontSize: 12,
+    ...ChatType.quote,
     color: Colors.textMedium,
-    lineHeight: 16,
   },
   replyQuoteTextOwn: {
-    color: 'rgba(255,255,255,0.7)',
+    color: Colors.overlayWhiteLight,
   },
   locationBubble: { paddingHorizontal: 13, paddingVertical: 10, minWidth: 180 },
   locationPinRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
@@ -667,7 +703,7 @@ const bubbleStyles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: Colors.textLight,
   },
-  locationTapHintOwn: { color: 'rgba(255,255,255,0.7)' },
+  locationTapHintOwn: { color: Colors.overlayWhiteLight },
 });
 
 // ─── Swipe to reply ─────────────────────────────────────────────────────────
@@ -739,7 +775,9 @@ const SwipeableRow = memo(function SwipeableRow({
     () =>
       Gesture.Pan()
         .enabled(enabled)
-        .activeOffsetX([SWIPE_REPLY_ACTIVE_OFFSET_X, Number.MAX_SAFE_INTEGER])
+        // A positive scalar waits for rightward movement. A positive lower
+        // bound also activates at dx=0, stealing stationary long presses.
+        .activeOffsetX(SWIPE_REPLY_ACTIVE_OFFSET_X)
         .failOffsetY([-SWIPE_REPLY_FAIL_OFFSET_Y, SWIPE_REPLY_FAIL_OFFSET_Y])
         .onBegin(() => {
           triggered.value = false;
@@ -805,49 +843,95 @@ const swipeStyles = StyleSheet.create({
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
+let nextChatEntry = 0;
+
 function ChatThread(props: ChatThreadProps) {
   const { id } = props;
+  const { width: windowWidth } = useWindowDimensions();
+  const { fonts: loadedConversationFonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const conversationFonts = memberPresentationFonts(loadedConversationFonts);
+  const screenAppearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? createConversationAppearance(conversationFonts) : null, [conversationFonts]);
+  const composerAppearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? createChatComposerAppearance(conversationFonts) : null, [conversationFonts]);
+  const useSystemEmoji = COMMUNITY_CHAT_GROUPING_ENABLED && (Platform.OS === 'ios' || Platform.OS === 'android');
+  const gifsInAttachments = useSystemEmoji && isChatGifPickerAvailable();
   const isPast = props.readOnly != null;
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [inputText, setInputText] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoViewUrl, setPhotoViewUrl] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
-  const [overlayMessage, setOverlayMessage] = useState<{ message: ChatMessage; isOwn: boolean } | null>(null);
+  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; scrollMessage?: boolean; buttons?: BrandedAlertButton[] } | null>(null);
+  const [reactionDetails, setReactionDetails] = useState<ReactionDetailsRequest | null>(null);
+  const [overlayMessage, setOverlayMessage] = useState<MessageMenu | null>(null);
   const listRef = useRef<FlatList>(null);
   // Measured so the "+" header menu (DMs) can bloom from the button.
   const plusBtnRef = useRef<View>(null);
+  const requestedAnchor = parseMemberReactionAnchor(props.reactionMessageId, props.reactionMessageSource);
+  const anchorRequestKey = `${props.kind}:${id}:${requestedAnchor}`;
+  const [dismissedAnchor, setDismissedAnchor] = useState<string | null>(null);
+  const anchorId = dismissedAnchor === anchorRequestKey ? null : requestedAnchor;
+  const clearAnchor = useCallback(() => setDismissedAnchor(anchorRequestKey), [anchorRequestKey]);
+  const { messages, loading, loadError, olderLoadError, anchorUnavailable, currentUserId, operationScope, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch } = useChat({ kind: props.kind, id }, anchorId);
+  // A room/account return is a new entry, even when its IDs repeat. The
+  // transport also owns its own account epoch; this tighter scope includes
+  // the read-only transition and every asynchronous composer continuation.
+  const entry = useMemo(() => ({ serial: ++nextChatEntry }), [props.kind, id, currentUserId, operationScope]);
+  const activeEntry = useRef<typeof entry | null>(null);
+  const writableVisit = useMemo(() => ({}), [entry, isPast]);
+  const activeWritableVisit = useRef<object | null>(null);
+  const isCurrentEntry = useCallback(() => activeEntry.current === entry && !!currentUserId &&
+    operationScope !== null && (!operationScope || operationScope.isCurrent()), [entry, currentUserId, operationScope]);
+  const draftRoom = useMemo(() => ({ kind: props.kind, id }), [props.kind, id]);
+  const draftOwner = useMemo(() => currentUserId ? { userId: currentUserId, isCurrent: isCurrentEntry } : null, [currentUserId, isCurrentEntry]);
+  const composerDraft = useChatComposerDraft(draftRoom, draftOwner);
+  const inputText = composerDraft.draft.text;
+  const editingMessageId = composerDraft.draft.edit?.id ?? null;
+  const replyingTo = composerDraft.draft.reply;
+  const changeDraft = composerDraft.change;
+  const setInputText = useCallback((value: React.SetStateAction<string>) => changeDraft(draft => {
+    const text = typeof value === 'function' ? value(draft.text) : value;
+    return { text, mentions: draft.mentions ? rebaseChatMentions(draft.mentions, text) : null };
+  }), [changeDraft]);
+  const setReplyingTo = useCallback((reply: typeof replyingTo) => changeDraft({ reply }), [changeDraft]);
+  const setEditingMessageId = useCallback((_id: null) => changeDraft({ edit: null }), [changeDraft]);
+  const canWrite = useCallback(() => isCurrentEntry() && composerDraft.isCurrent() && composerDraft.ready && !composerDraft.error && !isPast && activeWritableVisit.current === writableVisit,
+    [isCurrentEntry, composerDraft.isCurrent, composerDraft.ready, composerDraft.error, isPast, writableVisit]);
+  const entryScope = useMemo(() => ({ userId: currentUserId, isCurrent: canWrite }), [currentUserId, canWrite]);
+  const moderationScope = useMemo(() => ({ userId: currentUserId ?? '', isCurrent: isCurrentEntry }), [currentUserId, isCurrentEntry]);
   const openPlusFromButton = useCallback(() => {
-    if (props.headerMenu.type !== 'plus') return;
+    if (!isCurrentEntry() || props.headerMenu.type !== 'plus') return;
     const onPress = props.headerMenu.onPress;
-    plusBtnRef.current?.measureInWindow((x, y, width, height) =>
-      onPress({ x, y, width, height }),
-    );
-  }, [props.headerMenu]);
-  const { messages, loading, currentUserId, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch } = useChat({ kind: props.kind, id });
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; senderName: string } | null>(null);
+    plusBtnRef.current?.measureInWindow((x, y, width, height) => {
+      if (isCurrentEntry()) onPress({ x, y, width, height });
+    });
+  }, [props.headerMenu, isCurrentEntry]);
+  const requireEntry = useCallback(() => { if (!canWrite()) throw new Error('Conversation changed'); }, [canWrite]);
+  useLayoutEffect(() => {
+    activeEntry.current = entry;
+    return () => { if (activeEntry.current === entry) activeEntry.current = null; };
+  }, [entry]);
+  useLayoutEffect(() => {
+    activeWritableVisit.current = writableVisit;
+    sendingRef.current = null; photoSendingRef.current = null; photoPickerAttempt.current = null;
+    gifAttempt.current = null; locationAttempt.current = null;
+    return () => { if (activeWritableVisit.current === writableVisit) activeWritableVisit.current = null; };
+  }, [writableVisit]);
+  const photos = useMemo(() => messages.filter(message => message.message_type !== 'system' && message.image_url)
+    .slice().sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+    .map(message => ({ id: message.id, uri: message.image_url!, senderName: message.sender?.first_name, caption: message.content })), [messages]);
+  const photoSelection = useChatPhotoSelection(`${props.kind}:${id}:${currentUserId}:${entry.serial}`, photos);
+  const openMessagePhoto = useCallback((url: string, messageId: string) => {
+    if (COMMUNITY_CHAT_GROUPING_ENABLED) photoSelection.onSelect(messageId);
+    else setPhotoViewUrl(url);
+  }, [photoSelection.onSelect]);
   const [membersExpanded, setMembersExpanded] = useState(false);
-  // Track keyboard on both platforms.
-  //
-  // iOS: KeyboardAvoidingView with behavior="padding" is broken under
-  // the new architecture (Fabric) -- the input bar slides behind the
-  // keyboard. Instead we listen to keyboardWillShow, capture the
-  // reported keyboard height, and apply it as paddingBottom on a
-  // wrapper View around the FlatList + input bar. KAV is gone.
-  //
-  // Android: edgeToEdgeEnabled=true disables the classic adjustResize
-  // window shrink on Android 15+, and Keyboard.addListener('keyboardDidShow')
-  // reports a stale/zero height under new arch. We use Reanimated's
-  // useAnimatedKeyboard instead -- it hooks into Android's WindowInsets
-  // API via the native module and is the only reliable height source in
-  // edge-to-edge mode. The shared value drives an animated style applied
-  // to the Android input bar wrapper (Animated.View). iOS continues to
-  // use the keyboardWillShow listener + iosKeyboardHeight state untouched.
+  // Native keyboard geometry stays on the UI thread. Waiting for an iOS
+  // keyboardWillShow state commit lets the rising keyboard cover messages
+  // before the composer/list move. Event state below is only for controls
+  // and panel handoff; it is not the iOS viewport's height source.
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [iosKeyboardHeight, setIosKeyboardHeight] = useState(0);
   // Android keyboard height mirrored from Reanimated's shared value into
@@ -861,11 +945,20 @@ function ChatThread(props: ChatThreadProps) {
   // max(keyboardHeight, panelOpen ? panelHeight : 0) so the keyboard<->panel
   // handoff never collapses to 0 for a frame (prevents the input bar jumping).
   // Which keyboard-height panel is showing (both share the substrate + inset).
-  const [activePanel, setActivePanel] = useState<'attach' | 'emoji' | null>(null);
+  const [activePanel, setActivePanel] = useState<'attach' | 'emoji' | 'gif' | null>(null);
+  const attachmentShowsKeyboard = activePanel === 'attach' || (useSystemEmoji && activePanel === 'gif');
   const panelOpen = activePanel !== null;
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [pendingPhotos, setPendingPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
+  const photoCaptionSentRef = useRef(false);
+  const photoSendingRef = useRef<object | null>(null);
+  const photoPickerAttempt = useRef<object | null>(null);
+  const gifAttempt = useRef<object | null>(null);
+  const gifPendingIds = useRef(new Map<string, string>());
+  const locationAttempt = useRef<object | null>(null);
+  const locationSession = useRef<{ pin: string; sendId: string } | null>(null);
+  const photoSendSessionRef = useRef(new PhotoSendSession(() => Crypto.randomUUID()));
   // Message id whose full-emoji reaction picker is open (via the "+" on the
   // quick-react row); null when closed.
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
@@ -876,36 +969,41 @@ function ChatThread(props: ChatThreadProps) {
   // height; fall back until one is seen this session.
   const [panelHeight, setPanelHeight] = useState(PANEL_FALLBACK_HEIGHT);
   const panelInset = panelOpen ? panelHeight : 0;
+  const iosDockFloor = Math.max(panelInset, insets.bottom);
 
   const animatedKeyboard = useAnimatedKeyboard();
-  // Panel inset mirrored to the UI thread so the Android animated bottom can
-  // max() it against the live keyboard height (and ease it for a smooth open).
+  // Android retains its existing eased panel inset. On iOS the panel mounts
+  // at full height, so reserve that footprint in the same render; only the
+  // native keyboard height animates. Otherwise the panel covers the dock
+  // while the inset catches up.
   const panelInsetSV = useSharedValue(0);
   useEffect(() => {
     panelInsetSV.value = withTiming(panelInset, { duration: PANEL_ANIM_MS });
   }, [panelInset, panelInsetSV]);
-  const androidInputBarAnimatedStyle = useAnimatedStyle(() => ({
-    bottom: Math.max(animatedKeyboard.height.value, panelInsetSV.value),
+  const immediateIOSPanelInset = Platform.OS === 'ios' ? panelInset : null;
+  const nativeInputBarAnimatedStyle = useAnimatedStyle(() => ({
+    bottom: Math.max(animatedKeyboard.height.value, immediateIOSPanelInset ?? panelInsetSV.value),
   }));
+  const MessageViewport = Platform.OS === 'ios' ? IOSKeyboardViewport : View;
+  const mirrorKeyboardHeightToJS = Platform.OS === 'android';
   useAnimatedReaction(
-    () => animatedKeyboard.height.value,
+    () => mirrorKeyboardHeightToJS ? animatedKeyboard.height.value : 0,
     (h) => { runOnJS(setAndroidKeyboardHeight)(h); },
     [],
   );
-  // Android gets Animated.View driven by useAnimatedKeyboard; iOS gets
-  // plain View with static bottom = max(keyboard, panel) inset.
+  // The iOS viewport and dock use the same native height for every animation
+  // frame, including interactive dismissal. Android retains its existing
+  // edge-to-edge content reservation; web has no native keyboard inset.
   const InputBarWrapper: React.ComponentType<any> =
-    Platform.OS === 'android' ? Animated.View : View;
+    Platform.OS === 'web' ? View : Platform.OS === 'ios' ? IOSKeyboardDock : Animated.View;
   const inputBarBottomStyle =
-    Platform.OS === 'android'
-      ? androidInputBarAnimatedStyle
-      : { bottom: Math.max(iosKeyboardHeight, panelInset) };
+    Platform.OS === 'web' ? { bottom: panelInset } : Platform.OS === 'ios' ? { bottom: 0 } : nativeInputBarAnimatedStyle;
   useEffect(() => {
     // Inverted FlatList: offset 0 is the visual bottom (newest message).
-    // When the keyboard opens we snap to that so the user always sees the
-    // latest messages above the newly-raised input bar.
+    // Keep the newest message above the keyboard only when already at the
+    // bottom. Reading or replying further up must not lose that position.
     const scrollToLatest = () => {
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      if (isCurrentEntry() && !anchorId && atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
     };
     // Remember the keyboard height so the attachment panel matches it, and
     // close the panel only once the keyboard has actually taken over the space
@@ -915,18 +1013,37 @@ function ChatThread(props: ChatThreadProps) {
       setActivePanel(null);
     };
     if (Platform.OS === 'ios') {
+      let listening = true;
+      let showPending = false;
       const showSub = Keyboard.addListener('keyboardWillShow', (e) => {
+        if (!listening || !isCurrentEntry()) return;
+        showPending = true;
         setKeyboardVisible(true);
         setIosKeyboardHeight(e.endCoordinates.height);
-        onKeyboardShown(e.endCoordinates.height);
+        // Keep the panel's reservation while the native keyboard is rising.
+        // keyboardWillShow carries a target height, not occupied space yet.
         scrollToLatest();
       });
+      const shownSub = Keyboard.addListener('keyboardDidShow', (e) => {
+        if (!listening || !showPending) return;
+        showPending = false;
+        // A cancelled transition, picker, or newer panel request must not
+        // let a delayed completion dismiss the currently selected panel.
+        if (!isCurrentEntry() || !textInputRef.current?.isFocused()) return;
+        const height = e.endCoordinates?.height ?? 0;
+        if (height > 0) onKeyboardShown(height);
+      });
       const hideSub = Keyboard.addListener('keyboardWillHide', () => {
+        showPending = false;
+        if (!listening || !isCurrentEntry()) return;
         setKeyboardVisible(false);
         setIosKeyboardHeight(0);
       });
       return () => {
+        listening = false;
+        showPending = false;
         showSub.remove();
+        shownSub.remove();
         hideSub.remove();
       };
     }
@@ -940,25 +1057,31 @@ function ChatThread(props: ChatThreadProps) {
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [isCurrentEntry, anchorId]);
   // The keyboard AND the attachment panel both span the home-indicator area, so
   // when either is up the bar sits flush on it (8) rather than adding insets.bottom.
-  const inputBarBottomPadding = keyboardVisible || panelOpen ? 8 : insets.bottom + 8;
+  const inputBarBottomPadding = Platform.OS === 'ios' ? 8 : keyboardVisible || panelOpen ? 8 : insets.bottom + 8;
   // Measure the bottom dock (input bar + any reply/edit banners) so the
   // inverted FlatList can reserve exactly that much space at its visual
   // bottom. Inverted lists flip the content container, so paddingTop in
   // style terms is the side closest to the input bar visually.
-  // Default to 70 so the first render already reserves space for the input
-  // bar. Without this, bottomDockHeight starts at 0, the inverted list has
-  // no bottom padding, and the newest message renders behind the absolute-
-  // positioned input bar until onLayout fires and corrects it.
-  const [bottomDockHeight, setBottomDockHeight] = useState(70);
+  // Wait for the actual dock before revealing messages. A fixed first-frame
+  // estimate can miss the safe area or a restored draft/reply tray, exposing
+  // the newest bubble underneath the dock on entry. Keep the list mounted so
+  // it can lay out, then reveal it in the same commit as its measured inset.
+  // Retain the measurement while this physical dock remains mounted: focus
+  // alone does not guarantee another native onLayout event.
+  const [bottomDockHeight, setBottomDockHeight] = useState<number | null>(null);
+  const onDockLayout = useCallback((event: LayoutChangeEvent) => {
+    const height = event.nativeEvent.layout.height;
+    if (Number.isFinite(height) && height > 0) setBottomDockHeight(height);
+  }, []);
 
   // Reserved space at the visual bottom of the inverted FlatList so the
   // newest message always sits directly above the input bar.
   //
-  // iOS: the list shrinks by iosKeyboardHeight via marginBottom on the
-  // FlatList style below, so the contentContainer only needs to reserve
+  // iOS: the viewport shrinks with the native keyboard animation, so the
+  // contentContainer only needs to reserve
   // the input bar height. Growing paddingTop by the keyboard height here
   // would trigger maintainVisibleContentPosition to shift the scroll on
   // keyboard open, leaving the user stuck mid-conversation unable to
@@ -969,79 +1092,149 @@ function ChatThread(props: ChatThreadProps) {
   // paddingTop has to reserve both the bar and the keyboard height.
   const listBottomReservation =
     Platform.OS === 'ios'
-      ? bottomDockHeight + 8
-      : bottomDockHeight + 8 + Math.max(androidKeyboardHeight, panelInset);
+      ? (bottomDockHeight ?? 0) + 8
+      : (bottomDockHeight ?? 0) + 8 + Math.max(androidKeyboardHeight, panelInset);
 
-  // ── "Enable notifications" banner ────────────────────────────────────
-  // Shows when the user has no push token and there are messages from
-  // others in the chat. This is the moment they feel the pain of missing
-  // notifications. Dismissable for 7 days via AsyncStorage.
+  // Keep the existing invitation and seven-day explicit-dismissal/denial
+  // policy. A slow or failed registration is not a permission decision.
   const [showPushBanner, setShowPushBanner] = useState(false);
+  const [enablingPush, setEnablingPush] = useState(false);
+  const [pushFeedback, setPushFeedback] = useState<string | null>(null);
+  const [pushVisit, setPushVisit] = useState<object>({});
+  const activePushVisit = useRef<object | null>(null);
+  const pushAttempt = useRef<object | null>(null);
+  const pushCheckRevision = useRef(0);
+  const pushSettingsReturn = useRef<{ visit: object; returned: boolean } | null>(null);
   const PUSH_BANNER_KEY = 'push_banner_dismissed_at';
   const PUSH_BANNER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+  const isCurrentPush = useCallback(() => isCurrentEntry() && activePushVisit.current === pushVisit,
+    [isCurrentEntry, pushVisit]);
+
+  useFocusEffect(useCallback(() => {
+    const visit = {};
+    activePushVisit.current = visit;
+    setPushVisit(visit);
+    pushAttempt.current = null;
+    pushSettingsReturn.current = null;
+    pushCheckRevision.current++;
+    setShowPushBanner(false);
+    setPushFeedback(null);
+    setEnablingPush(false);
+    return () => {
+      if (activePushVisit.current !== visit) return;
+      activePushVisit.current = null;
+      pushAttempt.current = null;
+      pushSettingsReturn.current = null;
+      pushCheckRevision.current++;
+    };
+  }, [entry]));
 
   useEffect(() => {
-    if (!currentUserId || messages.length === 0) return;
-    const hasOtherMessages = messages.some(m => m.user_id !== currentUserId);
-    if (!hasOtherMessages) return;
-
+    if (!isCurrentPush() || !currentUserId || messages.length === 0) return;
+    if (!messages.some(message => message.user_id !== currentUserId)) return;
     let cancelled = false;
-    (async () => {
+    const revision = pushCheckRevision.current;
+    const current = () => !cancelled && isCurrentPush() && revision === pushCheckRevision.current;
+    void (async () => {
       try {
-        const status = await getPushPermissionStatus();
-        if (status === 'granted') return;
-
+        const permission = await getPushPermissionStatus();
+        if (!current() || permission === 'granted') return;
         const dismissed = await AsyncStorage.getItem(PUSH_BANNER_KEY);
-        if (dismissed) {
-          const elapsed = Date.now() - parseInt(dismissed, 10);
-          if (elapsed < PUSH_BANNER_COOLDOWN_MS) return;
-        }
-        if (!cancelled) setShowPushBanner(true);
-      } catch {}
+        if (!current()) return;
+        if (dismissed && Date.now() - parseInt(dismissed, 10) < PUSH_BANNER_COOLDOWN_MS) return;
+        setShowPushBanner(true);
+      } catch { /* A passive check never opens an error or requests permission. */ }
     })();
     return () => { cancelled = true; };
-  }, [currentUserId, messages.length]);
+  }, [currentUserId, messages.length, isCurrentPush]);
 
-  const handleEnablePush = useCallback(async () => {
-    // If iOS has already recorded a hard denial, the system prompt silently
-    // no-ops -- the only path forward is Settings.
-    const status = await getPushPermissionStatus();
-    if (status === 'denied') {
-      await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
-      setShowPushBanner(false);
-      Linking.openSettings();
-      return;
-    }
-
-    // Undetermined / provisional: surface the native prompt and, on
-    // grant, save the expo push token to the user's profile.
-    const token = await registerForPushNotifications({ prompt: true, userId: currentUserId });
-    setShowPushBanner(false);
-    if (!token) {
-      // User declined the system prompt -- honor the 7-day cooldown so we
-      // don't nag on every chat open.
-      await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
-    }
-  }, [currentUserId]);
-
-  const handleDismissPushBanner = useCallback(async () => {
-    await AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
-    setShowPushBanner(false);
-  }, []);
-
-  // When returning from Settings, re-check permission. If granted, fetch
-  // and save the token -- banner auto-hides since permission is now granted.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', async (state) => {
-      if (state !== 'active' || !showPushBanner) return;
-      const status = await getPushPermissionStatus();
-      if (status === 'granted') {
+  const handleEnablePush = useCallback(async (fromSettings = false): Promise<void> => {
+    if (!isCurrentPush() || pushAttempt.current) return;
+    if (fromSettings && (pushSettingsReturn.current?.visit !== pushVisit || !pushSettingsReturn.current.returned)) return;
+    pushSettingsReturn.current = null;
+    const attempt = {};
+    pushAttempt.current = attempt;
+    pushCheckRevision.current++;
+    setEnablingPush(true);
+    setPushFeedback(null);
+    const current = () => isCurrentPush() && pushAttempt.current === attempt;
+    // showResult and the native foreground listener can assign this ref
+    // after the initial clear; read its declared type at completion time.
+    const getSettingsReturn = (): { visit: object; returned: boolean } | null => pushSettingsReturn.current;
+    const showResult = (result: Parameters<typeof pushRegistrationFeedback>[0], previouslyDenied = false) => {
+      if (!current()) return;
+      const feedback = pushRegistrationFeedback(result);
+      if (feedback.kind === 'silent') return;
+      if (feedback.kind === 'success') {
         setShowPushBanner(false);
-        registerForPushNotifications({ prompt: false, userId: currentUserId }).catch(() => {});
+      } else if (feedback.kind === 'settings') {
+        // Keep the established snooze after a declined native prompt. Open
+        // Settings only when denial was known before this enable attempt.
+        void AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
+        setShowPushBanner(false);
+        if (fromSettings || !previouslyDenied) return;
+        const settingsReturn = { visit: pushVisit, returned: false };
+        pushSettingsReturn.current = settingsReturn;
+        void Linking.openSettings().catch(() => {
+          if (!isCurrentPush() || pushSettingsReturn.current !== settingsReturn) return;
+          pushSettingsReturn.current = null;
+          setShowPushBanner(true);
+          setPushFeedback('Couldn’t open Settings. Open your device settings and choose WashedUp.');
+        });
+      } else {
+        setShowPushBanner(true);
+        setPushFeedback(feedback.message);
       }
+    };
+    try {
+      // An explicit Enable action first asks for a truthful, non-prompting
+      // registration result; the coarse Android native enum is insufficient.
+      let result = await registerPushNotificationsWithResult({ prompt: false, userId: currentUserId });
+      if (!current()) return;
+      const previouslyDenied = result.status === 'permission-denied';
+      if (result.status === 'permission-required' && !fromSettings) {
+        result = await registerPushNotificationsWithResult({ prompt: true, userId: currentUserId, canPrompt: current });
+      }
+      showResult(result, previouslyDenied);
+    } catch {
+      showResult({ status: 'failed' });
+    } finally {
+      if (pushAttempt.current === attempt) {
+        pushAttempt.current = null;
+        if (isCurrentPush()) {
+          setEnablingPush(false);
+          // An early foreground event may arrive before this attempt releases
+          // its lock. Retain and consume that one return after the lock clears.
+          const settingsReturn = getSettingsReturn();
+          if (settingsReturn?.visit === pushVisit && settingsReturn.returned) {
+            void handleEnablePush(true);
+          }
+        }
+      }
+    }
+  }, [currentUserId, isCurrentPush, pushVisit]);
+
+  const handleDismissPushBanner = useCallback(() => {
+    if (!isCurrentPush()) return;
+    pushAttempt.current = null;
+    pushCheckRevision.current++;
+    pushSettingsReturn.current = null;
+    setEnablingPush(false);
+    setShowPushBanner(false);
+    setPushFeedback(null);
+    void AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
+  }, [isCurrentPush]);
+
+  // Recheck only after this visit's explicit Settings action. Foregrounding
+  // elsewhere must not start another registration or display a new prompt.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state !== 'active' || !isCurrentPush() || pushSettingsReturn.current?.visit !== pushVisit) return;
+      pushSettingsReturn.current.returned = true;
+      void handleEnablePush(true);
     });
     return () => sub.remove();
-  }, [showPushBanner, currentUserId]);
+  }, [handleEnablePush, isCurrentPush, pushVisit]);
 
   // Throttle the focus-driven message refetch. New messages already
   // arrive live via realtime; this is a safety-net resync, so once per
@@ -1065,71 +1258,9 @@ function ChatThread(props: ChatThreadProps) {
     }, [refetch]),
   );
 
-  // Tell the server this user is actively viewing THIS chat, so the
-  // send-push edge function suppresses pushes for new messages in the
-  // same chat (they arrive live via realtime; a banner + haptic for a
-  // message you can already see on screen is noise). Cleared on blur,
-  // unmount, or app background; re-set when the app foregrounds while
-  // still focused on this chat.
-  const enablePresence = props.enablePresence;
-  useFocusEffect(
-    useCallback(() => {
-      // Presence writes active_chat_event_id, a plan-only column. Circles/DMs
-      // don't have it yet, so they opt out (no-op) until their push lands.
-      if (!enablePresence) return;
-      let cancelled = false;
-      let markedActive = false;
-
-      const setActive = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user || cancelled) return;
-        const { error } = await supabase
-          .from('profiles')
-          .update({ active_chat_event_id: id })
-          .eq('id', user.id);
-        // Only treat ourselves as "active" if the server actually recorded
-        // it. If this silently failed and we still flipped markedActive,
-        // clearActive's early-return guard would later skip the reset and
-        // strand active_chat_event_id pointing at this chat -- suppressing
-        // push for it long after the user left (missed messages).
-        if (error) {
-          if (__DEV__) console.warn('[chat] setActive failed:', error.message);
-          return;
-        }
-        markedActive = true;
-      };
-
-      const clearActive = async () => {
-        if (!markedActive) return;
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        const { error } = await supabase
-          .from('profiles')
-          .update({ active_chat_event_id: null })
-          .eq('id', user.id);
-        // Keep markedActive=true on failure so the next blur/unmount/
-        // background retries the clear instead of leaving suppression on.
-        if (error) {
-          if (__DEV__) console.warn('[chat] clearActive failed:', error.message);
-          return;
-        }
-        markedActive = false;
-      };
-
-      if (AppState.currentState === 'active') setActive();
-
-      const appSub = AppState.addEventListener('change', (state) => {
-        if (state === 'active') setActive();
-        else clearActive();
-      });
-
-      return () => {
-        cancelled = true;
-        appSub.remove();
-        clearActive();
-      };
-    }, [id, enablePresence]),
-  );
+  // Preserve existing Plan-only push suppression while owning each focused
+  // room/account visit and its background/return cleanup.
+  useActiveChatPresence(id, operationScope ?? null, !!props.enablePresence);
 
   const { blockUser } = useBlock();
 
@@ -1144,7 +1275,7 @@ function ChatThread(props: ChatThreadProps) {
     () => members.find(m => m.id === currentUserId)?.first_name ?? null,
     [members, currentUserId],
   );
-  const { typingUsers, broadcastTyping, stopTyping } = useTypingIndicator(id, currentUserId, currentUserName, props.kind);
+  const { typingUsers, broadcastTyping, stopTyping } = useTypingIndicator(id, currentUserId, currentUserName, props.kind, operationScope);
 
   // Lowercased first names of everyone in the chat, for highlighting @mentions
   // in rendered bubbles. Memoized so the Set reference stays stable (MessageBubble
@@ -1157,13 +1288,7 @@ function ChatThread(props: ChatThreadProps) {
 
   // Candidates for the autocomplete strip: members whose first name starts with
   // what's been typed after "@" (self excluded). Empty query lists everyone.
-  const mentionCandidates = useMemo(() => {
-    if (mentionQuery === null) return [];
-    const q = mentionQuery.toLowerCase();
-    return members
-      .filter(m => m.id !== currentUserId && m.first_name && (q === '' || m.first_name.toLowerCase().startsWith(q)))
-      .slice(0, MENTION_SUGGESTION_LIMIT);
-  }, [mentionQuery, members, currentUserId]);
+  const mentionCandidates = useMemo(() => findMentionMembers(members, mentionQuery, currentUserId), [mentionQuery, members, currentUserId]);
 
   const typingLabel = useMemo(() => {
     if (typingUsers.length === 0) return null;
@@ -1179,13 +1304,20 @@ function ChatThread(props: ChatThreadProps) {
   // commit until the next render, so a fast real double-tap can fire
   // handleSend twice reading the same pre-clear text -- two identical real
   // messages, not a display glitch. A ref closes that window instantly.
-  const sendingRef = useRef(false);
+  const sendingRef = useRef<object | null>(null);
+  const draftRevision = useRef(0);
+  const draftContextRevision = useRef(0);
   const handleInputChange = useCallback((text: string) => {
+    if (!canWrite()) return;
+    draftRevision.current++;
+    const previousLength = inputTextRef.current.length;
+    const caret = selectionRef.current.start >= previousLength ? text.length : selectionRef.current.start;
+    selectionRef.current = { start: caret, end: caret };
     setInputText(text);
     inputTextRef.current = text;
     broadcastTyping();
-    setMentionQuery(mentionQueryAt(text, selectionRef.current.start));
-  }, [broadcastTyping]);
+    setMentionQuery(mentionQueryAt(text, caret));
+  }, [broadcastTyping, canWrite]);
   useEffect(() => { inputTextRef.current = inputText; }, [inputText]);
 
   const prefetchedRef = useRef<Set<string>>(new Set());
@@ -1205,9 +1337,16 @@ function ChatThread(props: ChatThreadProps) {
   // "rendered fewer hooks" if infoError flipped true after a successful render).
 
   const handleReportMenu = useCallback(async () => {
+    if (!isCurrentEntry()) return;
     // The full member list (avatar row is capped) comes from the per-kind wrapper:
     // plans query event_members, circles query circle_members.
-    const reportMembers = (await props.fetchReportMembers?.()) ?? [];
+    let reportMembers: { id: string; name: string }[];
+    try { reportMembers = (await props.fetchReportMembers?.()) ?? []; }
+    catch {
+      if (isCurrentEntry()) setAlertInfo({ title: 'Could not load members', message: 'Try opening the member menu again.' });
+      return;
+    }
+    if (!isCurrentEntry()) return;
 
     if (reportMembers.length === 0) {
       setAlertInfo({ title: 'No other members', message: 'There are no other members in this chat to report.' });
@@ -1220,14 +1359,16 @@ function ChatThread(props: ChatThreadProps) {
       ActionSheetIOS.showActionSheetWithOptions(
         { options: [...memberNames, 'Cancel'], cancelButtonIndex: memberNames.length, title: 'Members' },
         (idx) => {
-          if (idx >= reportMembers.length) return;
+          if (!isCurrentEntry() || idx < 0 || idx >= reportMembers.length) return;
           const member = reportMembers[idx];
           setTimeout(() => {
+            if (!isCurrentEntry()) return;
             ActionSheetIOS.showActionSheetWithOptions(
               { options: ['Report User', 'Block User', 'Cancel'], destructiveButtonIndex: 1, cancelButtonIndex: 2, title: member.name },
               (actionIdx) => {
+                if (!isCurrentEntry()) return;
                 if (actionIdx === 0) { setReportTarget(member); setShowReport(true); }
-                if (actionIdx === 1) blockUser(member.id, member.name, () => router.back());
+                if (actionIdx === 1) blockUser(member.id, member.name, () => { if (isCurrentEntry()) router.back(); }, moderationScope);
               },
             );
           }, 300);
@@ -1241,13 +1382,15 @@ function ChatThread(props: ChatThreadProps) {
           ...reportMembers.map((member) => ({
             text: member.name,
             onPress: () => {
+              if (!isCurrentEntry()) return;
               setTimeout(() => {
+                if (!isCurrentEntry()) return;
                 setAlertInfo({
                   title: member.name,
                   message: '',
                   buttons: [
-                    { text: 'Report User', onPress: () => { setReportTarget(member); setShowReport(true); } },
-                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => router.back()) },
+                    { text: 'Report User', onPress: () => { if (isCurrentEntry()) { setReportTarget(member); setShowReport(true); } } },
+                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => { if (isCurrentEntry()) router.back(); }, moderationScope) },
                     { text: 'Cancel', style: 'cancel' },
                   ],
                 });
@@ -1258,43 +1401,63 @@ function ChatThread(props: ChatThreadProps) {
         ],
       });
     }
-  }, [props.fetchReportMembers, router, blockUser]);
+  }, [props.fetchReportMembers, router, blockUser, isCurrentEntry, moderationScope]);
 
-  // Scroll the inverted FlatList to its visual bottom (offset 0 in inverted
-  // coordinates is where the newest message lives). Needed because the list
-  // uses maintainVisibleContentPosition, which keeps existing visible items
-  // stable when new ones are added at index 0 -- meaning a freshly-sent
-  // message lands just below the visible area, behind the input bar. Calling
-  // this after every send forces the new message into view. Wrapped in
-  // requestAnimationFrame so layout has flushed before the scroll fires.
+  // Explicit jumps happen immediately. New rows at the live edge do not use
+  // visible-position preservation: that would pin the previous message and
+  // place the new bubble underneath the composer until server confirmation.
   const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    });
-  }, []);
+    if (!isCurrentEntry()) return;
+    atBottomRef.current = true;
+    setFollowingLatest(true);
+    if (anchorId) { clearAnchor(); return; }
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [isCurrentEntry, anchorId, clearAnchor]);
 
   // Floating scroll-to-bottom button + "new messages below" counter.
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [unreadBelow, setUnreadBelow] = useState(0);
   const atBottomRef = useRef(true);
-  const lastMsgCountRef = useRef(0);
+  const [followingLatest, setFollowingLatest] = useState(!anchorId);
+  const incomingTracker = useRef<{ entry: typeof entry; ids: Set<string>; newest: number } | null>(null);
+  useLayoutEffect(() => {
+    // A new room or history window starts with its own list position.
+    // Keep this separate from composer resets when only the anchor changes.
+    incomingTracker.current = null;
+    atBottomRef.current = !anchorId;
+    setFollowingLatest(!anchorId);
+    setUnreadBelow(0); setShowScrollBtn(false);
+  }, [entry, anchorId]);
 
   const handleListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!isCurrentEntry()) return;
     const y = e.nativeEvent.contentOffset.y;
     atBottomRef.current = y <= SCROLL_AT_BOTTOM_THRESHOLD;
+    setFollowingLatest(atBottomRef.current);
     setShowScrollBtn(y > SCROLL_SHOW_THRESHOLD);
     if (atBottomRef.current) setUnreadBelow(0);
-  }, []);
+  }, [isCurrentEntry]);
 
-  // Count messages that arrive while the user is scrolled up; clear when they
-  // return to the bottom (handled in handleListScroll) or tap the button.
+  // Track arrivals by identity and time, not array length: pagination adds
+  // history above, and a delete plus arrival can leave the length unchanged.
   useEffect(() => {
-    if (messages.length > lastMsgCountRef.current) {
-      const delta = messages.length - lastMsgCountRef.current;
-      if (!atBottomRef.current) setUnreadBelow(c => c + delta);
+    const previous = incomingTracker.current;
+    const newest = messages.reduce((latest, message) => {
+      const timestamp = Date.parse(message.created_at);
+      return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
+    }, -Infinity);
+    if (!previous || previous.entry !== entry) {
+      incomingTracker.current = { entry, ids: new Set(messages.map(message => message.id)), newest };
+      return;
     }
-    lastMsgCountRef.current = messages.length;
-  }, [messages.length]);
+    let incoming = 0;
+    for (const message of messages) {
+      if (!previous.ids.has(message.id) && Date.parse(message.created_at) >= previous.newest && message.user_id !== currentUserId) incoming++;
+      previous.ids.add(message.id);
+    }
+    previous.newest = Math.max(previous.newest, newest);
+    if (!atBottomRef.current && incoming > 0) setUnreadBelow(count => count + incoming);
+  }, [messages, entry, currentUserId]);
 
   const handleScrollToBottomPress = useCallback(() => {
     scrollToBottom();
@@ -1302,25 +1465,70 @@ function ChatThread(props: ChatThreadProps) {
   }, [scrollToBottom]);
 
   const scrollBtnBottom =
-    Math.max(Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight, panelInset) + bottomDockHeight + SCROLL_BTN_GAP;
+    Math.max(Platform.OS === 'ios' ? iosKeyboardHeight : androidKeyboardHeight, panelInset) + (bottomDockHeight ?? 0) + SCROLL_BTN_GAP;
 
-  const handleSend = useCallback(async () => {
-    if (sendingRef.current) return;
-    const text = inputText.trim();
-    if (!text || uploading) return;
-    sendingRef.current = true;
-    setInputText('');
-    setMentionQuery(null);
-    stopTyping();
-    if (editingMessageId) {
-      editMessage(editingMessageId, text).finally(() => { sendingRef.current = false; });
-      setEditingMessageId(null);
-    } else {
-      sendMessage(text, undefined, replyingTo?.id).finally(() => { sendingRef.current = false; });
-      setReplyingTo(null);
-      scrollToBottom();
+  const [checkingDraft, setCheckingDraft] = useState(false);
+  const [sendingText, setSendingText] = useState(false);
+  const checkPendingDraft = useCallback(async () => {
+    const original = composerDraft.draft.attempt;
+    if (!original || !draftOwner || !isCurrentEntry() || sendingRef.current) return;
+    const token = {}; sendingRef.current = token; setCheckingDraft(true);
+    try {
+      if (await checkChatComposerAttempt(draftRoom, original, draftOwner)) {
+        await composerDraft.finish(original);
+        if (isCurrentEntry()) await refetch();
+      } else if (isCurrentEntry()) setAlertInfo({ title: 'Not confirmed yet', message: 'Your original message is kept. Check again or retry the original when you’re ready.' });
+    } catch (error) {
+      if (isCurrentEntry()) setAlertInfo({ title: 'Could not check your message', message: error instanceof Error ? error.message : 'Your original message is kept.' });
+    } finally {
+      if (sendingRef.current === token) { sendingRef.current = null; setCheckingDraft(false); }
     }
-  }, [inputText, uploading, sendMessage, editMessage, editingMessageId, replyingTo, scrollToBottom, stopTyping]);
+  }, [composerDraft, draftRoom, draftOwner, isCurrentEntry, refetch]);
+
+  const handleSend = useCallback(async (retryOriginal = false) => {
+    if (!canWrite() || !draftOwner || sendingRef.current || uploading || (composerDraft.draft.attempt && !retryOriginal)) return;
+    if (!inputTextRef.current.trim() && !composerDraft.draft.attempt) return;
+    const token = {}; sendingRef.current = token; setSendingText(true);
+    const revision = draftRevision.current;
+    const contextRevision = draftContextRevision.current;
+    let original: ChatDraftAttempt | null = null;
+    try {
+      if (!composerDraft.draft.attempt) {
+        const filtered = checkContent(inputTextRef.current.trim());
+        if (!filtered.ok) throw Error(filtered.reason ?? 'Please revise your message.');
+      }
+      original = await composerDraft.prepare();
+      if (!canWrite()) return;
+      // Only the original composer is cleared. Text typed during preflight stays.
+      if (!retryOriginal && draftRevision.current === revision) { setInputText(''); inputTextRef.current = ''; }
+      setMentionQuery(null); stopTyping();
+      if (!retryOriginal || !await checkChatComposerAttempt(draftRoom, original, draftOwner)) {
+        if (retryOriginal) await verifyChatComposerTarget(draftRoom, original, draftOwner);
+        const confirmed = original.edit
+          ? await editMessage(original.id, original.text, entryScope, original.edit.content, original.mentions, original.edit.mentions, { errorPresentation: 'caller' })
+          : await sendMessage(original.text, undefined, original.replyId ?? undefined, original.id, entryScope, original.mentions);
+        if (!canWrite()) return;
+        if (!confirmed || !await checkChatComposerAttempt(draftRoom, original, draftOwner)) throw Error('Your original message has not been confirmed yet.');
+      }
+      if (!canWrite()) return;
+      await composerDraft.finish(original);
+      if (canWrite()) scrollToBottom();
+    } catch (error) {
+      if (!canWrite()) return;
+      // An unresolved original is shown separately from newer typing/context.
+      // Never merge it into a newer message that could later resend it as new.
+      if (original && draftContextRevision.current === contextRevision && !inputTextRef.current) {
+        const restored = restoreChatDraft(original.text, '');
+        changeDraft({ text: restored, mentions: original.mentions ?? null }); inputTextRef.current = restored;
+      }
+      // A definitive refusal of this new edit made no change. Older uncertain
+      // attempts remain protected even if a later retry is refused.
+      if (original && !retryOriginal && isChatEditRefused(error)) await composerDraft.refuseFresh(original).catch(() => undefined);
+      if (canWrite()) setAlertInfo({ title: original && (!isChatEditRefused(error) || retryOriginal) ? 'Message not confirmed' : 'Message not sent', message: error instanceof Error ? error.message : 'Your message is kept. Check it before trying again.' });
+    } finally {
+      if (sendingRef.current === token) { sendingRef.current = null; setSendingText(false); }
+    }
+  }, [canWrite, draftOwner, uploading, composerDraft, draftRoom, editMessage, sendMessage, entryScope, scrollToBottom, setInputText, stopTyping, changeDraft]);
 
   // Send button morph (mic when empty, send when typing). A single shared value
   // drives the crossfade so the two stacked icon layers animate in opposition.
@@ -1338,47 +1546,75 @@ function ChatThread(props: ChatThreadProps) {
     transform: [{ scale: SEND_MORPH_MIN_SCALE + SEND_MORPH_SCALE_RANGE * sendMorph.value }],
   }));
 
-  // Mic press is a placeholder until voice recording lands in Component 5.
   // ── Voice recording ────────────────────────────────────────────────────
-  const recorder = useVoiceRecorder();
+  const recorder = useVoiceRecorder(entryScope);
   const [recordingMode, setRecordingMode] = useState<RecorderUiMode | 'idle'>('idle');
   const [draft, setDraft] = useState<{ uri: string; durationSeconds: number } | null>(null);
 
+  const voiceCapture = useRef<object | null>(null);
+  const voiceStopAttempt = useRef<object | null>(null);
+  const audioSendAttempt = useRef<object | null>(null);
+  const audioSession = useRef<{ uri: string; durationSeconds: number; sendId: string; url?: string } | null>(null);
+  const [audioSending, setAudioSending] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [voiceDockHeight, setVoiceDockHeight] = useState(0);
+
   const resetRecording = useCallback(() => {
-    setRecordingMode('idle');
-    setDraft(null);
-  }, []);
+    if (!isCurrentEntry()) return;
+    setRecordingMode('idle'); setDraft(null); setAudioError(null);
+    voiceCapture.current = null; audioSession.current = null;
+  }, [isCurrentEntry]);
 
   const uploadAndSendAudio = useCallback(async (uri: string, durationSeconds: number) => {
-    if (!currentUserId) { resetRecording(); return; }
-    resetRecording();
+    if (!canWrite() || audioSendAttempt.current) return;
+    const attempt = {}; audioSendAttempt.current = attempt;
+    const session = audioSession.current?.uri === uri ? audioSession.current
+      : { uri, durationSeconds, sendId: Crypto.randomUUID(), url: undefined as string | undefined };
+    audioSession.current = session;
+    setDraft({ uri, durationSeconds }); setRecordingMode('draft'); setAudioSending(true); setAudioError(null);
+    const attemptScope = { userId: currentUserId, isCurrent: () => audioSendAttempt.current === attempt && canWrite() };
+    const requireAttempt = () => { if (!attemptScope.isCurrent()) throw new Error('Voice attempt ended'); };
     try {
-      const url = await uploadAudioToStorage(id, currentUserId, uri);
-      await sendAudio(url, durationSeconds);
-      scrollToBottom();
-    } catch (e) {
-      logError(e, 'chat.uploadAndSendAudio');
-      Alert.alert("Couldn't send voice message", 'Please try again.');
+      if (!session.url) {
+        const url = await requestWithDeadline(uploadAudioToStorage(id, currentUserId, uri, attemptScope), 30_000);
+        requireAttempt(); session.url = url;
+      }
+      requireAttempt();
+      const confirmed = await requestWithDeadline(sendAudio(session.url, session.durationSeconds, attemptScope, session.sendId), 25_000);
+      requireAttempt();
+      if (!confirmed) throw new Error('Voice delivery is unconfirmed');
+      resetRecording(); scrollToBottom();
+    } catch (error) {
+      if (!canWrite()) return;
+      logError(error, 'chat.uploadAndSendAudio');
+      setAudioError(session.url ? 'Delivery isn’t confirmed. Retry keeps the same recording.' : 'Couldn’t upload your recording. It’s still here to retry.');
+    } finally {
+      if (audioSendAttempt.current === attempt) {
+        audioSendAttempt.current = null;
+        if (canWrite()) setAudioSending(false);
+      }
     }
-  }, [currentUserId, id, sendAudio, scrollToBottom, resetRecording]);
+  }, [canWrite, currentUserId, id, sendAudio, scrollToBottom, resetRecording]);
 
-  const beginRecording = useCallback(async () => {
-    if (isPast) return;
-    Keyboard.dismiss();
-    hapticMedium();
-    setRecordingMode('holding');
+  const beginRecording = useCallback(async (initialMode: 'holding' | 'locked' = 'holding') => {
+    if (!canWrite() || voiceCapture.current || audioSendAttempt.current || voiceStopAttempt.current) return;
+    const capture = {}; voiceCapture.current = capture;
+    Keyboard.dismiss(); hapticMedium(); setRecordingMode(initialMode);
     const ok = await recorder.start();
+    if (!canWrite() || voiceCapture.current !== capture) return;
     if (!ok) {
-      setRecordingMode('idle');
+      voiceCapture.current = null; setRecordingMode('idle');
       Alert.alert('Microphone needed', 'Enable microphone access in Settings to send voice messages.');
     }
-  }, [isPast, recorder]);
+  }, [canWrite, recorder]);
 
   const cancelRecording = useCallback(async () => {
+    if (!canWrite() || audioSendAttempt.current) return;
+    voiceCapture.current = null;
     hapticLight();
     await recorder.cancel();
-    resetRecording();
-  }, [recorder, resetRecording]);
+    if (canWrite() && !voiceCapture.current) resetRecording();
+  }, [canWrite, recorder, resetRecording]);
 
   // Android: while a recording is in progress (holding/locked/draft), the
   // hardware back button should cancel the recording rather than navigate away
@@ -1403,31 +1639,33 @@ function ChatThread(props: ChatThreadProps) {
   }, [panelOpen]);
 
   const lockRecording = useCallback(() => {
-    hapticLight();
-    setRecordingMode('locked');
-  }, []);
+    if (!canWrite() || !voiceCapture.current || audioSendAttempt.current) return;
+    hapticLight(); setRecordingMode('locked');
+  }, [canWrite]);
 
-  const stopRecordingToDraft = useCallback(async () => {
-    const res = await recorder.stop();
-    if (res) { setDraft(res); setRecordingMode('draft'); }
-    else resetRecording();
-  }, [recorder, resetRecording]);
-
-  // Finger lifted mid-hold (not locked, not slid to cancel): stop and send.
-  const finishHeldRecording = useCallback(async () => {
-    const res = await recorder.stop();
-    if (res) await uploadAndSendAudio(res.uri, res.durationSeconds);
-    else resetRecording();
-  }, [recorder, uploadAndSendAudio, resetRecording]);
-
+  const stopRecording = useCallback(async (send: boolean) => {
+    if (!canWrite() || !voiceCapture.current || voiceStopAttempt.current || audioSendAttempt.current) return;
+    const capture = voiceCapture.current;
+    const attempt = {}; voiceStopAttempt.current = attempt;
+    try {
+      const result = await recorder.stop();
+      if (!canWrite() || voiceCapture.current !== capture) return;
+      if (!result) { resetRecording(); return; }
+      setDraft(result); setRecordingMode('draft');
+      if (send) await uploadAndSendAudio(result.uri, result.durationSeconds);
+    } finally {
+      if (voiceStopAttempt.current === attempt) voiceStopAttempt.current = null;
+    }
+  }, [canWrite, recorder, resetRecording, uploadAndSendAudio]);
+  const stopRecordingToDraft = useCallback(() => stopRecording(false), [stopRecording]);
+  const finishHeldRecording = useCallback(() => stopRecording(true), [stopRecording]);
   const sendDraft = useCallback(async () => {
-    if (draft) await uploadAndSendAudio(draft.uri, draft.durationSeconds);
-  }, [draft, uploadAndSendAudio]);
-
+    if (canWrite() && draft) await uploadAndSendAudio(draft.uri, draft.durationSeconds);
+  }, [canWrite, draft, uploadAndSendAudio]);
   const pauseResumeRecording = useCallback(() => {
-    if (recorder.status === 'paused') recorder.resume();
-    else recorder.pause();
-  }, [recorder]);
+    if (!canWrite() || !voiceCapture.current || voiceStopAttempt.current || audioSendAttempt.current) return;
+    if (recorder.status === 'paused') recorder.resume(); else recorder.pause();
+  }, [canWrite, recorder]);
 
   // Resolve a released hold from the final finger translation.
   const endHoldGesture = useCallback((translationX: number, translationY: number) => {
@@ -1443,55 +1681,90 @@ function ChatThread(props: ChatThreadProps) {
     hapticLight();
   }, [hasText, handleSend]);
 
+  // Screen readers and keyboards cannot perform the physical hold/swipe. An
+  // empty activation opens the existing hands-free controls; it never sends.
+  const activateComposerControl = useCallback(() => {
+    if (!canWrite() || composerDraft.draft.attempt || uploading || sendingRef.current || voiceCapture.current ||
+        audioSendAttempt.current || voiceStopAttempt.current) return;
+    if (inputTextRef.current.trim()) { void handleSend(); return; }
+    void beginRecording('locked');
+  }, [canWrite, composerDraft.draft.attempt, uploading, handleSend, beginRecording]);
+  const composerControlDisabled = !canWrite() || !!composerDraft.draft.attempt || uploading || recordingMode !== 'idle';
+  const composerControlLabel = hasText ? editingMessageId ? 'Save edit' : 'Send message' : 'Record voice message';
+  const webComposerControlProps = Platform.OS === 'web' ? {
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      if (!event.repeat) activateComposerControl();
+    },
+    // DOM clicks handle mouse, touch and assistive activation consistently.
+    // Native hold/swipe gestures are disabled on web to avoid double dispatch.
+    onClick: () => activateComposerControl(),
+  } : {};
+
   const micGesture = useMemo(() => {
-    const tap = Gesture.Tap().onEnd((_e, success) => {
+    const tap = Gesture.Tap().enabled(Platform.OS !== 'web').onEnd((_e, success) => {
       if (success) runOnJS(handleMorphTap)();
     });
     const pan = Gesture.Pan()
-      .enabled(!hasText)
+      .enabled(Platform.OS !== 'web' && !hasText && !composerControlDisabled)
       .activateAfterLongPress(VOICE_HOLD_MS)
       .onStart(() => { runOnJS(beginRecording)(); })
       .onEnd((e) => { runOnJS(endHoldGesture)(e.translationX, e.translationY); });
     return Gesture.Exclusive(pan, tap);
-  }, [hasText, handleMorphTap, beginRecording, endHoldGesture]);
+  }, [hasText, composerControlDisabled, handleMorphTap, beginRecording, endHoldGesture]);
 
   // Smile button toggles the inline emoji panel (same substrate as attachments).
   const handleEmojiToggle = useCallback(() => {
+    if (!canWrite() || useSystemEmoji) return;
     if (activePanel === 'emoji') {
       textInputRef.current?.focus();
     } else {
       setActivePanel('emoji');
       Keyboard.dismiss();
     }
-  }, [activePanel]);
+  }, [activePanel, useSystemEmoji, canWrite]);
 
   // Cursor position in the message input, so emoji insert where the caret is.
+  const textInputRef = useRef<TextInput>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
   const insertEmoji = useCallback((emoji: string) => {
+    if (!canWrite()) return;
+    draftRevision.current++;
     setInputText((prev) => {
       const s = Math.min(selectionRef.current.start, prev.length);
       const e = Math.min(selectionRef.current.end, prev.length);
       const caret = s + emoji.length;
       selectionRef.current = { start: caret, end: caret };
-      return prev.slice(0, s) + emoji + prev.slice(e);
-    });
-  }, []);
-  // Replace the partial "@query" at the caret with the full "@Name " and close
-  // the autocomplete. Stored as plain text -- mentions are highlighted on render
-  // by matching against the member list, so no schema change.
-  const insertMention = useCallback((firstName: string) => {
-    setInputText((prev) => {
-      const caret = Math.min(selectionRef.current.start, prev.length);
-      const replaced = prev.slice(0, caret).replace(/@[\p{L}\p{N}_]*$/u, `@${firstName} `);
-      const next = replaced + prev.slice(caret);
-      selectionRef.current = { start: replaced.length, end: replaced.length };
+      const next = prev.slice(0, s) + emoji + prev.slice(e);
       inputTextRef.current = next;
       return next;
     });
+  }, [canWrite]);
+  // Replace the partial "@query" at the caret with the full "@Name " and close
+  // the autocomplete. The selected member ID travels with the exact text range.
+  const focusMention = useChatMentionFocus(textInputRef, canWrite);
+  const insertMention = useCallback((member: { id: string; first_name: string | null }) => {
+    if (!canWrite()) return;
+    if (!member.first_name || !members.some(candidate => candidate.id === member.id && candidate.first_name === member.first_name)) return;
+    const before = inputTextRef.current;
+    const caret = Math.max(0, Math.min(selectionRef.current.start, before.length));
+    if (mentionQueryAt(before, caret) === null) return;
+    const start = before.slice(0, caret).lastIndexOf('@');
+    const inserted = insertMentionAt(before, caret, member.first_name);
+    let mentions;
+    try { mentions = addChatMentionReference(inserted.text, composerDraft.draft.mentions ?? null, member.id, member.first_name, start); } catch { return; }
+    draftRevision.current++;
+    selectionRef.current = { start: inserted.caret, end: inserted.caret };
+    inputTextRef.current = inserted.text;
+    changeDraft({ text: inserted.text, mentions });
     setMentionQuery(null);
-    textInputRef.current?.focus();
-  }, []);
+    focusMention(inserted.caret);
+  }, [canWrite, focusMention, members, composerDraft.draft.mentions, changeDraft]);
+
   const handleEmojiBackspace = useCallback(() => {
+    if (!canWrite()) return;
+    draftRevision.current++;
     setInputText((prev) => {
       const s = Math.min(selectionRef.current.start, prev.length);
       const e = Math.min(selectionRef.current.end, prev.length);
@@ -1505,88 +1778,168 @@ function ChatThread(props: ChatThreadProps) {
       head.pop();
       const newHead = head.join('');
       selectionRef.current = { start: newHead.length, end: newHead.length };
-      return newHead + prev.slice(e);
+      const next = newHead + prev.slice(e);
+      inputTextRef.current = next;
+      return next;
     });
-  }, []);
+  }, [canWrite]);
 
   // Send a GIF: the Giphy URL goes straight in as the image_url (no upload), and
   // the existing image bubble renders + autoplays it via expo-image. A dedicated
   // 'gif' message_type (for chat-list preview text) is deferred to the pre-flip
   // migration batch.
-  const sendGif = useCallback((url: string) => {
-    setActivePanel(null);
-    void sendMessage('', url);
-    scrollToBottom();
-  }, [sendMessage, scrollToBottom]);
-
-  // Pick photos (camera = one, library = up to PHOTO_BATCH_LIMIT), then open the
-  // preview where the user can add a caption before sending.
-  const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
-    if (!currentUserId) return;
-
-    if (choice === 'camera') {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        setAlertInfo({ title: 'Camera access needed', message: 'Please allow camera access in Settings to take photos.' });
-        return;
-      }
-    }
-
-    const result = choice === 'camera'
-      ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
-      : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          allowsMultipleSelection: true,
-          selectionLimit: PHOTO_BATCH_LIMIT,
-          quality: 0.8,
-        });
-
-    if (result.canceled || !result.assets?.length) return;
-    setPendingPhotos(result.assets);
-    setPhotoPreviewOpen(true);
-  }, [currentUserId]);
-
-  // Upload + send the previewed photos. Each photo is its own message; the
-  // caption rides the first one (rendered beneath the image).
-  const sendPhotos = useCallback(async (caption: string) => {
-    const assets = pendingPhotos;
-    setPhotoPreviewOpen(false);
-    setPendingPhotos([]);
-    if (!currentUserId || assets.length === 0) return;
-
-    setUploading(true);
+  const sendGif = useCallback(async (url: string) => {
+    if (!canWrite() || gifAttempt.current) return;
+    const attempt = {}; gifAttempt.current = attempt;
+    const isCurrent = () => canWrite() && gifAttempt.current === attempt;
+    const sendScope = { ...entryScope, isCurrent };
+    let sendId = gifPendingIds.current.get(url);
+    if (!sendId) { sendId = Crypto.randomUUID(); gifPendingIds.current.set(url, sendId); }
+    setActivePanel(null); setAlertInfo(null);
     try {
-      for (let i = 0; i < assets.length; i++) {
-        const manipulated = await ImageManipulator.manipulateAsync(
-          assets[i].uri,
-          [{ resize: { width: 1200 } }],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-        );
-        if (!manipulated.base64) continue;
-        const fileName = `${currentUserId}/${Date.now()}-${i}.jpg`;
-        const publicUrl = await uploadBase64ToStorage('chat-images', fileName, manipulated.base64);
-        await sendMessage(i === 0 ? caption.trim() : '', publicUrl);
-      }
+      const sent = await requestWithDeadline(sendMessage('', url, undefined, sendId, sendScope), 25_000);
+      if (!isCurrent()) return;
+      if (!sent) throw Error('GIF delivery is unconfirmed.');
+      gifPendingIds.current.delete(url);
       scrollToBottom();
     } catch {
-      setAlertInfo({ title: 'Could not send photos', message: 'Something went wrong uploading. Please try again.' });
+      if (isCurrent()) setAlertInfo({
+        title: 'GIF not confirmed',
+        message: 'Your selection is kept. Retry sends the same GIF without adding a second message.',
+        buttons: [
+          { text: 'Try again', onPress: () => { if (canWrite()) void sendGif(url); } },
+          { text: 'Close', style: 'cancel' },
+        ],
+      });
     } finally {
-      setUploading(false);
+      if (gifAttempt.current === attempt) gifAttempt.current = null;
     }
-  }, [pendingPhotos, currentUserId, sendMessage, scrollToBottom]);
+  }, [canWrite, sendMessage, scrollToBottom, entryScope]);
 
-  // Send a location chosen in the LocationPickerModal (map preview + address).
-  const handleLocationConfirm = useCallback((latitude: number, longitude: number, address: string) => {
-    setLocationPickerOpen(false);
-    void sendLocation(latitude, longitude, address);
-    scrollToBottom();
-  }, [sendLocation, scrollToBottom]);
+  // Pick first, then preserve the selected batch/caption through explicit retry.
+  const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
+    if (!canWrite() || photoPickerAttempt.current || photoSendingRef.current) return;
+    const attempt = {}; photoPickerAttempt.current = attempt;
+    try {
+      if (choice === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (!canWrite()) return;
+        if (status !== 'granted') {
+          setAlertInfo({ title: 'Camera access needed', message: 'Please allow camera access in Settings to take photos.' });
+          return;
+        }
+      }
+      const result = choice === 'camera'
+        ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: PHOTO_BATCH_LIMIT, quality: 0.8 });
+      if (!canWrite() || result.canceled || !result.assets?.length) return;
+      photoSendSessionRef.current = new PhotoSendSession(() => Crypto.randomUUID());
+      photoCaptionSentRef.current = false;
+      setPhotoError(null);
+      setPendingPhotos(result.assets);
+      setPhotoPreviewOpen(true);
+    } catch {
+      if (canWrite()) setAlertInfo({ title: 'Photos could not open', message: 'Please try again.' });
+    } finally {
+      if (photoPickerAttempt.current === attempt) photoPickerAttempt.current = null;
+    }
+  }, [canWrite]);
 
-  const textInputRef = useRef<TextInput>(null);
+  const sendPhotos = useCallback(async (caption: string) => {
+    if (!canWrite() || photoSendingRef.current) return;
+    const assets = pendingPhotos;
+    if (assets.length === 0) return;
+    if (!photoCaptionSentRef.current && !photoSendSessionRef.current.hasCaption(assets[0].uri)) {
+      const allowed = checkContent(caption);
+      if (!allowed.ok) { setPhotoError(allowed.reason ?? 'Please revise your caption.'); return; }
+    }
+    const attempt = {}; photoSendingRef.current = attempt;
+    setUploading(true);
+    setPhotoError(null);
+    const attemptScope = { userId: currentUserId, isCurrent: () => photoSendingRef.current === attempt && canWrite() };
+    const requireAttempt = () => { if (!attemptScope.isCurrent()) throw new Error('Photo attempt ended'); };
+    const session = photoSendSessionRef.current;
+    const alreadyCaptioned = photoCaptionSentRef.current;
+    try {
+      await sendPhotoBatch(assets, async (asset) => {
+        requireAttempt();
+        const cachedUrl = session.uploadedUrl(asset.uri);
+        if (cachedUrl) return cachedUrl;
+        const manipulated = await requestWithDeadline(ImageManipulator.manipulateAsync(
+          asset.uri, [{ resize: { width: 1200 } }],
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }), 12_000);
+        requireAttempt();
+        if (!manipulated.base64) throw new Error('Could not prepare photo');
+        const fileName = `${currentUserId}/${session.idFor(asset.uri)}.jpg`;
+        const url = await requestWithDeadline(uploadBase64ToStorage('chat-images', fileName, manipulated.base64, { existingIsSuccess: true }), 30_000);
+        requireAttempt();
+        session.rememberUploadedUrl(asset.uri, url);
+        return url;
+      }, async (messageCaption, url, asset) => {
+        requireAttempt();
+        const originalCaption = session.captionFor(asset.uri, messageCaption);
+        const sent = await requestWithDeadline(sendMessage(originalCaption, url, undefined, session.idFor(asset.uri), attemptScope), 25_000);
+        requireAttempt();
+        return sent;
+      }, caption, alreadyCaptioned);
+      if (!canWrite()) return;
+      setPendingPhotos([]); setPhotoPreviewOpen(false);
+      photoCaptionSentRef.current = false;
+      session.clear(); scrollToBottom();
+    } catch (error) {
+      if (!canWrite()) return;
+      const failure = error as PhotoBatchFailure;
+      if (failure.sentCount > 0) {
+        setPendingPhotos(assets.slice(failure.sentCount));
+        photoCaptionSentRef.current = true;
+      }
+      setPhotoError(session.hasCaption(assets[failure.sentCount]?.uri)
+        ? 'Delivery isn’t confirmed. Retry keeps the same photos and original caption.'
+        : 'Couldn’t finish sending. Your remaining photos are here. Try again.');
+    } finally {
+      if (photoSendingRef.current === attempt) {
+        photoSendingRef.current = null;
+        if (canWrite()) setUploading(false);
+      }
+    }
+  }, [pendingPhotos, currentUserId, sendMessage, scrollToBottom, canWrite, requireEntry, entryScope]);
+
+  const handleLocationConfirm = useCallback(async (latitude: number, longitude: number, address: string) => {
+    if (!canWrite() || locationAttempt.current) return false;
+    const attempt = {}; locationAttempt.current = attempt;
+    const attemptScope = { userId: entryScope.userId, isCurrent: () => canWrite() && locationAttempt.current === attempt };
+    const pin = JSON.stringify({ latitude, longitude, address });
+    if (!locationSession.current || locationSession.current.pin !== pin) {
+      locationSession.current = { pin, sendId: Crypto.randomUUID() };
+    }
+    const session = locationSession.current;
+    try {
+      const confirmed = await requestWithDeadline(sendLocation(latitude, longitude, address, attemptScope, session.sendId), 25_000);
+      if (!attemptScope.isCurrent()) return false;
+      if (confirmed) { locationSession.current = null; setLocationPickerOpen(false); scrollToBottom(); }
+      return confirmed;
+    } catch {
+      return false; // The existing preview retains its pin and presents inline retry.
+    } finally {
+      if (locationAttempt.current === attempt) locationAttempt.current = null;
+    }
+  }, [sendLocation, scrollToBottom, canWrite, entryScope]);
+
+  const composerInputHeight = useChatInputHeight(textInputRef, inputText, conversationFonts.regular, 100, COMMUNITY_CHAT_GROUPING_ENABLED);
+  // Keep iOS native multiline sizing: fixed height can stop Fabric size events.
 
   // Route an attachment-panel selection. Photos/Camera launch the picker;
   // Location opens the map preview screen. (Document/Poll/Contact were removed.)
   const handleAttachSelect = useCallback((key: AttachmentKey) => {
+    if (!canWrite()) return;
+    if (key === 'gif') {
+      if (!gifsInAttachments) return;
+      // Swap the content in the same keyboard-height slot, without dropping
+      // its reserved inset between the attachment menu and the GIF grid.
+      setActivePanel('gif');
+      Keyboard.dismiss();
+      return;
+    }
     setActivePanel(null);
     if (key === 'camera') {
       doPhotoAction('camera');
@@ -1596,7 +1949,7 @@ function ChatThread(props: ChatThreadProps) {
       Keyboard.dismiss();
       setLocationPickerOpen(true);
     }
-  }, [doPhotoAction]);
+  }, [doPhotoAction, gifsInAttachments, canWrite]);
 
   // Left input-bar button toggles + <-> keyboard.
   //  - panel closed: open it, THEN dismiss the keyboard. Setting panelInset
@@ -1605,15 +1958,38 @@ function ChatThread(props: ChatThreadProps) {
   //  - panel open: refocus the input; the keyboard-show listener closes the
   //    panel once the keyboard has taken over (again, no inset collapse).
   const handleAttachToggle = useCallback(() => {
-    if (!currentUserId) return;
-    if (activePanel === 'attach') {
+    if (!canWrite()) return;
+    if (attachmentShowsKeyboard) {
       textInputRef.current?.focus();
     } else {
       // From the emoji panel this just swaps content (keyboard already down).
       setActivePanel('attach');
       Keyboard.dismiss();
     }
-  }, [currentUserId, activePanel]);
+  }, [canWrite, attachmentShowsKeyboard]);
+
+  useLayoutEffect(() => {
+    inputTextRef.current = ''; draftRevision.current = 0; draftContextRevision.current = 0;
+    setMentionQuery(null); setCheckingDraft(false); setSendingText(false);
+    selectionRef.current = { start: 0, end: 0 };
+    sendingRef.current = null; photoSendingRef.current = null;
+    photoPickerAttempt.current = null; gifAttempt.current = null; locationAttempt.current = null; locationSession.current = null; gifPendingIds.current.clear();
+    photoSendSessionRef.current = new PhotoSendSession(() => Crypto.randomUUID());
+    photoCaptionSentRef.current = false;
+    setUploading(false); setPendingPhotos([]); setPhotoPreviewOpen(false);
+    setLocationPickerOpen(false); setActivePanel(null);
+    setOverlayMessage(null); setReactionDetails(null); setReactionPickerMsgId(null); setPhotoViewUrl(null);
+    setAlertInfo(null); setMiniProfileUserId(null); setShowReport(false); setReportTarget(null);
+    setRecordingMode('idle'); setDraft(null); setAudioSending(false); setAudioError(null); setVoiceDockHeight(0);
+    voiceCapture.current = null; voiceStopAttempt.current = null; audioSendAttempt.current = null; audioSession.current = null;
+  }, [entry]);
+  useLayoutEffect(() => {
+    if (!isPast) return;
+    setActivePanel(null); setLocationPickerOpen(false); setPhotoPreviewOpen(false);
+    setPendingPhotos([]); setUploading(false); setOverlayMessage(null); setReactionDetails(null); setReactionPickerMsgId(null);
+    setRecordingMode('idle'); setDraft(null); setAudioSending(false); setAudioError(null); setVoiceDockHeight(0);
+    voiceCapture.current = null; voiceStopAttempt.current = null; audioSendAttempt.current = null; audioSession.current = null;
+  }, [isPast]);
 
   type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string } | { type: 'time'; label: string; id: string };
   const enrichedItems = useMemo<EnrichedItem[]>(() => {
@@ -1633,17 +2009,39 @@ function ChatThread(props: ChatThreadProps) {
     return items.reverse();
   }, [messages]);
 
+  const anchorScroll = useChatAnchorScroll(listRef, anchorId ? `${props.kind}:${id}:${anchorId}` : null,
+    anchorId ? enrichedItems.findIndex(item => item.id === anchorId) : -1);
+
   // Stable callbacks for MessageBubble's memo to actually work -- inline lambdas
   // at the call site would create new function refs every render and break it,
   // which made every keystroke re-render every row (visible Android jank).
-  const handleReaction = useCallback(
-    (msgId: string, emoji?: string) => toggleReaction(msgId, emoji ?? 'heart'),
-    [toggleReaction],
-  );
-  const handleMessageLongPress = useCallback(
-    (msg: ChatMessage, ownFlag: boolean) => setOverlayMessage({ message: msg, isOwn: ownFlag }),
-    [],
-  );
+  const reactionMessagesRef = useRef(messages);
+  reactionMessagesRef.current = messages;
+  const handleReaction = useCallback(function react(msgId: string, emoji?: string, retry?: () => Promise<void>) {
+    if (!canWrite()) return;
+    const message = reactionMessagesRef.current.find(row => row.id === msgId);
+    if (!message || message.user_id === currentUserId) return;
+    const key = reactionKeyForEmoji(emoji ?? 'heart', topicReactionCounts(message.reactions ?? [], currentUserId), 'heart');
+    void (retry ? retry() : toggleReaction(msgId, key, entryScope))?.catch(error => {
+      if (!canWrite() || isObsoleteChatOperation(error)) return;
+      logError(error, 'chat.reaction');
+      setAlertInfo(isUnconfirmedChatReaction(error) ? {
+        title: 'Reaction not confirmed', message: error.message, scrollMessage: true,
+        buttons: [
+          { text: 'Close', style: 'cancel' },
+          { text: 'Retry', onPress: () => react(msgId, key, error.retry) },
+        ],
+      } : { title: 'Reaction not confirmed', message: friendlyError(error, 'Please try again.'), scrollMessage: true });
+    });
+  }, [toggleReaction, canWrite, currentUserId, entryScope]);
+  const openReactionDetails = useCallback((messageId: string) => {
+    const isCurrent = () => isCurrentEntry() && reactionMessagesRef.current.some(message => message.id === messageId);
+    if (!isCurrent() || !currentUserId) return;
+    setReactionDetails({ source: 'chat', messageId, scope: { userId: currentUserId, isCurrent },
+      canRemove: canWrite, onChanged: () => { if (isCurrent()) void refetch(); } });
+  }, [isCurrentEntry, currentUserId, canWrite, refetch]);
+  useEffect(() => { if (reactionDetails && !reactionDetails.scope.isCurrent()) setReactionDetails(null); }, [reactionDetails, messages, entry]);
+  const handleAddReaction = useCallback((messageId: string) => { if (canWrite()) setReactionPickerMsgId(messageId); }, [canWrite]);
   // enrichedItems is read via a ref so this callback stays stable across message
   // updates -- depending on enrichedItems directly would re-break the memo every
   // time a new message lands.
@@ -1656,21 +2054,63 @@ function ChatThread(props: ChatThreadProps) {
       listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
     }
   }, []);
-  const handleAvatarPress = useCallback((uid: string) => setMiniProfileUserId(uid), []);
+  const handleAvatarPress = useCallback((uid: string) => {
+    if (isCurrentEntry()) setMiniProfileUserId(uid);
+  }, [isCurrentEntry]);
   const handleTriggerReply = useCallback((msgId: string) => {
+    if (!canWrite()) return;
+    draftRevision.current++; draftContextRevision.current++;
     const msg = enrichedItemsRef.current.find(
       (item): item is ChatMessage => !('type' in item) && item.id === msgId,
     );
     if (!msg) return;
-    setReplyingTo({
-      id: msg.id,
-      content: msg.content,
-      senderName: msg.sender?.first_name ?? 'Someone',
-    });
-    setEditingMessageId(null);
+    changeDraft({ reply: { id: msg.id, content: msg.content, senderName: msg.user_id === currentUserId ? 'You' : msg.sender?.first_name ?? 'Someone' }, edit: null });
     setActivePanel(null);
-    requestAnimationFrame(() => textInputRef.current?.focus());
-  }, []);
+    requestAnimationFrame(() => { if (canWrite()) textInputRef.current?.focus(); });
+  }, [canWrite, changeDraft, currentUserId]);
+
+  const menuReadOnly = useRef(isPast); menuReadOnly.current = isPast;
+  const handleMessageLongPress = useCallback((selected: ChatMessage, _ownFlag: boolean) => {
+    const currentMessage = () => reactionMessagesRef.current.find(message => message.id === selected.id);
+    const menuIsCurrent = () => isCurrentEntry() && menuReadOnly.current === isPast && !!currentMessage();
+    const message = currentMessage();
+    if (!menuIsCurrent() || !message) return;
+    const own = message.user_id === currentUserId;
+    const buttons: BrandedAlertButton[] = [];
+    if (!own && !isPast) buttons.push({ text: 'react', onPress: () => { if (canWrite() && currentMessage()) setReactionPickerMsgId(message.id); } });
+    if (message.message_type === 'user' && !isPast) buttons.push({ text: 'reply', onPress: () => { if (menuIsCurrent()) handleTriggerReply(message.id); } });
+    buttons.push({ text: 'copy', onPress: () => {
+      if (!menuIsCurrent()) return;
+      const latest = currentMessage()!;
+      let copyText = latest.content;
+      if (latest.image_url) copyText = latest.image_url;
+      else if (latest.message_type === 'location') { try { copyText = JSON.parse(latest.content).address ?? latest.content; } catch {} }
+      Clipboard?.setStringAsync(copyText).catch(() => {}); hapticLight();
+    } });
+    if (own && !isPast && message.message_type === 'user' && !message.image_url) buttons.push({ text: 'edit', onPress: () => {
+      if (!menuIsCurrent() || !canWrite()) return;
+      const latest = currentMessage()!;
+      hapticLight(); draftRevision.current++; draftContextRevision.current++;
+      const mentions = readChatMentionDocument(latest.content, latest.mention_data);
+      changeDraft({ edit: { id: latest.id, content: latest.content, mentions }, reply: null, text: latest.content, mentions });
+      inputTextRef.current = latest.content; setActivePanel(null);
+      requestAnimationFrame(() => { if (menuIsCurrent() && canWrite()) textInputRef.current?.focus(); });
+    } });
+    if (own) buttons.push({ text: 'delete', style: 'destructive', onPress: () => {
+      if (!menuIsCurrent()) return;
+      hapticMedium(); setAlertInfo({ title: 'Delete this message?', message: '', buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => { if (menuIsCurrent()) void deleteMessage(message.id, moderationScope)?.catch(error => { if (isCurrentEntry()) logError(error, 'chat.deleteMessage'); }); } },
+      ] });
+    } });
+    setOverlayMessage({ title: message.sender?.first_name ?? 'Someone', own, buttons,
+      preview: message.image_url ? 'Photo' : message.message_type === 'location' ? 'Shared place' : message.message_type === 'audio' ? 'Voice message' : message.content,
+      selectedReaction: reactionEmoji(message.reactions?.find(reaction => reaction.user_id === currentUserId)?.reaction ?? ''),
+      onReact: !own && !isPast ? emoji => { if (menuIsCurrent()) { hapticLight(); handleReaction(message.id, emoji); } } : undefined,
+      isCurrent: menuIsCurrent,
+    });
+  }, [isCurrentEntry, isPast, currentUserId, canWrite, handleTriggerReply, changeDraft, deleteMessage, moderationScope, handleReaction]);
+  useEffect(() => { if (overlayMessage && !overlayMessage.isCurrent()) setOverlayMessage(null); }, [overlayMessage, messages, isPast]);
 
   // Stable renderItem. An inline arrow in the FlatList changes identity every
   // render, so the list re-renders every visible row on ANY state change (opening
@@ -1683,7 +2123,7 @@ function ChatThread(props: ChatThreadProps) {
       if ('type' in item && (item.type === 'date' || item.type === 'time')) {
         return (
           <View style={bubbleStyles.systemRow}>
-            <Text style={bubbleStyles.systemText}>{item.label}</Text>
+            <Text style={[bubbleStyles.systemText, screenAppearance?.day]}>{item.label}</Text>
           </View>
         );
       }
@@ -1703,7 +2143,8 @@ function ChatThread(props: ChatThreadProps) {
       // bubbles participate in grouping, on either side.
       const groupsWith = (other: ChatMessage | null) =>
         !!other && other.message_type !== 'system' && msg.message_type !== 'system' &&
-        other.user_id === msg.user_id && isSameDay(other.created_at, msg.created_at);
+        other.user_id === msg.user_id && isSameDay(other.created_at, msg.created_at) &&
+        Math.abs(new Date(other.created_at).getTime() - new Date(msg.created_at).getTime()) <= 5 * 60 * 1000;
       const isGroupedWithOlder = groupsWith(olderMsg);
       const isGroupedWithNewer = groupsWith(newerMsg);
 
@@ -1711,10 +2152,12 @@ function ChatThread(props: ChatThreadProps) {
       const showName = !isOwn && !isGroupedWithOlder;
 
       const gap = isGroupedWithOlder ? chatStyles.msgGap1
-        : msg.reactions?.length ? chatStyles.msgGap18
+        : !COMMUNITY_CHAT_GROUPING_ENABLED && msg.reactions?.length ? chatStyles.msgGap18
         : chatStyles.msgGap10;
 
       return (
+        <View onLayout={msg.id === anchorId ? anchorScroll.onTargetLayout : undefined}
+          style={msg.id === anchorId ? { backgroundColor: Colors.goldBadgeSoft } : undefined}>
         <SwipeableRow
           containerStyle={gap}
           enabled={!isPast && msg.message_type === 'user'}
@@ -1729,8 +2172,13 @@ function ChatThread(props: ChatThreadProps) {
             isGrouped={isGroupedWithNewer}
             currentUserId={currentUserId}
             contextTitle={props.contextTitle}
-            onPhotoPress={setPhotoViewUrl}
+            onPhotoPress={openMessagePhoto}
+            photoMaxWidth={Math.min(240, (windowWidth - 72) * 0.8)}
+            conversationFonts={conversationFonts}
             onReaction={handleReaction}
+            onAddReaction={handleAddReaction}
+            onViewReactions={openReactionDetails}
+            reactionsDisabled={isPast}
             onMessageLongPress={handleMessageLongPress}
             onStartReply={!isPast ? handleTriggerReply : undefined}
             onReplyTap={handleReplyTap}
@@ -1738,19 +2186,37 @@ function ChatThread(props: ChatThreadProps) {
             mentionNames={mentionNames}
           />
         </SwipeableRow>
+        </View>
       );
     },
-    [currentUserId, enrichedItems, isPast, props.contextTitle, handleReaction, handleMessageLongPress, handleReplyTap, handleAvatarPress, handleTriggerReply, mentionNames],
+    [anchorId, anchorScroll.onTargetLayout, currentUserId, enrichedItems, isPast, props.contextTitle, handleReaction, handleAddReaction, openReactionDetails, screenAppearance, handleMessageLongPress, handleReplyTap, handleAvatarPress, handleTriggerReply, mentionNames, openMessagePhoto, conversationFonts, windowWidth],
   );
 
   return (
-    <View style={chatStyles.screen}>
+    <View style={[chatStyles.screen, screenAppearance?.screen]}>
       {/* ── Header ── */}
-      <SafeAreaView edges={['top']} style={chatStyles.headerSafe}>
-        <View style={chatStyles.header}>
+      <View style={[chatStyles.headerSafe, COMMUNITY_CHAT_GROUPING_ENABLED && { backgroundColor: AfterglowColors.paper }, { paddingTop: insets.top }]}>
+        {COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatContextHeader
+          title={props.title} subtitle={typingLabel ?? props.subtitle} location={props.locationLabel}
+          contextLabel={props.viewContextLabel} fonts={conversationFonts}
+          onBack={() => { Keyboard.dismiss(); router.navigate('/(tabs)/chats' as never); }} onViewContext={props.onViewContext}
+          wrapActionsOnNarrow={!!props.calendarAction}
+          actions={<>
+            {props.calendarAction && <TouchableOpacity onPress={props.calendarAction.onPress} accessibilityRole="button" accessibilityLabel={props.calendarAction.label} style={chatHeaderActionStyle}>
+              <Ionicons name="calendar-outline" size={21} color={AfterglowColors.clay} />
+            </TouchableOpacity>}
+            {props.headerMenu.type === 'plus' ? <TouchableOpacity ref={plusBtnRef} onPress={openPlusFromButton} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="Add people or make a plan">
+              <Ionicons name="add" size={24} color={AfterglowColors.clay} />
+            </TouchableOpacity> : <TouchableOpacity onPress={handleReportMenu} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="More options">
+              <Ionicons name="ellipsis-horizontal" size={21} color={AfterglowColors.ink} />
+            </TouchableOpacity>}
+          </>}
+        /> : <View style={chatStyles.header}>
           <TouchableOpacity
-            onPress={() => router.replace('/(tabs)/chats' as never)}
+            onPress={() => { Keyboard.dismiss(); router.navigate('/(tabs)/chats' as never); }}
             style={chatStyles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Back to Chats"
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <Ionicons name="chevron-back" size={24} color={Colors.asphalt} />
@@ -1796,7 +2262,8 @@ function ChatThread(props: ChatThreadProps) {
               <Ionicons name="ellipsis-horizontal" size={20} color={Colors.warmGray} />
             </TouchableOpacity>
           )}
-        </View>
+          <ProfileButton compact/>
+        </View>}
 
         {/* Header banner slot (plan ticket banner) */}
         {props.renderHeaderBanner?.()}
@@ -1813,43 +2280,47 @@ function ChatThread(props: ChatThreadProps) {
               decelerationRate="normal"
               horizontal
               showsHorizontalScrollIndicator={false}
-              style={chatStyles.membersRow}
+              style={[chatStyles.membersRow, COMMUNITY_CHAT_GROUPING_ENABLED && { backgroundColor: AfterglowColors.paper }]}
               contentContainerStyle={chatStyles.membersRowContent}
             >
               {visibleMembers.map((member) => (
                 <TouchableOpacity
                   key={member.id}
-                  style={chatStyles.memberItem}
-                  onPress={() => setMiniProfileUserId(member.id)}
+                  style={[chatStyles.memberItem, COMMUNITY_CHAT_GROUPING_ENABLED && { width: 44, minHeight: 44 }]}
+                  onPress={() => handleAvatarPress(member.id)}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${member.first_name || 'member'} profile`}
                 >
                   {member.avatar_url ? (
                     <Image source={{ uri: member.avatar_url }} style={chatStyles.memberAvatar} contentFit="cover" />
                   ) : (
                     <View style={[chatStyles.memberAvatar, chatStyles.memberAvatarFallback]}>
-                      <Text style={chatStyles.memberInitial}>{member.first_name?.[0]?.toUpperCase() ?? '?'}</Text>
+                      <ChatSizedText allowFontScaling={!COMMUNITY_CHAT_GROUPING_ENABLED} style={[chatStyles.memberInitial, COMMUNITY_CHAT_GROUPING_ENABLED && { fontFamily: conversationFonts.medium, color: AfterglowColors.clay }]}>{member.first_name?.[0]?.toUpperCase() ?? '?'}</ChatSizedText>
                     </View>
                   )}
-                  <Text style={chatStyles.memberName} numberOfLines={1}>{member.first_name ?? ''}</Text>
+                  <ChatSizedText style={[chatStyles.memberName, COMMUNITY_CHAT_GROUPING_ENABLED && { fontFamily: conversationFonts.regular, color: AfterglowColors.muted }]} numberOfLines={1}>{member.first_name ?? ''}</ChatSizedText>
                 </TouchableOpacity>
               ))}
               {isOverflow && !membersExpanded && (
                 <TouchableOpacity
-                  style={chatStyles.memberItem}
+                  style={[chatStyles.memberItem, COMMUNITY_CHAT_GROUPING_ENABLED && { width: 44, minHeight: 44 }]}
                   onPress={() => setMembersExpanded(true)}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
                   accessibilityLabel={`Show ${total - 4} more members`}
                 >
                   <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
-                    <Text style={chatStyles.memberOverflowText}>+{total - 4}</Text>
+                    <ChatSizedText style={chatStyles.memberOverflowText}>+{total - 4}</ChatSizedText>
                   </View>
                 </TouchableOpacity>
               )}
               {isOverflow && membersExpanded && (
                 <TouchableOpacity
-                  style={chatStyles.memberItem}
+                  style={[chatStyles.memberItem, COMMUNITY_CHAT_GROUPING_ENABLED && { width: 44, minHeight: 44 }]}
                   onPress={() => setMembersExpanded(false)}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
                   accessibilityLabel="Show fewer members"
                 >
                   <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
@@ -1861,24 +2332,29 @@ function ChatThread(props: ChatThreadProps) {
           );
         })()}
 
-      </SafeAreaView>
+      </View>
 
       {showPushBanner && (
         <View style={chatStyles.pushBanner}>
           <View style={chatStyles.pushBannerContent}>
-            <Text style={chatStyles.pushBannerText}>
-              Turn on notifications so you never miss a message.
-            </Text>
+            <ChatSizedText style={chatStyles.pushBannerText} accessibilityLiveRegion="polite">
+              {pushFeedback ?? 'Get alerts for new messages.'}
+            </ChatSizedText>
             <TouchableOpacity
               style={chatStyles.pushBannerButton}
-              onPress={handleEnablePush}
+              onPress={() => { void handleEnablePush(); }}
+              disabled={enablingPush}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: enablingPush, busy: enablingPush }}
               activeOpacity={0.85}
             >
-              <Text style={chatStyles.pushBannerButtonText}>Enable</Text>
+              <ChatSizedText style={chatStyles.pushBannerButtonText}>{enablingPush ? 'Turning on…' : 'Enable'}</ChatSizedText>
             </TouchableOpacity>
           </View>
           <TouchableOpacity
             onPress={handleDismissPushBanner}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss notification reminder"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={chatStyles.pushBannerClose}
           >
@@ -1887,42 +2363,64 @@ function ChatThread(props: ChatThreadProps) {
         </View>
       )}
 
-      {/* ── Messages ──
-          The input bar is absolutely positioned above the keyboard on
-          both platforms. On Android that means bottom:0 (adjustResize
-          shrinks the window). On iOS the new architecture (Fabric) makes
-          KeyboardAvoidingView unreliable, so we listen to keyboardWillShow
-          and set the bar's bottom to the reported keyboard height. The
-          FlatList (inverted) reserves exactly the dock height via
-          paddingTop on its content container so new messages never hide
-          behind the bar. */}
+      {/* iOS viewport and dock follow the same native keyboard animation.
+          The inverted list reserves the measured dock height separately. */}
       <View style={chatStyles.listWrap}>
-        {loading ? (
+        {anchorId && <ChatMessageAnchorNotice loading={loading} unavailable={anchorUnavailable} failed={loadError}
+          onLatest={clearAnchor} fonts={conversationFonts} />}
+        {loadError && messages.length > 0 && !loading && (
+          <TouchableOpacity style={[chatStyles.loadWarning, screenAppearance?.warning]} onPress={() => { void refetch(true); }} accessibilityRole="button" accessibilityLabel="Messages may be out of date. Retry loading">
+            <Text style={[chatStyles.loadWarningText, screenAppearance?.body]}>Messages may be out of date · Tap to retry</Text>
+          </TouchableOpacity>
+        )}
+        <MessageViewport testID="chat-message-viewport" style={{ flex: 1 }} {...(Platform.OS === 'ios' ? { inset: iosDockFloor } : {})}>
+        {loading && messages.length === 0 ? (
           <View style={chatStyles.loadingWrap}>
-            <ActivityIndicator size="large" color={Colors.terracotta} />
+            <ActivityIndicator size="large" color={COMMUNITY_CHAT_GROUPING_ENABLED ? AfterglowColors.clay : Colors.terracotta} />
+          </View>
+        ) : loadError && messages.length === 0 ? (
+          <View style={chatStyles.loadErrorWrap}>
+            <Text style={[chatStyles.loadErrorTitle, screenAppearance?.title]}>Messages couldn't load</Text>
+            <Text style={[chatStyles.loadErrorText, screenAppearance?.body]}>Your conversation is still here. Check your connection and try again.</Text>
+            <TouchableOpacity style={[chatStyles.loadRetry, screenAppearance?.button]} onPress={() => { void refetch(); }} accessibilityRole="button" accessibilityLabel="Retry loading messages">
+              <CreatorActionFill /><Text style={[chatStyles.loadRetryText, screenAppearance?.buttonText]}>Try again</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <FlatList
+            key={anchorId ?? 'latest'}
             decelerationRate="normal"
             ref={listRef}
             data={enrichedItems}
             keyExtractor={item => item.id}
             inverted={true}
+            accessibilityElementsHidden={bottomDockHeight === null}
+            importantForAccessibility={bottomDockHeight === null ? 'no-hide-descendants' : 'auto'}
+            pointerEvents={bottomDockHeight === null ? 'none' : 'auto'}
             style={[
-              { flex: 1 },
-              Platform.OS === 'ios' && { marginBottom: Math.max(iosKeyboardHeight, panelInset) },
+              { flex: 1, opacity: bottomDockHeight === null ? 0 : 1 },
             ]}
             contentContainerStyle={{ paddingBottom: 12, paddingTop: listBottomReservation }}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={Platform.OS === 'android'}
             automaticallyAdjustContentInsets={false}
             contentInsetAdjustmentBehavior="never"
-            keyboardDismissMode="interactive"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             keyboardShouldPersistTaps="handled"
             initialNumToRender={20}
             windowSize={10}
             maxToRenderPerBatch={15}
-            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            maintainVisibleContentPosition={followingLatest && !anchorId ? undefined : { minIndexForVisible: 0 }}
+            onLayout={() => {
+              if (!isCurrentEntry()) return;
+              if (anchorId) anchorScroll.schedule();
+              else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
+            }}
+            onContentSizeChange={() => {
+              if (!isCurrentEntry()) return;
+              if (anchorId) anchorScroll.schedule();
+              else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
+            }}
             onScroll={handleListScroll}
             onEndReached={() => { void loadOlder(); }}
             onEndReachedThreshold={0.2}
@@ -1931,25 +2429,36 @@ function ChatThread(props: ChatThreadProps) {
             // side), so the typing dots sit just above the input bar.
             ListHeaderComponent={typingUsers.length > 0 ? <TypingIndicator /> : null}
             onScrollToIndexFailed={(info) => {
+              if (anchorId) { anchorScroll.onScrollToIndexFailed(info); return; }
               listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
               setTimeout(() => {
                 listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
               }, 300);
             }}
-            ListEmptyComponent={
+            ListEmptyComponent={anchorUnavailable ? null :
               <View style={chatStyles.emptyState}>
                 {/* Line-drawn sunrise mark (no emoji, ever): a beginning, gold,
                     fading in. Same family as the Yours tab sunrise glyph. */}
                 <Animated.View entering={FadeIn.duration(400)} style={chatStyles.emptyMark}>
                   <SunriseIcon size={36} color={Colors.gold} strokeWidth={1.75} />
                 </Animated.View>
-                <Text style={chatStyles.emptyText}>{props.emptyText ?? 'Say hi to everyone!'}</Text>
+                <Text style={[chatStyles.emptyText, screenAppearance?.body]}>{props.emptyText ?? 'Say hi to everyone!'}</Text>
               </View>
             }
-            ListFooterComponent={props.renderPinnedFooter ? props.renderPinnedFooter() : null}
+            ListFooterComponent={olderLoadError || props.renderPinnedFooter ? (
+              <View>
+                {olderLoadError && (
+                  <TouchableOpacity style={[chatStyles.olderRetry, screenAppearance?.textAction]} onPress={() => { void loadOlder(true); }} accessibilityRole="button" accessibilityLabel="Retry loading older messages">
+                    <Text style={[chatStyles.olderRetryText, screenAppearance?.link]}>Couldn't load older messages · Try again</Text>
+                  </TouchableOpacity>
+                )}
+                {props.renderPinnedFooter?.()}
+              </View>
+            ) : null}
             renderItem={renderMessage}
           />
         )}
+        </MessageViewport>
 
         {/* Input bar -- absolutely positioned so the FlatList can span the
             full KAV area. The measured height is reserved via paddingTop
@@ -1957,6 +2466,7 @@ function ChatThread(props: ChatThreadProps) {
             new messages are never obscured by the bar on any screen size. */}
         {isPast ? (
           <InputBarWrapper
+            {...(Platform.OS === 'ios' ? { inset: iosDockFloor } : {})}
             style={[
               chatStyles.readOnlyBar,
               {
@@ -1967,86 +2477,83 @@ function ChatThread(props: ChatThreadProps) {
                 paddingLeft: Math.max(insets.left, 20),
                 paddingRight: Math.max(insets.right, 20),
               },
+              composerAppearance?.tray,
               inputBarBottomStyle,
             ]}
-            onLayout={(e: LayoutChangeEvent) => setBottomDockHeight(e.nativeEvent.layout.height)}
+            testID="chat-bottom-dock"
+            onLayout={onDockLayout}
           >
-            <Text style={chatStyles.readOnlyText}>{props.readOnly?.text ?? ''}</Text>
+            <Text style={[chatStyles.readOnlyText, composerAppearance?.metadata]}>{props.readOnly?.text ?? ''}</Text>
           </InputBarWrapper>
         ) : (
           <InputBarWrapper
+            {...(Platform.OS === 'ios' ? { inset: iosDockFloor } : {})}
             style={[
               {
                 position: 'absolute',
                 left: 0,
                 right: 0,
                 backgroundColor: Colors.white,
+                minHeight: recordingMode !== 'idle' ? voiceDockHeight : 0,
               },
+              composerAppearance?.tray,
               inputBarBottomStyle,
             ]}
-            onLayout={(e: LayoutChangeEvent) => setBottomDockHeight(e.nativeEvent.layout.height)}
+            testID="chat-bottom-dock"
+            onLayout={onDockLayout}
           >
             {props.countdownText != null && (
-              <Text style={chatStyles.countdownText}>
+              <Text style={[chatStyles.countdownText, composerAppearance?.tray, composerAppearance?.metadata]}>
                 {props.countdownText}
               </Text>
+            )}
+            {(!composerDraft.ready || composerDraft.error || composerDraft.draft.attempt && !sendingText) && (
+              <View style={chatStyles.replyBar}>
+                <View style={chatStyles.replyBarContent}>
+                  <Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>{composerDraft.error ? 'Your draft could not be saved or checked.' : !composerDraft.ready ? 'Checking your draft…' : 'Your previous message is not confirmed.'}</Text>
+                  {!!composerDraft.draft.attempt && <Text style={[chatStyles.replyBarText, composerAppearance?.contextBody]} numberOfLines={2}>{composerDraft.draft.attempt.text}</Text>}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+                    {composerDraft.error ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry message draft" style={chatStyles.draftRecoveryAction} onPress={() => { void composerDraft.retry(); }}><Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>Try again</Text></TouchableOpacity>
+                      : composerDraft.draft.attempt && <>
+                        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check original message" style={chatStyles.draftRecoveryAction} disabled={checkingDraft} onPress={() => { void checkPendingDraft(); }}><Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>Check message</Text></TouchableOpacity>
+                        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry original message" style={chatStyles.draftRecoveryAction} disabled={checkingDraft || !canWrite()} onPress={() => { void handleSend(true); }}><Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>Retry original</Text></TouchableOpacity>
+                      </>}
+                  </View>
+                </View>
+              </View>
             )}
             {replyingTo && (
               <View style={chatStyles.replyBar}>
                 <View style={chatStyles.replyBarLeft}>
-                  <Ionicons name="arrow-undo-outline" size={16} color={Colors.terracotta} />
+                  <Ionicons name="arrow-undo-outline" size={16} color={composerAppearance ? AfterglowColors.clay : Colors.terracotta} />
                   <View style={chatStyles.replyBarContent}>
-                    <Text style={chatStyles.replyBarName}>{replyingTo.senderName}</Text>
-                    <Text style={chatStyles.replyBarText} numberOfLines={1}>{replyingTo.content}</Text>
+                    <Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>{replyingTo.senderName}</Text>
+                    <Text style={[chatStyles.replyBarText, composerAppearance?.contextBody]} numberOfLines={1}>{replyingTo.content}</Text>
                   </View>
                 </View>
-                <TouchableOpacity onPress={() => setReplyingTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Ionicons name="close" size={18} color={Colors.warmGray} />
+                <TouchableOpacity onPress={() => { if (!canWrite()) return; draftRevision.current++; draftContextRevision.current++; setReplyingTo(null); }} style={chatStyles.composerCancel} accessibilityRole="button" accessibilityLabel="Cancel reply">
+                  <Ionicons name="close" size={18} color={composerAppearance ? AfterglowColors.muted : Colors.warmGray} />
                 </TouchableOpacity>
               </View>
             )}
             {editingMessageId && (
               <View style={chatStyles.editingBar}>
-                <Ionicons name="create-outline" size={16} color={Colors.terracotta} />
-                <Text style={chatStyles.editingText}>Editing message</Text>
-                <TouchableOpacity onPress={() => { setEditingMessageId(null); setInputText(''); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Ionicons name="close" size={18} color={Colors.warmGray} />
+                <Ionicons name="create-outline" size={16} color={composerAppearance ? AfterglowColors.clay : Colors.terracotta} />
+                <Text style={[chatStyles.editingText, composerAppearance?.contextName]}>Editing message</Text>
+                <TouchableOpacity onPress={() => { if (!canWrite()) return; draftRevision.current++; draftContextRevision.current++; setEditingMessageId(null); setInputText(''); inputTextRef.current = ''; }} style={chatStyles.composerCancel} accessibilityRole="button" accessibilityLabel="Cancel edit">
+                  <Ionicons name="close" size={18} color={composerAppearance ? AfterglowColors.muted : Colors.warmGray} />
                 </TouchableOpacity>
               </View>
             )}
-            {mentionQuery !== null && mentionCandidates.length > 0 && (
-              <View style={chatStyles.mentionBar}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={chatStyles.mentionBarContent}
-                >
-                  {mentionCandidates.map((m) => (
-                    <TouchableOpacity
-                      key={m.id}
-                      style={chatStyles.mentionChip}
-                      onPress={() => insertMention(m.first_name!)}
-                      activeOpacity={0.7}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Mention ${m.first_name}`}
-                    >
-                      {m.avatar_url ? (
-                        <Image source={{ uri: m.avatar_url }} style={chatStyles.mentionAvatar} contentFit="cover" />
-                      ) : (
-                        <View style={chatStyles.mentionAvatarFallback}>
-                          <Text style={chatStyles.mentionInitial}>{m.first_name?.[0]?.toUpperCase() ?? '?'}</Text>
-                        </View>
-                      )}
-                      <Text style={chatStyles.mentionName} numberOfLines={1}>{m.first_name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
+            {mentionQuery !== null && <ChatMentionPicker members={mentionCandidates} fonts={conversationFonts}
+              onSelect={insertMention} onClose={()=>{if(canWrite())setMentionQuery(null);}}/>}
           <View
+            accessibilityElementsHidden={recordingMode !== 'idle'}
+            importantForAccessibility={recordingMode !== 'idle' ? 'no-hide-descendants' : 'auto'}
+            aria-hidden={recordingMode !== 'idle'}
             style={[
               chatStyles.inputBar,
+              composerAppearance?.bar,
               Platform.OS === 'android'
                 ? {
                     paddingBottom: inputBarBottomPadding,
@@ -2058,51 +2565,57 @@ function ChatThread(props: ChatThreadProps) {
           >
             <TouchableOpacity
               onPress={handleAttachToggle}
-              style={chatStyles.cameraBtn}
-              disabled={uploading}
+              style={[chatStyles.cameraBtn, composerAppearance?.utility]}
+              disabled={uploading || recordingMode !== 'idle'}
               accessibilityRole="button"
-              accessibilityLabel={activePanel === 'attach' ? 'Show keyboard' : 'Add attachment'}
+              accessibilityLabel={attachmentShowsKeyboard ? 'Show keyboard' : 'Add attachment'}
             >
               {uploading ? (
-                <ActivityIndicator size="small" color={Colors.warmGray} />
-              ) : activePanel === 'attach' ? (
+                <ActivityIndicator size="small" color={composerAppearance ? AfterglowColors.muted : Colors.warmGray} />
+              ) : attachmentShowsKeyboard ? (
                 // Deliberate single-family exception: Ionicons has no keyboard
                 // glyph (only keypad/dialpad), so the keyboard toggle uses
                 // MaterialIcons. Every other input-bar icon stays Ionicons.
-                <MaterialIcons name="keyboard" size={26} color={Colors.warmGray} />
+                <MaterialIcons name="keyboard" size={26} color={composerAppearance ? AfterglowColors.muted : Colors.warmGray} />
               ) : (
-                <Ionicons name="add-circle-outline" size={26} color={Colors.warmGray} />
+                <Ionicons name="add-circle-outline" size={26} color={composerAppearance ? AfterglowColors.muted : Colors.warmGray} />
               )}
             </TouchableOpacity>
 
-            {/* Smile button toggles the inline emoji panel; morphs to a keyboard
-                icon while that panel is open. */}
-            <TouchableOpacity
+            {/* Staged mobile uses the OS keyboard's emoji key. Web and the
+                legacy composer retain the in-app emoji entry. */}
+            {!useSystemEmoji && <TouchableOpacity
               onPress={handleEmojiToggle}
-              style={chatStyles.emojiBtn}
-              disabled={uploading}
+              style={[chatStyles.emojiBtn, composerAppearance?.utility]}
+              disabled={uploading || recordingMode !== 'idle'}
               accessibilityRole="button"
               accessibilityLabel={activePanel === 'emoji' ? 'Show keyboard' : 'Open emoji picker'}
             >
               {activePanel === 'emoji' ? (
-                <MaterialIcons name="keyboard" size={24} color={Colors.terracotta} />
+                <MaterialIcons name="keyboard" size={24} color={composerAppearance ? AfterglowColors.clay : Colors.terracotta} />
               ) : (
-                <Ionicons name="happy-outline" size={24} color={Colors.terracotta} />
+                <Ionicons name="happy-outline" size={24} color={composerAppearance ? AfterglowColors.clay : Colors.terracotta} />
               )}
-            </TouchableOpacity>
+            </TouchableOpacity>}
 
             <TextInput
               ref={textInputRef}
-              style={chatStyles.input}
+              style={[chatStyles.input, composerAppearance?.input, composerAppearance && { height: Platform.OS === 'ios' ? undefined : composerInputHeight.inputHeight }]}
               value={inputText}
+              onContentSizeChange={composerAppearance ? composerInputHeight.onContentSizeChange : undefined}
+              onLayout={composerAppearance ? composerInputHeight.measureWebInput : undefined}
+              editable={recordingMode === 'idle' && composerDraft.ready && !composerDraft.error}
+              tabIndex={recordingMode === 'idle' ? 0 : -1}
               onChangeText={handleInputChange}
               onSelectionChange={(e) => {
+                if (!canWrite()) return;
                 selectionRef.current = e.nativeEvent.selection;
                 setMentionQuery(mentionQueryAt(inputTextRef.current, e.nativeEvent.selection.start));
               }}
               placeholder="Message..."
-              placeholderTextColor={Colors.warmGray}
+              placeholderTextColor={composerAppearance ? AfterglowColors.muted : Colors.warmGray}
               multiline
+              numberOfLines={composerAppearance && Platform.OS === 'web' ? 1 : undefined}
               textAlignVertical="top"
               maxLength={1000}
               returnKeyType="default"
@@ -2120,12 +2633,30 @@ function ChatThread(props: ChatThreadProps) {
             />
 
             <GestureDetector gesture={micGesture}>
-              <Animated.View style={chatStyles.sendMorphWrap}>
-                <Animated.View style={[chatStyles.morphLayer, chatStyles.sendCircle, sendLayerStyle]}>
+              <Animated.View
+                style={[chatStyles.sendMorphWrap, composerAppearance?.morph, composerControlDisabled && { opacity: 0.45 }]}
+                accessible={recordingMode === 'idle'}
+                accessibilityRole="button"
+                accessibilityLabel={composerControlLabel}
+                accessibilityHint={hasText ? undefined : 'Starts recording. Use the controls to pause, stop or discard before sending.'}
+                accessibilityState={{ disabled: composerControlDisabled }}
+                accessibilityElementsHidden={recordingMode !== 'idle'}
+                importantForAccessibility={recordingMode === 'idle' ? 'yes' : 'no-hide-descendants'}
+                aria-hidden={recordingMode !== 'idle'}
+                aria-disabled={composerControlDisabled}
+                focusable={!composerControlDisabled}
+                tabIndex={composerControlDisabled ? -1 : 0}
+                onAccessibilityTap={activateComposerControl}
+                accessibilityActions={[{ name: 'activate', label: composerControlLabel }]}
+                onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'activate') activateComposerControl(); }}
+                {...webComposerControlProps}
+              >
+                <Animated.View style={[chatStyles.morphLayer, chatStyles.sendCircle, composerAppearance?.layer, composerAppearance?.send, sendLayerStyle]}>
+                  <CreatorActionFill />
                   <Ionicons name="arrow-up" size={SEND_ARROW_ICON_SIZE} color={Colors.white} />
                 </Animated.View>
-                <Animated.View style={[chatStyles.morphLayer, micLayerStyle]}>
-                  <Ionicons name="mic" size={SEND_MIC_ICON_SIZE} color={Colors.terracotta} />
+                <Animated.View style={[chatStyles.morphLayer, composerAppearance?.layer, micLayerStyle]}>
+                  <Ionicons name="mic" size={SEND_MIC_ICON_SIZE} color={composerAppearance ? AfterglowColors.clay : Colors.terracotta} />
                 </Animated.View>
               </Animated.View>
             </GestureDetector>
@@ -2133,9 +2664,11 @@ function ChatThread(props: ChatThreadProps) {
 
           {recordingMode !== 'idle' && (
             <View
-              style={[chatStyles.recorderOverlay, { paddingBottom: inputBarBottomPadding }]}
+              style={[chatStyles.recorderOverlay, composerAppearance?.tray, { paddingBottom: inputBarBottomPadding }]}
               pointerEvents={recordingMode === 'holding' ? 'none' : 'auto'}
+              onLayout={(event: LayoutChangeEvent) => setVoiceDockHeight(event.nativeEvent.layout.height)}
             >
+              {!!audioError && <Text accessibilityRole="alert" style={[chatStyles.replyBarText, composerAppearance?.contextBody, { paddingHorizontal: 16, paddingTop: 8 }]}>{audioError}</Text>}
               <VoiceRecorder
                 mode={recordingMode as RecorderUiMode}
                 durationMillis={recorder.durationMillis}
@@ -2143,6 +2676,9 @@ function ChatThread(props: ChatThreadProps) {
                 isPaused={recorder.status === 'paused'}
                 draftUri={draft?.uri ?? null}
                 draftDuration={draft?.durationSeconds ?? 0}
+                sending={audioSending}
+                retryAvailable={!!audioError}
+                appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined}
                 onTrash={cancelRecording}
                 onPauseResume={pauseResumeRecording}
                 onStop={stopRecordingToDraft}
@@ -2166,7 +2702,13 @@ function ChatThread(props: ChatThreadProps) {
         {panelOpen && (
           <View style={chatStyles.attachPanelWrap}>
             {activePanel === 'attach' ? (
-              <AttachmentPanel onSelect={handleAttachSelect} height={panelHeight} bottomInset={insets.bottom} />
+              <AttachmentPanel
+                onSelect={handleAttachSelect}
+                height={panelHeight}
+                bottomInset={insets.bottom}
+                appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined}
+                showGif={gifsInAttachments}
+              />
             ) : (
               <MediaPanel
                 onSelect={insertEmoji}
@@ -2174,6 +2716,8 @@ function ChatThread(props: ChatThreadProps) {
                 onGifSelect={sendGif}
                 height={panelHeight}
                 bottomInset={insets.bottom}
+                appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined}
+                mode={activePanel === 'gif' ? 'gif-only' : undefined}
               />
             )}
           </View>
@@ -2184,10 +2728,8 @@ function ChatThread(props: ChatThreadProps) {
       {reportTarget && (
         <ReportModal
           visible={showReport}
-          onClose={() => {
-            setShowReport(false);
-            setReportTarget(null);
-          }}
+          onClose={() => { if (isCurrentEntry()) setShowReport(false); }}
+          scope={currentUserId ? moderationScope : null}
           reportedUserId={reportTarget.id}
           reportedUserName={reportTarget.name}
           eventId={props.reportEventId}
@@ -2195,16 +2737,22 @@ function ChatThread(props: ChatThreadProps) {
       )}
 
       <LocationPickerModal
+        key={`location:${entry.serial}`}
+        retryPreservesMessage
         visible={locationPickerOpen}
-        onClose={() => setLocationPickerOpen(false)}
+        onClose={() => { if (canWrite()) setLocationPickerOpen(false); }}
         onConfirm={handleLocationConfirm}
       />
 
       <PhotoPreviewModal
+        key={`photos:${entry.serial}`}
         visible={photoPreviewOpen}
         assets={pendingPhotos}
         sending={uploading}
-        onCancel={() => { setPhotoPreviewOpen(false); setPendingPhotos([]); }}
+        captionSent={photoCaptionSentRef.current}
+        captionLocked={!!pendingPhotos[0] && photoSendSessionRef.current.hasCaption(pendingPhotos[0].uri)}
+        errorMessage={photoError}
+        onCancel={() => { if (!canWrite() || photoSendingRef.current) return; setPhotoPreviewOpen(false); setPendingPhotos([]); setPhotoError(null); photoCaptionSentRef.current = false; photoSendSessionRef.current.clear(); }}
         onSend={sendPhotos}
       />
 
@@ -2212,13 +2760,16 @@ function ChatThread(props: ChatThreadProps) {
         visible={!!reactionPickerMsgId}
         onSelect={(emoji) => {
           const reactionKey = emoji === '❤️' ? 'heart' : emoji;
-          if (reactionPickerMsgId) toggleReaction(reactionPickerMsgId, reactionKey);
+          if (!canWrite()) return;
+          if (reactionPickerMsgId) handleReaction(reactionPickerMsgId, reactionKey);
           setReactionPickerMsgId(null);
         }}
-        onClose={() => setReactionPickerMsgId(null)}
+        onClose={() => { if (isCurrentEntry()) setReactionPickerMsgId(null); }}
       />
 
-      {/* Full-screen photo viewer */}
+      {COMMUNITY_CHAT_GROUPING_ENABLED && <ChatPhotoViewer photos={photos} {...photoSelection} fonts={conversationFonts} />}
+
+      {/* Legacy full-screen photo viewer */}
       <Modal visible={!!photoViewUrl} transparent animationType="fade" onRequestClose={() => setPhotoViewUrl(null)} statusBarTranslucent>
         <Pressable style={chatStyles.photoModal} onPress={() => setPhotoViewUrl(null)}>
           {photoViewUrl && (
@@ -2233,148 +2784,27 @@ function ChatThread(props: ChatThreadProps) {
       <MiniProfileCard
         userId={miniProfileUserId}
         visible={!!miniProfileUserId}
-        onClose={() => setMiniProfileUserId(null)}
+        onClose={() => { if (isCurrentEntry()) setMiniProfileUserId(null); }}
         onReport={(uid, uname) => {
+          if (!isCurrentEntry()) return;
           setReportTarget({ id: uid, name: uname });
           setShowReport(true);
         }}
-        onBlock={(uid, uname) => blockUser(uid, uname, () => router.back())}
+        onBlock={(uid, uname) => { if (isCurrentEntry()) blockUser(uid, uname, () => { if (isCurrentEntry()) router.back(); }, moderationScope); }}
       />
 
       <BrandedAlert
         visible={!!alertInfo}
         title={alertInfo?.title ?? ''}
         message={alertInfo?.message}
+        scrollMessage={alertInfo?.scrollMessage}
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
       />
 
 
-      {/* Message interaction overlay */}
-      <Modal visible={!!overlayMessage} transparent animationType="fade" onRequestClose={() => setOverlayMessage(null)} statusBarTranslucent>
-        <Pressable style={overlayStyles.backdrop} onPress={() => setOverlayMessage(null)}>
-          <Pressable onPress={(e) => e.stopPropagation()} style={overlayStyles.container}>
-            {/* Emoji reaction row -- only for other people's messages, disabled when read-only */}
-            {!overlayMessage?.isOwn && !isPast && (
-            <View style={overlayStyles.emojiRow}>
-              {['\uD83D\uDC4D', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDE2E', '\uD83D\uDE22', '\uD83D\uDE4F'].map((emoji) => (
-                <EmojiReactionButton
-                  key={emoji}
-                  emoji={emoji}
-                  onSelect={(e) => {
-                    const reactionKey = e === '\u2764\uFE0F' ? 'heart' : e;
-                    toggleReaction(overlayMessage!.message.id, reactionKey);
-                    setOverlayMessage(null);
-                  }}
-                />
-              ))}
-              <TouchableOpacity
-                style={overlayStyles.emojiBtn}
-                onPress={() => {
-                  hapticLight();
-                  setReactionPickerMsgId(overlayMessage!.message.id);
-                  setOverlayMessage(null);
-                }}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="More reactions"
-              >
-                <Ionicons name="add" size={24} color={Colors.textMedium} />
-              </TouchableOpacity>
-            </View>
-            )}
-
-            {/* Action menu */}
-            <View style={overlayStyles.actionMenu}>
-              {overlayMessage?.message.message_type === 'user' && !isPast && (
-                <>
-                  <TouchableOpacity
-                    style={overlayStyles.actionRow}
-                    onPress={() => {
-                      hapticLight();
-                      const msg = overlayMessage.message;
-                      handleTriggerReply(msg.id);
-                      setOverlayMessage(null);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={overlayStyles.actionText}>Reply</Text>
-                    <Ionicons name="arrow-undo-outline" size={18} color={Colors.asphalt} />
-                  </TouchableOpacity>
-                  <View style={overlayStyles.actionDivider} />
-                </>
-              )}
-
-              <TouchableOpacity
-                style={overlayStyles.actionRow}
-                onPress={() => {
-                  const msg = overlayMessage?.message;
-                  if (msg) {
-                    let copyText = msg.content;
-                    if (msg.image_url) {
-                      copyText = msg.image_url;
-                    } else if (msg.message_type === 'location') {
-                      try { copyText = JSON.parse(msg.content).address ?? msg.content; } catch {}
-                    }
-                    Clipboard?.setStringAsync(copyText).catch(() => {});
-                  }
-                  hapticLight();
-                  setOverlayMessage(null);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={overlayStyles.actionText}>Copy</Text>
-                <Ionicons name="copy-outline" size={18} color={Colors.asphalt} />
-              </TouchableOpacity>
-
-              {overlayMessage?.isOwn && overlayMessage.message.message_type === 'user' && !overlayMessage.message.image_url && (
-                <>
-                  <View style={overlayStyles.actionDivider} />
-                  <TouchableOpacity
-                    style={overlayStyles.actionRow}
-                    onPress={() => {
-                      hapticLight();
-                      setEditingMessageId(overlayMessage.message.id);
-                      setReplyingTo(null);
-                      setInputText(overlayMessage.message.content);
-                      setOverlayMessage(null);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={overlayStyles.actionText}>Edit</Text>
-                    <Ionicons name="create-outline" size={18} color={Colors.asphalt} />
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {overlayMessage?.isOwn && (
-                <>
-                  <View style={overlayStyles.actionDivider} />
-                  <TouchableOpacity
-                    style={overlayStyles.actionRow}
-                    onPress={() => {
-                      hapticMedium();
-                      setOverlayMessage(null);
-                      setAlertInfo({
-                        title: 'Delete this message?',
-                        message: '',
-                        buttons: [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Delete', style: 'destructive', onPress: () => deleteMessage(overlayMessage.message.id) },
-                        ],
-                      });
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={overlayStyles.actionTextDelete}>Delete</Text>
-                    <Ionicons name="trash-outline" size={18} color={Colors.errorRed} />
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {reactionDetails && <ReactionDetailsSheet request={reactionDetails} onClose={() => setReactionDetails(null)} />}
+      <MessageActionsMenu menu={overlayMessage} onClose={() => setOverlayMessage(null)} />
     </View>
   );
 }
@@ -2384,11 +2814,34 @@ function ChatThread(props: ChatThreadProps) {
 // stabilized props passed by CircleChatScreenInner.
 export default memo(ChatThread);
 
+function createConversationAppearance(fonts: AfterglowFontFamilies) {
+  return StyleSheet.create({
+    screen: { backgroundColor: AfterglowColors.paper },
+    day: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted, backgroundColor: AfterglowColors.paper, borderRadius: 0 },
+    title: { ...AfterglowType.identity, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    body: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted },
+    warning: { minHeight: 44, justifyContent: 'center', backgroundColor: AfterglowColors.white, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AfterglowColors.line },
+    button: { minHeight: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: AfterglowColors.clay, borderRadius: 6 },
+    buttonText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.white },
+    textAction: { minHeight: 44, justifyContent: 'center' },
+    link: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.clay },
+  });
+}
+
 const chatStyles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.parchment },
   headerSafe: { backgroundColor: Colors.white },
   listWrap: { flex: 1 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loadErrorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 12 },
+  loadErrorTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, textAlign: 'center' },
+  loadErrorText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, textAlign: 'center' },
+  loadRetry: { backgroundColor: Colors.terracotta, borderRadius: 24, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 12, marginTop: 4 },
+  loadRetryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  loadWarning: { backgroundColor: Colors.inputBg, paddingHorizontal: 16, paddingVertical: 9 },
+  loadWarningText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt, textAlign: 'center' },
+  olderRetry: { alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 12, marginVertical: 8 },
+  olderRetryText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodySM, color: Colors.terracotta, textAlign: 'center' },
   pushBanner: {
     backgroundColor: Colors.inputBg,
     paddingVertical: 10,
@@ -2432,7 +2885,7 @@ const chatStyles = StyleSheet.create({
     gap: 8,
   },
   backBtn: { padding: 2 },
-  headerCenter: { flex: 1 },
+  headerCenter: { flex: 1, minWidth: 0 },
   headerTitle: { fontSize: 16, fontWeight: '700' as const, color: Colors.darkWarm },
   headerSub: { fontSize: 11, color: Colors.secondary, marginTop: 1 },
   viewPlanBtn: {
@@ -2443,7 +2896,7 @@ const chatStyles = StyleSheet.create({
     paddingVertical: 4,
     // Cap so a long DM counterpart name ("View Magdalena") can't crowd/wrap the
     // header; the title (flex:1) truncates first, then this.
-    maxWidth: 150,
+    maxWidth: 85,
   },
   viewPlanText: { fontSize: 12, fontWeight: '600' as const, color: Colors.terracotta },
   ellipsisBtn: {
@@ -2608,6 +3061,7 @@ const chatStyles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
   },
+  draftRecoveryAction: { minHeight: 44, justifyContent: 'center' },
   replyBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2650,6 +3104,13 @@ const chatStyles = StyleSheet.create({
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
     flex: 1,
+  },
+  composerCancel: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
 
   mentionBar: {
@@ -2716,99 +3177,3 @@ const chatStyles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
-
-const overlayStyles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  container: {
-    width: '100%',
-    maxWidth: 320,
-    alignItems: 'center',
-    gap: 10,
-  },
-  emojiRow: {
-    flexDirection: 'row',
-    backgroundColor: Colors.white,
-    borderRadius: 28,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    gap: 2,
-    shadowColor: Colors.shadowBlack,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  emojiBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emojiText: {
-    fontSize: 28,
-  },
-  actionMenu: {
-    backgroundColor: Colors.white,
-    borderRadius: 14,
-    width: '100%',
-    overflow: 'hidden',
-    shadowColor: Colors.shadowBlack,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-  },
-  actionText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-  actionTextDelete: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.errorRed,
-  },
-  actionDivider: {
-    height: 1,
-    backgroundColor: Colors.border,
-    marginHorizontal: 18,
-  },
-});
-
-// Animated emoji button with scale bounce on tap
-function EmojiReactionButton({ emoji, onSelect }: { emoji: string; onSelect: (emoji: string) => void }) {
-  const scale = useSharedValue(1);
-  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
-
-  return (
-    <TouchableOpacity
-      style={overlayStyles.emojiBtn}
-      onPress={() => {
-        hapticLight();
-        scale.value = withSpring(1.3, { damping: 8, stiffness: 300 }, () => {
-          scale.value = withSpring(1);
-        });
-        setTimeout(() => onSelect(emoji), 150);
-      }}
-      activeOpacity={1}
-    >
-      <Animated.View style={animStyle}>
-        <Text style={overlayStyles.emojiText}>{emoji}</Text>
-      </Animated.View>
-    </TouchableOpacity>
-  );
-}

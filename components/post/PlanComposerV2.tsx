@@ -1,24 +1,17 @@
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 /**
- * PlanComposerV2 - the redesigned main composer (Golden Hour design study v3).
- *
- * Rendered only when YOURS_PAGE_ENABLED is true. Owns its own state and submit
- * so the frozen LegacyComposer carries zero risk. Built one section at a time
- * per composer-redesign-build-spec.md.
- *
- * Step 2: full section rhythm (what / category / photo / message / when /
- * where(stub) / how many / who can join + ages / invite / more options) plus
- * the sticky live post bar. The WHERE section is a stub here; the maps place
- * picker lands in steps 3-4. The post moment is the interim SharePlanModal;
- * the optimistic confirmation screen lands in step 6.
- *
- * V2 required set to post: title, date, time, category. Place, message, and
- * description are optional (place is skippable by spec; message is the study's
- * "one warm optional field"; description lives under More options). All other
- * fields persist exactly as the legacy composer.
+ * Main plan composer, with optional development-gated Afterglow presentation.
+ * The original post requires title, date, time, category, a message of at least
+ * ten characters, and a description. Drafts require title, date and time.
+ * Place, photo, end time and ticket link stay optional. Posting, creator
+ * membership, invitation recovery and all saved payloads retain their source
+ * contracts; this presentation does not add a creation step.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AccessibilityInfo,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -33,29 +26,32 @@ import { Image } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { ImagePlus, X, ChevronDown } from 'lucide-react-native';
 
-import Colors from '../../constants/Colors';
+import Colors, { AfterglowColors } from '../../constants/Colors';
 import { extractFirstUrl } from '../../lib/url';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
+import { requestPlanNotificationPrompt } from '../../lib/planNotificationPrompt';
 import { checkContent } from '../../lib/contentFilter';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
-import { MONTHS, getTodayInLA, laWallTimeToUTC, getLAWallParts } from '../../lib/laDate';
+import { MONTHS, getTodayInLA, laWallTimeToUTC, getLAWallParts, isValidLAWallTime, resolveOvernightLAEnd } from '../../lib/laDate';
 import {
   NEIGHBORHOOD_OPTIONS,
   NEIGHBORHOOD_OTHER,
 } from '../../constants/Neighborhoods';
 import { PLAN_CATEGORIES, type PlanCategory } from '../../constants/Categories';
-import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { COPY } from '../yours/state/constants';
-import { useAuthUserId } from '../yours/state/useAuthUserId';
+import { useObservedUser } from '../../hooks/useObservedUser';
 import type { MyFace } from '../../hooks/useMyFace';
 import {
   buildOptimisticPlan,
@@ -64,21 +60,20 @@ import {
 } from '../../lib/optimisticPlans';
 import { useInviteInterestSignals } from '../../hooks/useInviteInterestSignals';
 import { useDismissSuggestion } from '../../hooks/useDismissSuggestion';
-import { useInvitePeopleToPlan } from '../../hooks/useInvitePeopleToPlan';
+import { usePostPlanInvitations } from './usePostPlanInvitations';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
 import EditorialTitleField from '../composer/EditorialTitleField';
 import CategoryChips from '../composer/CategoryChips';
 import CollapsibleCalendar from '../composer/CollapsibleCalendar';
-import TimePicker, { displayTime, MINUTE_OPTIONS } from '../composer/TimePicker';
+import TimePicker, { displayTime } from '../composer/TimePicker';
 import InlineNudge from '../composer/InlineNudge';
 import { useNudgeArbiter, NUDGE_PLACE_BASE } from '../composer/nudgeArbiter';
 import PlacePicker, { type PlaceValue } from '../composer/place/PlacePicker';
 import PostConfirmation from '../composer/PostConfirmation';
 import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../components/post/InvitePeopleSection';
 import PeoplePickerSheet, { type PickedPerson } from '../../components/post/PeoplePickerSheet';
-import { requestPostPlanPushPrimer } from '../../lib/postPlanPushPrimer';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -96,6 +91,13 @@ const DESC_LIMIT = 2000;
 const DESC_WARN_MARGIN = 200;
 
 type QuickKind = 'tonight' | 'tomorrow';
+type RequiredField = 'title' | 'category' | 'message' | 'description' | 'when';
+type ValidationMode = 'post' | 'draft';
+type ComposerWrite = {
+  userId: string;
+  isCurrentViewer: () => boolean;
+  optimistic: OptimisticHandle | null;
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -140,8 +142,19 @@ function sameDay(a: { year: number; month: number; day: number } | null, b: { ye
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function PlanComposerV2() {
+  const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const appearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts } : undefined, [fonts]);
+  const styles = useMemo(() => appearance ? { ...legacyStyles, ...composerAppearance(appearance.fonts) } : legacyStyles, [appearance]);
+  const muted = appearance ? AfterglowColors.muted : Colors.secondary;
+  const placeholder = appearance ? AfterglowColors.muted : Colors.inkSoft;
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const titleInputRef = useRef<TextInput>(null);
+  const messageInputRef = useRef<TextInput>(null);
+  const descriptionInputRef = useRef<TextInput>(null);
+  const sectionPositions = useRef<Partial<Record<RequiredField, number>>>({});
+  const [validationMode, setValidationMode] = useState<ValidationMode | null>(null);
   const params = useLocalSearchParams<{
     prefillTitle?: string;
     prefillInvitePersonId?: string;
@@ -174,16 +187,21 @@ export default function PlanComposerV2() {
     draftId?: string;
   }>();
 
+  const composerViewer = useObservedUser();
+  const composerUserId = !composerViewer.error && !composerViewer.isLoading ? composerViewer.viewerId : undefined;
+
   // ── Profile (gender options) ──
   const [userGender, setUserGender] = useState<string | null>(null);
   useEffect(() => {
+    let active = true;
+    setUserGender(null);
+    if (!composerUserId) return;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: profile } = await supabase.from('profiles').select('gender').eq('id', user.id).single();
-      if (profile?.gender) setUserGender(profile.gender);
-    })();
-  }, []);
+      const { data: profile } = await supabase.from('profiles').select('gender').eq('id', composerUserId).single();
+      if (active && composerViewer.isCurrent() && profile?.gender) setUserGender(profile.gender);
+    })().catch(() => {});
+    return () => { active = false; };
+  }, [composerUserId, composerViewer.epoch, composerViewer.isCurrent]);
 
   // ── Core fields ──
   const [title, setTitle] = useState('');
@@ -193,7 +211,7 @@ export default function PlanComposerV2() {
   const [imageLoading, setImageLoading] = useState(false);
   const [creatorMessage, setCreatorMessage] = useState('');
 
-  // ── Place (stub here; picker in steps 3-4) ──
+  // ── Place ──
   const [location, setLocation] = useState('');
   const [locationLat, setLocationLat] = useState<number | null>(null);
   const [locationLng, setLocationLng] = useState<number | null>(null);
@@ -230,10 +248,9 @@ export default function PlanComposerV2() {
   const [showNeighborhoodPicker, setShowNeighborhoodPicker] = useState(false);
 
   // ── Invite people (flag-on path) ──
-  const { data: composerUserId } = useAuthUserId();
   const { data: wantInSignals = [] } = useInviteInterestSignals(composerUserId);
   const { dismiss: dismissSuggestion, undo: undoDismissSuggestion } = useDismissSuggestion(composerUserId);
-  const invitePeopleToPlan = useInvitePeopleToPlan();
+  const postInvitations = usePostPlanInvitations(composerViewer);
   const [invited, setInvited] = useState<InviteChip[]>([]);
   const [inviteShowAll, setInviteShowAll] = useState(false);
   const [peoplePickerOpen, setPeoplePickerOpen] = useState(false);
@@ -244,14 +261,13 @@ export default function PlanComposerV2() {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string } | null>(null);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [postedPlanId, setPostedPlanId] = useState<string | null>(null);
+  const postedPlanIdRef = useRef<string | null>(null);
   const [postedPlanTitle, setPostedPlanTitle] = useState('');
   const [postedGenderLabel, setPostedGenderLabel] = useState<string | undefined>();
-  const [inviteDeliveryFailed, setInviteDeliveryFailed] = useState(false);
   // Optimistic post moment.
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirmIsFirst, setConfirmIsFirst] = useState(false);
   const [confirmMeta, setConfirmMeta] = useState('');
-  const [confirmInvited, setConfirmInvited] = useState(false);
   const [shareWanted, setShareWanted] = useState(false);
   const [recoveryNudge, setRecoveryNudge] = useState(false);
   const neverPostedRef = useRef(false);
@@ -260,6 +276,67 @@ export default function PlanComposerV2() {
   // onPress still sees loading=false), which can double-insert the plan. A
   // ref updates instantly, before React re-renders.
   const submittingRef = useRef(false);
+  const mountedRef = useRef(false);
+  const photoVisit = useRef<object | null>(null);
+  const photoAttempt = useRef<object | null>(null);
+  const writeRef = useRef<ComposerWrite | null>(null);
+  // Retirement removes only this attempt's temporary card. Restoring its old
+  // cache snapshot here could erase newer data when the same account returns.
+  const retireWrite = useCallback(() => {
+    const write = writeRef.current;
+    writeRef.current = null;
+    submittingRef.current = false;
+    if (write?.optimistic) {
+      const tempId = write.optimistic.tempId;
+      for (const key of [['events', 'feed', write.userId], ['my-plans', write.userId]]) {
+        queryClient.setQueryData<Array<{ id: string }>>(key, old => old?.filter(plan => plan.id !== tempId));
+        // A dispatched write may have committed. Reconcile on the next read;
+        // never launch compensating writes under a replacement account.
+        void queryClient.invalidateQueries({ queryKey: key, exact: true, refetchType: 'none' });
+      }
+    }
+  }, [queryClient]);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; photoVisit.current = null; photoAttempt.current = null; retireWrite(); };
+  }, [retireWrite]);
+  useFocusEffect(useCallback(() => {
+    const visit = {}; photoVisit.current = visit;
+    return () => {
+      if (photoVisit.current !== visit) return;
+      photoVisit.current = null;
+      if (photoAttempt.current) {
+        photoAttempt.current = null;
+        setImageLoading(false);
+        setImageUrl(current => current?.startsWith('http') ? current : null);
+      }
+    };
+  }, [composerViewer.epoch]));
+  const isComposerCurrent = () => mountedRef.current && composerViewer.isCurrent();
+  const cancelComposer = () => {
+    if (!isComposerCurrent()) return;
+    hapticLight();
+    photoVisit.current = null; photoAttempt.current = null;
+    setImageLoading(false); setImageUrl(current => current?.startsWith('http') ? current : null);
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/plans');
+  };
+  const ownsWrite = (write: ComposerWrite) => mountedRef.current && writeRef.current === write && write.isCurrentViewer();
+  const beginWrite = (): ComposerWrite | null => {
+    // A retained callback cannot adopt the account returned by a later read.
+    if (!isComposerCurrent() || submittingRef.current) return null;
+    if (!composerUserId) {
+      setAlertInfo({ title: 'Check your account', message: 'We could not confirm your account. Please try again before posting or saving.' });
+      void composerViewer.retry();
+      return null;
+    }
+    const write: ComposerWrite = { userId: composerUserId, isCurrentViewer: composerViewer.isCurrent, optimistic: null };
+    writeRef.current = write;
+    submittingRef.current = true;
+    setLoading(true);
+    return write;
+  };
+  const invitationOwner = useRef<{ viewerId: string | null | undefined; epoch: number }>({ viewerId: undefined, epoch: 0 });
 
   // Has the creator seen the first-plan moment? Drives the elevated copy.
   useEffect(() => {
@@ -347,7 +424,7 @@ export default function PlanComposerV2() {
         if (m) { setDateYear(Number(m[1])); setDateMonth(Number(m[2]) - 1); setDateDay(Number(m[3])); setDateSelected(true); }
       }
     }
-    // Time: from start_time (ISO or HH:MM[:SS]); snap to the picker's minutes.
+    // Time: from start_time (ISO or HH:MM[:SS]); preserve the exact minute.
     // A full ISO carries both the LA day and the LA clock, so take BOTH from
     // the LA side: day and time must come from the same wall clock or they
     // drift apart (the +1 shift paired a UTC day with an LA time).
@@ -365,13 +442,11 @@ export default function PlanComposerV2() {
       if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
         const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
         let displayHour = hours % 12; if (displayHour === 0) displayHour = 12;
-        const nearestMinute = MINUTE_OPTIONS.reduce((prev, curr) =>
-          Math.abs(parseInt(curr) - minutes!) < Math.abs(parseInt(prev) - minutes!) ? curr : prev);
-        setTimeHour(displayHour); setTimeMinute(nearestMinute); setTimePeriod(period); setTimeSelected(true);
+        setTimeHour(displayHour); setTimeMinute(String(minutes).padStart(2, '0')); setTimePeriod(period); setTimeSelected(true);
       }
     }
     // End time (optional): from end_time (ISO, read on the LA clock, or
-    // HH:MM[:SS]); snap to picker.
+    // HH:MM[:SS]); preserve the exact minute.
     if (params.prefillEndTime) {
       const et = String(params.prefillEndTime);
       let hours: number | null = null; let minutes: number | null = null;
@@ -380,9 +455,7 @@ export default function PlanComposerV2() {
       if (hours !== null && minutes !== null && !isNaN(hours) && !isNaN(minutes)) {
         const period: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
         let displayHour = hours % 12; if (displayHour === 0) displayHour = 12;
-        const nearestMinute = MINUTE_OPTIONS.reduce((prev, curr) =>
-          Math.abs(parseInt(curr) - minutes!) < Math.abs(parseInt(prev) - minutes!) ? curr : prev);
-        setEndTimeHour(displayHour); setEndTimeMinute(nearestMinute); setEndTimePeriod(period); setEndTimeSelected(true);
+        setEndTimeHour(displayHour); setEndTimeMinute(String(minutes).padStart(2, '0')); setEndTimePeriod(period); setEndTimeSelected(true);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -409,21 +482,23 @@ export default function PlanComposerV2() {
   }, [invited, wantInSignals, hiddenWantIn]);
 
   const onInviteSuggestion = useCallback((s: InviteSuggestion) => {
+    if (!composerUserId || !composerViewer.isCurrent()) return;
     hapticLight();
     setInvited((prev) => prev.some((c) => c.user_id === s.user_id) ? prev : [...prev, { user_id: s.user_id, name: s.name, photo: s.photo }]);
-  }, []);
+  }, [composerUserId, composerViewer.isCurrent]);
   const onRemoveChip = useCallback((userId: string) => {
     hapticLight();
     setInvited((prev) => prev.filter((c) => c.user_id !== userId));
   }, []);
   const onPickedFromPeople = useCallback((picked: PickedPerson[]) => {
+    if (!composerUserId || !composerViewer.isCurrent()) return;
     if (picked.length === 0) return;
     hapticLight();
     setInvited((prev) => {
       const have = new Set(prev.map((c) => c.user_id));
       return [...prev, ...picked.filter((p) => !have.has(p.user_id))];
     });
-  }, []);
+  }, [composerUserId, composerViewer.isCurrent]);
   const onDismissSuggestion = useCallback((s: InviteSuggestion) => {
     hapticLight();
     setHiddenWantIn((prev) => new Set(prev).add(s.user_id));
@@ -441,46 +516,43 @@ export default function PlanComposerV2() {
 
   // ── Photo ──
   const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      setAlertInfo({ title: 'Permission needed', message: 'Go to Settings and allow photo access.' });
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 1,
-    });
-    if (!result.canceled && result.assets[0]) {
-      try {
-        const manipulated = await ImageManipulator.manipulateAsync(
-          result.assets[0].uri,
-          [{ resize: { width: 1200 } }],
-          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-        );
-        setImageUrl(manipulated.uri);
-        if (manipulated.base64) uploadPhoto(manipulated.base64);
-        else { setImageUrl(null); setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE }); }
-      } catch {
-        setImageUrl(null);
-        setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
-      }
-    }
-  };
-
-  const uploadPhoto = async (base64: string) => {
+    if (!isComposerCurrent() || !composerUserId || !photoVisit.current || photoAttempt.current || submittingRef.current) return;
+    const attempt = {}, visit = photoVisit.current, userId = composerUserId;
+    const isCurrentViewer = composerViewer.isCurrent;
+    photoAttempt.current = attempt;
     setImageLoading(true);
+    const isCurrent = () => mountedRef.current && isCurrentViewer() && photoVisit.current === visit && photoAttempt.current === attempt;
+    let stage: 'choose' | 'prepare' | 'upload' = 'choose';
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-      const { error: refreshErr } = await supabase.auth.refreshSession();
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 1 });
+      if (!isCurrent() || result.canceled || !result.assets?.[0]) return;
+      stage = 'prepare';
+      const manipulated = await ImageManipulator.manipulateAsync(result.assets[0].uri, [{ resize: { width: 1200 } }], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+      if (!isCurrent()) return;
+      if (!manipulated.base64) throw new Error('Missing prepared image');
+      setImageUrl(manipulated.uri);
+      stage = 'upload';
+      const identity = await requestWithDeadline(supabase.auth.getUser(), 12_000);
+      if (!isCurrent()) return;
+      if (identity.error || identity.data.user?.id !== userId) throw new Error('Could not confirm photo owner');
+      const { error: refreshErr } = await requestWithDeadline(supabase.auth.refreshSession(), 12_000);
+      if (!isCurrent()) return;
       if (refreshErr) throw refreshErr;
-      const fileName = `${user.id}/${Date.now()}.jpg`;
-      const publicUrl = await uploadBase64ToStorage('event-images', fileName, base64);
-      setImageUrl(publicUrl);
+      const refreshedIdentity = await requestWithDeadline(supabase.auth.getUser(), 12_000);
+      if (!isCurrent()) return;
+      if (refreshedIdentity.error || refreshedIdentity.data.user?.id !== userId) throw new Error('Could not confirm photo owner');
+      const publicUrl = await requestWithDeadline(uploadBase64ToStorage('event-images', `${userId}/${Date.now()}.jpg`, manipulated.base64), 30_000);
+      if (isCurrent()) setImageUrl(publicUrl);
     } catch {
+      if (!isCurrent()) return;
       setImageUrl(null);
-      setAlertInfo({ title: 'Upload failed', message: 'Could not upload photo. Try again.' });
+      setAlertInfo(stage === 'choose'
+        ? { title: 'Couldn’t open photos', message: 'Try again.' }
+        : stage === 'upload'
+          ? { title: 'Upload failed', message: 'Could not upload photo. Try again.' }
+          : { title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
     } finally {
-      setImageLoading(false);
+      if (photoAttempt.current === attempt) { photoAttempt.current = null; if (mountedRef.current && isCurrentViewer() && photoVisit.current === visit) setImageLoading(false); }
     }
   };
 
@@ -538,16 +610,48 @@ export default function PlanComposerV2() {
   // of instruct: "add a day" read like a tappable link and it is not (C19,
   // Liz's call: genuinely tappable or visually passive, nothing in between).
   // LIZ COPY
+  const timeSummary = displayTime(timeHour, timeMinute, timePeriod);
   const whenSummary = dateSelected
-    ? `${MONTHS[dateMonth]} ${dateDay}${timeSelected ? ` · ${displayTime(timeHour, timeMinute, timePeriod).toLowerCase()}` : ''}`
-    : 'no day yet';
-  const placeSummary = location.trim() ? location.trim().toLowerCase() : 'no place yet';
-  const peopleSummary = invited.length > 0 ? invited.map((c) => c.name.toLowerCase()).join(', ') : `open to ${groupSize}`;
+    ? `${MONTHS[dateMonth]} ${dateDay}${timeSelected ? ` · ${appearance ? timeSummary : timeSummary.toLowerCase()}` : ''}`
+    : appearance ? 'No day yet' : 'no day yet';
+  const placeSummary = location.trim()
+    ? appearance ? location.trim() : location.trim().toLowerCase()
+    : appearance ? 'No place yet' : 'no place yet';
+  const peopleSummary = invited.length > 0
+    ? invited.map((c) => appearance ? c.name : c.name.toLowerCase()).join(', ')
+    : appearance ? `Open to ${groupSize}` : `open to ${groupSize}`;
   const summaryMeta = [whenSummary, placeSummary, peopleSummary].join(' · ');
 
   const canPost = title.trim().length > 0 && dateSelected && timeSelected && category !== null && creatorMessage.trim().length >= MSG_MIN && description.trim().length > 0 && !loading && !imageLoading;
 
+  // Validate in screen order, so the first correction is also the next field
+  // the member sees. Drafts keep their existing, smaller set of requirements.
+  const requiredErrors = (mode: ValidationMode): Partial<Record<RequiredField, string>> => ({
+    ...(!title.trim() ? { title: 'Add a title for your plan.' } : {}),
+    ...(mode === 'post' && category === null ? { category: 'Choose a category.' } : {}),
+    ...(mode === 'post' && creatorMessage.trim().length < MSG_MIN ? { message: `Add a message with at least ${MSG_MIN} characters.` } : {}),
+    ...(mode === 'post' && !description.trim() ? { description: 'Add a description so people know what to expect.' } : {}),
+    ...(!dateSelected || !timeSelected ? { when: !dateSelected && !timeSelected ? 'Choose a day and a start time.' : !dateSelected ? 'Choose a day for your plan.' : 'Choose a start time.' } : {}),
+  });
+  const fieldErrors: Partial<Record<RequiredField, string>> = validationMode ? requiredErrors(validationMode) : {};
+  const validateRequired = (mode: ValidationMode) => {
+    const errors = requiredErrors(mode);
+    const first = (Object.keys(errors) as RequiredField[])[0];
+    setValidationMode(mode);
+    if (!first) return true;
+    AccessibilityInfo.announceForAccessibility(errors[first]!);
+    const input = first === 'title' ? titleInputRef : first === 'message' ? messageInputRef : first === 'description' ? descriptionInputRef : null;
+    if (input) input.current?.focus();
+    else Keyboard.dismiss();
+    scrollRef.current?.scrollTo({ y: Math.max(0, (sectionPositions.current[first] ?? 0) - 12), animated: true });
+    return false;
+  };
+  const fieldError = (field: RequiredField) => fieldErrors[field] ? (
+    <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.fieldError}>{fieldErrors[field]}</Text>
+  ) : null;
+
   const resetForm = () => {
+    setValidationMode(null);
     setTitle(''); setExploreEventId(null); setCategory(null); setImageUrl(null); setCreatorMessage('');
     setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
     setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
@@ -575,33 +679,59 @@ export default function PlanComposerV2() {
     } as never);
   };
 
+  useLayoutEffect(() => {
+    const previous = invitationOwner.current;
+    // Keep the initial route prefill while identity loads. A later account
+    // transition owns a fresh form and retires every prior write, even A→B→A.
+    if (previous.viewerId !== undefined && previous.epoch !== composerViewer.epoch) {
+      retireWrite();
+      photoVisit.current = null; photoAttempt.current = null; setImageLoading(false);
+      resetForm();
+      postInvitations.reset();
+      setLoading(false);
+      setHiddenWantIn(new Set());
+      setPeoplePickerOpen(false);
+      setShowNeighborhoodPicker(false);
+      setConfirmVisible(false);
+      setShareModalVisible(false);
+      setShareWanted(false);
+      setPostedPlanId(null);
+      postedPlanIdRef.current = null;
+      setPostedPlanTitle('');
+      setPostedGenderLabel(undefined);
+      setConfirmMeta('');
+      setRecoveryNudge(false);
+      setAlertInfo(null);
+    }
+    invitationOwner.current = { viewerId: composerViewer.viewerId, epoch: composerViewer.epoch };
+  }, [composerViewer.epoch, composerViewer.viewerId]);
+
   // ── Save as draft (COMMUNITIES_ENABLED): title + when are enough; the rest
   // waits. No host member row, no feed presence, no waitlist notify - the row
   // sits at status 'draft', visible only in Yours until it posts. ──
   const canSaveDraft = title.trim().length > 0 && dateSelected && timeSelected && !loading && !imageLoading;
   const handleSaveDraft = async () => {
-    if (loading || imageLoading || confirmVisible) return;
-    const missing: string[] = [];
-    if (title.trim().length === 0) missing.push('Title');
-    if (!dateSelected) missing.push('Day');
-    if (!timeSelected) missing.push('Time');
-    if (missing.length > 0) {
-      // LIZ COPY
-      setAlertInfo({ title: 'Almost there', message: `A draft just needs:\n\n• ${missing.join('\n• ')}` });
-      return;
-    }
+    if (!isComposerCurrent() || submittingRef.current || photoAttempt.current || loading || imageLoading || confirmVisible) return;
+    if (!validateRequired('draft')) return;
     const fieldsToCheck = [title, description, creatorMessage, location].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
     if (!filter.ok) {
       setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
       return;
     }
+    if (!isValidLAWallTime(dateYear, dateMonth, dateDay, timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), Number(timeMinute))) {
+      setAlertInfo({ title: 'Choose another time', message: 'That date or time does not exist in Los Angeles. Pick a different time.' });
+      return;
+    }
     const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
     let endTimeIso: string | null = null;
     if (endTimeSelected) {
-      let endDt = buildDatetime(dateMonth, dateDay, dateYear, endTimeHour, endTimeMinute, endTimePeriod);
-      if (endDt.getTime() <= startTime.getTime()) {
-        endDt = new Date(endDt.getTime() + 24 * 60 * 60 * 1000);
+      const endDt = resolveOvernightLAEnd(dateYear, dateMonth, dateDay,
+        timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), Number(timeMinute),
+        endTimeHour % 12 + (endTimePeriod === 'PM' ? 12 : 0), Number(endTimeMinute));
+      if (!endDt) {
+        setAlertInfo({ title: 'Choose another end time', message: 'That end time does not exist in Los Angeles. Pick a different time.' });
+        return;
       }
       endTimeIso = endDt.toISOString();
     }
@@ -630,10 +760,12 @@ export default function PlanComposerV2() {
       neighborhood: neighborhood.trim() || null,
       explore_event_id: exploreEventId,
     };
-    setLoading(true);
+    const write = beginWrite();
+    if (!write) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('auth');
+      const { data: { user }, error: identityError } = await supabase.auth.getUser();
+      if (!ownsWrite(write)) return;
+      if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       if (params.draftId) {
         const { error } = await supabase
           .from('events')
@@ -641,47 +773,46 @@ export default function PlanComposerV2() {
           .eq('id', String(params.draftId))
           .eq('creator_user_id', user.id)
           .eq('status', 'draft');
+        if (!ownsWrite(write)) return;
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from('events')
           .insert({ ...row, creator_user_id: user.id });
+        if (!ownsWrite(write)) return;
         if (error) throw error;
       }
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
       resetForm();
       // LIZ COPY
-      setAlertInfo({ title: 'saved', message: 'your draft lives in yours, under plans. finish it whenever.' });
+      setAlertInfo({ title: appearance ? 'Draft saved' : 'saved', message: appearance ? 'Find your draft in Yours under Plans. Finish it whenever you’re ready.' : 'your draft lives in yours, under plans. finish it whenever.' });
     } catch {
+      if (!ownsWrite(write)) return;
       setAlertInfo({ title: 'That did not save', message: 'Try again in a moment.' });
     } finally {
-      setLoading(false);
+      if (ownsWrite(write)) {
+        writeRef.current = null;
+        submittingRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
   // ── Submit (optimistic: the post moment shows instantly; the insert runs in
   // the background and recovers quietly in gold on failure). ──
   const handleSubmit = async () => {
-    if (submittingRef.current) return;
-    if (loading || imageLoading || confirmVisible) return;
-    const missing: string[] = [];
-    if (title.trim().length === 0) missing.push('Title');
-    if (!dateSelected) missing.push('Day');
-    if (!timeSelected) missing.push('Time');
-    if (category === null) missing.push('Category');
-    if (creatorMessage.trim().length < MSG_MIN) {
-      missing.push(`Your message (at least ${MSG_MIN} characters)`);
-    }
-    if (description.trim().length === 0) missing.push('Description');
-    if (missing.length > 0) {
-      setAlertInfo({ title: 'Almost there', message: `A couple things first:\n\n• ${missing.join('\n• ')}` });
-      return;
-    }
+    if (!isComposerCurrent() || submittingRef.current) return;
+    if (photoAttempt.current || loading || imageLoading || confirmVisible) return;
+    if (!validateRequired('post')) return;
     const fieldsToCheck = [title, description, creatorMessage, location].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
     if (!filter.ok) {
       setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
+      return;
+    }
+    if (!isValidLAWallTime(dateYear, dateMonth, dateDay, timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), Number(timeMinute))) {
+      setAlertInfo({ title: 'Choose another time', message: 'That date or time does not exist in Los Angeles. Pick a different time.' });
       return;
     }
     const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
@@ -694,9 +825,12 @@ export default function PlanComposerV2() {
     // day (overnight), require at least 30 min after start.
     let endTimeIso: string | null = null;
     if (endTimeSelected) {
-      let endDt = buildDatetime(dateMonth, dateDay, dateYear, endTimeHour, endTimeMinute, endTimePeriod);
-      if (endDt.getTime() <= startTime.getTime()) {
-        endDt = new Date(endDt.getTime() + 24 * 60 * 60 * 1000);
+      const endDt = resolveOvernightLAEnd(dateYear, dateMonth, dateDay,
+        timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), Number(timeMinute),
+        endTimeHour % 12 + (endTimePeriod === 'PM' ? 12 : 0), Number(endTimeMinute));
+      if (!endDt) {
+        setAlertInfo({ title: 'Choose another end time', message: 'That end time does not exist in Los Angeles. Pick a different time.' });
+        return;
       }
       if (endDt.getTime() - startTime.getTime() < 30 * 60 * 1000) {
         setAlertInfo({ title: 'Give it a little longer', message: 'An end time should be at least 30 minutes after the start.' });
@@ -705,7 +839,9 @@ export default function PlanComposerV2() {
       endTimeIso = endDt.toISOString();
     }
 
-    // Snapshot everything the insert needs - the form resets immediately.
+    const write = beginWrite();
+    if (!write) return;
+    // Freeze this attempt's fields; the form resets only after confirmation.
     const ageBounds = ageRangesToMinMax(ageRanges);
     const row = {
       title: title.trim(),
@@ -733,6 +869,8 @@ export default function PlanComposerV2() {
       duplicated_from_event_id: params.duplicatedFromEventId ? String(params.duplicatedFromEventId) : null,
     };
     const inviteIds = invited.map((c) => c.user_id);
+    postedPlanIdRef.current = null;
+    const invitationRequest = postInvitations.prepare(inviteIds);
     const genderLabelSnap =
       genderPref === 'women_only' ? 'Women only'
         : genderPref === 'men_only' ? 'Men only'
@@ -743,11 +881,9 @@ export default function PlanComposerV2() {
     hapticSuccess();
     setConfirmIsFirst(isFirst);
     setConfirmMeta(summaryMeta);
-    setConfirmInvited(inviteIds.length > 0);
     setPostedPlanTitle(row.title);
     setPostedGenderLabel(genderLabelSnap);
     setPostedPlanId(null);
-    setInviteDeliveryFailed(false);
     setRecoveryNudge(false);
     setConfirmVisible(true);
     // The form is NOT reset yet: if the background insert fails we restore the
@@ -770,17 +906,17 @@ export default function PlanComposerV2() {
           profile_photo_url: face?.profile_photo_url ?? null,
         }),
       );
+      write.optimistic = optimistic;
     }
 
     // Background insert. `loading` tracks the real in-flight window so the post
     // button's spinner is reachable and `canPost`'s !loading is a true second
     // guard against a re-submit racing the insert (alongside confirmVisible).
     // submittingRef is the synchronous guard above (see its declaration).
-    submittingRef.current = true;
-    setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('auth');
+      const { data: { user }, error: identityError } = await supabase.auth.getUser();
+      if (!ownsWrite(write)) return;
+      if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       let insertedEvent: { id: string } | null = null;
       if (params.draftId) {
         // finishing a draft: the row exists, flip it to forming with the
@@ -792,6 +928,7 @@ export default function PlanComposerV2() {
           .eq('creator_user_id', user.id)
           .select('id')
           .single();
+        if (!ownsWrite(write)) return;
         if (updateErr) throw updateErr;
         insertedEvent = updated;
       } else {
@@ -800,19 +937,24 @@ export default function PlanComposerV2() {
           .insert({ ...row, creator_user_id: user.id })
           .select('id')
           .single();
+        if (!ownsWrite(write)) return;
         if (error) throw error;
         insertedEvent = inserted;
       }
 
-      if (insertedEvent?.id) {
+      if (!insertedEvent?.id) throw new Error('The saved plan could not be confirmed.');
+      if (insertedEvent.id) {
         const { error: memberErr } = await supabase.from('event_members').insert({
           event_id: insertedEvent.id, user_id: user.id, role: 'host', status: 'joined',
         });
+        if (!ownsWrite(write)) return;
         if (memberErr) {
           await new Promise((r) => setTimeout(r, 500));
+          if (!ownsWrite(write)) return;
           const { error: retryErr } = await supabase.from('event_members').insert({
             event_id: insertedEvent.id, user_id: user.id, role: 'host', status: 'joined',
           });
+          if (!ownsWrite(write)) return;
           if (retryErr) {
             // Best-effort rollback of the orphaned event. Error-check it: a
             // failed delete leaves an event with no host member, so flag that
@@ -822,6 +964,7 @@ export default function PlanComposerV2() {
             const { error: rollbackErr } = params.draftId
               ? (await supabase.from('events').update({ status: 'draft' }).eq('id', insertedEvent.id)) 
               : (await supabase.from('events').delete().eq('id', insertedEvent.id));
+            if (!ownsWrite(write)) return;
             throw new Error(rollbackErr ? 'member_orphan' : 'member');
           }
         }
@@ -830,6 +973,7 @@ export default function PlanComposerV2() {
         // only now (not right after the event insert) so an orphan rollback above
         // still removes the card via the catch's rollback().
         optimistic?.commit(insertedEvent.id);
+        write.optimistic = null;
         // If this was a "Post your own" duplicate, notify the source plan's
         // waitlist (fire-and-forget; mirrors LegacyComposer).
         if (params.duplicatedFromEventId) {
@@ -842,10 +986,7 @@ export default function PlanComposerV2() {
           });
         }
         if (inviteIds.length > 0) {
-          invitePeopleToPlan.mutate(
-            { eventId: insertedEvent.id, recipientIds: inviteIds },
-            { onError: () => setInviteDeliveryFailed(true) },
-          );
+          void postInvitations.send(invitationRequest, insertedEvent.id, user.id);
         }
       }
 
@@ -853,24 +994,34 @@ export default function PlanComposerV2() {
       queryClient.invalidateQueries({ queryKey: ['my-plans'] });
       queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
       queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
-      setPostedPlanId(insertedEvent?.id ?? null);
+      postedPlanIdRef.current = insertedEvent.id;
+      setPostedPlanId(insertedEvent.id);
       if (isFirst) {
-        await AsyncStorage.setItem('hasSeenFirstPlanCelebration', '1');
+        // A local celebration preference cannot undo a committed plan or make
+        // the recovery UI invite a duplicate post.
+        await AsyncStorage.setItem('hasSeenFirstPlanCelebration', '1').catch(() => {});
+        if (!ownsWrite(write)) return;
         neverPostedRef.current = false;
       }
       resetForm();
     } catch {
+      if (!ownsWrite(write)) return;
       // Remove the optimistic card from feed + my-plans (restores the exact prior
       // snapshot) before the recovery UX runs.
-      optimistic?.rollback();
+      write.optimistic?.rollback();
+      write.optimistic = null;
       // Quiet gold recovery: pull the moment, reopen the composer with the data
       // intact and a gold nudge. No red, never a hard error dialog.
       setConfirmVisible(false);
       setShareWanted(false);
+      postInvitations.reset();
       setRecoveryNudge(true);
     } finally {
-      setLoading(false);
-      submittingRef.current = false;
+      if (ownsWrite(write)) {
+        writeRef.current = null;
+        setLoading(false);
+        submittingRef.current = false;
+      }
     }
   };
 
@@ -882,20 +1033,21 @@ export default function PlanComposerV2() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => { hapticLight(); if (router.canGoBack()) router.back(); }} hitSlop={12}>
-          <Text style={styles.cancel}>cancel</Text>
+        <TouchableOpacity onPress={cancelComposer} accessibilityRole="button" accessibilityLabel="Cancel" style={appearance ? styles.headerAction : undefined} hitSlop={12}>
+          <Text style={styles.cancel}>{appearance ? 'Cancel' : 'cancel'}</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>new plan</Text>
+        <Text style={styles.headerTitle}>{appearance ? 'New plan' : 'new plan'}</Text>
         {/* Stays tappable when the form is incomplete so handleSubmit can surface
-            the "Almost there, a couple things first" list. Only a genuine
+            field errors and reveal the first missing section. Only a genuine
             in-flight post (loading/imageLoading) blocks the tap; the greyed
             look is still keyed to !canPost. */}
-        <TouchableOpacity onPress={handleSubmit} disabled={loading || imageLoading} hitSlop={12}>
-          <Text style={[styles.postInline, !canPost && styles.postInlineOff]}>post</Text>
+        <TouchableOpacity onPress={handleSubmit} disabled={loading || imageLoading} accessibilityRole="button" accessibilityLabel="Post" accessibilityState={{ disabled: loading || imageLoading, busy: loading }} style={appearance ? styles.headerAction : undefined} hitSlop={12}>
+          <Text style={[styles.postInline, !canPost && styles.postInlineOff]}>{appearance ? 'Post' : 'post'}</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -906,8 +1058,9 @@ export default function PlanComposerV2() {
         showsVerticalScrollIndicator={false}
       >
         {/* WHAT + photo */}
-        <View style={styles.section}>
-          <EditorialTitleField value={title} onChangeText={setTitle} placeholder="sunset hike at runyon" />
+        <View style={styles.section} onLayout={event => { sectionPositions.current.title = event.nativeEvent.layout.y; }}>
+          <EditorialTitleField inputRef={titleInputRef} error={fieldErrors.title} appearance={appearance} label={appearance ? "Plan title" : undefined} value={title} onChangeText={setTitle} placeholder={appearance ? "Sunset hike at Runyon" : "sunset hike at runyon"} />
+          {fieldError('title')}
           <View style={styles.photoRow}>
             {imageUrl ? (
               <View style={styles.photoThumbWrap}>
@@ -915,45 +1068,50 @@ export default function PlanComposerV2() {
                 {imageLoading ? (
                   <View style={styles.photoThumbOverlay}><ActivityIndicator color={Colors.white} /></View>
                 ) : (
-                  <TouchableOpacity style={styles.photoRemove} onPress={() => { hapticLight(); setImageUrl(null); }} hitSlop={8}>
+                  <TouchableOpacity style={styles.photoRemove} accessibilityRole="button" accessibilityLabel="Remove photo" onPress={() => { hapticLight(); setImageUrl(null); }} hitSlop={8}>
                     <X size={13} color={Colors.white} strokeWidth={2.5} />
                   </TouchableOpacity>
                 )}
               </View>
             ) : (
-              <TouchableOpacity style={styles.photoAdd} onPress={pickImage} activeOpacity={0.7}>
-                <ImagePlus size={15} color={Colors.secondary} strokeWidth={2} />
-                <Text style={styles.photoAddText}>add a photo</Text>
+              <TouchableOpacity style={styles.photoAdd} accessibilityRole="button" accessibilityLabel={imageLoading ? "Adding photo" : "Add photo"} accessibilityState={{ disabled: imageLoading, busy: imageLoading }} disabled={imageLoading} onPress={pickImage} activeOpacity={0.7}>
+                <ImagePlus size={18} color={muted} strokeWidth={2} />
+                <Text style={styles.photoAddText}>{imageLoading ? 'Adding photo…' : appearance ? 'Add photo' : 'add a photo'}</Text>
               </TouchableOpacity>
             )}
           </View>
         </View>
 
         {/* CATEGORY */}
-        <View style={styles.section}>
-          <CategoryChips selected={category} onSelect={setCategory} />
+        <View style={styles.section} onLayout={event => { sectionPositions.current.category = event.nativeEvent.layout.y; }}>
+          <CategoryChips expanded appearance={appearance} label={appearance ? "Category" : undefined} selected={category} onSelect={setCategory} />
+          {fieldError('category')}
         </View>
 
         {/* YOUR MESSAGE (required) */}
-        <View style={styles.section}>
-          <Text style={styles.label}>your message</Text>
+        <View style={styles.section} onLayout={event => { sectionPositions.current.message = event.nativeEvent.layout.y; }}>
+          <Text style={styles.label}>{appearance ? 'Your message' : 'your message'}{appearance ? <Text style={styles.labelOptional}> · required</Text> : null}</Text>
           <TextInput
-            style={styles.messageInput}
+            ref={messageInputRef}
+            style={[styles.messageInput, fieldErrors.message ? styles.invalidInput : undefined]}
             value={creatorMessage}
+            accessibilityLabel="Your message, required"
+            accessibilityHint={fieldErrors.message}
             onChangeText={setCreatorMessage}
-            placeholder="going up the back trail, golden hour pace, no rush..."
-            placeholderTextColor={Colors.inkSoft}
+            placeholder={appearance ? "Going up the back trail, golden hour pace, no rush…" : "going up the back trail, golden hour pace, no rush..."}
+            placeholderTextColor={placeholder}
             multiline
             maxLength={MSG_LIMIT}
           />
-          {title.trim().length > 0 && creatorMessage.trim().length < MSG_MIN
-            ? <InlineNudge text={COPY.composerMessageRequired} /> : null}
+          {fieldError('message')}
+          {!fieldErrors.message && title.trim().length > 0 && creatorMessage.trim().length < MSG_MIN
+            ? <InlineNudge appearance={appearance} text={COPY.composerMessageRequired} /> : null}
         </View>
 
         {/* DESCRIPTION (required; surfaced out of "more options") */}
-        <View style={styles.section}>
+        <View style={styles.section} onLayout={event => { sectionPositions.current.description = event.nativeEvent.layout.y; }}>
           <View style={styles.descLabelRow}>
-            <Text style={[styles.label, { marginBottom: 0 }]}>description</Text>
+            <Text style={[styles.label, { marginBottom: 0 }]}>{appearance ? 'Description' : 'description'}{appearance ? <Text style={styles.labelOptional}> · required</Text> : null}</Text>
             <Text
               style={[
                 styles.charCounter,
@@ -964,24 +1122,29 @@ export default function PlanComposerV2() {
             </Text>
           </View>
           <TextInput
-            style={[styles.textField, styles.textArea]}
+            ref={descriptionInputRef}
+            style={[styles.textField, styles.textArea, fieldErrors.description ? styles.invalidInput : undefined]}
             value={description}
+            accessibilityLabel="Description, required"
+            accessibilityHint={fieldErrors.description}
             onChangeText={setDescription}
-            placeholder="anything else worth knowing"
-            placeholderTextColor={Colors.inkSoft}
+            placeholder={appearance ? "Details people need before joining" : "anything else worth knowing"}
+            placeholderTextColor={placeholder}
             multiline
             maxLength={DESC_LIMIT}
           />
-          {title.trim().length > 0 && description.trim().length === 0
-            ? <InlineNudge text={COPY.composerDescriptionRequired} /> : null}
+          {fieldError('description')}
+          {!fieldErrors.description && title.trim().length > 0 && description.trim().length === 0
+            ? <InlineNudge appearance={appearance} text={COPY.composerDescriptionRequired} /> : null}
           {(() => {
             // One-tap (never silent): a pasted URL in the description is offered
             // a home in the ticket/link field, so links stop becoming a wall.
             const detectedUrl = extractFirstUrl(description);
             return detectedUrl && !ticketUrl.trim() ? (
               <InlineNudge
+                appearance={appearance}
                 text={COPY.composerLinkDetected}
-                actionLabel="add it"
+                actionLabel={appearance ? "Add link" : "add it"}
                 onPress={() => {
                   hapticLight();
                   setTicketUrl(detectedUrl);
@@ -995,25 +1158,28 @@ export default function PlanComposerV2() {
         </View>
 
         {/* WHEN */}
-        <View style={styles.section}>
-          <Text style={styles.label}>when</Text>
+        <View style={styles.section} onLayout={event => { sectionPositions.current.when = event.nativeEvent.layout.y; }}>
+          <Text style={styles.label}>{appearance ? 'When' : 'when'}</Text>
+          {fieldError('when')}
           <View style={styles.quickRow}>
             {(['tonight', 'tomorrow'] as QuickKind[]).map((k) => {
               const on = activeQuick === k;
               return (
                 <TouchableOpacity
                   key={k}
+                  accessibilityRole="button" accessibilityLabel={k === "tonight" ? "Tonight" : "Tomorrow"} accessibilityState={{ selected: on }}
                   activeOpacity={0.7}
                   onPress={() => selectQuick(k)}
                   style={[styles.quickChip, on && styles.quickChipOn]}
                 >
-                  <Text style={[styles.quickChipText, on && styles.quickChipTextOn]}>{k}</Text>
+                  <Text style={[styles.quickChipText, on && styles.quickChipTextOn]}>{appearance ? (k === 'tonight' ? 'Tonight' : 'Tomorrow') : k}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-          <CollapsibleCalendar selected={selectedDate} onSelect={selectDate} />
+          <CollapsibleCalendar appearance={appearance} selected={selectedDate} onSelect={selectDate} />
           <TimePicker
+            appearance={appearance}
             hour={timeHour}
             minute={timeMinute}
             period={timePeriod}
@@ -1021,40 +1187,42 @@ export default function PlanComposerV2() {
             onChange={(h, m, p) => { setTimeHour(h); setTimeMinute(m); setTimePeriod(p); setTimeSelected(true); }}
           />
           <View style={styles.endTimeRow}>
-            <Text style={styles.subLabel}>ends<Text style={styles.labelOptional}> · optional</Text></Text>
+            <Text style={styles.subLabel}>{appearance ? 'Ends' : 'ends'}<Text style={styles.labelOptional}> · optional</Text></Text>
             {endTimeSelected ? (
-              <TouchableOpacity onPress={() => { hapticLight(); setEndTimeSelected(false); }} hitSlop={8}>
-                <Text style={styles.clearEndText}>clear</Text>
+              <TouchableOpacity onPress={() => { hapticLight(); setEndTimeSelected(false); }} accessibilityRole="button" accessibilityLabel="Clear end time" style={appearance ? styles.clearEndAction : undefined} hitSlop={8}>
+                <Text style={styles.clearEndText}>{appearance ? 'Clear' : 'clear'}</Text>
               </TouchableOpacity>
             ) : null}
           </View>
           <TimePicker
+            appearance={appearance}
             hour={endTimeHour}
             minute={endTimeMinute}
             period={endTimePeriod}
             selected={endTimeSelected}
             onChange={(h, m, p) => { setEndTimeHour(h); setEndTimeMinute(m); setEndTimePeriod(p); setEndTimeSelected(true); }}
           />
-          {nudge === 'tonight' ? <InlineNudge text={COPY.composerTonightNudge} /> : null}
+          {nudge === 'tonight' ? <InlineNudge appearance={appearance} text={COPY.composerTonightNudge} /> : null}
         </View>
 
         {/* WHERE */}
         <View style={styles.section}>
-          <Text style={styles.label}>where</Text>
-          <PlacePicker value={place} onChange={onPlaceChange} />
-          {nudge === 'placeSkip' ? <InlineNudge text={NUDGE_PLACE_BASE} /> : null}
+          <Text style={styles.label}>{appearance ? 'Where' : 'where'}</Text>
+          <PlacePicker appearance={appearance} value={place} onChange={onPlaceChange} />
+          {nudge === 'placeSkip' ? <InlineNudge appearance={appearance} text={NUDGE_PLACE_BASE} /> : null}
         </View>
 
         {/* LINK OR TICKETS (surfaced from the retired "more options"; decision-shaping,
             and the visible home that keeps links out of the description) */}
         <View style={styles.section}>
-          <Text style={styles.label}>link or tickets<Text style={styles.labelOptional}> · optional</Text></Text>
+          <Text style={styles.label}>{appearance ? 'Link or tickets' : 'link or tickets'}<Text style={styles.labelOptional}> · optional</Text></Text>
           <TextInput
             style={styles.textField}
             value={ticketUrl}
+            accessibilityLabel="Link or tickets, optional"
             onChangeText={setTicketUrl}
             placeholder="https://"
-            placeholderTextColor={Colors.inkSoft}
+            placeholderTextColor={placeholder}
             autoCapitalize="none"
             keyboardType="url"
           />
@@ -1062,12 +1230,13 @@ export default function PlanComposerV2() {
 
         {/* HOW MANY (existing semantics, new skin) */}
         <View style={styles.section}>
-          <Text style={styles.label}>how many</Text>
+          <Text style={styles.label}>{appearance ? 'How many' : 'how many'}</Text>
           <View style={styles.stepperRow}>
             <TouchableOpacity
               style={[styles.stepperBtn, groupSize <= MIN_GROUP - 1 && styles.stepperBtnOff]}
               onPress={() => { if (groupSize > MIN_GROUP - 1) { hapticLight(); setGroupSize((g) => g - 1); } }}
               disabled={groupSize <= MIN_GROUP - 1}
+              accessibilityRole="button" accessibilityLabel="Fewer people" accessibilityState={{ disabled: groupSize <= MIN_GROUP - 1 }}
             >
               <Text style={styles.stepperBtnText}>−</Text>
             </TouchableOpacity>
@@ -1079,6 +1248,7 @@ export default function PlanComposerV2() {
               style={[styles.stepperBtn, groupSize >= MAX_GROUP - 1 && styles.stepperBtnOff]}
               onPress={() => { if (groupSize < MAX_GROUP - 1) { hapticLight(); setGroupSize((g) => g + 1); } }}
               disabled={groupSize >= MAX_GROUP - 1}
+              accessibilityRole="button" accessibilityLabel="More people" accessibilityState={{ disabled: groupSize >= MAX_GROUP - 1 }}
             >
               <Text style={styles.stepperBtnText}>+</Text>
             </TouchableOpacity>
@@ -1087,13 +1257,14 @@ export default function PlanComposerV2() {
 
           {/* WHO CAN JOIN + AGES (safety: never buried) */}
           <View style={styles.audienceRow}>
-            <Text style={styles.subLabel}>who can join</Text>
+            <Text style={styles.subLabel}>{appearance ? 'Who can join' : 'who can join'}</Text>
             <View style={styles.pillWrap}>
               {genderOptions.map((opt) => {
                 const on = genderPref === opt.value;
                 return (
                   <TouchableOpacity
                     key={opt.value}
+                    accessibilityRole="radio" accessibilityLabel={opt.label} accessibilityState={{ checked: on }}
                     activeOpacity={0.7}
                     onPress={() => { hapticSelection(); setGenderPref(opt.value); }}
                     style={[styles.smallPill, on && styles.smallPillOn]}
@@ -1105,18 +1276,19 @@ export default function PlanComposerV2() {
             </View>
           </View>
           <View style={styles.audienceRow}>
-            <Text style={styles.subLabel}>ages</Text>
+            <Text style={styles.subLabel}>{appearance ? 'Ages' : 'ages'}</Text>
             <View style={styles.pillWrap}>
               {AGE_RANGES.map((r) => {
                 const on = ageRanges.includes(r);
                 return (
                   <TouchableOpacity
                     key={r}
+                    accessibilityRole="checkbox" accessibilityLabel={r} accessibilityState={{ checked: on }}
                     activeOpacity={0.7}
                     onPress={() => toggleAgeRange(r)}
                     style={[styles.smallPill, on && styles.smallPillOn]}
                   >
-                    <Text style={[styles.smallPillText, on && styles.smallPillTextOn]}>{r}</Text>
+                    <Text style={[styles.smallPillText, on && styles.smallPillTextOn]}>{appearance && r === 'All Ages' ? 'All ages' : r}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -1126,10 +1298,10 @@ export default function PlanComposerV2() {
 
         {/* JOINABILITY (surfaced from the retired "more options"; decision-shaping) */}
         <View style={styles.section}>
-          <TouchableOpacity style={styles.toggleRow} onPress={() => { hapticLight(); setDropIn((v) => !v); }} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.toggleRow} accessibilityRole="switch" accessibilityLabel="Drop-in welcome" accessibilityState={{ checked: dropIn }} onPress={() => { hapticLight(); setDropIn((v) => !v); }} activeOpacity={0.7}>
             <View style={styles.toggleTextWrap}>
-              <Text style={styles.toggleTitle}>drop-in welcome</Text>
-              <Text style={styles.toggleSub}>people can still join after it starts</Text>
+              <Text style={styles.toggleTitle}>{appearance ? 'Drop-in welcome' : 'drop-in welcome'}</Text>
+              <Text style={styles.toggleSub}>{appearance ? 'People can still join after it starts' : 'people can still join after it starts'}</Text>
             </View>
             <View style={[styles.switchTrack, dropIn && styles.switchTrackOn]}>
               <View style={[styles.switchThumb, dropIn && styles.switchThumbOn]} />
@@ -1140,6 +1312,7 @@ export default function PlanComposerV2() {
         {/* INVITE PEOPLE */}
         <View style={styles.section}>
           <InvitePeopleSection
+            appearance={appearance}
             invited={invited}
             suggestions={inviteSuggestions}
             showAll={inviteShowAll}
@@ -1154,18 +1327,18 @@ export default function PlanComposerV2() {
         {/* OPTIONAL EXTRAS (genuinely secondary; quiet, at the bottom, no collapsible.
             Ticket link + drop-in were surfaced above into the main flow.) */}
         <View style={[styles.section, styles.secondarySection]}>
-          <Text style={styles.secondaryHeader}>optional extras</Text>
-          <Text style={styles.mutedLabel}>neighborhood</Text>
-          <TouchableOpacity style={styles.selectField} onPress={() => setShowNeighborhoodPicker(true)} activeOpacity={0.7}>
+          <Text style={styles.secondaryHeader}>{appearance ? 'Optional extras' : 'optional extras'}</Text>
+          <Text style={styles.mutedLabel}>{appearance ? 'Neighborhood' : 'neighborhood'}</Text>
+          <TouchableOpacity style={styles.selectField} accessibilityRole="button" accessibilityLabel="Neighborhood, optional" onPress={() => setShowNeighborhoodPicker(true)} activeOpacity={0.7}>
             <Text style={[styles.selectFieldText, !neighborhood && styles.selectFieldPlaceholder]}>
-              {neighborhood || 'pick a neighborhood'}
+              {neighborhood || (appearance ? 'Choose a neighborhood' : 'pick a neighborhood')}
             </Text>
-            <ChevronDown size={16} color={Colors.tertiary} />
+            <ChevronDown size={18} color={muted} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.toggleRow} onPress={() => { hapticLight(); setAllowDuplicate((v) => !v); }} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.toggleRow} accessibilityRole="switch" accessibilityLabel="Let others copy this plan" accessibilityState={{ checked: allowDuplicate }} onPress={() => { hapticLight(); setAllowDuplicate((v) => !v); }} activeOpacity={0.7}>
             <View style={styles.toggleTextWrap}>
-              <Text style={styles.toggleTitle}>let others copy this plan</Text>
-              <Text style={styles.toggleSub}>when it fills, others can post their own</Text>
+              <Text style={styles.toggleTitle}>{appearance ? 'Let others copy this plan' : 'let others copy this plan'}</Text>
+              <Text style={styles.toggleSub}>{appearance ? 'When it fills, others can post their own' : 'when it fills, others can post their own'}</Text>
             </View>
             <View style={[styles.switchTrack, allowDuplicate && styles.switchTrackOn]}>
               <View style={[styles.switchThumb, allowDuplicate && styles.switchThumbOn]} />
@@ -1177,24 +1350,26 @@ export default function PlanComposerV2() {
       {/* Sticky live post bar */}
       <View style={[styles.postBar, { paddingBottom: sheetBottomPad }]}>
         {nudge === 'recovery' ? (
-          <TouchableOpacity style={styles.recoveryNudge} onPress={() => setRecoveryNudge(false)} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.recoveryNudge} accessibilityRole="button" accessibilityLabel="Dismiss posting reminder" onPress={() => setRecoveryNudge(false)} activeOpacity={0.8}>
             <View style={styles.recoveryDot} />
-            <Text style={styles.recoveryText}>that didn't go through. your plan is here. tap post to try again.</Text>
+            <Text style={styles.recoveryText}>{appearance ? 'That didn’t go through. Your plan is still here. Tap Post to try again.' : "that didn't go through. your plan is here. tap post to try again."}</Text>
           </TouchableOpacity>
         ) : null}
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle} numberOfLines={1}>
-            {title.trim() || 'your plan'}
+            {title.trim() || (appearance ? 'Your plan' : 'your plan')}
           </Text>
           <Text style={styles.summaryMeta} numberOfLines={1}>{summaryMeta}</Text>
         </View>
+        <View style={appearance ? styles.postActions : undefined}>
         <TouchableOpacity
           style={[styles.postBtn, !canPost && styles.postBtnOff]}
+          accessibilityRole="button" accessibilityLabel={appearance ? "Post plan" : "post the plan"} accessibilityState={{ disabled: loading || imageLoading, busy: loading }}
           onPress={handleSubmit}
           disabled={loading || imageLoading}
           activeOpacity={0.85}
         >
-          {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.postBtnText}>post the plan</Text>}
+          {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.postBtnText}>{appearance ? 'Post plan' : 'post the plan'}</Text>}
         </TouchableOpacity>
         {COMMUNITIES_ENABLED && (
           <TouchableOpacity
@@ -1202,23 +1377,25 @@ export default function PlanComposerV2() {
             disabled={loading || imageLoading}
             hitSlop={8}
             style={styles.draftLinkWrap}
+            accessibilityRole="button" accessibilityLabel={appearance ? "Save draft" : "save it as a draft"} accessibilityState={{ disabled: loading || imageLoading }}
           >
             {/* LIZ COPY */}
-            <Text style={[styles.draftLink, !canSaveDraft && styles.draftLinkOff]}>save it as a draft</Text>
+            <Text style={[styles.draftLink, !canSaveDraft && styles.draftLinkOff]}>{appearance ? 'Save draft' : 'save it as a draft'}</Text>
           </TouchableOpacity>
         )}
+        </View>
       </View>
 
       {/* Neighborhood picker modal */}
       <Modal visible={showNeighborhoodPicker} transparent animationType="slide" onRequestClose={() => setShowNeighborhoodPicker(false)} statusBarTranslucent>
         <Pressable style={styles.modalOverlay} onPress={() => setShowNeighborhoodPicker(false)}>
           <Pressable style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>which neighborhood?</Text>
+            <View style={styles.modalHeader}><Text style={styles.modalTitle}>{appearance ? 'Choose neighborhood' : 'which neighborhood?'}</Text>{appearance && <TouchableOpacity style={styles.headerAction} accessibilityRole="button" accessibilityLabel="Close neighborhood picker" onPress={() => setShowNeighborhoodPicker(false)}><Text style={styles.cancel}>Close</Text></TouchableOpacity>}</View>
             <ScrollView style={styles.neighborhoodList} showsVerticalScrollIndicator={false}>
               {[...NEIGHBORHOOD_OPTIONS, NEIGHBORHOOD_OTHER].map((opt) => {
                 const on = neighborhood === opt;
                 return (
-                  <TouchableOpacity key={opt} style={styles.neighborhoodOpt} onPress={() => { hapticLight(); setNeighborhood(opt); setShowNeighborhoodPicker(false); }} activeOpacity={0.7}>
+                  <TouchableOpacity key={opt} accessibilityRole="radio" accessibilityLabel={opt} accessibilityState={{ checked: on }} style={styles.neighborhoodOpt} onPress={() => { hapticLight(); setNeighborhood(opt); setShowNeighborhoodPicker(false); }} activeOpacity={0.7}>
                     <Text style={[styles.neighborhoodOptText, on && styles.neighborhoodOptTextOn]}>{opt}</Text>
                   </TouchableOpacity>
                 );
@@ -1230,6 +1407,7 @@ export default function PlanComposerV2() {
 
       {/* People picker */}
       <PeoplePickerSheet
+        appearance={appearance}
         visible={peoplePickerOpen}
         onClose={() => setPeoplePickerOpen(false)}
         excludeIds={invited.map((c) => c.user_id)}
@@ -1238,42 +1416,54 @@ export default function PlanComposerV2() {
 
       {/* The post moment (Tier-1, one per event). */}
       <PostConfirmation
+        appearance={appearance}
         visible={confirmVisible}
         isFirstPlan={confirmIsFirst}
         planTitle={postedPlanTitle}
         metaLine={confirmMeta}
-        invitedSomeone={confirmInvited}
+        planReady={!!postedPlanId}
+        invitationStatus={postInvitations.status}
+        canRetryInvites={postInvitations.canRetry}
+        canContinue={() => isComposerCurrent() && !!postedPlanIdRef.current && postInvitations.canContinue()}
+        onRetryInvites={() => { if (isComposerCurrent()) void postInvitations.retry(); }}
         onShare={() => {
+          if (!isComposerCurrent() || !postedPlanIdRef.current || !postInvitations.canContinue()) return;
           if (postedPlanId) { setConfirmVisible(false); setShareModalVisible(true); }
           else setShareWanted(true); // open the share sheet once the id lands
         }}
         onSeePlans={() => {
-          const id = postedPlanId;
+          if (!isComposerCurrent() || !postedPlanIdRef.current || !postInvitations.canContinue()) return;
+          const id = postedPlanIdRef.current;
           setConfirmVisible(false);
           setTimeout(() => {
-            if (id) router.push(`/plan/${id}` as any);
+            if (!isComposerCurrent()) return;
+            if (id) {
+              requestPlanNotificationPrompt({ userId: composerUserId!, planId: id, reason: 'posted' }, isComposerCurrent);
+              router.push(`/plan/${id}` as any);
+            }
             else router.replace('/(tabs)/plans');
-            // Moment-of-value push ask, after the celebration ends and the
-            // plan page is on screen. The layout re-checks permission and
-            // cooldowns before showing anything (lib/postPlanPushPrimer).
-            setTimeout(requestPostPlanPushPrimer, 600);
           }, 200);
         }}
       />
 
       {/* "share it" opens the existing share content, on intent only. */}
       <SharePlanModal
+        appearance={appearance}
         visible={shareModalVisible}
         onClose={() => {
+          if (!isComposerCurrent()) return;
           const planId = postedPlanId;
           setShareModalVisible(false);
           setPostedPlanId(null);
+          postedPlanIdRef.current = null;
           setPostedPlanTitle('');
           setTimeout(() => {
-            if (planId) router.push(`/plan/${planId}` as any);
+            if (!isComposerCurrent()) return;
+            if (planId) {
+              requestPlanNotificationPrompt({ userId: composerUserId!, planId, reason: 'posted' }, isComposerCurrent);
+              router.push(`/plan/${planId}` as any);
+            }
             else router.replace('/(tabs)/plans');
-            // Same moment-of-value ask as onSeePlans, for the share-first exit.
-            setTimeout(requestPostPlanPushPrimer, 600);
           }, 300);
         }}
         planTitle={postedPlanTitle}
@@ -1281,10 +1471,10 @@ export default function PlanComposerV2() {
         slug={null}
         genderLabel={postedGenderLabel}
         variant="posted"
-        inviteWarning={inviteDeliveryFailed}
       />
 
       <BrandedAlert
+        appearance={appearance}
         visible={alertInfo !== null}
         title={alertInfo?.title ?? ''}
         message={alertInfo?.message ?? ''}
@@ -1294,7 +1484,8 @@ export default function PlanComposerV2() {
   );
 }
 
-const styles = StyleSheet.create({
+const legacyStyles = StyleSheet.create({
+  headerAction: {}, clearEndAction: {}, postActions: {}, modalHeader: {},
   screen: { flex: 1, backgroundColor: Colors.cream },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -1308,6 +1499,8 @@ const styles = StyleSheet.create({
 
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 24 },
+  fieldError: { color: Colors.errorBrand, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, lineHeight: 20, marginTop: 8 },
+  invalidInput: { borderColor: Colors.errorBrand },
   section: {
     paddingHorizontal: 20, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
@@ -1481,3 +1674,77 @@ const styles = StyleSheet.create({
   neighborhoodOptText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   neighborhoodOptTextOn: { color: Colors.terracotta, fontFamily: Fonts.sansBold },
 });
+
+function composerAppearance(fonts: AfterglowFontFamilies) {
+  const body = { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted };
+  const label = { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.ink, letterSpacing: 0, textTransform: 'none' as const };
+  const action = { ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.clay };
+  const input = { ...AfterglowType.message, fontFamily: fonts.regular, color: AfterglowColors.ink, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderWidth: 1, borderRadius: 4 };
+  const control = { minHeight: 44, borderRadius: 4, justifyContent: 'center' as const };
+  return StyleSheet.create({
+    fieldError: { ...legacyStyles.fieldError, fontFamily: fonts.medium },
+    screen: { ...legacyStyles.screen, backgroundColor: AfterglowColors.paper },
+    header: { ...legacyStyles.header, paddingVertical: 4, borderBottomColor: AfterglowColors.line },
+    headerAction: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+    cancel: { ...body, color: AfterglowColors.ink },
+    headerTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    postInline: action,
+    postInlineOff: { color: AfterglowColors.muted },
+    section: { ...legacyStyles.section, paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AfterglowColors.subtleLine },
+    label: { ...label, marginBottom: 10 },
+    subLabel: { ...label, marginBottom: 8, marginTop: 4 },
+    labelOptional: body,
+    clearEndAction: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    clearEndText: { ...body, color: AfterglowColors.clay },
+    photoAdd: { ...legacyStyles.photoAdd, ...control, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line },
+    photoAddText: { ...body, fontFamily: fonts.medium, color: AfterglowColors.ink },
+    photoThumbWrap: { ...legacyStyles.photoThumbWrap, width: 128, height: 80, borderRadius: 4 },
+    photoRemove: { ...legacyStyles.photoRemove, width: 44, height: 44, top: 0, right: 0, borderRadius: 4 },
+    messageInput: { ...legacyStyles.messageInput, ...input, minHeight: 84 },
+    quickChip: { ...legacyStyles.quickChip, ...control, paddingHorizontal: 16, borderColor: AfterglowColors.line, backgroundColor: AfterglowColors.white },
+    quickChipOn: { backgroundColor: AfterglowColors.clay, borderColor: AfterglowColors.clay },
+    quickChipText: { ...body, fontFamily: fonts.medium, color: AfterglowColors.ink },
+    quickChipTextOn: { color: AfterglowColors.white },
+    stepperBtn: { ...legacyStyles.stepperBtn, width: 44, height: 44, borderRadius: 4, borderWidth: 1, borderColor: AfterglowColors.line, backgroundColor: AfterglowColors.white },
+    stepperBtnText: { ...AfterglowType.identity, fontFamily: fonts.regular, color: AfterglowColors.ink },
+    stepperValueNum: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink },
+    stepperValueSub: { ...body, marginTop: 2 },
+    stepperHint: { ...body, textAlign: 'center', marginTop: 4 },
+    smallPill: { ...legacyStyles.smallPill, ...control, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line },
+    smallPillOn: { backgroundColor: AfterglowColors.avatar, borderColor: AfterglowColors.clay },
+    smallPillText: { ...body, fontFamily: fonts.medium, color: AfterglowColors.ink },
+    smallPillTextOn: { color: AfterglowColors.clay },
+    secondaryHeader: { ...label, color: AfterglowColors.muted, marginBottom: 14 },
+    mutedLabel: { ...body, marginBottom: 8 },
+    textField: { ...legacyStyles.textField, ...input, minHeight: 48 },
+    textArea: { ...legacyStyles.textArea, minHeight: 88 },
+    charCounter: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted },
+    charCounterWarn: { color: Colors.errorBrand, fontFamily: fonts.semibold },
+    selectField: { ...legacyStyles.selectField, ...input, minHeight: 48 },
+    selectFieldText: { ...AfterglowType.title, fontFamily: fonts.regular, color: AfterglowColors.ink, flex: 1 },
+    selectFieldPlaceholder: { color: AfterglowColors.muted },
+    toggleRow: { ...legacyStyles.toggleRow, minHeight: 56 },
+    toggleTitle: { ...label },
+    toggleSub: { ...body, marginTop: 3 },
+    switchTrack: { ...legacyStyles.switchTrack, backgroundColor: AfterglowColors.line },
+    switchTrackOn: { backgroundColor: AfterglowColors.clay },
+    postBar: { ...legacyStyles.postBar, backgroundColor: AfterglowColors.paper, borderTopColor: AfterglowColors.line },
+    recoveryNudge: { ...legacyStyles.recoveryNudge, minHeight: 44, borderRadius: 4, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line },
+    recoveryDot: { ...legacyStyles.recoveryDot, backgroundColor: AfterglowColors.clay },
+    recoveryText: { ...body, flex: 1 },
+    summaryCard: { paddingVertical: 2, marginBottom: 10 },
+    summaryTitle: { ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    summaryMeta: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 2 },
+    postActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    postBtn: { ...legacyStyles.postBtn, flex: 1, minHeight: 48, paddingVertical: 12, borderRadius: 4, backgroundColor: AfterglowColors.clay, shadowOpacity: 0, elevation: 0 },
+    postBtnText: { ...action, color: AfterglowColors.white },
+    draftLinkWrap: { minHeight: 48, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
+    draftLink: action,
+    modalSheet: { ...legacyStyles.modalSheet, backgroundColor: AfterglowColors.paper, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
+    modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 },
+    modalTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink, flex: 1 },
+    neighborhoodOpt: { ...legacyStyles.neighborhoodOpt, minHeight: 48, borderBottomColor: AfterglowColors.subtleLine },
+    neighborhoodOptText: { ...AfterglowType.title, fontFamily: fonts.regular, color: AfterglowColors.ink },
+    neighborhoodOptTextOn: { color: AfterglowColors.clay, fontFamily: fonts.semibold },
+  });
+}

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { GROUPS_ENABLED, CHAT_ENGINE_ENABLED } from '../constants/FeatureFlags';
 import { circleDisplay, type DisplayMember } from '../lib/circles/display';
 import { seedSender } from '../lib/chatEngine/senderCache';
+import { getPlanChatTiming } from '../lib/planChatExpiry';
 
 export interface ChatPreview {
   // A conversation row is either a plan (event) chat or a circle chat.
@@ -15,6 +17,7 @@ export interface ChatPreview {
   category: string | null;
   image_url: string | null;
   start_time: string;
+  end_time?: string | null;
   member_count: number;
   last_message: string | null;
   last_message_at: string | null;
@@ -44,26 +47,29 @@ function sortChatPreviews(previews: ChatPreview[]): ChatPreview[] {
 
 /**
  * Build circle-chat previews for the current user. Reachable only behind
- * GROUPS_ENABLED (the circles tables/RPCs are not applied to prod yet), and the
- * caller wraps this so any failure degrades to an event-only list.
+ * GROUPS_ENABLED. The caller retains this branch's cached rows on failure
+ * while allowing plan conversations to load independently.
  */
 async function fetchCircleChats(userId: string, senderCache?: Map<string, string>): Promise<ChatPreview[]> {
-  const { data: memberships } = await supabase
+  const { data: memberships, error: membershipError } = await supabase
     .from('circle_members')
     .select('circle_id, circles ( id, name, cover_upload_id, status, created_at )')
     .eq('user_id', userId)
     .eq('status', 'joined');
 
+  if (membershipError) throw membershipError;
   const circleIds = (memberships ?? []).map((m: any) => m.circles?.id).filter(Boolean);
   if (circleIds.length === 0) return [];
 
-  const [{ data: countRows }, { data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows }] = await Promise.all([
+  const results = await Promise.all([
     supabase.from('circle_members').select('circle_id').in('circle_id', circleIds).eq('status', 'joined'),
-    supabase.from('messages')
-      .select('circle_id, content, created_at, image_url, audio_url, message_type, user_id')
-      .in('circle_id', circleIds)
-      .order('created_at', { ascending: false })
-      .limit(circleIds.length * 3),
+    // Limit inside each parent so busy chats cannot crowd out older history.
+    supabase.from('circles')
+      .select('id, latest_message:messages!messages_circle_id_fkey(circle_id, content, created_at, image_url, audio_url, message_type, user_id)')
+      .in('id', circleIds)
+      .order('created_at', { referencedTable: 'latest_message', ascending: false })
+      .order('id', { referencedTable: 'latest_message', ascending: false })
+      .limit(1, { referencedTable: 'latest_message' }),
     supabase.from('chat_reads').select('circle_id, last_read_at').eq('user_id', userId).in('circle_id', circleIds),
     supabase.from('messages')
       .select('circle_id, created_at')
@@ -77,11 +83,17 @@ async function fetchCircleChats(userId: string, senderCache?: Map<string, string
       .eq('status', 'joined'),
   ]);
 
+  const failed = results.find(result => result.error);
+  if (failed?.error) throw failed.error;
+  const [{ data: countRows }, { data: messageParents }, { data: allReads }, { data: otherMessages }, { data: memberRows }] = results;
   const realCounts: Record<string, number> = {};
   (countRows ?? []).forEach((r: any) => { realCounts[r.circle_id] = (realCounts[r.circle_id] ?? 0) + 1; });
 
   const lastMsgMap: Record<string, any> = {};
-  (allMessages ?? []).forEach((msg: any) => { if (!lastMsgMap[msg.circle_id]) lastMsgMap[msg.circle_id] = msg; });
+  (messageParents ?? []).forEach((parent: any) => {
+    const message = parent.latest_message?.[0];
+    if (message) lastMsgMap[parent.id] = message;
+  });
 
   const senderNameMap: Record<string, string> = {};
   const avatarMap: Record<string, string[]> = {};
@@ -219,234 +231,264 @@ async function fetchCircleChatsViaCards(userId: string, senderCache?: Map<string
 export function useChatList(knownUserId: string | null | undefined) {
   const [chats, setChats] = useState<ChatPreview[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const userIdRef = useRef<string | null>(null);
+  const currentViewer = useRef(knownUserId);
+  currentViewer.current = knownUserId;
+  const requestVersion = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; requestVersion.current++; }; }, []);
   // Sender name cache (user_id -> first_name_display), populated from the roster
   // fetch so the realtime handler doesn't fire a profiles_public lookup per
   // incoming message.
   const senderNameCacheRef = useRef<Map<string, string>>(new Map());
 
   const fetchChats = useCallback(async (silent = false) => {
-    if (knownUserId === undefined) return;
+    if (!mounted.current || currentViewer.current !== knownUserId || knownUserId === undefined) return;
     if (knownUserId === null) {
       setLoading(false);
       return;
     }
-    if (!silent) setLoading(true);
-    try {
-      const userId = knownUserId;
-      userIdRef.current = userId;
+    const version = ++requestVersion.current;
+    const current = () => mounted.current && currentViewer.current === knownUserId && requestVersion.current === version;
+    const read = async <T,>(work: PromiseLike<T>): Promise<T> => {
+      const result = await requestWithDeadline(work, 12_000);
+      if (!current()) throw new Error('Chat list request retired');
+      return result;
+    };
+    const userId = knownUserId;
+    userIdRef.current = userId;
+    const names = new Map<string, string>();
+    let latest = chatListMemoryCache.get(userId) ?? [];
+    const pending = { event: true, circle: GROUPS_ENABLED };
+    const failed = { event: false, circle: false };
+    if (!silent && latest.length === 0) setLoading(true);
 
-      const { data: memberships, error: membershipsError } = await supabase
-        .from('event_members')
-        .select(`
-          event_id,
-          events (
-            id, title, primary_vibe, image_url, start_time, member_count, tickets_url, status
-          )
-        `)
-        .eq('user_id', userId)
-        .eq('status', 'joined');
-
-      if (membershipsError || !memberships) return;
-
-      const allEventIds = memberships.map((m: any) => m.events?.id).filter(Boolean);
-
-      // Circle work used to start only after every event preview query finished.
-      // Start it now so the two independent conversation types load together.
-      const circlePreviewsPromise: Promise<ChatPreview[]> = GROUPS_ENABLED
-        ? (async () => {
-            try {
-              if (CHAT_ENGINE_ENABLED) {
-                try {
-                  return await fetchCircleChatsViaCards(userId, senderNameCacheRef.current);
-                } catch {
-                  return await fetchCircleChats(userId, senderNameCacheRef.current);
-                }
-              }
-              return await fetchCircleChats(userId, senderNameCacheRef.current);
-            } catch {
-              return [];
-            }
-          })()
-        : Promise.resolve([]);
-
-      // The membership response already contains enough event information for
-      // a useful first paint. Show those rows before message previews, unread
-      // counts, and avatars finish enriching the list.
-      if (!silent) {
-        const firstPaint = memberships
-          .map((membership: any) => membership.events)
-          .filter((event: any) => event && ((event.member_count ?? 0) >= 2 || event.status === 'cancelled'))
-          .map((event: any): ChatPreview => ({
-            kind: 'event',
-            conversationId: event.id,
-            eventId: event.id,
-            title: event.title,
-            category: event.primary_vibe ?? null,
-            image_url: event.image_url ?? null,
-            start_time: event.start_time,
-            member_count: event.member_count ?? 0,
-            ticket_url: event.tickets_url ?? null,
-            last_message: null,
-            last_message_at: null,
-            unread_count: 0,
-            is_past: event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000),
-            member_avatars: [],
-          }));
-        if (firstPaint.length > 0) {
-          setChats(sortChatPreviews(firstPaint));
-          setLoading(false);
-        }
-      }
-
-      // Run all 5 queries in parallel against allEventIds. Member-count drift
-      // correction (events.member_count vs real joined rows) used to be a
-      // sequential pre-step before the batch; folding it in saves a round-trip.
-      // The memberRows2 query also pulls first_name_display so we get sender
-      // names alongside avatars without a separate sender-profiles lookup.
-      let eventPreviews: ChatPreview[] = [];
-      if (allEventIds.length > 0) {
-        const [{ data: memberCountRows }, { data: allMessages }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = await Promise.all([
-          supabase
-            .from('event_members')
-            .select('event_id')
-            .in('event_id', allEventIds)
-            .eq('status', 'joined'),
-          supabase
-            .from('messages')
-            .select('event_id, content, created_at, image_url, audio_url, message_type, user_id')
-            .in('event_id', allEventIds)
-            .order('created_at', { ascending: false })
-            .limit(allEventIds.length * 3),
-          supabase
-            .from('chat_reads')
-            .select('event_id, last_read_at')
-            .eq('user_id', userId)
-            .in('event_id', allEventIds),
-          supabase
-            .from('messages')
-            .select('event_id, created_at')
-            .in('event_id', allEventIds)
-            .neq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(allEventIds.length * 20),
-          supabase
-            .from('event_members')
-            .select('event_id, user_id, profiles_public!inner(profile_photo_url, first_name_display)')
-            .in('event_id', allEventIds)
-            .eq('status', 'joined'),
-        ]);
-
-        const realCounts: Record<string, number> = {};
-        (memberCountRows ?? []).forEach((r: any) => {
-          realCounts[r.event_id] = (realCounts[r.event_id] ?? 0) + 1;
-        });
-
-        const eligible = memberships.filter((m: any) => {
-          const e = m.events;
-          return e && (realCounts[e.id] >= 2 || e.status === 'cancelled');
-        });
-
-        const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; audio_url: string | null; message_type: string | null; user_id: string }> = {};
-        (allMessages ?? []).forEach((msg: any) => {
-          if (!lastMsgMap[msg.event_id]) {
-            lastMsgMap[msg.event_id] = msg;
-          }
-        });
-
-        // Build sender-name + avatar maps from the single memberRows2 query.
-        const senderNameMap: Record<string, string> = {};
-        const avatarMap: Record<string, string[]> = {};
-        (memberRows2 ?? []).forEach((r: any) => {
-          const profile = r.profiles_public as any;
-          const name = profile?.first_name_display;
-          if (name && r.user_id && !senderNameMap[r.user_id]) {
-            senderNameMap[r.user_id] = name;
-            // Persist into the cross-render cache the realtime handler reads.
-            senderNameCacheRef.current.set(r.user_id, name);
-          }
-          const url = profile?.profile_photo_url;
-          if (url && r.event_id) {
-            if (!avatarMap[r.event_id]) avatarMap[r.event_id] = [];
-            if (avatarMap[r.event_id].length < 4) avatarMap[r.event_id].push(url);
-          }
-        });
-
-        const readMap: Record<string, string> = {};
-        (allReads ?? []).forEach((r: any) => {
-          readMap[r.event_id] = r.last_read_at;
-        });
-
-        const unreadMap: Record<string, number> = {};
-        (otherMessages ?? []).forEach((msg: any) => {
-          const lastRead = readMap[msg.event_id];
-          if (!lastRead || msg.created_at > lastRead) {
-            unreadMap[msg.event_id] = (unreadMap[msg.event_id] ?? 0) + 1;
-          }
-        });
-
-        eventPreviews = eligible.map((m: any): ChatPreview => {
-          const event = m.events;
-          const isPast = event.status === 'cancelled' || new Date(event.start_time) < new Date(Date.now() - 48 * 60 * 60 * 1000);
-          const lastMsg = lastMsgMap[event.id];
-
-          return {
-            kind: 'event',
-            conversationId: event.id,
-            eventId: event.id,
-            title: event.title,
-            category: event.primary_vibe ?? null,
-            image_url: event.image_url ?? null,
-            start_time: event.start_time,
-            member_count: realCounts[event.id] ?? event.member_count ?? 0,
-            ticket_url: event.tickets_url ?? null,
-            last_message: lastMsg
-              ? (() => {
-                  const isOwn = lastMsg.user_id === userId;
-                  const senderName = isOwn ? 'You' : (senderNameMap[lastMsg.user_id] ?? null);
-                  const text = lastMsg.message_type === 'audio' || lastMsg.audio_url
-                    ? 'sent a voice message'
-                    : lastMsg.image_url ? 'sent a photo' : lastMsg.content;
-                  return senderName ? `${senderName}: ${text}` : text;
-                })()
-              : null,
-            last_message_at: lastMsg?.created_at ?? null,
-            unread_count: unreadMap[event.id] ?? 0,
-            is_past: isPast,
-            member_avatars: avatarMap[event.id] ?? [],
-          };
-        });
-      }
-
-      // Circle chats are additive and gated. Isolated so any circle-side failure
-      // (tables not applied, RLS, network) degrades to an event-only list and can
-      // never break the plan chat list.
-      const circlePreviews = await circlePreviewsPromise;
-
-      const previews = [...eventPreviews, ...circlePreviews];
-      if (previews.length === 0) {
-        chatListMemoryCache.set(userId, []);
-        setChats([]);
-        setLoading(false);
-        return;
-      }
-
-      const sorted = sortChatPreviews(previews);
+    // Publish each independent conversation type as soon as it is ready.
+    // A failed branch keeps only its own last confirmed rows; it cannot erase
+    // or delay successful conversations from the other branch.
+    const publish = (kind: ChatPreview['kind'], rows: ChatPreview[] | null, complete: boolean, error = false) => {
+      if (!current()) return;
+      if (rows !== null) latest = [...latest.filter(chat => chat.kind !== kind), ...rows];
+      if (complete) pending[kind] = false;
+      failed[kind] = error;
+      const sorted = sortChatPreviews(latest);
       chatListMemoryCache.set(userId, sorted);
+      senderNameCacheRef.current = names;
       setChats(sorted);
-      // Only a COMPLETED load clears the skeleton (T1, doc 121). The old
-      // finally-based clear meant a transient auth lock or failed fetch
-      // flipped loading off with no data, flashing the "join a plan" empty
-      // state at users who have chats; now those paths keep the skeleton and
-      // the next focus refetch fills in silently.
-      setLoading(false);
-    } catch {
-      // keep whatever is on screen; a later refetch reconciles
-    }
+      setLoadError(failed.event || failed.circle);
+      setLoading(sorted.length === 0 && (pending.event || pending.circle));
+    };
+
+    const loadEvents = async () => {
+      try {
+        const { data: memberships, error: membershipsError } = await read(supabase
+          .from('event_members')
+          .select(`
+            event_id,
+            events (
+              id, title, primary_vibe, image_url, start_time, end_time, member_count, tickets_url, status
+            )
+          `)
+          .eq('user_id', userId)
+          .eq('status', 'joined'));
+
+        if (membershipsError || !memberships) throw membershipsError ?? new Error('Chats could not load');
+
+        const allEventIds = memberships.map((m: any) => m.events?.id).filter(Boolean);
+
+        // The membership response already contains enough event information for
+        // a useful first paint. Show those rows before message previews, unread
+        // counts, and avatars finish enriching the list.
+        if (!silent) {
+          const cachedEvents = new Map(latest.filter(chat => chat.kind === 'event').map(chat => [chat.conversationId, chat]));
+          const firstPaint = memberships
+            .map((membership: any) => membership.events)
+            .filter((event: any) => event && ((event.member_count ?? 0) >= 2 || event.status === 'cancelled' || !!cachedEvents.get(event.id)?.last_message_at))
+            .map((event: any): ChatPreview => ({
+              kind: 'event',
+              conversationId: event.id,
+              eventId: event.id,
+              title: event.title,
+              category: event.primary_vibe ?? null,
+              image_url: event.image_url ?? null,
+              start_time: event.start_time,
+              end_time: event.end_time ?? null,
+              member_count: event.member_count ?? 0,
+              ticket_url: event.tickets_url ?? null,
+              last_message: null,
+              last_message_at: null,
+              unread_count: 0,
+              is_past: getPlanChatTiming(event.start_time, event.end_time, event.status).isPast,
+              member_avatars: [],
+            }));
+          if (firstPaint.length > 0) {
+            publish('event', firstPaint.map(chat => {
+              const cached = cachedEvents.get(chat.conversationId);
+              return { ...chat, last_message: cached?.last_message ?? null, last_message_at: cached?.last_message_at ?? null,
+                unread_count: cached?.unread_count ?? 0, member_avatars: cached?.member_avatars ?? [] };
+            }), false);
+          }
+        }
+
+        // Run all 5 queries in parallel against allEventIds. Member-count drift
+        // correction (events.member_count vs real joined rows) used to be a
+        // sequential pre-step before the batch; folding it in saves a round-trip.
+        // The memberRows2 query also pulls first_name_display so we get sender
+        // names alongside avatars without a separate sender-profiles lookup.
+        let eventPreviews: ChatPreview[] = [];
+        if (allEventIds.length > 0) {
+          const enrichment = await read(Promise.all([
+            supabase
+              .from('event_members')
+              .select('event_id')
+              .in('event_id', allEventIds)
+              .eq('status', 'joined'),
+            supabase.from('events')
+              .select('id, latest_message:messages!messages_event_id_fkey(event_id, content, created_at, image_url, audio_url, message_type, user_id)')
+              .in('id', allEventIds)
+              .order('created_at', { referencedTable: 'latest_message', ascending: false })
+              .order('id', { referencedTable: 'latest_message', ascending: false })
+              .limit(1, { referencedTable: 'latest_message' }),
+            supabase
+              .from('chat_reads')
+              .select('event_id, last_read_at')
+              .eq('user_id', userId)
+              .in('event_id', allEventIds),
+            supabase
+              .from('messages')
+              .select('event_id, created_at')
+              .in('event_id', allEventIds)
+              .neq('user_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(allEventIds.length * 20),
+            supabase
+              .from('event_members')
+              .select('event_id, user_id, profiles_public!inner(profile_photo_url, first_name_display)')
+              .in('event_id', allEventIds)
+              .eq('status', 'joined'),
+          ]));
+          const failedRead = enrichment.find(result => result.error);
+          if (failedRead?.error) throw failedRead.error;
+          const [{ data: memberCountRows }, { data: messageParents }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = enrichment;
+
+          const realCounts: Record<string, number> = {};
+          (memberCountRows ?? []).forEach((r: any) => {
+            realCounts[r.event_id] = (realCounts[r.event_id] ?? 0) + 1;
+          });
+
+          const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; audio_url: string | null; message_type: string | null; user_id: string }> = {};
+          (messageParents ?? []).forEach((parent: any) => {
+            const message = parent.latest_message?.[0];
+            if (message) lastMsgMap[parent.id] = message;
+          });
+
+          // Joined members keep access to an existing conversation after others
+          // leave. An unused one-person plan still stays out of the chat list.
+          const eligible = memberships.filter((m: any) => {
+            const e = m.events;
+            return e && (realCounts[e.id] >= 2 || e.status === 'cancelled' || !!lastMsgMap[e.id]);
+          });
+
+          // Build sender-name + avatar maps from the single memberRows2 query.
+          const senderNameMap: Record<string, string> = {};
+          const avatarMap: Record<string, string[]> = {};
+          (memberRows2 ?? []).forEach((r: any) => {
+            const profile = r.profiles_public as any;
+            const name = profile?.first_name_display;
+            if (name && r.user_id && !senderNameMap[r.user_id]) {
+              senderNameMap[r.user_id] = name;
+              // Persist into the cross-render cache the realtime handler reads.
+              names.set(r.user_id, name);
+            }
+            const url = profile?.profile_photo_url;
+            if (url && r.event_id) {
+              if (!avatarMap[r.event_id]) avatarMap[r.event_id] = [];
+              if (avatarMap[r.event_id].length < 4) avatarMap[r.event_id].push(url);
+            }
+          });
+
+          const readMap: Record<string, string> = {};
+          (allReads ?? []).forEach((r: any) => {
+            readMap[r.event_id] = r.last_read_at;
+          });
+
+          const unreadMap: Record<string, number> = {};
+          (otherMessages ?? []).forEach((msg: any) => {
+            const lastRead = readMap[msg.event_id];
+            if (!lastRead || msg.created_at > lastRead) {
+              unreadMap[msg.event_id] = (unreadMap[msg.event_id] ?? 0) + 1;
+            }
+          });
+
+          eventPreviews = eligible.map((m: any): ChatPreview => {
+            const event = m.events;
+            const isPast = getPlanChatTiming(event.start_time, event.end_time, event.status).isPast;
+            const lastMsg = lastMsgMap[event.id];
+
+            return {
+              kind: 'event',
+              conversationId: event.id,
+              eventId: event.id,
+              title: event.title,
+              category: event.primary_vibe ?? null,
+              image_url: event.image_url ?? null,
+              start_time: event.start_time,
+              end_time: event.end_time ?? null,
+              member_count: realCounts[event.id] ?? event.member_count ?? 0,
+              ticket_url: event.tickets_url ?? null,
+              last_message: lastMsg
+                ? (() => {
+                    const isOwn = lastMsg.user_id === userId;
+                    const senderName = isOwn ? 'You' : (senderNameMap[lastMsg.user_id] ?? null);
+                    const text = lastMsg.message_type === 'audio' || lastMsg.audio_url
+                      ? 'sent a voice message'
+                      : lastMsg.image_url ? 'sent a photo' : lastMsg.content;
+                    return senderName ? `${senderName}: ${text}` : text;
+                  })()
+                : null,
+              last_message_at: lastMsg?.created_at ?? null,
+              unread_count: unreadMap[event.id] ?? 0,
+              is_past: isPast,
+              member_avatars: avatarMap[event.id] ?? [],
+            };
+          });
+        }
+
+        publish('event', eventPreviews, true);
+      } catch {
+        publish('event', null, true, true);
+      }
+    };
+    const loadCircles = async () => {
+      if (!GROUPS_ENABLED) return;
+      try {
+        let rows: ChatPreview[];
+        if (CHAT_ENGINE_ENABLED) {
+          try {
+            rows = await read(fetchCircleChatsViaCards(userId, names));
+          } catch {
+            if (!current()) return;
+            rows = await read(fetchCircleChats(userId, names));
+          }
+        } else {
+          rows = await read(fetchCircleChats(userId, names));
+        }
+        publish('circle', rows, true);
+      } catch {
+        publish('circle', null, true, true);
+      }
+    };
+    await Promise.all([loadEvents(), loadCircles()]);
   }, [knownUserId]);
 
   useEffect(() => {
-    if (knownUserId === undefined) return;
+    requestVersion.current++;
+    userIdRef.current = knownUserId ?? null;
+    senderNameCacheRef.current = new Map();
+    setLoadError(false);
+    setChats(knownUserId ? chatListMemoryCache.get(knownUserId) ?? [] : []);
+    if (knownUserId === undefined) { setLoading(true); return; }
     if (knownUserId === null) {
       setChats([]);
       setLoading(false);
@@ -478,6 +520,8 @@ export function useChatList(knownUserId: string | null | undefined) {
   }, [chats.length]);
 
   useEffect(() => {
+    let active = true;
+    const isCurrent = () => active && mounted.current && currentViewer.current === knownUserId;
     const channel = supabase
       .channel('chat-list-messages')
       .on(
@@ -488,7 +532,7 @@ export function useChatList(knownUserId: string | null | undefined) {
           // Match either parent. circle_id is only considered behind the flag
           // (and is null on event messages), so plan chats are unaffected.
           const convId = msg?.event_id ?? (GROUPS_ENABLED ? msg?.circle_id : null);
-          if (!convId || !hasChatsRef.current || !convIdsRef.current.has(convId)) return;
+          if (!isCurrent() || !convId || !hasChatsRef.current || !convIdsRef.current.has(convId)) return;
 
           // Incremental update: patch the affected chat instead of full refetch
           try {
@@ -499,11 +543,12 @@ export function useChatList(knownUserId: string | null | undefined) {
               // only hit profiles_public on a miss, then cache it.
               senderName = senderNameCacheRef.current.get(msg.user_id) ?? null;
               if (senderName == null) {
-                const { data: profile } = await supabase
+                const { data: profile } = await requestWithDeadline(supabase
                   .from('profiles_public')
                   .select('first_name_display')
                   .eq('id', msg.user_id)
-                  .maybeSingle();
+                  .maybeSingle(), 12_000);
+                if (!isCurrent()) return;
                 senderName = profile?.first_name_display ?? null;
                 if (senderName) senderNameCacheRef.current.set(msg.user_id, senderName);
               }
@@ -530,16 +575,17 @@ export function useChatList(knownUserId: string | null | undefined) {
               return [...active, ...past];
             });
           } catch {
-            // Fallback: full refetch on error
-            fetchChats(true);
+            // Fallback: full refetch only for this active account.
+            if (isCurrent()) void fetchChats(true);
           }
         },
       )
       .subscribe();
     return () => {
+      active = false;
       supabase.removeChannel(channel);
     };
-  }, [fetchChats]);
+  }, [fetchChats, knownUserId]);
 
-  return { chats, loading, refetch: fetchChats, removeChat };
+  return { chats: currentViewer.current === userIdRef.current ? chats : [], loading, loadError, refetch: fetchChats, removeChat };
 }

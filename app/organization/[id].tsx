@@ -1,3 +1,5 @@
+import ProfileButton from '../../components/ProfileButton';
+import { EventMediaImage } from '../../components/events/EventMediaImage';
 /**
  * The public organization profile (Scene handoff §12/13/16/17,
  * WashedUp_The_Scene_User_Facing_Implementation_Handoff.pdf). Reached by
@@ -36,7 +38,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ChevronRight, ExternalLink } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
+import PublicOrganizationPageScreen from '../../components/creator/pages/PublicOrganizationPageScreen';
+import { CREATOR_PAGES_ENABLED, COMMUNITIES_ENABLED } from '../../constants/FeatureFlags';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { openUrl } from '../../lib/url';
 import { formatEventDateLA } from '../../lib/laDate';
@@ -73,7 +76,7 @@ function EventRow({ event }: { event: OrganizationPageEvent }) {
       }}
     >
       {event.image_url ? (
-        <Image source={{ uri: event.image_url }} style={styles.eventThumb} contentFit="cover" />
+        <EventMediaImage eventId={event.id} reference={event.image_url} style={styles.eventThumb} contentFit="cover" />
       ) : (
         <View style={[styles.eventThumb, styles.eventThumbFallback]}>
           <Text style={styles.eventThumbInitial}>{event.title[0]?.toUpperCase() ?? '?'}</Text>
@@ -91,6 +94,13 @@ function EventRow({ event }: { event: OrganizationPageEvent }) {
 }
 
 export default function OrganizationProfileScreen() {
+  const { id, identity, update } = useLocalSearchParams<{ id: string; identity?: string; update?: string }>();
+  if (identity === 'page') return CREATOR_PAGES_ENABLED && typeof id === 'string'
+    ? <PublicOrganizationPageScreen pageId={id} updateId={typeof update === 'string' ? update : undefined} /> : <Redirect href="/(tabs)/explore" />;
+  return <LegacyOrganizationProfileScreen />;
+}
+
+function LegacyOrganizationProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
   const { data: userId = null } = useAuthUserId();
@@ -146,6 +156,7 @@ export default function OrganizationProfileScreen() {
           <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
             <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
+          <ProfileButton compact/>
         </View>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
@@ -162,6 +173,7 @@ export default function OrganizationProfileScreen() {
           <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
             <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
+          <ProfileButton compact/>
         </View>
         <View style={styles.centered}>
           {/* LIZ COPY (voice match: "this event is not around anymore.") */}
@@ -185,6 +197,7 @@ export default function OrganizationProfileScreen() {
         <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
           <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
         </TouchableOpacity>
+        <ProfileButton compact/>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -284,7 +297,7 @@ export default function OrganizationProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
-  header: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.textMedium, textAlign: 'center' },
   goBackBtn: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 },

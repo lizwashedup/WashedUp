@@ -1,6 +1,12 @@
 import { useCallback } from 'react';
 // import * as Crypto from 'expo-crypto'; // V2: re-enable with recordInvite (ghost avatars)
 import { supabase } from '../lib/supabase';
+import { buildReferralLink } from '../lib/yours/invite';
+
+export class ObsoleteReferralOperation extends Error {
+  constructor() { super('This invite is no longer current.'); this.name = 'ObsoleteReferralOperation'; }
+}
+export type ReferralScope = { isCurrent: () => boolean };
 
 /**
  * Referral / text-invite client.
@@ -13,11 +19,23 @@ import { supabase } from '../lib/supabase';
 export function useReferral() {
   /** Lazily generate (or fetch) the caller's referral code. */
   const ensureReferralCode = useCallback(
-    async (userId: string): Promise<string> => {
+    async (userId: string, scope?: ReferralScope): Promise<string> => {
+      const check = () => { if (scope && !scope.isCurrent()) throw new ObsoleteReferralOperation(); };
+      check();
+      if (scope) {
+        const identity = await supabase.auth.getUser();
+        check();
+        if (identity.error) throw identity.error;
+        if (!identity.data.user || identity.data.user.id !== userId) throw new ObsoleteReferralOperation();
+      }
       const { data, error } = await supabase.rpc('ensure_referral_code', {
         p_user_id: userId,
       });
+      check();
       if (error) throw error;
+      // Use the existing native/web referral code contract. Invalid results
+      // must not become a QR or a message containing /r/null or /r/undefined.
+      buildReferralLink(data);
       return data as string;
     },
     [],

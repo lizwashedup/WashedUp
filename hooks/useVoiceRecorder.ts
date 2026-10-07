@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   useAudioRecorder,
   useAudioRecorderState,
@@ -11,9 +11,9 @@ import { logError } from '../lib/logger';
 // Voice recording engine on expo-audio (expo-av was deprecated and is removed in
 // SDK 55). Records m4a/AAC via the HIGH_QUALITY preset (same container as before,
 // so existing chat-audio clips stay playable) and samples metering so the UI can
-// draw a live amplitude waveform. The single hook-owned recorder instance makes
-// the old "Only one Recording object can be prepared" class of bug structurally
-// impossible — there is exactly one recorder for the component's lifetime.
+// draw a live amplitude waveform. Each hook owns one recorder and serializes
+// its native preparation and cleanup, so a newer attempt waits for the previous
+// attempt to release that recorder.
 
 export type RecorderStatus = 'idle' | 'recording' | 'paused';
 
@@ -34,11 +34,23 @@ export interface StoppedRecording {
   meterings: number[];
 }
 
+export interface VoiceRecorderScope {
+  /** The initiating writable room/account visit; keep stable within a visit. */
+  readonly isCurrent: () => boolean;
+}
+
+interface RecordingAttempt {
+  visit: object;
+  phase: 'starting' | 'recording' | 'paused' | 'stopping';
+  cancelled: boolean;
+  stopped: boolean;
+}
+
 function normalizeMetering(db: number): number {
   return Math.max(0, Math.min(1, (db - METERING_MIN_DB) / (0 - METERING_MIN_DB)));
 }
 
-export function useVoiceRecorder() {
+export function useVoiceRecorder(scope?: VoiceRecorderScope) {
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
   const recState = useAudioRecorderState(recorder);
 
@@ -47,6 +59,22 @@ export function useVoiceRecorder() {
   const meteringsRef = useRef<number[]>([]);
   const lastEmitRef = useRef(0);
   const durationRef = useRef(0);
+  const visit = useMemo(() => ({}), [scope, recorder]);
+  const activeVisit = useRef<object | null>(null);
+  const activeAttempt = useRef<RecordingAttempt | null>(null);
+  const nativeOwner = useRef<RecordingAttempt | null>(null);
+  const nativeQueue = useRef<Promise<void>>(Promise.resolve());
+  const isCurrent = useCallback(() => activeVisit.current === visit && (!scope || scope.isCurrent()), [scope, visit]);
+  const owns = useCallback((attempt: RecordingAttempt) => isCurrent() && activeAttempt.current === attempt &&
+    attempt.visit === visit && !attempt.cancelled, [isCurrent, visit]);
+  // Permission requests do not own the native recorder. All preparation,
+  // stopping and audio-mode changes do, and therefore share this queue. A new
+  // intent can wait here but cannot prepare until the old native work retires.
+  const serialize = useCallback(<T,>(work: () => Promise<T>): Promise<T> => {
+    const pending = nativeQueue.current.then(work, work);
+    nativeQueue.current = pending.then(() => {}, () => {});
+    return pending;
+  }, []);
 
   // Accumulate metering into a rolling buffer while actively recording (paused
   // state still reports isRecording=false, so this naturally stops sampling).
@@ -54,7 +82,8 @@ export function useVoiceRecorder() {
   // setMeterings only fires at most every METERING_EMIT_INTERVAL_MS to keep
   // Android renders bounded — see the constant above.
   useEffect(() => {
-    if (!recState.isRecording || typeof recState.metering !== 'number') return;
+    const attempt = activeAttempt.current;
+    if (!attempt || !owns(attempt) || attempt.phase !== 'recording' || !recState.isRecording || typeof recState.metering !== 'number') return;
     const norm = normalizeMetering(recState.metering);
     const next = [...meteringsRef.current.slice(-(METERING_SAMPLE_CAP - 1)), norm];
     meteringsRef.current = next;
@@ -63,13 +92,16 @@ export function useVoiceRecorder() {
       lastEmitRef.current = now;
       setMeterings(next);
     }
-  }, [recState.metering, recState.isRecording]);
+  }, [recState.metering, recState.isRecording, owns]);
 
   // Keep the latest duration in a ref so stop() reads a fresh value without
   // depending on the reactive state (avoids a stale closure).
   useEffect(() => {
-    durationRef.current = recState.durationMillis ?? 0;
-  }, [recState.durationMillis]);
+    const attempt = activeAttempt.current;
+    if (attempt && owns(attempt) && (attempt.phase === 'recording' || attempt.phase === 'paused')) {
+      durationRef.current = recState.durationMillis ?? 0;
+    }
+  }, [recState.durationMillis, owns]);
 
   const reset = useCallback(() => {
     setStatus('idle');
@@ -87,107 +119,141 @@ export function useVoiceRecorder() {
     }
   }, []);
 
+  const cleanup = useCallback(async (attempt: RecordingAttempt) => {
+    if (nativeOwner.current !== attempt) return;
+    if (!attempt.stopped) {
+      // expo-audio may already have released its native object on unmount.
+      // A failed/duplicate stop must not escape cleanup or target a later owner.
+      attempt.stopped = true;
+      try { await recorder.stop(); } catch { /* already stopped or released */ }
+    }
+    await releaseAudioMode();
+    if (nativeOwner.current === attempt) nativeOwner.current = null;
+  }, [recorder, releaseAudioMode]);
+
+  const finishLocalAttempt = useCallback((attempt: RecordingAttempt) => {
+    if (activeAttempt.current !== attempt) return;
+    activeAttempt.current = null;
+    if (activeVisit.current === attempt.visit && isCurrent()) reset();
+  }, [isCurrent, reset]);
+
+  useLayoutEffect(() => {
+    activeVisit.current = visit;
+    reset();
+    return () => {
+      if (activeVisit.current === visit) activeVisit.current = null;
+      const attempt = activeAttempt.current;
+      if (attempt?.visit === visit) {
+        attempt.cancelled = true;
+        activeAttempt.current = null;
+        void serialize(() => cleanup(attempt));
+      }
+    };
+  }, [visit, reset, serialize, cleanup]);
+
   const start = useCallback(async (): Promise<boolean> => {
+    if (!isCurrent() || activeAttempt.current) return false;
+    const attempt: RecordingAttempt = { visit, phase: 'starting', cancelled: false, stopped: false };
+    activeAttempt.current = attempt;
     try {
       const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) return false;
-
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-
-      meteringsRef.current = [];
-      setMeterings([]);
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-      setStatus('recording');
-      return true;
+      if (!owns(attempt)) return false;
+      if (!perm.granted) { finishLocalAttempt(attempt); return false; }
     } catch (e) {
-      logError(e, 'useVoiceRecorder.start');
-      reset();
-      await releaseAudioMode();
+      if (owns(attempt)) { logError(e, 'useVoiceRecorder.start'); finishLocalAttempt(attempt); }
       return false;
     }
-  }, [recorder, reset, releaseAudioMode]);
+    return serialize(async () => {
+      if (!owns(attempt)) return false;
+      nativeOwner.current = attempt;
+      try {
+        await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+        if (!owns(attempt)) { await cleanup(attempt); return false; }
+        meteringsRef.current = []; durationRef.current = 0; lastEmitRef.current = 0;
+        setMeterings([]);
+        await recorder.prepareToRecordAsync();
+        if (!owns(attempt)) { await cleanup(attempt); return false; }
+        recorder.record();
+        attempt.phase = 'recording';
+        setStatus('recording');
+        return true;
+      } catch (e) {
+        if (owns(attempt)) logError(e, 'useVoiceRecorder.start');
+        await cleanup(attempt);
+        finishLocalAttempt(attempt);
+        return false;
+      }
+    });
+  }, [recorder, isCurrent, owns, visit, serialize, cleanup, finishLocalAttempt]);
 
   const pause = useCallback(() => {
+    const attempt = activeAttempt.current;
+    if (!attempt || !owns(attempt) || attempt.phase !== 'recording') return;
     try {
       recorder.pause();
+      attempt.phase = 'paused';
       setStatus('paused');
     } catch (e) {
       logError(e, 'useVoiceRecorder.pause');
     }
-  }, [recorder]);
+  }, [recorder, owns]);
 
   const resume = useCallback(() => {
+    const attempt = activeAttempt.current;
+    if (!attempt || !owns(attempt) || attempt.phase !== 'paused') return;
     try {
       recorder.record();
+      attempt.phase = 'recording';
       setStatus('recording');
     } catch (e) {
       logError(e, 'useVoiceRecorder.resume');
     }
-  }, [recorder]);
+  }, [recorder, owns]);
 
   const cancel = useCallback(async () => {
-    try {
-      await recorder.stop();
-    } catch {
-      /* already stopped */
-    }
-    reset();
-    await releaseAudioMode();
-  }, [recorder, reset, releaseAudioMode]);
+    const attempt = activeAttempt.current;
+    if (!attempt || !owns(attempt)) return;
+    // Retire before awaiting native stop/permission/preparation. A queued start
+    // cannot revive this attempt, and cleanup cannot reset a newer UI intent.
+    attempt.cancelled = true;
+    finishLocalAttempt(attempt);
+    await serialize(() => cleanup(attempt));
+  }, [owns, finishLocalAttempt, serialize, cleanup]);
 
   const stop = useCallback(async (): Promise<StoppedRecording | null> => {
-    const capturedMeterings = meteringsRef.current.slice();
-    const ms = durationRef.current;
-    try {
-      await recorder.stop();
-      const uri = recorder.uri;
-      reset();
-      await releaseAudioMode();
-      if (!uri) return null;
-      return {
-        uri,
-        durationSeconds: Math.max(1, Math.round(ms / 1000)),
-        meterings: capturedMeterings,
-      };
-    } catch (e) {
-      logError(e, 'useVoiceRecorder.stop');
-      reset();
-      await releaseAudioMode();
+    const attempt = activeAttempt.current;
+    if (!attempt || !owns(attempt) || attempt.phase === 'stopping') return null;
+    if (attempt.phase === 'starting') {
+      attempt.cancelled = true;
+      finishLocalAttempt(attempt);
+      await serialize(() => cleanup(attempt));
       return null;
     }
-  }, [recorder, reset, releaseAudioMode]);
-
-  // Safety net: if the screen unmounts mid-recording, tear the recorder down.
-  // Wrapped in try/catch: useAudioRecorder() is expo-audio's
-  // useReleasingSharedObject (same primitive useVideoPlayer uses), which
-  // registers its OWN unmount effect at the useAudioRecorder() call site
-  // above -- earlier in this hook's body than this effect. React runs
-  // effect cleanups in declaration order (not reversed) on unmount, so that
-  // internal effect can release the native recorder before this cleanup
-  // runs, making `recorder.isRecording` / `recorder.stop()` below a read on
-  // an already-released native object. Same bug class as the
-  // NativeSharedObjectNotFoundException fixed in components/VideoSplash.tsx
-  // (detachPlayerListeners) -- there the fix was to detach proactively at a
-  // guaranteed-earlier point; there's no equivalent deliberate "finish"
-  // moment here (this effect exists specifically to catch the *abnormal*
-  // unmount-while-recording case), so the safe minimal fix is to not let an
-  // already-released recorder throw out of an unmount cleanup uncaught.
-  useEffect(() => {
-    return () => {
+    attempt.phase = 'stopping';
+    const capturedMeterings = meteringsRef.current.slice();
+    const ms = durationRef.current;
+    return serialize(async () => {
+      let result: StoppedRecording | null = null;
       try {
-        if (recorder.isRecording) {
-          recorder.stop().catch(() => {});
+        if (nativeOwner.current === attempt && !attempt.stopped) { attempt.stopped = true; await recorder.stop(); }
+        if (nativeOwner.current === attempt && owns(attempt)) {
+          const uri = recorder.uri;
+          if (uri) result = { uri, durationSeconds: Math.max(1, Math.round(ms / 1000)), meterings: capturedMeterings };
         }
-      } catch {
-        // already released; nothing to tear down
+      } catch (e) {
+        if (owns(attempt)) logError(e, 'useVoiceRecorder.stop');
+      } finally {
+        await cleanup(attempt);
       }
-    };
-  }, [recorder]);
+      const canDeliver = owns(attempt);
+      finishLocalAttempt(attempt);
+      return canDeliver ? result : null;
+    });
+  }, [recorder, owns, serialize, cleanup, finishLocalAttempt]);
 
   return {
     status,
-    durationMillis: recState.durationMillis ?? 0,
+    durationMillis: status === 'idle' ? 0 : recState.durationMillis ?? 0,
     meterings,
     start,
     pause,

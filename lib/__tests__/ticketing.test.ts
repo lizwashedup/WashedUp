@@ -417,7 +417,7 @@ describe('getOrganizationPurchases', () => {
       order: jest.fn(() => Promise.resolve({
         data: [{
           id: 'order-1', event_id: 'event-1', buyer_name_snapshot: '   ', qty: 2,
-          total_cents: 4000, refunded_cents: 0, status: 'paid', created_at: '2026-08-20T00:00:00.000Z',
+          total_cents: 4000, ticket_order_positions: [], status: 'paid', created_at: '2026-08-20T00:00:00.000Z',
           ticket_tiers: { name: 'General' },
         }],
         error: null,
@@ -840,7 +840,7 @@ describe('getEventPurchases', () => {
       order: jest.fn(() => Promise.resolve({
         data: [{
           id: 'order-1', event_id: 'event-1', buyer_name_snapshot: 'Alex',
-          qty: 2, total_cents: 4000, refunded_cents: 0, status: 'paid',
+          qty: 2, total_cents: 4000, ticket_order_positions: [], status: 'paid',
           created_at: '2026-09-01T00:00:00.000Z', ticket_tiers: { name: 'general' },
         }],
         error: null,
@@ -883,7 +883,7 @@ describe('getPurchaseDetail (Screen 45)', () => {
       maybeSingle: jest.fn(() => Promise.resolve({
         data: {
           id: 'order-1', event_id: 'event-1', buyer_name_snapshot: '  Sam  ',
-          qty: 1, total_cents: 2000, refunded_cents: 0, status: 'paid',
+          qty: 1, total_cents: 2000, ticket_order_positions: [{refunded_cents:500},{refunded_cents:700}], status: 'paid',
           created_at: '2026-09-01T00:00:00.000Z',
           ticket_tiers: { name: 'vip' }, explore_events: { title: 'Open Mic' },
         },
@@ -901,7 +901,7 @@ describe('getPurchaseDetail (Screen 45)', () => {
     expect(result).toEqual({
       orderId: 'order-1', eventId: 'event-1', eventTitle: 'Open Mic',
       buyerName: 'Sam', tierName: 'vip', qty: 1, totalCents: 2000,
-      refundedCents: 0, status: 'paid', createdAt: '2026-09-01T00:00:00.000Z',
+      refundedCents: 1200, status: 'paid', createdAt: '2026-09-01T00:00:00.000Z',
     });
   });
 

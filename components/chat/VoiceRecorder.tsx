@@ -1,10 +1,11 @@
-import React, { memo, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import React, { memo, useEffect, useMemo } from 'react';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import Colors, { AfterglowColors } from '../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import VoicePlayer from './VoicePlayer';
+import { CreatorActionFill } from '../creator/CreatorActionFill';
 
 // Recording UI that replaces the input bar while a voice message is being
 // captured. Three modes:
@@ -38,6 +39,9 @@ interface VoiceRecorderProps {
   onPauseResume: () => void;
   onStop: () => void;
   onSend: () => void;
+  sending?: boolean;
+  retryAvailable?: boolean;
+  appearance?: { fonts: AfterglowFontFamilies };
 }
 
 function formatTime(totalMillis: number): string {
@@ -50,26 +54,26 @@ function formatTime(totalMillis: number): string {
 // Memoized so a parent re-render that didn't change `meterings` doesn't remap
 // the 48 bars. Combined with the metering-emit throttle in useVoiceRecorder,
 // this keeps the waveform off the Android render hot path.
-const LiveWaveform = memo(function LiveWaveform({ meterings }: { meterings: number[] }) {
+const LiveWaveform = memo(function LiveWaveform({ meterings, tint }: { meterings: number[]; tint?: string }) {
   return (
     <View style={styles.waveform}>
       {meterings.map((ratio, i) => (
         <View
           key={i}
-          style={[styles.waveBar, { height: Math.max(WAVE_MIN_HEIGHT, ratio * WAVE_MAX_HEIGHT) }]}
+          style={[styles.waveBar, { height: Math.max(WAVE_MIN_HEIGHT, ratio * WAVE_MAX_HEIGHT), ...(tint ? { backgroundColor: tint } : {}) }]}
         />
       ))}
     </View>
   );
 });
 
-function RecordingDot() {
+function RecordingDot({ tint }: { tint?: string }) {
   const opacity = useSharedValue(1);
   useEffect(() => {
     opacity.value = withRepeat(withTiming(DOT_MIN_OPACITY, { duration: DOT_PULSE_MS }), -1, true);
   }, [opacity]);
   const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  return <Animated.View style={[styles.dot, animatedStyle]} />;
+  return <Animated.View style={[styles.dot, tint && {backgroundColor:tint}, animatedStyle]} />;
 }
 
 function VoiceRecorder({
@@ -83,23 +87,32 @@ function VoiceRecorder({
   onPauseResume,
   onStop,
   onSend,
+  sending = false,
+  retryAvailable = false,
+  appearance,
 }: VoiceRecorderProps) {
+  const theme = useMemo(() => appearance ? createAppearance(appearance.fonts) : null, [appearance?.fonts]);
+  const tint = appearance ? AfterglowColors.clay : Colors.terracotta;
+  const muted = appearance ? AfterglowColors.muted : Colors.warmGray;
   if (mode === 'draft' && draftUri) {
     return (
-      <View style={styles.bar}>
-        <Pressable onPress={onTrash} hitSlop={8} accessibilityRole="button" accessibilityLabel="Discard voice message">
-          <Ionicons name="trash-outline" size={CONTROL_ICON_SIZE} color={Colors.warmGray} />
+      <View style={[styles.bar, theme?.bar]}>
+        <Pressable onPress={onTrash} disabled={sending} accessibilityState={{ disabled: sending }} hitSlop={8} style={theme?.control} accessibilityRole="button" accessibilityLabel="Discard voice message">
+          <Ionicons name="trash-outline" size={CONTROL_ICON_SIZE} color={muted} />
         </Pressable>
-        <View style={styles.draftPlayer}>
-          <VoicePlayer uri={draftUri} durationSeconds={draftDuration} isOwn={false} />
+        <View style={[styles.draftPlayer, theme?.draftPlayer]}>
+          <VoicePlayer uri={draftUri} durationSeconds={draftDuration} isOwn={false} appearance={appearance} />
         </View>
         <Pressable
           onPress={onSend}
-          style={styles.sendCircle}
+          disabled={sending}
+          accessibilityState={{ disabled: sending, busy: sending }}
+          style={[styles.sendCircle, theme?.send]}
           accessibilityRole="button"
-          accessibilityLabel="Send voice message"
+          accessibilityLabel={sending ? 'Sending voice message' : retryAvailable ? 'Retry sending voice message' : 'Send voice message'}
         >
-          <Ionicons name="arrow-up" size={SEND_ICON_SIZE} color={Colors.white} />
+          {appearance && <CreatorActionFill />}
+          {sending ? <ActivityIndicator size="small" color={Colors.white} /> : <Ionicons name="arrow-up" size={SEND_ICON_SIZE} color={Colors.white} />}
         </Pressable>
       </View>
     );
@@ -107,22 +120,23 @@ function VoiceRecorder({
 
   if (mode === 'locked') {
     return (
-      <View style={styles.bar}>
-        <Pressable onPress={onTrash} hitSlop={8} accessibilityRole="button" accessibilityLabel="Discard recording">
-          <Ionicons name="trash-outline" size={CONTROL_ICON_SIZE} color={Colors.warmGray} />
+      <View style={[styles.bar, theme?.bar]}>
+        <Pressable onPress={onTrash} disabled={sending} accessibilityState={{ disabled: sending }} hitSlop={8} style={theme?.control} accessibilityRole="button" accessibilityLabel="Discard recording">
+          <Ionicons name="trash-outline" size={CONTROL_ICON_SIZE} color={muted} />
         </Pressable>
-        <RecordingDot />
-        <Text style={styles.timer}>{formatTime(durationMillis)}</Text>
+        <RecordingDot tint={tint} />
+        <Text style={[styles.timer, theme?.timer]}>{formatTime(durationMillis)}</Text>
         <View style={styles.waveformWrap}>
-          <LiveWaveform meterings={meterings} />
+          <LiveWaveform meterings={meterings} tint={tint} />
         </View>
-        <Pressable onPress={onPauseResume} hitSlop={8} accessibilityRole="button" accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}>
-          <Ionicons name={isPaused ? 'play' : 'pause'} size={CONTROL_ICON_SIZE} color={Colors.terracotta} />
+        <Pressable onPress={onPauseResume} hitSlop={8} style={theme?.control} accessibilityRole="button" accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}>
+          <Ionicons name={isPaused ? 'play' : 'pause'} size={CONTROL_ICON_SIZE} color={tint} />
         </Pressable>
-        <Pressable onPress={onStop} hitSlop={8} accessibilityRole="button" accessibilityLabel="Stop and preview">
-          <Ionicons name="stop-circle-outline" size={CONTROL_ICON_SIZE} color={Colors.terracotta} />
+        <Pressable onPress={onStop} hitSlop={8} style={theme?.control} accessibilityRole="button" accessibilityLabel="Stop and preview">
+          <Ionicons name="stop-circle-outline" size={CONTROL_ICON_SIZE} color={tint} />
         </Pressable>
-        <Pressable onPress={onSend} style={styles.sendCircle} accessibilityRole="button" accessibilityLabel="Send voice message">
+        <Pressable onPress={onSend} style={[styles.sendCircle, theme?.send]} accessibilityRole="button" accessibilityLabel="Send voice message">
+          {appearance && <CreatorActionFill />}
           <Ionicons name="arrow-up" size={SEND_ICON_SIZE} color={Colors.white} />
         </Pressable>
       </View>
@@ -131,15 +145,15 @@ function VoiceRecorder({
 
   // holding
   return (
-    <View style={styles.bar}>
-      <RecordingDot />
-      <Text style={styles.timer}>{formatTime(durationMillis)}</Text>
+    <View style={[styles.bar, theme?.bar]}>
+      <RecordingDot tint={tint} />
+      <Text style={[styles.timer, theme?.timer]}>{formatTime(durationMillis)}</Text>
       <View style={styles.waveformWrap}>
-        <LiveWaveform meterings={meterings} />
+        <LiveWaveform meterings={meterings} tint={tint} />
       </View>
       <View style={styles.hints}>
-        <Ionicons name="chevron-back" size={14} color={Colors.warmGray} />
-        <Text style={styles.hintText}>slide to cancel</Text>
+        <Ionicons name="chevron-back" size={14} color={muted} />
+        <Text style={[styles.hintText, theme?.hint]}>slide to cancel</Text>
       </View>
     </View>
   );
@@ -201,6 +215,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+});
+
+const createAppearance = (fonts: AfterglowFontFamilies) => StyleSheet.create({
+  bar: { gap: 4, paddingHorizontal: 8, backgroundColor: AfterglowColors.paper },
+  control: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  send: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden', backgroundColor: AfterglowColors.clay },
+  timer: { ...AfterglowType.section, fontFamily: fonts.medium, color: AfterglowColors.ink },
+  hint: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted },
+  draftPlayer: { minWidth: 0 },
 });
 
 // Memoized so unrelated screen re-renders (chat messages arriving, typing

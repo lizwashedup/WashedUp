@@ -1,9 +1,10 @@
 import React from 'react';
 import { Pressable, Text, View, StyleSheet } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType } from '../../../constants/Typography';
 import { COPY } from '../state/constants';
+import type { RequestAppearance } from './RequestStack';
 
 /**
  * Conditional amber banner. Renders null when there are no requests (spec:
@@ -12,9 +13,11 @@ import { COPY } from '../state/constants';
 export default function RequestBanner({
   count,
   onPress,
+  appearance,
 }: {
   count: number;
   onPress: () => void;
+  appearance?: RequestAppearance;
 }) {
   if (count <= 0) return null;
   const label =
@@ -22,13 +25,13 @@ export default function RequestBanner({
   return (
     <Pressable
       onPress={onPress}
-      style={styles.banner}
+      style={[styles.banner, appearance && afterglow.banner]}
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <View style={styles.accent} />
-      <Text style={styles.text}>{label}</Text>
-      <ChevronRight size={20} color={Colors.asphalt} strokeWidth={2} />
+      {!appearance && <View style={styles.accent} />}
+      <Text style={[styles.text, appearance && { ...afterglow.text, fontFamily: appearance.fonts.semibold }]}>{label}</Text>
+      <ChevronRight size={20} color={appearance ? AfterglowColors.ink : Colors.asphalt} strokeWidth={2} />
     </Pressable>
   );
 }
@@ -58,4 +61,9 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
   },
+});
+
+const afterglow = StyleSheet.create({
+  banner: { minHeight: 48, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderWidth: 1, borderRadius: 4 },
+  text: { ...AfterglowType.body, color: AfterglowColors.ink },
 });

@@ -8,11 +8,11 @@
  * for the discovery layer's When chip and is a stub here. TIME is out of scope:
  * this component owns the DATE only.
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable, PanResponder, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import Colors, { AfterglowColors } from '../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { hapticLight, hapticSelection } from '../../lib/haptics';
 import {
   MONTHS,
@@ -33,18 +33,22 @@ export default function WashedUpCalendar({
   selected,
   onSelect,
   markedDays,
+  appearance,
 }: {
+  appearance?: { fonts: AfterglowFontFamilies };
   mode?: 'pick' | 'filter';
   selected: CalendarDay | null;
   onSelect: (day: CalendarDay) => void;
   /** filter mode: LA day-keys that have >=1 plan; rendered as a gold dot. */
   markedDays?: Set<string>;
 }) {
+  const styles = useMemo(() => calendarStyles(appearance), [appearance]);
   const [view, setView] = useState<{ m: number; y: number }>(() => {
     if (selected) return { m: selected.month, y: selected.year };
     const t = getTodayInLA();
     return { m: t.m, y: t.y };
   });
+  const [showMonthJump, setShowMonthJump] = useState(false);
 
   // Never page below the current LA month (plans live forward, not in the past).
   const t = getTodayInLA();
@@ -90,10 +94,12 @@ export default function WashedUpCalendar({
           <Ionicons
             name="chevron-back"
             size={22}
-            color={atCurrentMonth ? Colors.textLight : Colors.asphalt}
+            color={appearance ? (atCurrentMonth ? AfterglowColors.line : AfterglowColors.ink) : (atCurrentMonth ? Colors.textLight : Colors.asphalt)}
           />
         </Pressable>
-        <Text style={styles.monthLabel}>{MONTHS[view.m]} {view.y}</Text>
+        <Pressable style={appearance ? { minHeight: 44, justifyContent: 'center', flexShrink: 1 } : undefined} onPress={() => setShowMonthJump((visible) => !visible)} accessibilityRole="button" accessibilityLabel={`Choose month, currently ${MONTHS[view.m]} ${view.y}`} accessibilityState={{ expanded: showMonthJump }}>
+          <Text style={styles.monthLabel}>{MONTHS[view.m]} {view.y} ▾</Text>
+        </Pressable>
         <Pressable
           onPress={() => step(1)}
           hitSlop={8}
@@ -101,9 +107,24 @@ export default function WashedUpCalendar({
           accessibilityRole="button"
           accessibilityLabel="next month"
         >
-          <Ionicons name="chevron-forward" size={22} color={Colors.asphalt} />
+          <Ionicons name="chevron-forward" size={22} color={appearance ? AfterglowColors.ink : Colors.asphalt} />
         </Pressable>
       </View>
+
+      {showMonthJump && (
+        <View style={styles.monthChoices}>
+          {Array.from({ length: 12 }, (_, index) => {
+            const monthDate = new Date(Date.UTC(view.y, view.m + index, 1));
+            const month = monthDate.getUTCMonth();
+            const year = monthDate.getUTCFullYear();
+            return (
+              <Pressable key={`${year}-${month}`} style={styles.monthChoice} onPress={() => { setView({ m: month, y: year }); setShowMonthJump(false); hapticSelection(); }} accessibilityRole="button" accessibilityLabel={`${MONTHS[month]} ${year}`}>
+                <Text style={styles.monthChoiceText}>{MONTHS[month].slice(0, 3)} {year}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
 
       <View style={styles.weekdayRow}>
         {WEEKDAY_LABELS.map((label, i) => (
@@ -164,7 +185,7 @@ export default function WashedUpCalendar({
   );
 }
 
-const styles = StyleSheet.create({
+const legacyStyles = StyleSheet.create({
   surface: {
     backgroundColor: Colors.cream,
     borderRadius: 16,
@@ -185,6 +206,9 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
   },
   navBtn: { paddingVertical: 6, paddingHorizontal: 8 },
+  monthChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  monthChoice: { width: '23%', minHeight: 42, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  monthChoiceText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   weekdayRow: { flexDirection: 'row', marginBottom: 8 },
   weekdayLabel: {
     flex: 1,
@@ -223,3 +247,28 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gold,
   },
 });
+
+
+function calendarStyles(appearance?: { fonts: AfterglowFontFamilies }) {
+  if (!appearance) return legacyStyles;
+  const { fonts } = appearance;
+  return { ...legacyStyles, ...StyleSheet.create({
+    surface: { backgroundColor: AfterglowColors.white, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 12 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 12 },
+    monthLabel: { ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.ink, textAlign: 'center' },
+    navBtn: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
+    monthChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+    monthChoice: { width: '31%', minHeight: 44, borderWidth: 1, borderColor: AfterglowColors.line, borderRadius: 6,
+      alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, paddingVertical: 6 },
+    monthChoiceText: { ...AfterglowType.caption, fontFamily: fonts.medium, color: AfterglowColors.ink },
+    weekdayLabel: { flex: 1, textAlign: 'center', ...AfterglowType.caption, fontFamily: fonts.medium, color: AfterglowColors.muted },
+    row: { flexDirection: 'row', marginBottom: 2 },
+    cell: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    dayHighlight: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    dayToday: { borderWidth: 1.5, borderColor: AfterglowColors.clay },
+    daySelected: { backgroundColor: AfterglowColors.clay },
+    dayText: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.ink },
+    dayTextDisabled: { color: AfterglowColors.muted, opacity: 0.45 },
+    dayTextSelected: { color: AfterglowColors.white, fontFamily: fonts.semibold },
+  }) };
+}

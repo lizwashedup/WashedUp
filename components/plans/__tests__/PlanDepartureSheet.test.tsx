@@ -1,0 +1,23 @@
+import React from 'react';
+import { Modal, Text, TouchableOpacity } from 'react-native';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { PlanDepartureSheet } from '../PlanDepartureSheet';
+import { AfterglowFonts } from '../../../constants/Typography';
+jest.mock('react-native-safe-area-context', () => ({useSafeAreaInsets:()=>({top:24,bottom:16,left:0,right:0})}));
+let tree: ReactTestRenderer;
+let p: React.ComponentProps<typeof PlanDepartureSheet>;
+const button=(label:string)=>tree.root.findAllByType(TouchableOpacity).find(n=>n.findAllByType(Text).some(t=>t.props.children===label))!;
+const update=(patch:Partial<typeof p>)=>{p={...p,...patch};act(()=>tree.update(<PlanDepartureSheet {...p}/>));};
+beforeEach(()=>{p={action:'leave',planTitle:'A slow Sunday walk',appearance:{fonts:AfterglowFonts},busy:false,unknown:false,error:null,result:null,onConfirm:jest.fn(),onCheck:jest.fn(),onClose:jest.fn(),onDone:jest.fn()};act(()=>{tree=create(<PlanDepartureSheet {...p}/>);});});
+afterEach(()=>act(()=>tree.unmount()));
+it.each(['leave','cancel'] as const)('explains %s before calling its confirmation',action=>{update({action});expect(p.onConfirm).not.toHaveBeenCalled();act(()=>button(action==='leave'?'Leave plan':'Cancel plan').props.onPress());expect(p.onConfirm).toHaveBeenCalledTimes(1);});
+it('blocks all actions and dismissal while saving, including old callbacks',()=>{
+ const confirm=button('Leave plan').props.onPress,close=tree.root.findByType(Modal).props.onRequestClose;
+ update({busy:true});act(()=>{confirm();close();tree.root.findByType(Modal).props.onAccessibilityEscape();});
+ expect(p.onConfirm).not.toHaveBeenCalled();expect(p.onClose).not.toHaveBeenCalled();expect(button('Leaving…').props.disabled).toBe(true);
+});
+it('keeps failure text and permits retry in the same sheet',()=>{update({error:'Couldn’t leave this plan. Try again.'});expect(tree.root.findAllByType(Text).some(n=>n.props.accessibilityRole==='alert')).toBe(true);act(()=>button('Leave plan').props.onPress());expect(p.onConfirm).toHaveBeenCalledTimes(1);});
+it('checks an uncertain result instead of repeating the write',()=>{update({unknown:true});act(()=>button('Check status').props.onPress());expect(p.onCheck).toHaveBeenCalledTimes(1);expect(p.onConfirm).not.toHaveBeenCalled();});
+it('confirmed success stays in the same modal and claims exactly one exit',()=>{const modal=tree.root.findByType(Modal);update({result:{action:'leave',announcementUnconfirmed:true}});expect(tree.root.findByType(Modal)).toBe(modal);const done=button('Back to Plans').props.onPress;act(()=>{done();done();modal.props.onRequestClose();});expect(p.onDone).toHaveBeenCalledTimes(1);expect(p.onClose).not.toHaveBeenCalled();});
+it('ignores retained actions after a sheet is dismissed',()=>{const confirm=button('Leave plan').props.onPress;act(()=>button('Stay').props.onPress());act(()=>confirm());expect(p.onClose).toHaveBeenCalledTimes(1);expect(p.onConfirm).not.toHaveBeenCalled();});
+it('ignores retained actions after unmount',()=>{const confirm=button('Leave plan').props.onPress;act(()=>tree.unmount());act(()=>confirm());expect(p.onConfirm).not.toHaveBeenCalled();});

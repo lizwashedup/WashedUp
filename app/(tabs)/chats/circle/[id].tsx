@@ -5,24 +5,20 @@
  * <ChatThread>), not the old stacked noticeboard. This thin wrapper resolves the
  * circle's identity/members (get_circle) and hands the rest to ChatThread:
  *   header  = {circle name} + "View circle" (-> detail page) + "+" menu
- *   "+"     = Add people now (functional) | Make a plan (placeholder this build)
+ *   "+"     = Add people | Make a plan, using the shared anchored menu
  *   chat    = persistent (never read-only), no countdown, no presence column
  *
  * Gated behind GROUPS_ENABLED; a direct hit with the flag off bounces to Chats.
  */
-import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, Platform, ActionSheetIOS, Alert, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { GROUPS_ENABLED } from '../../../../constants/FeatureFlags';
-import Colors from '../../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../../constants/Typography';
 import { COPY } from '../../../../components/yours/state/constants';
-import { useAuthUserId } from '../../../../components/yours/state/useAuthUserId';
 import { useCircle } from '../../../../hooks/useCircle';
 import { circleDisplay } from '../../../../lib/circles/display';
 import ChatThread, { ChatThreadMember } from '../../../../components/chat/ChatThread';
 
+import { ChatEntryState } from '../../../../components/chat/ChatEntryState';
 const ThreadComponent = ChatThread;
 import AddPeopleSheet from '../../../../components/circles/AddPeopleSheet';
 import CirclePlanComposer from '../../../../components/circles/plan/CirclePlanComposer';
@@ -30,23 +26,43 @@ import MenuCard, { type AnchorRect } from '../../../../components/menu/MenuCard'
 import { buildComposerWithPerson } from '../../../../lib/composerLink';
 import { CalendarPlus, Users } from 'lucide-react-native';
 
-function CircleChatScreenInner({ circleId }: { circleId: string }) {
+interface MenuVisit {
+  serial: number;
+  closing: boolean;
+  action: 'plan' | 'circle' | null;
+  person: { id: string; name: string; avatar: string | null } | null;
+}
+
+function CircleChatScreenInner({ circleId, reactionMessageId, reactionMessageSource }: { circleId: string; reactionMessageId?: string; reactionMessageSource?: string }) {
   const router = useRouter();
-  const { data: myUserId } = useAuthUserId();
-  const { data, isError } = useCircle(circleId);
+  const { data, isError, isLoading, isFetching, refetch, viewerId: myUserId, viewerEpoch: epoch, isCurrentViewer: isCurrentUser } = useCircle(circleId);
   const [addOpen, setAddOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<AnchorRect | null>(null);
-  // "Start a circle" opens AddPeopleSheet, but it must wait until the MenuCard
-  // modal has fully dismissed -- two iOS modals overlapping (one dismissing, one
-  // presenting) makes the second silently fail ("goes nowhere"). The tap sets
-  // this flag; MenuCard's onClosed (post-dismiss) consumes it.
-  const pendingAddRef = useRef(false);
-  // Same deferral, for "Make a plan" -- it used to navigate immediately inside
-  // the row's onPress, racing the still-dismissing MenuCard modal and freezing
-  // the UI (Liz, 2026-08-27). Deferred to onClosed like "Start a circle" above.
-  const pendingPlanRef = useRef(false);
+  const [menuVisit, setMenuVisit] = useState<MenuVisit | null>(null);
+  const activeMenu = useRef<MenuVisit | null>(null);
+  const menuSerial = useRef(0), entrySerial = useRef(0);
+  const entry = useMemo(() => ({ serial: ++entrySerial.current }), [circleId, myUserId, epoch, isError]);
+  const activeEntry = useRef<typeof entry | null>(null);
+  const entryReadable = useRef(false);
+  entryReadable.current = !!myUserId && !!data && !isError;
+  // A same-account metadata refresh must not remount an open child form and
+  // discard its selections. Keep entry ownership stable, but read access live.
+  const isCurrentEntry = useCallback(() => activeEntry.current === entry && entryReadable.current && isCurrentUser(),
+    [entry, isCurrentUser]);
+  const operationScope = useMemo(() => myUserId ? { userId: myUserId, isCurrent: isCurrentEntry } : null, [myUserId, isCurrentEntry]);
+  const isCurrentMenu = useCallback(() => !!menuVisit && activeMenu.current === menuVisit && isCurrentEntry(), [menuVisit, isCurrentEntry]);
+
+  useLayoutEffect(() => {
+    activeEntry.current = entry;
+    activeMenu.current = null;
+    setAddOpen(false); setPlanOpen(false); setMenuOpen(false); setMenuAnchor(null); setMenuVisit(null);
+    return () => {
+      if (activeEntry.current === entry) activeEntry.current = null;
+      activeMenu.current = null;
+    };
+  }, [entry]);
 
   // Memoized so the props handed to the (memoized) ChatThread stay referentially
   // stable across this screen's own state changes (+ menu, add-people, plan).
@@ -82,44 +98,29 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
     [data, myUserId],
   );
 
-  // The "+" header menu. In a DM (2-person) it blooms the shared MenuCard from
-  // the + button (Make a plan, Start a circle). Circle chats (3+) keep the
-  // native menu this pass (out of scope per spec). "Add people now" retires:
-  // in a DM, pulling more people in IS Start a circle (grows it into a circle).
+  // Circle and DM actions share one anchored menu. Child sheets wait for
+  // dismissal, and the existing account/room/visit guards own each action.
   const openPlusMenu = useCallback((anchor: AnchorRect) => {
-    if (disp?.isDm) {
-      setMenuAnchor(anchor);
-      setMenuOpen(true);
-      return;
-    }
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: [COPY.circlePlusAddPeople, COPY.circlePlusMakePlan, COPY.circlePlusCancel],
-          cancelButtonIndex: 2,
-        },
-        (i) => {
-          if (i === 0) setAddOpen(true);
-          else if (i === 1) setPlanOpen(true);
-        },
-      );
-    } else {
-      Alert.alert(COPY.circlePlusMenuTitle, undefined, [
-        { text: COPY.circlePlusAddPeople, onPress: () => setAddOpen(true) },
-        { text: COPY.circlePlusMakePlan, onPress: () => setPlanOpen(true) },
-        { text: COPY.circlePlusCancel, style: 'cancel' },
-      ]);
-    }
-  }, [disp]);
+    if (!isCurrentEntry()) return;
+    const session: MenuVisit = {
+      serial: ++menuSerial.current, closing: false, action: null,
+      person: disp?.isDm && disp.otherUserId ? { id: disp.otherUserId, name: disp.title, avatar: disp.otherAvatar } : null,
+    };
+    activeMenu.current = session;
+    setMenuVisit(session);
+    setMenuAnchor(anchor);
+    setMenuOpen(true);
+  }, [disp, isCurrentEntry]);
 
   // Stable closures/objects for the memoized ChatThread.
   const onViewContext = useCallback(() => {
+    if (!isCurrentEntry()) return;
     if (disp?.isDm && disp.otherUserId) {
       router.push(`/person/${disp.otherUserId}` as any);
     } else {
       router.push(`/circle/${circleId}` as any);
     }
-  }, [disp, circleId, router]);
+  }, [disp, circleId, router, isCurrentEntry]);
 
   const headerMenu = useMemo(
     () => ({ type: 'plus' as const, onPress: openPlusMenu }),
@@ -132,48 +133,41 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         key: 'plan',
         icon: CalendarPlus,
         label: COPY.menuMakePlan,
-        subtitle: COPY.menuMakePlanSub,
+        subtitle: disp?.isDm ? COPY.menuMakePlanSub : 'Plan something with this circle',
         // From a DM: open the composer with the counterpart pre-attached as a
         // removable invite chip (a normal plan + invite), not the circle-plan
         // composer. Decided 2026-06-10 (Liz owns; sanity-check live).
         // Deferred to MenuCard's onClosed, same reason as "circle" below.
         onPress: () => {
-          pendingPlanRef.current = true;
+          if (isCurrentMenu() && menuVisit && !menuVisit.action) menuVisit.action = 'plan';
         },
       },
       {
         key: 'circle',
         icon: Users,
-        label: COPY.menuStartCircle,
-        subtitle: COPY.menuStartCircleSub,
+        label: disp?.isDm ? COPY.menuStartCircle : 'Add people',
+        subtitle: disp?.isDm ? COPY.menuStartCircleSub : 'Invite people into this circle',
         // Pulling more people into a DM grows it into a circle (the old
         // "Add people now", relabelled per the consistency rule). Deferred to
         // MenuCard's onClosed so AddPeopleSheet opens only after this menu's
         // modal has dismissed (no overlapping modals).
         onPress: () => {
-          pendingAddRef.current = true;
+          if (isCurrentMenu() && menuVisit && !menuVisit.action) menuVisit.action = 'circle';
         },
       },
     ],
-    [disp, router],
+    [isCurrentMenu, menuVisit, disp?.isDm],
   );
 
-  if (isError) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <View style={styles.center}>
-          <Text style={styles.errorText}>{COPY.circleLoadError}</Text>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backLabel}>{COPY.circleHomeBack}</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
+  if (isError || !data || !myUserId) {
+    return <ChatEntryState state={isError ? 'error' : isLoading || myUserId === undefined ? 'loading' : 'unavailable'}
+      retrying={isFetching || isLoading} onRetry={isError ? () => { void refetch(); } : undefined} onBack={() => router.back()} />;
   }
 
   return (
     <>
       <ThreadComponent
+        reactionMessageId={reactionMessageId} reactionMessageSource={reactionMessageSource}
         kind="circle"
         id={circleId}
         title={disp?.title ?? '...'}
@@ -185,23 +179,30 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         emptyText={COPY.circleChatStart}
       />
       <AddPeopleSheet
+        key={`add:${entry.serial}`}
         visible={addOpen}
         circleId={circleId}
+        scope={operationScope}
         existingMemberIds={memberIds}
-        onClose={() => setAddOpen(false)}
+        onClose={() => { if (isCurrentEntry()) setAddOpen(false); }}
       />
       <CirclePlanComposer
+        key={`plan:${entry.serial}`}
         visible={planOpen}
-        onClose={() => setPlanOpen(false)}
+        scope={operationScope}
+        onClose={() => { if (isCurrentEntry()) setPlanOpen(false); }}
         circleId={circleId}
         circleName={disp?.title ?? data?.circle.name ?? ''}
         members={(data?.members ?? []).map((m) => ({
           user_id: m.user_id,
           first_name_display: m.first_name_display,
+          handle: m.handle,
           profile_photo_url: m.profile_photo_url,
         }))}
         isDm={!!disp?.isDm}
+        onCheckPlans={() => { if (isCurrentEntry()) router.push(`/circle/${circleId}` as any); }}
         onPosted={(result) => {
+          if (!isCurrentEntry()) return;
           // Open plan / picked-subset plans get their own chat -> open it.
           // A whole-circle just-us plan lives in this circle chat already.
           if (result.has_own_chat) {
@@ -210,18 +211,30 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
         }}
       />
       <MenuCard
+        key={`menu:${entry.serial}:${menuVisit?.serial ?? 'closed'}`}
         visible={menuOpen}
-        onClose={() => setMenuOpen(false)}
+        onClose={() => {
+          if (!isCurrentMenu() || !menuVisit) return;
+          menuVisit.closing = true;
+          setMenuOpen(false);
+        }}
         onClosed={() => {
-          if (pendingAddRef.current) {
-            pendingAddRef.current = false;
+          // Both chat actions wait until the native menu fully dismisses. Own
+          // that intent by this opening: an old dismiss callback must never
+          // consume the action or counterpart of a newer menu/account/room.
+          if (!isCurrentMenu() || !menuVisit?.closing) return;
+          activeMenu.current = null;
+          const action = menuVisit.action;
+          menuVisit.action = null;
+          setMenuOpen(false);
+          if (action === 'circle') {
             setAddOpen(true);
           }
-          if (pendingPlanRef.current) {
-            pendingPlanRef.current = false;
-            if (disp?.otherUserId) {
-              router.push(buildComposerWithPerson(disp.otherUserId, disp.title, disp.otherAvatar) as never);
-            }
+          if (action === 'plan' && menuVisit.person) {
+            const { id, name, avatar } = menuVisit.person;
+            router.push(buildComposerWithPerson(id, name, avatar) as never);
+          } else if (action === 'plan') {
+            setPlanOpen(true);
           }
         }}
         anchor={menuAnchor}
@@ -233,29 +246,10 @@ function CircleChatScreenInner({ circleId }: { circleId: string }) {
 }
 
 export default function CircleChatScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, reactionMessageId, reactionMessageSource } = useLocalSearchParams<{ id: string; reactionMessageId?: string; reactionMessageSource?: string }>();
   if (!GROUPS_ENABLED || !id) {
     return <Redirect href="/(tabs)/chats" />;
   }
-  return <CircleChatScreenInner circleId={id} />;
+  return <CircleChatScreenInner circleId={id} reactionMessageId={reactionMessageId} reactionMessageSource={reactionMessageSource} />;
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  errorText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.secondary,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  backBtn: {
-    borderWidth: 1.5,
-    borderColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-  },
-  backLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-});

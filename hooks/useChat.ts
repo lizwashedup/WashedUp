@@ -1,28 +1,30 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { validOptionalMentionDocument, sameChatMentionIdentity, type ChatMentionDocument } from '../lib/chatMentionIdentity';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Alert } from 'react-native';
+import * as Crypto from 'expo-crypto';
 import { supabase } from '../lib/supabase';
 import { checkContent } from '../lib/contentFilter';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { logError } from '../lib/logger';
+import { editOwnChatMessage, isChatEditRefused } from '../lib/chatMessageEdit';
+import { readLoadedChatReactions } from '../lib/chatReactionReader';
+import { getBlockedWith } from '../lib/blocking';
+import { resolveChatSendReceipt } from '../lib/chatSendReceipt';
 import { useQueryClient } from '@tanstack/react-query';
 import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
+import { useObservedUser } from './useObservedUser';
+import { readObservedUser } from '../lib/observedUserRead';
+import { getMemberChatAnchorWindow, MemberChatMessageUnavailableError } from '../lib/memberChatMessageAnchor';
 import {
   CHAT_NEWEST_PAGE_SIZE,
+  compareChatSequence,
+  type ChatPageCursor,
   mergeChatBurst,
   olderChatFilter,
   oldestChatCursor,
   replaceNewestChatPage,
   toChronologicalChatPage,
 } from '../lib/chatPaging';
-
-// Monotonic optimistic-message id. Date.now() alone collides when two sends
-// land in the same millisecond (rapid consecutive sends); the realtime dedup
-// then collapsed the sender's own second message until its echo arrived. A
-// counter keeps every in-flight optimistic row distinct.
-let optimisticSeq = 0;
-function nextOptimisticId(): string {
-  optimisticSeq += 1;
-  return `optimistic-${Date.now()}-${optimisticSeq}`;
-}
 
 export interface MessageReaction {
   user_id: string;
@@ -36,6 +38,7 @@ export interface ReplyTo {
 }
 
 export interface ChatMessage {
+  mention_data?: ChatMentionDocument | null;
   id: string;
   // A message is parented by EITHER an event (plan) OR a circle, never both
   // (DB XOR constraint). Both optional here so the same shape serves both.
@@ -71,15 +74,51 @@ export type ConversationKey =
   | { kind: 'event'; id: string }
   | { kind: 'circle'; id: string };
 
+/** A caller may additionally retire an entry when its admission gate closes. */
+export interface ChatOperationScope {
+  readonly userId: string;
+  readonly isCurrent: () => boolean;
+}
+
+export class ObsoleteChatOperationError extends Error {
+  constructor() {
+    super('This chat action belongs to a previous visit.');
+    this.name = 'ObsoleteChatOperationError';
+  }
+}
+export function isObsoleteChatOperation(error: unknown): error is ObsoleteChatOperationError {
+  return error instanceof ObsoleteChatOperationError;
+}
+type ChatReactionIntent = { selected: string; desired: string | null; scope: ChatOperationScope };
+
+export class UnconfirmedChatReactionError extends Error {
+  constructor(readonly retry: () => Promise<void>) {
+    super('We could not confirm your reaction. Retry checks first and keeps the same change.');
+    this.name = 'UnconfirmedChatReactionError';
+  }
+}
+export function isUnconfirmedChatReaction(error: unknown): error is UnconfirmedChatReactionError {
+  return error instanceof UnconfirmedChatReactionError;
+}
+
+function assertChatScope(scope: ChatOperationScope): void {
+  if (!scope.userId || !scope.isCurrent()) throw new ObsoleteChatOperationError();
+}
+async function scopedChatRequest<T>(scope: ChatOperationScope, request: () => PromiseLike<T>): Promise<T> {
+  assertChatScope(scope);
+  try { return await request(); } finally { assertChatScope(scope); }
+}
+
 async function attachSenders(messages: any[]): Promise<ChatMessage[]> {
   const allIds = messages.map(m => m.user_id).filter(Boolean);
   const userIds = allIds.filter((id: string, i: number) => allIds.indexOf(id) === i);
   if (userIds.length === 0) return messages as ChatMessage[];
 
-  const { data: profiles } = await supabase
+  const { data: profiles, error: profileError } = await requestWithDeadline(supabase
     .from('profiles_public')
     .select('id, first_name_display, profile_photo_url')
-    .in('id', userIds);
+    .in('id', userIds), 12_000);
+  if (profileError) throw profileError;
 
   const profileMap: Record<string, any> = {};
   (profiles ?? []).forEach((p: any) => {
@@ -97,7 +136,32 @@ async function attachSenders(messages: any[]): Promise<ChatMessage[]> {
   })) as ChatMessage[];
 }
 
-export function useChat(key: ConversationKey) {
+// Reconcile a newest-page snapshot without undoing activity that happened
+// while the read was pending. Object identity distinguishes the unchanged
+// snapshot rows from realtime/local edits; UUIDs still identify actual sends.
+function reconcileNewestMessages(
+  current: ChatMessage[],
+  page: ChatMessage[],
+  startedWith: ReadonlyMap<string, ChatMessage>,
+  hasMore: boolean,
+): ChatMessage[] {
+  const currentById = new Map(current.map(message => [message.id, message]));
+  const persisted = current.filter(message => !message.id.startsWith('optimistic-'));
+  const unchanged = persisted.filter(message => startedWith.get(message.id) === message);
+  const changed = persisted.filter(message => startedWith.get(message.id) !== message);
+  const refreshed = (hasMore ? replaceNewestChatPage(unchanged, page) : page).filter(message =>
+    // A row removed locally during the request must not reappear from its
+    // earlier server snapshot. Keep the original page boundary for history.
+    !startedWith.has(message.id) || currentById.has(message.id),
+  );
+  const confirmedIds = new Set([...refreshed, ...changed].map(message => message.id));
+  const optimistic = current.filter(message => message.id.startsWith('optimistic-') &&
+    !confirmedIds.has(message.id.slice('optimistic-'.length)));
+  return mergeChatBurst(mergeChatBurst(refreshed, changed), optimistic);
+}
+
+export function useChat(key: ConversationKey, anchorId: string | null = null) {
+  const { viewerId, epoch, isCurrent: isCurrentViewer, error: identityError, isLoading: identityLoading, retry: retryIdentity } = useObservedUser();
   // Primitive fields drive all effect/callback deps so a fresh key object on
   // each render does not re-subscribe the realtime channel.
   const { kind, id: conversationId } = key;
@@ -108,12 +172,16 @@ export function useChat(key: ConversationKey) {
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentUserId, setCurrentUserId] = useState<string>('');
-  // Ref mirrors currentUserId for synchronous access inside callbacks (avoids async round-trip on send)
-  const currentUserIdRef = useRef<string>('');
+  const [loadError, setLoadError] = useState(false);
+  const [olderLoadError, setOlderLoadError] = useState(false);
+  const [anchorUnavailable, setAnchorUnavailable] = useState(false);
+  const currentUserId = viewerId ?? '';
   // Ref so the real-time channel closure always has the latest blocked set
   const blockedIdsRef = useRef<Record<string, boolean>>({});
+  const blockedReadyRef = useRef(false);
   const reactionInFlightRef = useRef<Set<string>>(new Set());
+  const reactionIntentsRef = useRef(new Map<string, ChatReactionIntent>());
+  const messageChangesRef = useRef(new Map<string, object>());
   const messagesRef = useRef<ChatMessage[]>([]);
   const loadingOlderRef = useRef(false);
   const hasOlderRef = useRef(false);
@@ -122,18 +190,114 @@ export function useChat(key: ConversationKey) {
   // Keep messagesRef in sync for stable callbacks
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
-  const cancelledRef = useRef(false);
+  // Identity belongs to one visit, not just a room id: A → B → A creates a
+  // new generation, so retired subscriptions and paging callbacks stay stale.
+  const roomGeneration = useMemo(() => ({ kind, conversationId, viewerId, epoch }), [kind, conversationId, viewerId, epoch]);
+  // A notification changes the read window, not the room's draft, sends or
+  // realtime subscription. Every asynchronous read owns its exact window.
+  const readWindow = useMemo(() => ({ anchorId, ready: false, upper: null as ChatPageCursor | null,
+    older: null as ChatPageCursor | null }), [anchorId, roomGeneration]);
+  const readWindowRef = useRef(readWindow); readWindowRef.current = readWindow;
+  const appliedWindowRef = useRef<typeof readWindow | null>(null);
+  const refreshWindowRef = useRef<(silent?: boolean) => Promise<void>>(async () => {});
+  const activeRoomGenerationRef = useRef<typeof roomGeneration | null>(null);
+  const isCurrentRoom = useCallback(() => activeRoomGenerationRef.current === roomGeneration && isCurrentViewer(), [roomGeneration, isCurrentViewer]);
+  const operationScope = useMemo<ChatOperationScope | null>(() => viewerId && conversationId
+    ? { userId: viewerId, isCurrent: isCurrentRoom } : null, [viewerId, conversationId, isCurrentRoom]);
+  const captureOperation = useCallback((entry?: ChatOperationScope): ChatOperationScope | null => {
+    // Even an old callback retained before identity resolved cannot acquire a
+    // later account. Both closures describe the initiating committed visit.
+    if (!isCurrentRoom()) throw new ObsoleteChatOperationError();
+    if (!operationScope) return null;
+    const scope: ChatOperationScope = entry ? {
+      userId: operationScope.userId,
+      isCurrent: () => operationScope.isCurrent() && entry.userId === operationScope.userId && entry.isCurrent(),
+    } : operationScope;
+    assertChatScope(scope);
+    return scope;
+  }, [isCurrentRoom, operationScope]);
+  const assertSendCurrent = useCallback((scope: ChatOperationScope, optimistic: ChatMessage) => {
+    if (scope.isCurrent()) return;
+    // Admission may close while the room/account still exists. Remove only
+    // this attempt's exact optimistic object, never a confirmed realtime row
+    // or another attempt that reused its UUID after returning to the entry.
+    if (operationScope?.isCurrent()) setMessages(prev => operationScope.isCurrent()
+      ? prev.filter(message => message !== optimistic) : prev);
+    throw new ObsoleteChatOperationError();
+  }, [operationScope]);
+  const newestRequestRef = useRef(0);
 
   useEffect(() => {
-    if (!conversationId) return;
-    cancelledRef.current = false;
+    activeRoomGenerationRef.current = roomGeneration;
+    appliedWindowRef.current = readWindowRef.current;
+    loadingOlderRef.current = false;
     hasOlderRef.current = false;
+    blockedIdsRef.current = {};
+    blockedReadyRef.current = false;
+    messagesRef.current = [];
+    reactionInFlightRef.current = new Set();
+    reactionIntentsRef.current = new Map();
+    messageChangesRef.current = new Map();
     setMessages([]);
+    setLoadError(false);
+    setOlderLoadError(false);
+    setAnchorUnavailable(false);
+    setLoading(!!viewerId && !!conversationId);
+    if (!conversationId || !viewerId) return () => {
+      if (activeRoomGenerationRef.current === roomGeneration) activeRoomGenerationRef.current = null;
+    };
     fetchMessages().catch((err) => logError(err, 'useChat.fetchMessages'));
 
     // Event channel name kept byte-identical to before; circles use a distinct name.
     const channelName = kind === 'event' ? `chat:${conversationId}` : `chat:circle:${conversationId}`;
     const filter = `${parentCol}=eq.${conversationId}`;
+
+    // Reactions have no conversation column. Read only this visit's loaded
+    // message IDs through RLS, coalescing bursts without reloading the thread.
+    const reactionQueue = { pending: false, running: false };
+    const refreshReactions = async () => {
+      if (!isCurrentRoom()) return;
+      reactionQueue.pending = true;
+      if (reactionQueue.running) return;
+      reactionQueue.running = true;
+      try {
+        while (isCurrentRoom() && reactionQueue.pending) {
+          reactionQueue.pending = false;
+          const snapshot = new Map(messagesRef.current.filter(message => !message.id.startsWith('optimistic-'))
+            .map(message => [message.id, message.reactions]));
+          if (!snapshot.size) continue;
+          const data = await readLoadedChatReactions([...snapshot.keys()], isCurrentRoom);
+          if (!data || !isCurrentRoom()) return;
+          const byMessage = new Map<string, MessageReaction[]>();
+          for (const row of data ?? []) {
+            const reactions = byMessage.get(row.message_id) ?? [];
+            reactions.push({ user_id: row.user_id, reaction: row.reaction });
+            byMessage.set(row.message_id, reactions);
+          }
+          setMessages(previous => isCurrentRoom() ? previous.map(message => {
+            if (!snapshot.has(message.id)) return message;
+            const beforeMine = snapshot.get(message.id)?.find(reaction => reaction.user_id === viewerId);
+            const currentMine = message.reactions?.find(reaction => reaction.user_id === viewerId);
+            const remote = byMessage.get(message.id) ?? [];
+            // Sender hydration can replace the array while this read is in
+            // flight. Preserve only a newer own reaction, not the entire old
+            // array, or a first arriving remote reaction is silently lost.
+            const preserveMine = reactionInFlightRef.current.has(message.id) || beforeMine?.reaction !== currentMine?.reaction;
+            const reactions = preserveMine
+              ? [...remote.filter(reaction => reaction.user_id !== viewerId), ...(currentMine ? [currentMine] : [])]
+              : remote;
+            return { ...message, reactions };
+          }) : previous);
+        }
+      } catch (error) {
+        if (isCurrentRoom()) logError(error, 'useChat.realtimeReactions');
+      } finally {
+        reactionQueue.running = false;
+        // A later event can arrive while a snapshot fails. Drain that event,
+        // without retrying a failed read when no newer work was queued.
+        if (isCurrentRoom() && reactionQueue.pending) void refreshReactions();
+      }
+    };
 
     const channel = supabase
       .channel(channelName)
@@ -142,25 +306,23 @@ export function useChat(key: ConversationKey) {
         { event: 'INSERT', schema: 'public', table: 'messages', filter },
         async (payload) => {
           const newMsg = payload.new as any;
-          if (blockedIdsRef.current[newMsg.user_id]) return;
-          const enriched = await attachSenders([newMsg]);
-          if (!cancelledRef.current) {
+          const window = readWindowRef.current;
+          const inWindow = () => readWindowRef.current === window && (!window.anchorId || (window.ready &&
+            (!window.upper || compareChatSequence(newMsg, window.upper) <= 0)));
+          if (!isCurrentRoom() || !inWindow() || blockedIdsRef.current[newMsg.user_id]) return;
+          let enriched: ChatMessage[];
+          try { enriched = await attachSenders([newMsg]); }
+          catch (error) { if (isCurrentRoom()) logError(error, 'useChat.realtimeSender'); return; }
+          if (isCurrentRoom()) {
             setMessages(prev => {
+              if (!isCurrentRoom() || !inWindow() || blockedIdsRef.current[newMsg.user_id]) return prev;
               const incoming = enriched[0];
               // Already present as the real row (the insert response may have
               // already swapped the optimistic id for this id).
               if (prev.some(m => m.id === incoming.id)) return prev;
-              // Reconcile against exactly ONE matching optimistic row from this
-              // sender, not every in-flight optimistic message. Rapid
-              // consecutive sends each stay visible until their own echo lands;
-              // a blanket strip dropped the sender's second message.
-              const optIdx = prev.findIndex(m =>
-                m.id.startsWith('optimistic-') &&
-                m.user_id === incoming.user_id &&
-                (m.content ?? '') === (incoming.content ?? '') &&
-                (m.image_url ?? null) === (incoming.image_url ?? null) &&
-                (m.reply_to_message_id ?? null) === (incoming.reply_to_message_id ?? null),
-              );
+              // Match only the client UUID. Identical rapid messages are
+              // separate sends; content matching could eat the wrong row.
+              const optIdx = prev.findIndex(m => m.id === `optimistic-${incoming.id}`);
               let msg = incoming;
               // Resolve reply reference from existing messages
               if (msg.reply_to_message_id) {
@@ -182,142 +344,210 @@ export function useChat(key: ConversationKey) {
         { event: 'UPDATE', schema: 'public', table: 'messages', filter },
         (payload) => {
           const updated = payload.new as any;
-          if (updated?.id && !cancelledRef.current) {
-            setMessages(prev => prev.map(m =>
-              m.id === updated.id ? { ...m, content: updated.content, image_url: updated.image_url } : m,
-            ));
+          if (updated?.id && isCurrentRoom()) {
+            setMessages(prev => isCurrentRoom() ? prev.map(m =>
+              m.id === updated.id ? { ...m, content: updated.content, image_url: updated.image_url, mention_data: updated.mention_data ?? null } : m,
+            ) : prev);
           }
         },
       )
       .on(
         'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'messages', filter },
+        // DELETE carries only its replica-identity ID; a parent filter drops it.
+        { event: 'DELETE', schema: 'public', table: 'messages' },
         (payload) => {
           const deleted = payload.old as any;
-          if (deleted?.id && !cancelledRef.current) {
-            setMessages(prev => prev.filter(m => m.id !== deleted.id));
+          if (deleted?.id && isCurrentRoom()) {
+            if (deleted.id === readWindowRef.current.anchorId) {
+              ++newestRequestRef.current;
+              readWindowRef.current.ready = false;
+              hasOlderRef.current = false;
+              setAnchorUnavailable(true); setLoadError(false); setLoading(false);
+              setMessages([]); messagesRef.current = [];
+              return;
+            }
+            setMessages(prev => isCurrentRoom() ? prev.filter(m => m.id !== deleted.id) : prev);
           }
         },
       )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, payload => {
+        const messageId = (payload.new as { message_id?: string })?.message_id;
+        if (payload.eventType === 'DELETE' || messagesRef.current.some(message => message.id === messageId)) {
+          void refreshReactions();
+        }
+      })
+      .on('system', {}, async (payload) => {
+        // Channel SUBSCRIBED can precede the PostgreSQL stream becoming ready.
+        // A message committed in that gap persists without an INSERT callback.
+        // Reconcile history at actual readiness, including after reconnect,
+        // through the existing account/room-owned, non-blocking refresh.
+        if (!isCurrentRoom() || payload?.status !== 'ok' || payload?.extension !== 'postgres_changes') return;
+        await refreshWindowRef.current(true);
+      })
       .subscribe();
 
-    return () => { cancelledRef.current = true; supabase.removeChannel(channel); };
-  }, [kind, conversationId]);
+    return () => {
+      if (isCurrentRoom()) activeRoomGenerationRef.current = null;
+      newestRequestRef.current += 1;
+      supabase.removeChannel(channel);
+    };
+  }, [kind, conversationId, roomGeneration, isCurrentRoom, viewerId]);
 
   const fetchMessages = useCallback(async (silent = false) => {
+    if (!isCurrentRoom()) return;
+    if (!operationScope) { if (!silent && viewerId === undefined) await retryIdentity(); return; }
+    const request = ++newestRequestRef.current;
+    const window = readWindowRef.current;
+    const isCurrent = () => isCurrentRoom() && readWindowRef.current === window && newestRequestRef.current === request;
+    const startedWith = new Map(messagesRef.current.map(message => [message.id, message]));
     if (!silent) setLoading(true);
     try {
-      // Event path selects the ORIGINAL columns only (no circle_id) so it stays
-      // byte-identical to before and works against prod, which has no circle_id
-      // column until the Circles migration is applied. Only the circle path adds it.
-      const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id${kind === 'circle' ? ', circle_id' : ''}`;
-      // getUser() contends on the GoTrue auth-token process lock and rejects with
-      // a LockAcquireTimeoutError when it loses the race. It must never reject
-      // this Promise.all: doing so threw away the messages we had already fetched
-      // and rendered an empty thread (Sentry REACT-NATIVE-14). Degrade instead --
-      // show the conversation, skip the read receipt.
-      const [{ data }, user] = await Promise.all([
-        supabase
-          .from('messages')
-          .select(selectCols)
-          .eq(parentCol, conversationId)
-          .order('created_at', { ascending: false })
-          .order('id', { ascending: false })
-          .limit(CHAT_NEWEST_PAGE_SIZE),
-        supabase.auth
-          .getUser()
-          .then(({ data: d }) => d.user)
-          .catch(async (err) => {
-            logError(err, 'useChat.fetchMessages.getUser');
-            const { data: cached } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
-            return cached.session?.user ?? null;
-          }),
-      ]);
-      if (cancelledRef.current) return;
-      const page = toChronologicalChatPage((data ?? []) as unknown as ChatMessage[]);
-      const more = page.length === CHAT_NEWEST_PAGE_SIZE;
-      hasOlderRef.current = more;
-      if (user) {
-        if (currentUserIdRef.current !== user.id) {
-          currentUserIdRef.current = user.id;
-          setCurrentUserId(user.id);
-        }
-        const msgIds = page.map((m: any) => m.id);
-        // Mark this conversation read. Plans and circles use different unique
-        // keys on chat_reads, so the onConflict target differs.
-        const readUpsert = kind === 'event'
-          ? supabase.from('chat_reads').upsert(
-              { event_id: conversationId, user_id: user.id, last_read_at: new Date().toISOString() },
-              { onConflict: 'event_id,user_id' },
-            )
-          : supabase.from('chat_reads').upsert(
-              { circle_id: conversationId, user_id: user.id, last_read_at: new Date().toISOString() },
-              { onConflict: 'user_id,circle_id' },
-            );
-        // new_message notifications are event-only today; circles have no
-        // notification type yet, so the circle branch skips the clear + badge.
-        const notifClear = kind === 'event'
-          ? supabase.from('app_notifications')
-              .update({ status: 'read' })
-              .eq('user_id', user.id)
-              .eq('event_id', conversationId)
-              .eq('type', 'new_message')
-              .eq('status', 'unread')
-          : Promise.resolve({ data: null });
-        // This privacy read stays ahead of first paint, but uses the shared
-        // query cache across thread mounts. useBlock invalidates this key, so a
-        // newly blocked person can never survive behind stale local state.
-        const blockedLookup = await queryClient.fetchQuery<Record<string, boolean>>({
-          queryKey: ['profile-blocked', user.id],
+      // Selected mention identity requires the verified mention-data migration
+      // before a candidate is enabled. Only the circle path selects circle_id;
+      // keep the event and circle parent boundaries separate.
+      const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id, mention_data${kind === 'circle' ? ', circle_id' : ''}`;
+      // Keep the auth-lock fallback, but accept only this observed account.
+      // A refresh failure keeps previously owned history; it cannot adopt an
+      // account returned by a delayed authentication response.
+      // Privacy remains a first-paint gate, using the shared per-account
+      // cache and the existing block invalidation contract.
+      const readBlocked = () => queryClient.fetchQuery<Record<string, boolean>>({
+          queryKey: ['profile-blocked', operationScope.userId],
           staleTime: 60_000,
           queryFn: async () => {
-            const { data: profile } = await supabase
+            const { data: profile, error: profileError } = await scopedChatRequest(operationScope, () => supabase
               .from('profiles')
               .select('blocked_users')
-              .eq('id', user.id)
-              .maybeSingle();
+              .eq('id', operationScope.userId)
+              .maybeSingle());
+            if (profileError) throw profileError;
             const lookup: Record<string, boolean> = {};
             (profile?.blocked_users ?? []).forEach((uid: string) => { lookup[uid] = true; });
             return lookup;
           },
         });
-        if (cancelledRef.current) return;
+      const readBlockedLookup = async () => {
+        try { return await requestWithDeadline(readBlocked(), 12_000); }
+        catch (error) {
+          if (!isCurrent() || !isObsoleteChatOperation(error)) throw error;
+          // An in-flight cache request may belong to a retired room.
+          return await requestWithDeadline(readBlocked(), 12_000);
+        }
+      };
+      // Verify this exact account before accessing its private preferences,
+      // but do not make that access wait for independent history delivery.
+      const verifiedUser = scopedChatRequest(operationScope, () => requestWithDeadline(readObservedUser(), 8_000))
+          .then(({ data: d, error }) => { if (error) throw error; return d.user; })
+          .catch(async (err) => {
+            assertChatScope(operationScope);
+            logError(err, 'useChat.fetchMessages.getUser');
+            const { data: cached } = await scopedChatRequest(operationScope, () => requestWithDeadline(supabase.auth.getSession(), 4_000)).catch(() => {
+              assertChatScope(operationScope);
+              return { data: { session: null } };
+            });
+            return cached.session?.user ?? null;
+          }).then(user => {
+        if (!isCurrent()) throw new ObsoleteChatOperationError();
+        if (!user || user.id !== operationScope.userId) throw new Error('Could not verify this chat account.');
+        return user;
+      });
+      const [snapshot, user, initialBlockedLookup] = await Promise.all([
+        window.anchorId
+          ? getMemberChatAnchorWindow({ kind, id: conversationId }, window.anchorId, { userId: operationScope.userId, isCurrent })
+            .then(anchor => ({ data: anchor.messages, error: null, anchor }))
+          : requestWithDeadline(supabase
+          .from('messages')
+          .select(selectCols)
+          .eq(parentCol, conversationId)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(CHAT_NEWEST_PAGE_SIZE), 12_000).then(result => ({ ...result, anchor: null })),
+        verifiedUser,
+        verifiedUser.then(() => readBlockedLookup()),
+      ]);
+      if (!isCurrent()) return;
+      const { data, error: messageError, anchor } = snapshot;
+      if (messageError) throw messageError;
+      if (!user || user.id !== operationScope.userId) throw new Error('Could not verify this chat account.');
+      setLoadError(false);
+      setAnchorUnavailable(false);
+      const page = toChronologicalChatPage((data ?? []) as unknown as ChatMessage[]);
+      const more = anchor ? anchor.hasMore : page.length === CHAT_NEWEST_PAGE_SIZE;
+      const pageCursor = anchor?.olderCursor ?? oldestChatCursor(page);
+      const retainedOlderPages = !!window.older && !!pageCursor && compareChatSequence(window.older, pageCursor) < 0;
+      if (!retainedOlderPages) hasOlderRef.current = more;
+      if (user) {
+        const userId = operationScope.userId;
+        const msgIds = page.map((m: any) => m.id);
+        // Mark this conversation read. Plans and circles use different unique
+        // keys on chat_reads, so the onConflict target differs.
+        const readUpsert = () => scopedChatRequest(operationScope, () => kind === 'event'
+          ? supabase.from('chat_reads').upsert(
+              { event_id: conversationId, user_id: userId, last_read_at: new Date().toISOString() },
+              { onConflict: 'event_id,user_id' },
+            )
+          : supabase.from('chat_reads').upsert(
+              { circle_id: conversationId, user_id: userId, last_read_at: new Date().toISOString() },
+              { onConflict: 'user_id,circle_id' },
+            ));
+        // new_message notifications are event-only today; circles have no
+        // notification type yet, so the circle branch skips the clear + badge.
+        const notifClear = () => scopedChatRequest(operationScope, () => kind === 'event'
+          ? supabase.from('app_notifications')
+              .update({ status: 'read' })
+              .eq('user_id', userId)
+              .eq('event_id', conversationId)
+              .eq('type', 'new_message')
+              .eq('status', 'unread')
+          : Promise.resolve({ data: null }));
+
+        const blockedLookup = { ...initialBlockedLookup, ...anchor?.blockedIds };
         blockedIdsRef.current = blockedLookup;
+        blockedReadyRef.current = true;
         const filtered = page.filter((msg: any) => !blockedLookup[msg.user_id]);
+        if (window.anchorId && !filtered.some(message => message.id === window.anchorId)) throw new MemberChatMessageUnavailableError();
+        window.ready = true;
+        window.upper = anchor?.upperCursor ?? null;
+        if (!retainedOlderPages) window.older = pageCursor;
+        const existingById = new Map(messagesRef.current.map(message => [message.id, message]));
         const firstPaint = filtered.map((message) => ({
           ...message,
           message_type: message.message_type ?? 'user',
-          reactions: message.reactions ?? [],
+          // Keep existing presentation until its refresh hydration completes;
+          // returning to the room must not briefly erase photos/reactions.
+          sender: existingById.get(message.id)?.sender,
+          reply_to: existingById.get(message.id)?.reply_to,
+          reactions: existingById.get(message.id)?.reactions ?? [],
         })) as ChatMessage[];
+        const firstPaintById = new Map(firstPaint.map(message => [message.id, message]));
 
         // The message text is the useful first paint. Sender photos, reactions,
         // read receipts, and notification cleanup are secondary and must not
         // hold the entire thread behind a spinner.
-        if (!silent || messagesRef.current.length === 0) {
-          setMessages(prev => {
-            const optimistic = prev.filter(message => message.id.startsWith('optimistic-'));
-            return mergeChatBurst(
-              replaceNewestChatPage(
-                prev.filter(message => !message.id.startsWith('optimistic-')),
-                firstPaint,
-              ),
-              optimistic,
-            );
-          });
-          setLoading(false);
-        }
+        // Silent focus refreshes need the same reconciliation as initial
+        // reads: mapping hydration over existing IDs alone loses missed rows.
+        setMessages(prev => isCurrent() ? reconcileNewestMessages(
+          prev.filter(message => !blockedLookup[message.user_id]), firstPaint, startedWith, more,
+        ) : prev);
+        setLoading(false);
 
         void (async () => {
           try {
-            const [, , { data: reactionsData }, enriched] = await Promise.all([
-              readUpsert,
-              notifClear,
+            // Receipts and notification cleanup must not delay names/photos.
+            // These idempotent background writes keep their original scope.
+            // Viewing an old notification must not mark unseen newer messages
+            // read or dismiss their notifications.
+            if (!window.anchorId) void Promise.all([readUpsert(), notifClear()]).then(() => {
+              if (isCurrent()) void queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
+            }).catch(error => { if (isCurrent()) logError(error, 'useChat.readReceipts'); });
+            const [{ data: reactionsData, error: reactionsError }, enriched] = await Promise.all([
               msgIds.length > 0
-                ? supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds)
-                : Promise.resolve({ data: [] as any[] }),
+                ? requestWithDeadline(supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds), 12_000)
+                : Promise.resolve({ data: [] as any[], error: null }),
               attachSenders(filtered),
             ]);
-            if (cancelledRef.current) return;
+            if (reactionsError) throw reactionsError;
+            if (!isCurrent()) return;
 
             const reactionsByMsg: Record<string, MessageReaction[]> = {};
             (reactionsData ?? []).forEach((reaction: any) => {
@@ -347,74 +577,86 @@ export function useChat(key: ConversationKey) {
                 : message;
             });
             const hydratedById = new Map(hydrated.map(message => [message.id, message]));
-            setMessages(prev => prev.map(message => hydratedById.get(message.id) ?? message));
+            setMessages(prev => isCurrent() ? prev.map(message =>
+              firstPaintById.get(message.id) === message
+                ? hydratedById.get(message.id) ?? message
+                : message,
+            ) : prev);
             queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
           } catch (error) {
-            logError(error, 'useChat.hydrateNewestPage');
+            if (isCurrent()) { logError(error, 'useChat.hydrateNewestPage'); setLoadError(true); }
           }
         })();
-      } else {
-        if (data) {
-          // No user: either signed out, or getUser() lost the auth-lock race.
-          // Reuse the last known block list so a lock timeout can never surface
-          // a blocked sender's messages.
-          const blocked = blockedIdsRef.current;
-          const filtered = page.filter((msg: any) => !blocked[msg.user_id]);
-          const enriched = await attachSenders(filtered);
-          if (!cancelledRef.current) {
-            setMessages(prev => {
-              const optimistic = prev.filter(message => message.id.startsWith('optimistic-'));
-              return mergeChatBurst(
-                replaceNewestChatPage(
-                  prev.filter(message => !message.id.startsWith('optimistic-')),
-                  enriched,
-                ),
-                optimistic,
-              );
-            });
-          }
-        }
+      }
+    } catch (error) {
+      if (isCurrent()) {
+        if (error instanceof MemberChatMessageUnavailableError) {
+          window.ready = false; hasOlderRef.current = false;
+          setMessages([]); messagesRef.current = [];
+          setAnchorUnavailable(true); setLoadError(false);
+        } else { logError(error, 'useChat.fetchMessages'); setLoadError(true); }
       }
     } finally {
-      if (!cancelledRef.current) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [kind, conversationId]);
+  }, [kind, conversationId, isCurrentRoom, operationScope, viewerId, retryIdentity]);
+  refreshWindowRef.current = fetchMessages;
 
-  const loadOlder = useCallback(async () => {
-    if (loadingOlderRef.current || !hasOlderRef.current) return;
-    const cursor = oldestChatCursor(
+  useEffect(() => {
+    if (!isCurrentRoom() || appliedWindowRef.current === readWindow) return;
+    appliedWindowRef.current = readWindow;
+    ++newestRequestRef.current;
+    loadingOlderRef.current = false; hasOlderRef.current = false;
+    // Keep in-flight sends owned by this room while replacing only history.
+    const pending = messagesRef.current.filter(message => message.id.startsWith('optimistic-'));
+    messagesRef.current = pending; setMessages(pending);
+    setLoadError(false); setOlderLoadError(false); setAnchorUnavailable(false);
+    void fetchMessages();
+  }, [readWindow, isCurrentRoom, fetchMessages]);
+
+  const loadOlder = useCallback(async (retry = false) => {
+    if (!isCurrentRoom() || loadingOlderRef.current || !hasOlderRef.current || (olderLoadError && !retry)) return;
+    const window = readWindowRef.current;
+    const isCurrent = () => isCurrentRoom() && readWindowRef.current === window && (!window.anchorId || window.ready);
+    const cursor = window.older ?? oldestChatCursor(
       messagesRef.current.filter(message => !message.id.startsWith('optimistic-')),
     );
     if (!cursor) return;
 
     loadingOlderRef.current = true;
+    setOlderLoadError(false);
     try {
-      const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id${kind === 'circle' ? ', circle_id' : ''}`;
-      const { data, error } = await supabase
+      const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id, mention_data${kind === 'circle' ? ', circle_id' : ''}`;
+      const { data, error } = await requestWithDeadline(supabase
         .from('messages')
         .select(selectCols)
         .eq(parentCol, conversationId)
         .or(olderChatFilter(cursor))
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
-        .limit(CHAT_NEWEST_PAGE_SIZE);
+        .limit(CHAT_NEWEST_PAGE_SIZE), 12_000);
+      if (!isCurrent()) return;
       if (error) throw error;
-      if (cancelledRef.current) return;
 
       const page = toChronologicalChatPage((data ?? []) as unknown as ChatMessage[]);
       const more = page.length === CHAT_NEWEST_PAGE_SIZE;
-      hasOlderRef.current = more;
 
       const filtered = page.filter(message => !blockedIdsRef.current[message.user_id]);
       const enriched = await attachSenders(filtered);
+      if (!isCurrent()) return;
       const msgIds = enriched.map(message => message.id);
-      const { data: reactionsData } = msgIds.length > 0
-        ? await supabase
+      const { data: reactionsData, error: reactionsError } = msgIds.length > 0
+        ? await requestWithDeadline(supabase
             .from('message_reactions')
             .select('message_id, user_id, reaction')
-            .in('message_id', msgIds)
-        : { data: [] as any[] };
-      if (cancelledRef.current) return;
+            .in('message_id', msgIds), 12_000)
+        : { data: [] as any[], error: null };
+      if (reactionsError) throw reactionsError;
+      if (!isCurrent()) return;
+      // Move the raw cursor only once the page is usable. A hydration failure
+      // must retry the same page, including neighbors hidden by blocking.
+      hasOlderRef.current = more;
+      window.older = oldestChatCursor(page);
 
       const reactionsByMsg: Record<string, MessageReaction[]> = {};
       (reactionsData ?? []).forEach((reaction: any) => {
@@ -427,6 +669,7 @@ export function useChat(key: ConversationKey) {
       }));
 
       setMessages(prev => {
+        if (!isCurrent()) return prev;
         const merged = mergeChatBurst(prev, withReactions);
         const byId = new Map(merged.map(message => [message.id, message]));
         return merged.map(message => {
@@ -437,113 +680,142 @@ export function useChat(key: ConversationKey) {
         });
       });
     } catch (error) {
-      logError(error, 'useChat.loadOlder');
+      if (isCurrent()) { logError(error, 'useChat.loadOlder'); setOlderLoadError(true); }
     } finally {
-      loadingOlderRef.current = false;
+      // A retired read must not unlock a page request in the current room.
+      if (isCurrent()) loadingOlderRef.current = false;
     }
-  }, [kind, parentCol, conversationId]);
+  }, [kind, parentCol, conversationId, olderLoadError, isCurrentRoom]);
 
-  const toggleReaction = useCallback(async (messageId: string, reaction = 'heart') => {
-    const userId = currentUserIdRef.current;
-    if (!userId) return;
-
-    // Prevent concurrent reaction toggles on the same message
-    if (reactionInFlightRef.current.has(messageId)) return;
-    reactionInFlightRef.current.add(messageId);
-
-    // Snapshot current reactions for rollback on failure
-    const snapshot = messagesRef.current.find(m => m.id === messageId)?.reactions ?? [];
-
+  const toggleReaction = useCallback(async function changeReaction(messageId: string, reaction = 'heart', entryScope?: ChatOperationScope, expectedIntent?: ChatReactionIntent): Promise<void> {
+    const scope = captureOperation(entryScope);
+    if (!scope) return;
+    const userId = scope.userId;
+    // Each room/account visit owns its lock and unresolved desired states.
+    const inFlight = reactionInFlightRef.current;
+    const intents = reactionIntentsRef.current;
+    if (expectedIntent && intents.get(messageId) !== expectedIntent) throw new ObsoleteChatOperationError();
+    if (inFlight.has(messageId)) return;
+    inFlight.add(messageId);
+    const retained = intents.get(messageId);
+    const resumed = retained?.selected === reaction && retained.scope.isCurrent() ? retained : undefined;
+    // A newer explicit choice retires the old alert before its preflight, even
+    // if that read later fails. An expired writable entry cannot resume either.
+    if (retained && !resumed) intents.delete(messageId);
+    const previousMine = messagesRef.current.find(m => m.id === messageId)?.reactions?.find(r => r.user_id === userId);
+    let optimisticMine: MessageReaction | undefined;
+    let changed = false;
+    const replaceMine = (reactions: MessageReaction[], next: MessageReaction | undefined) => {
+      const others = reactions.filter(r => r.user_id !== userId);
+      return next ? [...others, next] : others;
+    };
+    const readOwnReaction = async (timeout: number) => {
+      const { data, error } = await scopedChatRequest(scope, () => requestWithDeadline(supabase
+        .from('message_reactions').select('id, reaction').eq('message_id', messageId).eq('user_id', userId)
+        .order('created_at', { ascending: false }).limit(1), timeout));
+      if (error) throw error;
+      return data?.[0] ?? null;
+    };
     try {
-    const { data: existingRows, error: fetchErr } = await supabase
-      .from('message_reactions')
-      .select('id, reaction')
-      .eq('message_id', messageId)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (fetchErr) throw fetchErr;
-
-    const existing = existingRows?.[0] ?? null;
-
-    if (existing && existing.reaction === reaction) {
-      setMessages(prev => prev.map(m =>
-        m.id === messageId
-          ? { ...m, reactions: (m.reactions ?? []).filter(r => r.user_id !== userId) }
-          : m,
-      ));
-      const { error: delErr } = await supabase.from('message_reactions').delete().eq('id', existing.id);
-      if (delErr) throw delErr;
-    } else if (existing) {
-      setMessages(prev => prev.map(m =>
-        m.id === messageId
-          ? { ...m, reactions: (m.reactions ?? []).map(r => r.user_id === userId ? { ...r, reaction } : r) }
-          : m,
-      ));
-      const { error: updErr } = await supabase.from('message_reactions').update({ reaction }).eq('id', existing.id);
-      if (updErr) throw updErr;
-    } else {
-      setMessages(prev => prev.map(m =>
-        m.id === messageId
-          ? { ...m, reactions: [...(m.reactions ?? []), { user_id: userId, reaction }] }
-          : m,
-      ));
-      const { error: insErr } = await supabase.from('message_reactions').insert({
-        message_id: messageId,
-        user_id: userId,
-        reaction,
-      });
-      if (insErr) throw insErr;
-    }
-
-    } catch (err) {
-      logError(err, 'useChat.toggleReaction');
-      setMessages(prev => prev.map(m =>
-        m.id === messageId ? { ...m, reactions: snapshot } : m,
-      ));
+      const existing = await readOwnReaction(12_000);
+      const intent = resumed ?? { selected: reaction, desired: existing?.reaction === reaction ? null : reaction, scope };
+      optimisticMine = intent.desired === null ? undefined : { user_id: userId, reaction: intent.desired };
+      changed = true;
+      setMessages(prev => scope.isCurrent() ? prev.map(m => m.id === messageId
+        ? { ...m, reactions: replaceMine(m.reactions ?? [], optimisticMine) } : m) : prev);
+      if ((existing?.reaction ?? null) !== intent.desired) {
+        intents.set(messageId, intent);
+        try {
+          const { error } = await scopedChatRequest(scope, () => requestWithDeadline(intent.desired === null
+            ? supabase.from('message_reactions').delete().eq('id', existing!.id)
+            : existing
+              ? supabase.from('message_reactions').update({ reaction: intent.desired }).eq('id', existing.id)
+              : supabase.from('message_reactions').insert({ message_id: messageId, user_id: userId, reaction: intent.desired }), 12_000));
+          if (error) throw error;
+        } catch (error) {
+          assertChatScope(scope);
+          // A lost write reply is uncertain. Read once; never automatically
+          // toggle again or send a second mutation to manufacture confirmation.
+          let confirmed = false;
+          try { confirmed = ((await readOwnReaction(8_000))?.reaction ?? null) === intent.desired; }
+          catch { assertChatScope(scope); }
+          if (!confirmed) throw new UnconfirmedChatReactionError(() => changeReaction(messageId, reaction, entryScope, intent));
+        }
+      }
+      assertChatScope(scope);
+      if (intents.get(messageId) === intent || intents.get(messageId) === retained) intents.delete(messageId);
+    } catch (error) {
+      assertChatScope(scope);
+      logError(error, 'useChat.toggleReaction');
+      if (changed) setMessages(prev => scope.isCurrent() ? prev.map(m =>
+        m.id === messageId && m.reactions?.find(r => r.user_id === userId) === optimisticMine
+          ? { ...m, reactions: replaceMine(m.reactions ?? [], previousMine) } : m,
+      ) : prev);
+      if (resumed && intents.get(messageId) === resumed && !isUnconfirmedChatReaction(error)) {
+        throw new UnconfirmedChatReactionError(() => changeReaction(messageId, reaction, entryScope, resumed));
+      }
+      throw error;
     } finally {
-      reactionInFlightRef.current.delete(messageId);
+      inFlight.delete(messageId);
     }
-  }, []);
+  }, [captureOperation]);
 
-  const deleteMessage = useCallback(async (messageId: string) => {
-    const userId = currentUserIdRef.current;
-    if (!userId) return;
-
-    let previousMessages: ChatMessage[] = [];
-    setMessages(prev => { previousMessages = prev; return prev.filter(m => m.id !== messageId); });
-
-    const { error } = await supabase
-      .from('messages')
-      .delete()
-      .eq('id', messageId)
-      .eq('user_id', userId);
-
-    if (error) {
+  const deleteMessage = useCallback(async (messageId: string, entryScope?: ChatOperationScope) => {
+    const scope = captureOperation(entryScope);
+    if (!scope) return;
+    const userId = scope.userId;
+    const original = messagesRef.current.find(message => message.id === messageId);
+    const changes = messageChangesRef.current;
+    const attempt = {};
+    changes.set(messageId, attempt);
+    setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== messageId) : prev);
+    try {
+      const { error } = await scopedChatRequest(scope, () => supabase.from('messages').delete()
+        .eq('id', messageId).eq('user_id', userId));
+      assertChatScope(scope);
+      if (error) throw error;
+    } catch (error) {
+      assertChatScope(scope);
       logError(error, 'useChat.deleteMessage');
-      setMessages(previousMessages);
+      // Restore only the deleted row if this attempt still owns its absence.
+      // A failed delete must not replace a newer history/realtime snapshot.
+      if (original) setMessages(prev => scope.isCurrent() && changes.get(messageId) === attempt && !prev.some(m => m.id === messageId)
+        ? mergeChatBurst(prev, [original]) : prev);
       Alert.alert('Could not delete', 'Something went wrong. Please try again.');
     }
-  }, []);
+  }, [captureOperation]);
 
-  const sendMessage = useCallback(async (content: string, imageUrl?: string, replyToId?: string) => {
+  const sendMessage = useCallback(async (content: string, imageUrl?: string, replyToId?: string, sendIdOverride?: string, entryScope?: ChatOperationScope, mentions?: ChatMentionDocument | null) => {
+    const scope = captureOperation(entryScope);
+    if (!scope) return false;
+    if (!validOptionalMentionDocument(content, mentions)) throw Error('Your selected mentions could not be checked.');
+    const mentionData = mentions == null ? null : JSON.parse(JSON.stringify(mentions)) as ChatMentionDocument;
     const filter = checkContent(content);
     if (!filter.ok) {
       Alert.alert('Content not allowed', filter.reason ?? 'Please revise your message.');
-      return;
+      return false;
     }
 
-    // Use the ref for instant, synchronous access — no async round-trip before showing the message
-    const userId = currentUserIdRef.current;
-    if (!userId) return;
+    // Capture the initiating account once; never adopt a later session.
+    const userId = scope.userId;
 
     // Optimistic insert — synchronous, appears immediately with zero lag
-    const optimisticId = nextOptimisticId();
+    const sendId = sendIdOverride ?? Crypto.randomUUID();
+    const optimisticId = `optimistic-${sendId}`;
     // Build reply_to for optimistic display
     let replyTo: ReplyTo | null = null;
     if (replyToId) {
-      const parentMsg = messagesRef.current.find(m => m.id === replyToId);
+      let parentMsg = messagesRef.current.find(m => m.id === replyToId);
+      if (!parentMsg) {
+        const target = await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages')
+          .select('id,content,user_id').eq(parentCol, conversationId).eq('id', replyToId).maybeSingle(), 12_000));
+        if (target.error) throw target.error;
+        if (!target.data) throw Error('The original reply is no longer available. Your message is kept.');
+        const targetMessage = target.data;
+        const blocked = await scopedChatRequest(scope, () => requestWithDeadline(getBlockedWith(userId, [targetMessage.user_id]), 12_000));
+        if (blocked.has(targetMessage.user_id)) throw Error('The original reply is unavailable.');
+        parentMsg = target.data as ChatMessage;
+      }
       if (parentMsg) {
         replyTo = { id: parentMsg.id, content: parentMsg.content, sender_name: parentMsg.sender?.first_name ?? null };
       }
@@ -554,6 +826,7 @@ export function useChat(key: ConversationKey) {
       ...parentFields,
       user_id: userId,
       content: content || '',
+      ...(mentionData ? { mention_data: mentionData } : {}),
       message_type: 'user',
       image_url: imageUrl ?? null,
       created_at: new Date().toISOString(),
@@ -562,41 +835,65 @@ export function useChat(key: ConversationKey) {
       reactions: [],
       sender: null,
     };
-    setMessages(prev => [...prev, optimisticMsg]);
+    setMessages(prev => scope.isCurrent() && !prev.some(row => row.id === sendId) ? [...prev.filter(row => row.id !== optimisticId), optimisticMsg] : prev);
 
     // Insert and select back the real row so we can confirm the message even if real-time is slow
     const insertData: any = {
+      id: sendId,
       ...parentFields,
       user_id: userId,
       content: content || '',
+      ...(mentionData ? { mention_data: mentionData } : {}),
       message_type: 'user',
       image_url: imageUrl ?? null,
     };
     if (replyToId && replyTo) insertData.reply_to_message_id = replyToId;
 
-    const { data: inserted, error } = await supabase.from('messages').insert(insertData).select('id, created_at').single();
-
-    if (error) {
-      logError(error, 'useChat.sendMessage');
-      setMessages(prev => prev.filter(m => m.id !== optimisticId));
-      Alert.alert("Couldn't send message", "Your message failed to send. Please try again.");
-    } else if (inserted) {
+    const receiptColumns = imageUrl ? 'id, created_at, content, image_url, mention_data'
+      : mentionData ? 'id, created_at, content, mention_data' : 'id, created_at';
+    const checkedReceipt = (result: any) => result.data && (
+      (imageUrl && (result.data.id !== sendId || result.data.content !== (content || '') || result.data.image_url !== imageUrl)) ||
+      (mentionData && (result.data.content !== content || !sameChatMentionIdentity(content, mentionData, result.data.mention_data))))
+        ? { data: null, error: Error('The saved message differs. Your original is kept.') } : result;
+    const { receipt: inserted, failure } = await resolveChatSendReceipt(
+      async () => checkedReceipt(await scopedChatRequest(scope, () =>
+        requestWithDeadline(supabase.from('messages').insert(insertData).select(receiptColumns).single(), 12_000))),
+      async () => checkedReceipt(await scopedChatRequest(scope, () => {
+        const read = supabase.from('messages').select(receiptColumns)
+          .eq('id', sendId).eq(parentCol, conversationId).eq('user_id', userId).maybeSingle();
+        return requestWithDeadline(read, 8_000);
+      })),
+    );
+    // The receipt helper catches transport errors; retirement must still be
+    // surfaced as obsolete rather than a false failure or confirmation.
+    assertSendCurrent(scope, optimisticMsg);
+    if (!inserted) {
+      if (failure) logError(failure, 'useChat.sendMessage');
+      setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== optimisticId) : prev);
+      // Scoped callers keep their original draft/selection and own recovery UI.
+      // A second native alert would cover that retry and misdirect the sender.
+      if (!entryScope) Alert.alert('Delivery unconfirmed', 'Check this chat before retrying your message.');
+      return false;
+    } else {
       // Replace optimistic ID with real DB row ID — message is now confirmed regardless of real-time
       // Real-time handler will dedup correctly (checks for the real ID, won't add a duplicate)
-      setMessages(prev => prev.map(m =>
+      setMessages(prev => scope.isCurrent() ? prev.map(m =>
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
-      ));
+      ) : prev);
+      return true;
     }
-  }, [kind, conversationId]);
+  }, [kind, conversationId, captureOperation, assertSendCurrent]);
 
-  const sendLocation = useCallback(async (lat: number, lng: number, address: string) => {
-    const userId = currentUserIdRef.current;
-    if (!userId) return;
+  const sendLocation = useCallback(async (lat: number, lng: number, address: string, entryScope?: ChatOperationScope, sendIdOverride?: string) => {
+    const scope = captureOperation(entryScope);
+    if (!scope) return false;
+    const userId = scope.userId;
 
     const content = JSON.stringify({ lat, lng, address });
 
     // Optimistic insert — synchronous, no async delay
-    const optimisticId = nextOptimisticId();
+    const sendId = sendIdOverride ?? Crypto.randomUUID();
+    const optimisticId = `optimistic-${sendId}`;
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
       ...parentFields,
@@ -608,33 +905,43 @@ export function useChat(key: ConversationKey) {
       reactions: [],
       sender: null,
     };
-    setMessages(prev => [...prev, optimisticMsg]);
+    setMessages(prev => scope.isCurrent() && !prev.some(row => row.id === sendId) ? [...prev.filter(row => row.id !== optimisticId), optimisticMsg] : prev);
 
-    const { data: inserted, error } = await supabase.from('messages').insert({
-      ...parentFields,
-      user_id: userId,
-      content,
-      message_type: 'location',
-    }).select('id, created_at').single();
-
-    if (error) {
-      logError(error, 'useChat.sendLocation');
-      setMessages(prev => prev.filter(m => m.id !== optimisticId));
-      Alert.alert("Couldn't send location", "Your location failed to send. Please try again.");
-    } else if (inserted) {
-      setMessages(prev => prev.map(m =>
+    const receiptColumns = 'id, created_at, message_type, content';
+    const checkedReceipt = (result: any) => result.data && (
+      result.data.id !== sendId || result.data.message_type !== 'location' || result.data.content !== content)
+      ? { data: null, error: Error('The saved pin differs. Your original is kept.') } : result;
+    const { receipt: inserted, failure } = await resolveChatSendReceipt(
+      async () => checkedReceipt(await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').insert({
+        id: sendId, ...parentFields, user_id: userId, content, message_type: 'location',
+      }).select(receiptColumns).single(), 12_000))),
+      async () => checkedReceipt(await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').select(receiptColumns)
+        .eq('id', sendId).eq(parentCol, conversationId).eq('user_id', userId).maybeSingle(), 8_000))),
+    );
+    // The receipt helper catches transport errors; retirement must still be
+    // surfaced as obsolete rather than a false failure or confirmation.
+    assertSendCurrent(scope, optimisticMsg);
+    if (!inserted) {
+      if (failure) logError(failure, 'useChat.sendLocation');
+      setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== optimisticId) : prev);
+      return false;
+    } else {
+      setMessages(prev => scope.isCurrent() ? prev.map(m =>
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
-      ));
+      ) : prev);
+      return true;
     }
-  }, [kind, conversationId]);
+  }, [kind, conversationId, captureOperation, assertSendCurrent]);
 
-  const sendAudio = useCallback(async (audioUrl: string, durationSeconds: number) => {
-    const userId = currentUserIdRef.current;
-    if (!userId) return;
+  const sendAudio = useCallback(async (audioUrl: string, durationSeconds: number, entryScope?: ChatOperationScope, sendIdOverride?: string) => {
+    const scope = captureOperation(entryScope);
+    if (!scope) return false;
+    const userId = scope.userId;
 
     // Optimistic insert: the audio is already uploaded by the caller, so this
     // mirrors sendMessage/sendLocation: show immediately, reconcile the real id.
-    const optimisticId = nextOptimisticId();
+    const sendId = sendIdOverride ?? Crypto.randomUUID();
+    const optimisticId = `optimistic-${sendId}`;
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
       ...parentFields,
@@ -648,54 +955,83 @@ export function useChat(key: ConversationKey) {
       reactions: [],
       sender: null,
     };
-    setMessages(prev => [...prev, optimisticMsg]);
+    setMessages(prev => scope.isCurrent() && !prev.some(row => row.id === sendId) ? [...prev.filter(row => row.id !== optimisticId), optimisticMsg] : prev);
 
-    const { data: inserted, error } = await supabase.from('messages').insert({
-      ...parentFields,
-      user_id: userId,
-      content: '',
-      message_type: 'audio',
-      audio_url: audioUrl,
-      duration_seconds: durationSeconds,
-    }).select('id, created_at').single();
-
-    if (error) {
-      logError(error, 'useChat.sendAudio');
-      setMessages(prev => prev.filter(m => m.id !== optimisticId));
-      Alert.alert("Couldn't send voice message", 'Your voice message failed to send. Please try again.');
-    } else if (inserted) {
-      setMessages(prev => prev.map(m =>
+    const receiptColumns = 'id, created_at, message_type, audio_url, duration_seconds';
+    const checkedReceipt = (result: any) => result.data && (
+      result.data.id !== sendId || result.data.message_type !== 'audio' ||
+      result.data.audio_url !== audioUrl || Number(result.data.duration_seconds) !== durationSeconds)
+      ? { data: null, error: Error('The saved recording differs. Your original is kept.') } : result;
+    const { receipt: inserted, failure } = await resolveChatSendReceipt(
+      async () => checkedReceipt(await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').insert({
+        id: sendId, ...parentFields, user_id: userId, content: '',
+        message_type: 'audio', audio_url: audioUrl, duration_seconds: durationSeconds,
+      }).select(receiptColumns).single(), 12_000))),
+      async () => checkedReceipt(await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').select(receiptColumns)
+        .eq('id', sendId).eq(parentCol, conversationId).eq('user_id', userId).maybeSingle(), 8_000))),
+    );
+    // The receipt helper catches transport errors; retirement must still be
+    // surfaced as obsolete rather than a false failure or confirmation.
+    assertSendCurrent(scope, optimisticMsg);
+    if (!inserted) {
+      if (failure) logError(failure, 'useChat.sendAudio');
+      setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== optimisticId) : prev);
+      return false;
+    } else {
+      setMessages(prev => scope.isCurrent() ? prev.map(m =>
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
-      ));
+      ) : prev);
+      return true;
     }
-  }, [kind, conversationId]);
+  }, [kind, conversationId, captureOperation, assertSendCurrent]);
 
-  const editMessage = useCallback(async (messageId: string, newContent: string) => {
-    const userId = currentUserIdRef.current;
-    if (!userId) return;
-
-    // Optimistic update
-    setMessages(prev => prev.map(m =>
-      m.id === messageId ? { ...m, content: newContent } : m,
-    ));
-
-    const { error } = await supabase
-      .from('messages')
-      .update({ content: newContent })
-      .eq('id', messageId)
-      .eq('user_id', userId);
-
-    if (error) {
+  const editMessage = useCallback(async (messageId: string, newContent: string, entryScope?: ChatOperationScope, expectedContent?: string, mentions?: ChatMentionDocument | null, expectedMentions?: ChatMentionDocument | null, options?: { errorPresentation?: 'hook' | 'caller' }) => {
+    const scope = captureOperation(entryScope);
+    if (!scope) return false;
+    const userId = scope.userId;
+    const original = messagesRef.current.find(message => message.id === messageId);
+    const changes = messageChangesRef.current;
+    const attempt = {};
+    changes.set(messageId, attempt);
+    let optimistic: ChatMessage | undefined;
+    setMessages(prev => scope.isCurrent() ? prev.map(m => {
+      if (m.id !== messageId) return m;
+      optimistic = { ...m, content: newContent, mention_data: mentions ?? null };
+      return optimistic;
+    }) : prev);
+    try {
+      const expected = expectedContent ?? original?.content;
+      if (expected === undefined) throw new Error('The original message is unavailable. Your edit is kept.');
+      await editOwnChatMessage({ kind, id: conversationId }, messageId, expected, newContent, scope, mentions, expectedMentions !== undefined ? expectedMentions : original?.mention_data);
+      assertChatScope(scope);
+      return true;
+    } catch (error) {
+      assertChatScope(scope);
       logError(error, 'useChat.editMessage');
-      fetchMessages(true).catch((e) => logError(e, 'useChat.fetchMessages'));
-      Alert.alert('Could not edit', 'Something went wrong. Please try again.');
+      if (original) setMessages(prev => scope.isCurrent() && changes.get(messageId) === attempt ? prev.map(m =>
+        m === optimistic ? { ...m, content: original.content, mention_data: original.mention_data } : m,
+      ) : prev);
+      if (isChatEditRefused(error)) throw error;
+      if (options?.errorPresentation !== 'caller') Alert.alert('Could not edit', 'Something went wrong. Please try again.');
+      return false;
     }
-  }, [fetchMessages]);
+  }, [captureOperation]);
+
+  const visibleMessages = useMemo(() => readWindow.anchorId
+    ? messages.filter(message => readWindow.ready && (!readWindow.upper || compareChatSequence(message, readWindow.upper) <= 0))
+    : messages, [messages, readWindow, readWindow.ready, readWindow.upper]);
 
   return {
-    messages,
-    loading,
+    // Realtime may arrive during the first privacy read. Keep its rows for
+    // reconciliation, but expose nothing until this account's filter is known.
+    messages: isCurrentRoom() && appliedWindowRef.current === readWindow && blockedReadyRef.current
+      ? visibleMessages : [],
+    loading: identityLoading || loading || appliedWindowRef.current !== readWindow,
+    anchorUnavailable,
+    loadError: !!identityError || loadError,
+    olderLoadError,
     currentUserId,
+    operationScope,
     sendMessage,
     sendLocation,
     sendAudio,

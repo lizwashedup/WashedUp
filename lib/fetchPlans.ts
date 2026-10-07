@@ -42,6 +42,8 @@ export interface Plan {
   image_url: string | null;
   category: string | null;
   gender_rule: string | null;
+  target_age_min?: number | null;
+  target_age_max?: number | null;
   max_invites: number | null;
   min_invites: number | null;
   neighborhood: string | null;
@@ -56,6 +58,9 @@ export interface Plan {
   featured_type: 'washedup_event' | 'birthday_party' | 'special_event' | null;
   cluster_root_id: string | null;
   allow_duplicate: boolean;
+  // Source-confirmed provenance and feed outsider availability, never inferred from total attendance.
+  circle_metadata_known?: boolean;
+  spots_remaining?: number | null;
   circle_id?: string | null;
   circle_visibility?: 'circle_only' | 'open' | null;
   stranger_cap?: number | null;
@@ -86,6 +91,8 @@ function mapRowToPlan(item: any): Plan {
     distance_km: item.distance_km ?? null,
     slug: item.slug ?? null,
     gender_rule: item.gender_rule ?? null,
+    target_age_min: item.target_age_min,
+    target_age_max: item.target_age_max,
     max_invites: item.max_invites ?? null,
     min_invites: item.min_invites ?? null,
     member_count: item.member_count ?? 0,
@@ -95,6 +102,11 @@ function mapRowToPlan(item: any): Plan {
     featured_type: (item.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null,
     cluster_root_id: item.cluster_root_id ?? null,
     allow_duplicate: item.allow_duplicate ?? true,
+    circle_metadata_known: !GROUPS_ENABLED || item.circle_id === null || (typeof item.circle_id === 'string' && item.circle_id.trim().length > 0),
+    circle_id: item.circle_id,
+    circle_visibility: item.circle_visibility,
+    stranger_cap: item.stranger_cap,
+    spots_remaining: Number.isInteger(item.spots_remaining) && item.spots_remaining >= 0 ? item.spots_remaining : null,
     circle_size: item.circle_size ?? null,
     circle_in_count: item.circle_in_count ?? null,
     creator: (item.creator_user_id ?? item.host_id)
@@ -147,8 +159,8 @@ export async function fetchPlans(
       // select only the shipped columns so the feed enrichment never errors.
       .select(
         GROUPS_ENABLED
-          ? 'id, end_time, featured_type, allow_duplicate, circle_id, circle_visibility, stranger_cap'
-          : 'id, end_time, featured_type, allow_duplicate',
+          ? 'id, end_time, featured_type, allow_duplicate, target_age_min, target_age_max, circle_id, circle_visibility, stranger_cap'
+          : 'id, end_time, featured_type, allow_duplicate, target_age_min, target_age_max',
       )
       .in('id', plans.map((p) => p.id)),
   ]);
@@ -159,14 +171,16 @@ export async function fetchPlans(
     const featuredTypeById: Record<string, 'washedup_event' | 'birthday_party' | 'special_event' | null> = {};
     const allowDuplicateById: Record<string, boolean> = {};
     const endTimeById: Record<string, string | null> = {};
+    const agesById: Record<string, Pick<Plan, 'target_age_min' | 'target_age_max'>> = {};
     const circleById: Record<string, { circle_id: string | null; circle_visibility: 'circle_only' | 'open' | null; stranger_cap: number | null }> = {};
-    ((featuredTypeResult.data ?? []) as unknown as Array<{ id: string; end_time: string | null; featured_type: string | null; allow_duplicate: boolean | null; circle_id?: string | null; circle_visibility?: 'circle_only' | 'open' | null; stranger_cap?: number | null }>).forEach(
+    ((featuredTypeResult.data ?? []) as unknown as Array<{ id: string; end_time: string | null; featured_type: string | null; allow_duplicate: boolean | null; target_age_min?: number | null; target_age_max?: number | null; circle_id?: string | null; circle_visibility?: 'circle_only' | 'open' | null; stranger_cap?: number | null }>).forEach(
       (row) => {
         endTimeById[row.id] = row.end_time ?? null;
+        agesById[row.id] = { target_age_min: row.target_age_min, target_age_max: row.target_age_max };
         featuredTypeById[row.id] = (row.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null;
         allowDuplicateById[row.id] = row.allow_duplicate ?? true;
         circleById[row.id] = {
-          circle_id: row.circle_id ?? null,
+          circle_id: row.circle_id as string | null,
           circle_visibility: row.circle_visibility ?? null,
           stranger_cap: row.stranger_cap ?? null,
         };
@@ -174,10 +188,15 @@ export async function fetchPlans(
     );
     plans.forEach((p) => {
       if (p.id in endTimeById) p.end_time = endTimeById[p.id];
+      // Unreturned/missing bounds remain unknown, rather than becoming Any age.
+      const ages = agesById[p.id];
+      if (ages?.target_age_min !== undefined) p.target_age_min = ages.target_age_min;
+      if (ages?.target_age_max !== undefined) p.target_age_max = ages.target_age_max;
       p.featured_type = featuredTypeById[p.id] ?? null;
       if (p.id in allowDuplicateById) p.allow_duplicate = allowDuplicateById[p.id];
       const c = circleById[p.id];
       if (c) {
+        p.circle_metadata_known = !GROUPS_ENABLED || c.circle_id === null || (typeof c.circle_id === 'string' && c.circle_id.trim().length > 0);
         p.circle_id = c.circle_id;
         p.circle_visibility = c.circle_visibility;
         p.stranger_cap = c.stranger_cap;
@@ -215,25 +234,29 @@ export async function fetchPlans(
  * Fetched via the get_user_interest_signals RPC, then mapped through the same
  * Plan shape as fetchPlans so they render with the standard PlanCard.
  */
-export async function fetchInterestedPlans(): Promise<Plan[]> {
+export async function fetchInterestedPlans(options: { throwOnError?: boolean } = {}): Promise<Plan[]> {
   const { data: signals, error: sErr } = await supabase.rpc('get_user_interest_signals');
   if (sErr) {
+    if (options.throwOnError) throw sErr;
     console.warn('[fetchInterestedPlans] RPC failed:', sErr.message);
     return [];
   }
   const eventIds = (signals ?? []).map((r: any) => r.event_id).filter(Boolean) as string[];
   if (eventIds.length === 0) return [];
 
+  // cluster_root_id is computed by get_filtered_feed, not stored on events.
+  // Personal Interested entries are individual plans, so leave that feed-only field null.
   // events query + member-count correction can run in parallel (both keyed on eventIds).
   const [{ data: events, error: eErr }, realCounts] = await Promise.all([
     supabase
       .from('events')
-      .select('id, title, start_time, location_text, location_lat, location_lng, image_url, primary_vibe, neighborhood, slug, gender_rule, max_invites, min_invites, member_count, status, host_message, is_featured, featured_type, cluster_root_id, allow_duplicate, creator_user_id')
+      .select('id, title, start_time, end_time, location_text, location_lat, location_lng, image_url, primary_vibe, neighborhood, slug, gender_rule, target_age_min, target_age_max, max_invites, min_invites, member_count, status, host_message, is_featured, featured_type, allow_duplicate, creator_user_id' + (GROUPS_ENABLED ? ', circle_id, circle_visibility, stranger_cap' : ''))
       .in('id', eventIds),
     fetchRealMemberCounts(eventIds),
   ]);
 
   if (eErr || !events) {
+    if (options.throwOnError) throw eErr ?? new Error('Interested plans unavailable');
     console.warn('[fetchInterestedPlans] events fetch failed:', eErr?.message);
     return [];
   }
@@ -242,10 +265,11 @@ export async function fetchInterestedPlans(): Promise<Plan[]> {
   const creatorIds = [...new Set((events as any[]).map((r) => r.creator_user_id).filter(Boolean))] as string[];
   const profilesByCreator = new Map<string, { first_name_display: string | null; profile_photo_url: string | null }>();
   if (creatorIds.length > 0) {
-    const { data: profs } = await supabase
+    const { data: profs, error: profileError } = await supabase
       .from('profiles')
       .select('id, first_name_display, profile_photo_url')
       .in('id', creatorIds);
+    if (profileError && options.throwOnError) throw profileError;
     (profs ?? []).forEach((p: any) => {
       profilesByCreator.set(p.id, {
         first_name_display: p.first_name_display ?? null,

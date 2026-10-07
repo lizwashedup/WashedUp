@@ -33,7 +33,8 @@ export async function getWaitlistForCreator(
     p_event_id: eventId,
   });
   if (error) throw error;
-  return (data ?? []) as WaitlistManagerRow[];
+  if (!Array.isArray(data)) throw new Error('Waitlist response unavailable');
+  return data as WaitlistManagerRow[];
 }
 
 // Returns the new slots-used count (0-3).

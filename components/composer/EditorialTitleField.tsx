@@ -3,10 +3,11 @@
  * italic ~28px on a single underline rule, no border box (design study v3).
  * Shared by both composer surfaces (PlanComposerV2 + CirclePlanComposer).
  */
+import { useMemo, type Ref } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
-import Colors from '../../constants/Colors';
-import { Fonts } from '../../constants/Typography';
+import Colors, { AfterglowColors } from '../../constants/Colors';
+import { Fonts, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 
 interface EditorialTitleFieldProps {
   value: string;
@@ -15,6 +16,9 @@ interface EditorialTitleFieldProps {
   label?: string;
   maxLength?: number;
   autoFocus?: boolean;
+  appearance?: { fonts: AfterglowFontFamilies };
+  inputRef?: Ref<TextInput>;
+  error?: string;
 }
 
 export default function EditorialTitleField({
@@ -24,20 +28,27 @@ export default function EditorialTitleField({
   label = 'what',
   maxLength = 80,
   autoFocus = false,
+  appearance,
+  inputRef,
+  error,
 }: EditorialTitleFieldProps) {
+  const s = useMemo(() => appearance ? { ...styles, ...titleAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={s.container}>
+      <Text style={s.label}>{label}</Text>
       <TextInput
-        style={styles.input}
+        ref={inputRef}
+        style={[s.input, error ? { borderBottomColor: Colors.errorBrand } : undefined]}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor={Colors.inkSoft}
+        placeholderTextColor={appearance ? AfterglowColors.muted : Colors.inkSoft}
         maxLength={maxLength}
         autoFocus={autoFocus}
         returnKeyType="next"
         multiline={false}
+        accessibilityLabel={`${label}, plan title`}
+        accessibilityHint={error}
       />
     </View>
   );
@@ -66,3 +77,9 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
 });
+
+function titleAppearance(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  label: { ...AfterglowType.section, fontFamily: fonts.semibold, color: AfterglowColors.muted, marginBottom: 8 },
+  input: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink,
+    minHeight: 48, borderBottomWidth: 1, borderBottomColor: AfterglowColors.line, paddingVertical: 8 },
+}); }

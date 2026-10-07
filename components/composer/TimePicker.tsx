@@ -1,21 +1,17 @@
 /**
  * TimePicker - the shared WHEN time control for both composer surfaces. A "time"
- * row (label + pill + change) opens a sheet with hour / minute / AM-PM columns
- * and a terracotta "set time" button. Kept identical across V2 and the circle
- * composer so the time mechanic is uniform.
- *
- * BUILD-PREP: this single component is where the native UIDatePicker (wheels)
- * swap lands; replacing it here updates both surfaces at once.
+ * row opens a compact sheet with direct time entry, common minute choices,
+ * and a visible AM/PM choice. The same control serves Plan and event creation.
  */
-import { useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { CreatorActionFill } from '../creator/CreatorActionFill';
+import Colors, { AfterglowColors, CreatorSurfaceColors } from '../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
 
-export const HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 export const MINUTE_OPTIONS = ['00', '15', '30', '45'];
 export const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
 
@@ -24,6 +20,7 @@ export function displayTime(hour: number, minute: string, period: 'AM' | 'PM'): 
 }
 
 interface TimePickerProps {
+  appearance?: { fonts: AfterglowFontFamilies; sunset?: boolean };
   hour: number;
   minute: string;
   period: 'AM' | 'PM';
@@ -32,75 +29,126 @@ interface TimePickerProps {
   onChange: (hour: number, minute: string, period: 'AM' | 'PM') => void;
 }
 
-export default function TimePicker({ hour, minute, period, selected, onChange }: TimePickerProps) {
+export default function TimePicker({ hour, minute, period, selected, onChange, appearance }: TimePickerProps) {
+  const styles = useMemo(() => timeStyles(appearance), [appearance]);
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
-  const [tempHour, setTempHour] = useState(hour);
+  const [tempHour, setTempHour] = useState(String(hour));
   const [tempMinute, setTempMinute] = useState(minute);
   const [tempPeriod, setTempPeriod] = useState<'AM' | 'PM'>(period);
+  const minuteInput = useRef<TextInput>(null);
+  const active = useRef(false);
+  const visit = useRef(0);
+  const renderedVisit = visit.current;
+  useEffect(() => () => { active.current = false; visit.current++; }, []);
 
   const sheetBottomPad = Platform.OS === 'ios' ? 40 : Math.max(insets.bottom, 16) + 16;
 
   const openPicker = () => {
-    setTempHour(hour);
+    if (active.current) return;
+    active.current = true;
+    visit.current++;
+    setTempHour(String(hour));
     setTempMinute(minute);
     setTempPeriod(period);
     setOpen(true);
   };
+  const isCurrentVisit = () => active.current && visit.current === renderedVisit;
+  const cancel = () => {
+    if (!isCurrentVisit()) return;
+    active.current = false;
+    Keyboard.dismiss();
+    setOpen(false);
+  };
+  const parsedHour = Number(tempHour);
+  const parsedMinute = Number(tempMinute);
+  const validTime = /^\d{1,2}$/.test(tempHour) && parsedHour >= 1 && parsedHour <= 12 &&
+    /^\d{1,2}$/.test(tempMinute) && parsedMinute >= 0 && parsedMinute <= 59;
   const confirm = () => {
+    if (!validTime || !isCurrentVisit()) return;
+    active.current = false;
     hapticLight();
-    onChange(tempHour, tempMinute, tempPeriod);
+    Keyboard.dismiss();
+    onChange(parsedHour, String(parsedMinute).padStart(2, '0'), tempPeriod);
     setOpen(false);
   };
 
   return (
     <>
-      <TouchableOpacity style={styles.row} onPress={openPicker} activeOpacity={0.7}>
-        <Text style={styles.label}>time</Text>
+      <TouchableOpacity style={styles.row} onPress={openPicker} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Time, ${selected ? displayTime(hour, minute, period) : 'not set'}`} accessibilityState={{ expanded: open }}>
+        <Text style={styles.label}>{appearance ? 'Time' : 'time'}</Text>
         <View style={styles.pill}>
-          <Text style={styles.pillText}>{selected ? displayTime(hour, minute, period) : 'set a time'}</Text>
+          <Text style={styles.pillText}>{selected ? displayTime(hour, minute, period) : (appearance ? 'Set a time' : 'set a time')}</Text>
         </View>
-        <Text style={styles.change}>change</Text>
+        <Text style={styles.change}>{appearance ? 'Change' : 'change'}</Text>
       </TouchableOpacity>
 
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)} statusBarTranslucent>
-        <Pressable style={styles.overlay} onPress={() => setOpen(false)}>
-          <Pressable style={[styles.sheet, { paddingBottom: sheetBottomPad }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.sheetTitle}>what time?</Text>
-            <View style={styles.columns}>
-              <ScrollView showsVerticalScrollIndicator={false} style={styles.col}>
-                {HOURS.map((h) => (
-                  <TouchableOpacity key={h} style={[styles.opt, tempHour === h && styles.optOn]} onPress={() => setTempHour(h)}>
-                    <Text style={[styles.optText, tempHour === h && styles.optTextOn]}>{h}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <ScrollView showsVerticalScrollIndicator={false} style={styles.col}>
-                {MINUTE_OPTIONS.map((m) => (
-                  <TouchableOpacity key={m} style={[styles.opt, tempMinute === m && styles.optOn]} onPress={() => setTempMinute(m)}>
-                    <Text style={[styles.optText, tempMinute === m && styles.optTextOn]}>{m}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <View style={styles.col}>
+      <Modal visible={open} transparent animationType="slide" onRequestClose={cancel} statusBarTranslucent>
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <Pressable style={styles.overlay} onPress={cancel} accessible={false}>
+          <Pressable style={[styles.sheet, { paddingBottom: sheetBottomPad }]} onPress={(e) => e.stopPropagation()} accessible={false} accessibilityViewIsModal onAccessibilityEscape={cancel}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle} accessibilityRole="header">{appearance ? 'What time?' : 'what time?'}</Text>
+              <TouchableOpacity style={styles.cancel} onPress={cancel} accessibilityRole="button" accessibilityLabel="Cancel time changes" activeOpacity={0.7}>
+                <Text style={styles.cancelText} numberOfLines={1}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.timeRow}>
+              <TextInput
+                style={styles.timeInput}
+                value={tempHour}
+                onChangeText={(value) => {
+                  const digits = value.replace(/\D/g, '').slice(0, 2);
+                  setTempHour(digits);
+                  if (digits.length === 2) minuteInput.current?.focus();
+                }}
+                keyboardType="number-pad"
+                maxLength={2}
+                selectTextOnFocus
+                accessibilityLabel="Hour, 1 through 12"
+              />
+              <Text style={styles.separator}>:</Text>
+              <TextInput
+                ref={minuteInput}
+                style={styles.timeInput}
+                value={tempMinute}
+                onChangeText={(value) => setTempMinute(value.replace(/\D/g, '').slice(0, 2))}
+                keyboardType="number-pad"
+                maxLength={2}
+                selectTextOnFocus
+                accessibilityLabel="Minute, 0 through 59"
+              />
+              <View style={styles.periodGroup}>
                 {PERIODS.map((p) => (
-                  <TouchableOpacity key={p} style={[styles.opt, tempPeriod === p && styles.optOn]} onPress={() => setTempPeriod(p)}>
-                    <Text style={[styles.optText, tempPeriod === p && styles.optTextOn]}>{p}</Text>
+                  <TouchableOpacity key={p} style={[styles.periodOption, tempPeriod === p && styles.selectedOption]} onPress={() => { Keyboard.dismiss(); setTempPeriod(p); }} accessibilityRole="button" accessibilityState={{ selected: tempPeriod === p }} accessibilityLabel={p}>
+                    <Text style={[styles.optionText, tempPeriod === p && styles.selectedText]}>{p}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
-            <TouchableOpacity style={styles.confirm} onPress={confirm} activeOpacity={0.85}>
-              <Text style={styles.confirmText}>set time</Text>
+            <View style={styles.minuteChoices}>
+              {MINUTE_OPTIONS.map((m) => (
+                <TouchableOpacity key={m} style={[styles.minuteChoice, tempMinute === m && styles.selectedOption]} onPress={() => { Keyboard.dismiss(); setTempMinute(m); }} accessibilityRole="button" accessibilityLabel={`${m} minutes`} accessibilityState={{ selected: tempMinute === m }}>
+                  <Text style={[styles.optionText, tempMinute === m && styles.selectedText]}>:{m}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.timezoneNote}>Los Angeles time · adjusts for daylight saving</Text>
+            {!validTime && <Text style={styles.errorText}>Enter an hour from 1–12 and minutes from 00–59.</Text>}
+            <TouchableOpacity style={[styles.confirm, appearance?.sunset && creatorConfirm, !validTime && styles.confirmDisabled]} onPress={confirm} disabled={!validTime} activeOpacity={0.85} accessibilityRole="button" accessibilityState={{ disabled: !validTime }}>
+              {appearance?.sunset && <CreatorActionFill />}
+              <Text style={styles.confirmText}>{appearance ? 'Set time' : 'set time'}</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );
 }
 
-const styles = StyleSheet.create({
+const legacyStyles = StyleSheet.create({
+  flex: { flex: 1 },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10,
     paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12,
@@ -113,13 +161,64 @@ const styles = StyleSheet.create({
 
   overlay: { flex: 1, backgroundColor: Colors.overlayDark40, justifyContent: 'flex-end' },
   sheet: { backgroundColor: Colors.cream, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 18 },
-  sheetTitle: { fontFamily: Fonts.display, fontSize: 22, color: Colors.darkWarm, marginBottom: 16 },
-  columns: { flexDirection: 'row', gap: 12, height: 180 },
-  col: { flex: 1, backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
-  opt: { paddingVertical: 10, alignItems: 'center' },
-  optOn: { backgroundColor: Colors.accentSubtle },
-  optText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.secondary },
-  optTextOn: { color: Colors.terracotta, fontFamily: Fonts.sansBold },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  sheetTitle: { flex: 1, fontFamily: Fonts.display, fontSize: 22, color: Colors.darkWarm },
+  cancel: { minHeight: 44, minWidth: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
+  cancelText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.secondary },
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  timeInput: { width: 60, minHeight: 52, textAlign: 'center', backgroundColor: Colors.white, borderRadius: 6, borderWidth: 1, borderColor: Colors.border, fontFamily: Fonts.sansBold, fontSize: 22, color: Colors.darkWarm },
+  separator: { fontFamily: Fonts.sansBold, fontSize: 22, color: Colors.darkWarm },
+  periodGroup: { flex: 1, flexDirection: 'row', gap: 4, marginLeft: 8 },
+  periodOption: { flex: 1, paddingVertical: 14, alignItems: 'center', borderRadius: 6, borderWidth: 1, borderColor: Colors.border },
+  minuteChoices: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  minuteChoice: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 6, borderWidth: 1, borderColor: Colors.border },
+  selectedOption: { backgroundColor: Colors.accentSubtle, borderColor: Colors.terracotta },
+  optionText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.secondary },
+  selectedText: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
+  timezoneNote: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 14 },
+  errorText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 12 },
   confirm: { backgroundColor: Colors.terracotta, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
+  confirmDisabled: { opacity: 0.45 },
   confirmText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
 });
+
+
+function timeStyles(appearance?: { fonts: AfterglowFontFamilies; sunset?: boolean }) {
+  if (!appearance) return legacyStyles;
+  const { fonts } = appearance;
+  return { ...legacyStyles, ...StyleSheet.create({
+    row: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10,
+      paddingHorizontal: 12, paddingVertical: 12, borderRadius: 6, borderWidth: 1,
+      borderColor: AfterglowColors.line, backgroundColor: AfterglowColors.white },
+    label: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.muted },
+    pill: { flex: 1, minWidth: 0 },
+    pillText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    change: { ...AfterglowType.caption, fontFamily: fonts.medium, color: AfterglowColors.clay },
+    sheet: { backgroundColor: AfterglowColors.paper, borderTopLeftRadius: 10, borderTopRightRadius: 10, paddingHorizontal: 20, paddingTop: 18 },
+    sheetTitle: { flex: 1, ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink },
+    cancelText: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.ink },
+    timeInput: { width: 56, minHeight: 56, textAlign: 'center', backgroundColor: AfterglowColors.white,
+      borderRadius: 6, borderWidth: 1, borderColor: AfterglowColors.line,
+      ...AfterglowType.identity, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    separator: { ...AfterglowType.identity, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    periodGroup: { flex: 1, flexDirection: 'row', gap: 4, marginLeft: 2 },
+    periodOption: { flex: 1, minHeight: 48, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', borderRadius: 6,
+      borderWidth: 1, borderColor: AfterglowColors.line, backgroundColor: AfterglowColors.white },
+    minuteChoice: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingVertical: 10,
+      borderRadius: 6, borderWidth: 1, borderColor: AfterglowColors.line, backgroundColor: AfterglowColors.white },
+    selectedOption: { backgroundColor: AfterglowColors.clay, borderColor: AfterglowColors.clay },
+    optionText: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.ink },
+    selectedText: { fontFamily: fonts.semibold, color: AfterglowColors.white },
+    timezoneNote: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 14 },
+    errorText: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.clay, marginTop: 12 },
+    confirm: { minHeight: 48, backgroundColor: AfterglowColors.clay, borderRadius: 6, paddingVertical: 12,
+      alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+    confirmText: { ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.white },
+  }) };
+}
+
+const creatorConfirm = StyleSheet.create({
+  surface: { borderRadius: 24, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge,
+    backgroundColor: Colors.terracotta, shadowColor: Colors.terracotta,
+    shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.24, shadowRadius: 8, elevation: 3 },
+}).surface;

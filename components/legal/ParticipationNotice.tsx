@@ -9,7 +9,7 @@
  * never silent continued use).
  */
 
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -37,30 +37,64 @@ interface ParticipationNoticeProps {
       with the try-again line. */
   onAgree: () => Promise<boolean>;
   onClose: () => void;
+  /** Native iOS has fully dismissed this notice; optional for existing callers. */
+  onDismiss?: () => void;
 }
 
-export function ParticipationNotice({ visible, organizerName, onAgree, onClose }: ParticipationNoticeProps) {
+export function ParticipationNotice(props: ParticipationNoticeProps) {
+  const visit = useRef({ visible: props.visible, generation: 0 });
+  if (props.visible && !visit.current.visible) visit.current.generation += 1;
+  visit.current.visible = props.visible;
+  const generation = visit.current.generation;
+  return <ParticipationNoticeVisit key={generation} {...props} isCurrent={() => visit.current.generation === generation} />;
+}
+
+function ParticipationNoticeVisit(props: ParticipationNoticeProps & { isCurrent: () => boolean }) {
+  const { visible, organizerName } = props;
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const latest = useRef(props); latest.current = props;
+  const mounted = useRef(false);
+  const agreeing = useRef(false);
+  const closing = useRef(false);
+  const dismissed = useRef(false);
+  const beganVisible = useRef(visible);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const current = () => mounted.current && latest.current.isCurrent();
+  const active = () => current() && latest.current.visible && !closing.current;
+  const close = () => {
+    if (!active() || agreeing.current) return;
+    closing.current = true;
+    latest.current.onClose();
+  };
+  const dismiss = () => {
+    if (!current() || latest.current.visible || !beganVisible.current || dismissed.current) return;
+    dismissed.current = true;
+    latest.current.onDismiss?.();
+  };
 
   const handleAgree = async () => {
-    if (!checked || busy) return;
+    if (!active() || !checked || agreeing.current) return;
+    agreeing.current = true;
     setBusy(true);
     setProblem(null);
-    const ok = await onAgree();
+    let ok = false;
+    try { ok = await latest.current.onAgree(); } catch {}
+    if (!current()) return;
+    agreeing.current = false;
     setBusy(false);
-    if (!ok) {
+    if (!ok && active()) {
       // LIZ COPY
       setProblem('that did not go through. give it another try.');
     }
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={close} onDismiss={dismiss} onAccessibilityEscape={close}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} hitSlop={12}>
+          <TouchableOpacity onPress={close} disabled={busy} accessibilityRole="button" accessibilityLabel="Close" hitSlop={12}>
             <X size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
@@ -84,7 +118,8 @@ export function ParticipationNotice({ visible, organizerName, onAgree, onClose }
 
           <TouchableOpacity
             style={styles.checkboxRow}
-            onPress={() => { hapticLight(); setChecked((c) => !c); }}
+            disabled={busy} accessibilityRole="checkbox" accessibilityState={{ checked, disabled: busy }} aria-checked={checked}
+            onPress={() => { if (!active() || agreeing.current) return; hapticLight(); setChecked((c) => !c); }}
           >
             <View style={[styles.checkbox, checked && styles.checkboxOn]}>
               {checked && <Check size={14} color={Colors.white} strokeWidth={3} />}
@@ -94,7 +129,7 @@ export function ParticipationNotice({ visible, organizerName, onAgree, onClose }
               I understand this is an independent activity and agree to the
               assumption-of-risk, release, and limitation provisions in the WashedUp
               Terms of Service.{' '}
-              <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>
+              <Text style={styles.link} onPress={() => { if (active() && !agreeing.current) void Linking.openURL(TERMS_URL); }}>
                 View Terms
               </Text>
             </Text>

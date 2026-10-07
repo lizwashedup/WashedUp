@@ -328,7 +328,7 @@ describe('Build 42 creator ticket-flow regression contracts', () => {
     expect(home).toContain("events.find((event) => event.status === 'Draft')");
     expect(home).toContain('draft saved');
     expect(home).toContain('your ticket is saved. finish making it sellable.');
-    expect(home).toContain(') : !draftEvent ? (');
+    expect(home).toContain(') : !draftEvent && !eventsQuery.isError ? (');
   });
 });
 
@@ -381,7 +381,8 @@ describe('Paid-ticket journey regression contracts', () => {
   it('flushes the complete event before either Community or Organization ticket setup opens', () => {
     const source = readAppSource('app/creator/event-form.tsx');
     expect(source).toContain('const handleOpenTickets = async');
-    expect(source).toContain('await updateOperatorEvent(id, fields, null);');
+    expect(source).toContain('saveEvent: async () => { await saveEventFields(id, fields); }');
+    expect(source).toContain('if (!pageContext) { await updateOperatorEvent(eventId, fields, null); return; }');
     expect(source).toContain("queryKey: ['ticket-setup-event', id]");
     expect(source).toContain('void handleOpenTickets(true)');
     expect(source).toContain('void handleOpenTickets()');

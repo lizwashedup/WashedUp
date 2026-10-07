@@ -1,3 +1,8 @@
+import {useCreatorPageScope} from '../../hooks/useCreatorPageScope';
+import {useCreatorPageRead} from '../../hooks/useCreatorPageRead';
+import {listCreatorEventTemplates,deleteCreatorEventTemplate,creatorTemplateRoute,type PageEventLibraryTemplate} from '../../lib/creatorPageEventTemplateLibrary';
+import type {CreatorPageScope} from '../../lib/creatorPageReview';
+import { EventMediaImage } from '../../components/events/EventMediaImage';
 /**
  * Creator mode: events. Slice 0 of the launch design pass (doc 43 track B):
  * SEGMENTED, poster-led cards with the text in its own zone (never over the
@@ -14,24 +19,26 @@
  * segments.
  */
 
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { Plus, X } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { Plus, X, ArrowUpRight, FileText, Ticket, Users, ScanLine, Wallet, RotateCcw } from 'lucide-react-native';
+import Colors, { CreatorSurfaceColors } from '../../constants/Colors';
+import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import { getCreatorAccess, getCreatorEvents, type CommunityEventRow } from '../../lib/creatorMode';
-import { deleteEventTemplate, listEventTemplates } from '../../lib/creatorEvents';
+import { deleteEventTemplate, listEventTemplates, type EventTemplate } from '../../lib/creatorEvents';
 import { deriveEventState, hasUnpublishedTickets, needsAttention, pickNextUpcomingEvent, type EventState } from '../../lib/organizerHome';
 import { formatEventDateLA } from '../../lib/laDate';
 import { hapticLight } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
-import { EVENT_SUMMARY_ENABLED } from '../../constants/FeatureFlags';
+import { CREATOR_PAGES_ENABLED, EVENT_SUMMARY_ENABLED } from '../../constants/FeatureFlags';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { eventBelongsToWorkspace, useWorkspace } from '../../lib/workspaceContext';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
 import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 
@@ -39,22 +46,22 @@ type Segment = 'attention' | 'next' | 'drafts' | 'later' | 'past' | 'templates';
 
 const SEGMENTS: { key: Segment; label: string }[] = [
   // LIZ COPY: segment labels
-  { key: 'attention', label: 'needs attention' },
-  { key: 'next', label: 'next' },
-  { key: 'drafts', label: 'drafts' },
-  { key: 'later', label: 'later' },
-  { key: 'past', label: 'past' },
-  { key: 'templates', label: 'templates' },
+  { key: 'attention', label: 'Needs attention' },
+  { key: 'next', label: 'Next event' },
+  { key: 'drafts', label: 'Drafts' },
+  { key: 'later', label: 'Other events' },
+  { key: 'past', label: 'Past' },
+  { key: 'templates', label: 'Templates' },
 ];
 
 // LIZ COPY: the per-segment empty states, invitations not absences
 const EMPTY_HINTS: Record<Segment, string> = {
-  attention: 'nothing needs a look right now.',
-  next: 'nothing lined up next. put one on and it lives here.',
-  drafts: 'events you save before publishing land here. only you see them.',
-  later: 'nothing further out yet.',
-  past: 'completed, cancelled, and archived events settle here.',
-  templates: 'save any event as a template and it lives here, ready to put on again.',
+  attention: 'Nothing needs your attention right now.',
+  next: 'No next event here yet. Create one, or check Needs attention.',
+  drafts: 'Unpublished events you can keep working on appear here.',
+  later: 'No other events here yet.',
+  past: 'Completed, cancelled and archived events stay here.',
+  templates: 'Save an event as a template to use it again.',
 };
 
 // LIZ COPY: why a card landed in "needs attention"
@@ -64,15 +71,17 @@ function attentionReason(status: string, state: EventState): string {
   return "starts soon, nobody's said they're going yet";
 }
 
-function PosterThumb({ imageUrl, title }: { imageUrl: string | null; title: string }) {
-  const [broken, setBroken] = useState(false);
-  if (imageUrl && !broken) {
+function PosterThumb({ eventId, imageUrl, title }: { eventId: string; imageUrl: string | null; title: string }) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
+  const [brokenReference, setBrokenReference] = useState<string | null>(null);
+  if (imageUrl && brokenReference !== imageUrl) {
     return (
-      <Image
-        source={{ uri: imageUrl }}
+      <EventMediaImage
+        eventId={eventId} reference={imageUrl}
         style={styles.thumb}
         contentFit="cover"
-        onError={() => setBroken(true)}
+        onError={() => setBrokenReference(imageUrl)}
       />
     );
   }
@@ -84,6 +93,10 @@ function PosterThumb({ imageUrl, title }: { imageUrl: string | null; title: stri
 }
 
 export default function CreatorEventsScreen() {
+  const { width, fontScale } = useWindowDimensions();
+  const singleColumnActions = width < 360 || fontScale > 1.2;
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [segment, setSegment] = useState<Segment>('attention');
@@ -91,7 +104,7 @@ export default function CreatorEventsScreen() {
   const workspace = useWorkspace(access);
   const community = useLedCommunity(access);
 
-  const { data: allEvents = [], refetch, isRefetching } = useQuery({
+  const eventsQuery = useQuery({
     queryKey: ['creator-events-tab', workspace, community?.id],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -100,17 +113,42 @@ export default function CreatorEventsScreen() {
     },
     enabled: access != null && workspace != null,
   });
+  const { data: allEvents = [], refetch, isRefetching } = eventsQuery;
   const events = allEvents.filter((event) =>
     eventBelongsToWorkspace(event, workspace, community?.id ?? null),
   );
 
-  const { data: templates = [] } = useQuery({
+  const {scope: templateAccountScope,account: templateAccount} = useCreatorPageScope('creator-template-library');
+  const templateEpoch = useRef(0);
+  const [templateVisit,setTemplateVisit] = useState({active: AppState.currentState === 'active',epoch: 0});
+  useEffect(() => {
+    if (!CREATOR_PAGES_ENABLED) return;
+    const listener = AppState.addEventListener('change', next => {
+      templateEpoch.current += 1; setTemplateVisit({active: next === 'active',epoch: templateEpoch.current});
+    });
+    return () => listener.remove();
+  }, []);
+  const templateScope = useMemo<CreatorPageScope | null>(() => templateAccountScope && templateVisit.active ? {
+    userId: templateAccountScope.userId,
+    isCurrent: () => templateAccountScope.isCurrent() && AppState.currentState === 'active' && templateVisit.epoch === templateEpoch.current,
+  } : null, [templateAccountScope,templateVisit]);
+  const readTemplates = useCallback((owned: CreatorPageScope) => listCreatorEventTemplates(owned), []);
+  const pageTemplates = useCreatorPageRead(CREATOR_PAGES_ENABLED ? templateScope : null, readTemplates);
+  const { data: ordinaryTemplates = [] } = useQuery({
     queryKey: ['event-templates'],
     queryFn: listEventTemplates,
+    enabled: !CREATOR_PAGES_ENABLED,
   });
+  const templates: (EventTemplate | PageEventLibraryTemplate)[] = CREATOR_PAGES_ENABLED
+    ? templateScope?.isCurrent() && !pageTemplates.loading && !pageTemplates.error ? pageTemplates.data ?? [] : []
+    : ordinaryTemplates;
   const removeTemplate = useMutation({
-    mutationFn: (id: string) => deleteEventTemplate(id),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['event-templates'] }),
+    mutationFn: (template: EventTemplate | PageEventLibraryTemplate) => {
+      if (!CREATOR_PAGES_ENABLED) return deleteEventTemplate(template.id);
+      if (!templateScope?.isCurrent() || !('user_id' in template)) throw new Error('Check the current template library.');
+      return deleteCreatorEventTemplate(template, templateScope);
+    },
+    onSettled: () => { queryClient.invalidateQueries({ queryKey: ['event-templates'] }); if (CREATOR_PAGES_ENABLED) void pageTemplates.refresh().catch(() => undefined); },
   });
 
   // C-16: needsAttention takes priority -- an event never appears in both
@@ -158,7 +196,7 @@ export default function CreatorEventsScreen() {
         activeOpacity={0.85}
         accessible={false}
       >
-        <PosterThumb imageUrl={e.image_url} title={e.title} />
+        <PosterThumb eventId={e.id} imageUrl={e.image_url} title={e.title} />
       </TouchableOpacity>
       <View style={styles.cardBody}>
         <TouchableOpacity
@@ -175,7 +213,7 @@ export default function CreatorEventsScreen() {
           }
         >
           <View style={styles.cardTitleRow}>
-            <Text style={styles.cardTitle} numberOfLines={1}>{e.title}</Text>
+            <Text style={styles.cardTitle}>{e.title}</Text>
             {!!e.community_id && (
               // inventory C-17: the spec requires every community-hosted
               // event to carry this label wherever it's listed
@@ -185,9 +223,9 @@ export default function CreatorEventsScreen() {
               </View>
             )}
           </View>
-          <Text style={styles.cardMeta} numberOfLines={1}>
+          <Text style={styles.cardMeta}>
             {opts?.draft
-              ? /* LIZ COPY */ `only you see it${e.event_date ? ` · ${formatEventDateLA(e.event_date)}` : ''}`
+              ? /* LIZ COPY */ `Draft${e.event_date ? ` · ${formatEventDateLA(e.event_date)}` : ''}`
               : opts?.past
                 ? `${e.status.toLowerCase()}${e.event_date ? ` · ${formatEventDateLA(e.event_date)}` : ''}`
                 : [
@@ -208,95 +246,97 @@ export default function CreatorEventsScreen() {
                   ].filter(Boolean).join(' · ')}
           </Text>
           {!!e.public_name && !opts?.draft && (
-            <Text style={styles.cardByline} numberOfLines={1}>put on by {e.public_name}</Text>
+            <Text style={styles.cardByline}>put on by {e.public_name}</Text>
           )}
           {opts?.attention && (
-            <Text style={styles.cardAttentionReason} numberOfLines={1}>
+            <Text style={styles.cardAttentionReason}>
               {attentionReason(e.status, state)}
             </Text>
           )}
           {!opts?.draft && !opts?.past && e.roomArchived === true && (
             // C-24's room auto-closes ~48h after start; this is the only
             // signal of that on the events list itself
-            <Text style={styles.cardByline} numberOfLines={1}>chat closed</Text>
+            <Text style={styles.cardByline}>chat closed</Text>
           )}
         </TouchableOpacity>
+      </View>
         {opts?.past ? (
           <TouchableOpacity
+            style={[styles.cardActionTarget, singleColumnActions && styles.cardActionFull]}
             onPress={() => router.push(`/creator/event-form?duplicateFrom=${e.id}` as never)}
-            hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel={`Put ${e.title} on again`}
           >
             {/* LIZ COPY: duplicate = same event, fresh date */}
-            <Text style={styles.cardAction}>put it on again</Text>
+            <RotateCcw size={16} color={Colors.terracotta} accessible={false} /><Text style={styles.cardAction}>Put it on again</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.cardActionRow}>
             {/* LIZ COPY -- decorative label, not itself interactive; the
                 real "manage" affordance is the title/meta region above */}
-            <Text style={styles.cardActionQuiet}>{opts?.draft ? 'keep shaping it' : 'manage'}</Text>
+            {opts?.draft && <Text style={styles.cardActionQuiet}>keep shaping it</Text>}
             {EVENT_SUMMARY_ENABLED && !opts?.draft && (
               <TouchableOpacity
+            style={[styles.cardActionTarget, styles.cardActionSummary]}
                 onPress={() => router.push(`/creator/event-summary?id=${e.id}` as never)}
-                hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel={`Summary for ${e.title}`}
               >
                 {/* copy to the taste gate */}
-                <Text style={styles.cardAction}>summary</Text>
+                <FileText size={18} color={Colors.terracotta} accessible={false} /><Text style={[styles.cardAction, styles.cardActionSummaryLabel]}>Summary</Text><ArrowUpRight size={16} color={Colors.terracotta} accessible={false} />
               </TouchableOpacity>
             )}
             <TouchableOpacity
+            style={[styles.cardActionTarget, singleColumnActions && styles.cardActionFull]}
               onPress={() => router.push(`/creator/tickets?id=${e.id}` as never)}
-              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={`Tickets for ${e.title}`}
             >
               {/* copy to the taste gate (launch sprint 7-21) */}
-              <Text style={styles.cardAction}>tickets</Text>
+              <Ticket size={16} color={Colors.terracotta} accessible={false} /><Text style={styles.cardAction}>Tickets</Text>
             </TouchableOpacity>
             {!opts?.draft && (
               <>
                 <TouchableOpacity
+            style={[styles.cardActionTarget, singleColumnActions && styles.cardActionFull]}
                   onPress={() => router.push(`/creator/attendees?id=${e.id}` as never)}
-                  hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel={`Who's coming to ${e.title}`}
                 >
                   {/* copy to the taste gate (spec 100) */}
-                  <Text style={styles.cardAction}>who's coming</Text>
+                  <Users size={16} color={Colors.terracotta} accessible={false} /><Text style={styles.cardAction}>Who's coming</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+            style={[styles.cardActionTarget, singleColumnActions && styles.cardActionFull]}
                   onPress={() => router.push(`/creator/check-in?id=${e.id}` as never)}
-                  hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel={`Check in for ${e.title}`}
                 >
                   {/* copy to the taste gate (spec 100 P0 #5). O-09: was "at the door" */}
-                  <Text style={styles.cardAction}>check in</Text>
+                  <ScanLine size={16} color={Colors.terracotta} accessible={false} /><Text style={styles.cardAction}>Check in</Text>
                 </TouchableOpacity>
                 {EVENT_SUMMARY_ENABLED && (
                   <TouchableOpacity
+            style={[styles.cardActionTarget, singleColumnActions && styles.cardActionFull]}
                     onPress={() => router.push(`/creator/event-money?id=${e.id}` as never)}
-                    hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Money for ${e.title}`}
                   >
                     {/* copy to the taste gate (Build 35 Screen 07) */}
-                    <Text style={styles.cardAction}>money</Text>
+                    <Wallet size={16} color={Colors.terracotta} accessible={false} /><Text style={styles.cardAction}>Money</Text>
                   </TouchableOpacity>
                 )}
               </>
             )}
           </View>
         )}
-      </View>
     </View>
     );
   };
 
   const segmentBody = () => {
+    if (segment !== 'templates' && eventsQuery.isPending) return <Text style={styles.empty} accessibilityLiveRegion="polite">Loading your events…</Text>;
+    if (segment !== 'templates' && eventsQuery.isError && events.length === 0) return null;
     switch (segment) {
       case 'attention':
         return attention.length > 0
@@ -319,29 +359,36 @@ export default function CreatorEventsScreen() {
           ? past.map((e) => renderEventCard(e, { past: true }))
           : <Text style={styles.empty}>{EMPTY_HINTS.past}</Text>;
       case 'templates':
+        if (CREATOR_PAGES_ENABLED && (templateAccount.isLoading || pageTemplates.loading)) return <Text style={styles.empty}>Checking your templates…</Text>;
+        if (CREATOR_PAGES_ENABLED && (!templateScope?.isCurrent() || templateAccount.error || pageTemplates.error)) return <View>
+          <Text accessibilityRole="alert" style={styles.empty}>Couldn’t load your templates. Check this account and your page access, then try again.</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check template library" onPress={() => void (templateAccount.error ? templateAccount.retry() : pageTemplates.refresh()).catch(() => undefined)}><Text style={styles.empty}>Check templates</Text></TouchableOpacity>
+        </View>;
         // S-04: same nested-touchable fix as renderEventCard above -- the
         // outer used to be one TouchableOpacity, silently swallowing the
         // delete "X" from screen readers.
         return templates.length > 0 ? (
-          templates.map((t) => (
+          <>{CREATOR_PAGES_ENABLED && removeTemplate.isError && <Text accessibilityRole="alert" style={styles.empty}>Couldn’t confirm that deletion. Check your templates before trying again.</Text>}{templates.map((t) => (
             <View key={t.id} style={styles.card}>
               <TouchableOpacity
                 style={styles.templateTapArea}
-                onPress={() => router.push(`/creator/event-form?templateId=${t.id}` as never)}
+                onPress={() => { if (!CREATOR_PAGES_ENABLED || templateScope?.isCurrent()) router.push(creatorTemplateRoute(t) as never); }}
                 activeOpacity={0.85}
                 accessibilityRole="button"
                 accessibilityLabel={t.name}
-                accessibilityHint="Tap to put it on"
+                accessibilityHint={'source_page_id' in t && t.source_page_id ? 'Prepare a private event draft from this template' : 'Tap to put it on'}
               >
-                <PosterThumb imageUrl={t.fields.image_url || null} title={t.name} />
+                <PosterThumb eventId={'source_event_id' in t ? t.source_event_id ?? '' : ''} imageUrl={t.fields.image_url || null} title={t.name} />
                 <View style={styles.cardBody}>
-                  <Text style={styles.cardTitle} numberOfLines={1}>{t.name}</Text>
+                  <Text style={styles.cardTitle}>{t.name}</Text>
                   {/* LIZ COPY */}
-                  <Text style={styles.cardMeta}>tap to put it on</Text>
+                  <Text style={styles.cardMeta}>{'source_page_id' in t && t.source_page_id ? 'prepare a private event draft' : 'tap to put it on'}</Text>
                 </View>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => removeTemplate.mutate(t.id)}
+                style={styles.templateDelete}
+                onPress={() => removeTemplate.mutate(t)}
+                disabled={removeTemplate.isPending}
                 hitSlop={10}
                 accessibilityRole="button"
                 accessibilityLabel={`Delete template: ${t.name}`}
@@ -349,7 +396,7 @@ export default function CreatorEventsScreen() {
                 <X size={16} color={Colors.tertiary} strokeWidth={2.5} />
               </TouchableOpacity>
             </View>
-          ))
+          ))}</>
         ) : (
           <Text style={styles.empty}>{EMPTY_HINTS.templates}</Text>
         );
@@ -364,7 +411,7 @@ export default function CreatorEventsScreen() {
       >
         {/* LIZ COPY */}
         <Text style={styles.kicker}>creator mode</Text>
-        <Text style={styles.title}>events</Text>
+        <Text style={styles.title}>Events</Text>
         <WorkspaceSwitcher access={access} stayOnEvents />
         {workspace === 'community' && <CommunitySwitcher access={access} />}
 
@@ -372,10 +419,13 @@ export default function CreatorEventsScreen() {
           style={styles.postBtn}
           onPress={() => router.push('/creator/event-form')}
           accessibilityRole="button"
-          accessibilityLabel="Put on an event"
+          accessibilityLabel="New event"
         >
-          <Plus size={16} color={Colors.white} strokeWidth={2.5} />
-          <Text style={styles.postBtnText}>put on an event</Text>
+          <CreatorActionFill />
+          <View style={styles.postBtnContent}>
+            <Plus size={16} color={Colors.white} strokeWidth={2.5} />
+            <Text style={styles.postBtnText}>New event</Text>
+          </View>
         </TouchableOpacity>
 
         {/* Six labels cannot stay readable in one compressed phone-width
@@ -383,6 +433,7 @@ export default function CreatorEventsScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.segmentScroll}
           contentContainerStyle={styles.segmentRow}
           accessibilityRole="tablist"
         >
@@ -393,6 +444,7 @@ export default function CreatorEventsScreen() {
               onPress={() => { hapticLight(); setSegment(s.key); }}
               accessibilityRole="tab"
               accessibilityLabel={s.label}
+              aria-selected={segment === s.key}
               accessibilityState={{ selected: segment === s.key }}
             >
               <Text
@@ -408,6 +460,15 @@ export default function CreatorEventsScreen() {
           ))}
         </ScrollView>
 
+        {segment !== 'templates' && eventsQuery.isError && <View style={styles.readState} accessibilityLiveRegion="polite">
+          <Text style={styles.cardTitle}>Events unavailable</Text>
+          <Text style={styles.cardMeta}>{events.length ? 'Showing saved events. Retry to check for changes.' : 'Your events couldn’t be loaded. Try again.'}</Text>
+          <TouchableOpacity style={styles.retry} accessibilityRole="button" accessibilityLabel="Retry events" disabled={eventsQuery.isFetching} onPress={() => void refetch()}>
+            <Text style={styles.cardAction}>{eventsQuery.isFetching ? 'Checking…' : 'Retry'}</Text>
+          </TouchableOpacity>
+        </View>}
+        {segment === 'next' && next && <Text style={styles.cardMeta}>Your next scheduled event. Events needing a review appear in Needs attention.</Text>}
+        {segment === 'later' && later.length > 0 && <Text style={styles.cardMeta}>Your other events, including any without a date.</Text>}
         {segmentBody()}
       </ScrollView>
     </SafeAreaView>
@@ -417,23 +478,28 @@ export default function CreatorEventsScreen() {
 const THUMB_SIZE = 64;
 const UNDERLINE_HEIGHT = 2.5;
 
-const styles = StyleSheet.create({
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  segmentScroll: { flexGrow: 0, flexShrink: 0 },
+  postBtnContent: { zIndex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  readState: { paddingVertical: 12, gap: 4 },
+  retry: { minHeight: 44, minWidth: 44, alignSelf: 'flex-start', justifyContent: 'center' },
   container: { flex: 1, backgroundColor: Colors.parchment },
   content: { padding: 20, gap: 10 },
   kicker: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
   },
   title: {
-    fontFamily: Fonts.display,
+    fontFamily: fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
     marginBottom: 4,
   },
   postBtn: {
+    minHeight: 44, overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -443,19 +509,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 4,
   },
-  postBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  postBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.white },
   segmentRow: { flexDirection: 'row', gap: 8, paddingRight: 20, marginBottom: 6 },
   // S-04: paddingVertical was 8 (roughly a 30pt tap target with this text
   // size); 12 brings the real tap area near the 44pt minimum without
   // changing the tab row's proportions much.
-  segment: { flexShrink: 0, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 12 },
-  segmentText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray },
-  segmentTextOn: { color: Colors.darkWarm, fontFamily: Fonts.sansBold },
+  segment: { flexShrink: 0, minHeight: 44, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 12 },
+  segmentText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  segmentTextOn: { color: Colors.darkWarm, fontFamily: fonts.semibold },
   segmentUnderline: { height: UNDERLINE_HEIGHT, alignSelf: 'stretch', marginTop: 6, backgroundColor: 'transparent' },
   segmentUnderlineOn: { backgroundColor: Colors.terracotta },
   card: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
     gap: 12,
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
@@ -467,13 +534,14 @@ const styles = StyleSheet.create({
   // S-04: the templates card's tappable region (poster + name), sized to
   // fill the row up to the delete "X" -- same visual slot `cardBody` (flex:
   // 1) held before the nested-touchable accessibility fix split them apart.
-  templateTapArea: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  templateDelete: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  templateTapArea: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   thumb: { width: THUMB_SIZE, height: THUMB_SIZE, borderRadius: 12 },
   thumbFallback: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
-  thumbLetter: { fontFamily: Fonts.display, fontSize: FontSizes.displaySM, color: Colors.terracotta },
-  cardBody: { flex: 1 },
-  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 2, flexShrink: 1 },
+  thumbLetter: { fontFamily: fonts.display, fontSize: FontSizes.displaySM, color: Colors.terracotta },
+  cardBody: { flex: 1, minWidth: 0 },
+  cardTitleRow: { alignItems: 'flex-start', gap: 4 },
+  cardTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.darkWarm, marginBottom: 2, flexShrink: 1 },
   communityBadge: {
     backgroundColor: Colors.accentSubtle,
     borderRadius: 6,
@@ -481,27 +549,38 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   communityBadgeText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: 10,
+    fontFamily: fonts.semibold,
+    fontSize: FontSizes.micro,
     color: Colors.terracotta,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
-  cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
-  cardByline: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 2 },
-  cardAttentionReason: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.terracotta, marginTop: 2 },
+  cardMeta: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary },
+  cardByline: { fontFamily: fonts.medium, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 2 },
+  cardAttentionReason: { fontFamily: fonts.medium, fontSize: FontSizes.caption, color: Colors.terracotta, marginTop: 2 },
   cardAction: {
-    fontFamily: Fonts.sansMedium,
+    fontFamily: fonts.medium,
     fontSize: FontSizes.bodySM,
-    color: Colors.terracotta,
-    marginTop: 6,
+    color: Colors.darkWarm,
   },
   cardActionQuiet: {
-    fontFamily: Fonts.sansMedium,
+    fontFamily: fonts.medium,
     fontSize: FontSizes.caption,
     color: Colors.tertiary,
     marginTop: 6,
   },
-  cardActionRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 14, rowGap: 8 },
-  empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, marginTop: 8 },
+  cardActionTarget: {
+    flexBasis: '47%', flexGrow: 1, minHeight: 46, minWidth: 44,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 8,
+    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.cardBg,
+    shadowColor: Colors.darkWarm, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2,
+  },
+  cardActionFull: { flexBasis: '100%' },
+  cardActionSummary: { flexBasis: '100%', backgroundColor: Colors.parchment, borderColor: CreatorSurfaceColors.goldEdge },
+  cardActionSummaryLabel: { flex: 1 },
+  cardActionRow: { flexBasis: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  empty: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, color: Colors.secondary, marginTop: 8 },
 });
+
+}

@@ -1,9 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   clearPendingCheckout,
+  clearPendingDestination,
+  consumePendingDestination,
   parseAppDestination,
+  pendingCheckoutForEvent,
   peekPendingCheckout,
   stashPendingCheckout,
+  stashPendingDestination,
 } from '../pendingLink';
 import { redirectSystemPath } from '../../app/+native-intent';
 
@@ -83,6 +87,91 @@ describe('redirectSystemPath (universal-link routing)', () => {
   });
 });
 
+describe('pending destination durability', () => {
+  const href = `/e/${ID}`;
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.clearAllMocks();
+  });
+
+  it('consumes a saved destination once when no guard is supplied', async () => {
+    await stashPendingDestination(href);
+
+    await expect(consumePendingDestination()).resolves.toBe(href);
+    await expect(consumePendingDestination()).resolves.toBeNull();
+    expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['signout', 'same-user signout/signin'])(
+    'retains the durable destination when %s invalidates a pending read',
+    async (transition) => {
+      await stashPendingDestination(href);
+      let activeUserId: string | null = 'user-a';
+      let generation = 0;
+      const startingGeneration = generation;
+      const shouldConsume = jest.fn(() => (
+        activeUserId === 'user-a' && generation === startingGeneration
+      ));
+      let finishRead!: (value: string | null) => void;
+      jest.mocked(AsyncStorage.getItem).mockImplementationOnce(() => new Promise((resolve) => {
+        finishRead = resolve;
+      }));
+
+      const consumption = consumePendingDestination(shouldConsume);
+      expect(shouldConsume).not.toHaveBeenCalled();
+      activeUserId = null;
+      generation += 1;
+      if (transition === 'same-user signout/signin') {
+        activeUserId = 'user-a';
+        generation += 1;
+      }
+      finishRead(href);
+
+      await expect(consumption).resolves.toBeNull();
+      expect(shouldConsume).toHaveBeenCalledTimes(1);
+      expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+      await expect(consumePendingDestination(() => true)).resolves.toBe(href);
+      await expect(consumePendingDestination()).resolves.toBeNull();
+    },
+  );
+
+  it('clears only when the optional guard allows the mutation', async () => {
+    await stashPendingDestination(href);
+    await clearPendingDestination(() => false);
+
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    await expect(consumePendingDestination()).resolves.toBe(href);
+    await stashPendingDestination(href);
+    await clearPendingDestination(() => true);
+    await expect(consumePendingDestination()).resolves.toBeNull();
+    await stashPendingDestination(href);
+    await clearPendingDestination();
+    await expect(consumePendingDestination()).resolves.toBeNull();
+  });
+
+  it('treats storage read and removal failures as best-effort', async () => {
+    await stashPendingDestination(href);
+    jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('read failed'));
+
+    await expect(consumePendingDestination()).resolves.toBeNull();
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    jest.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error('remove failed'));
+    await expect(consumePendingDestination()).resolves.toBeNull();
+    await expect(consumePendingDestination()).resolves.toBe(href);
+  });
+
+  it('treats storage stash and clear failures as best-effort', async () => {
+    jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('write failed'));
+    await expect(stashPendingDestination(href)).resolves.toBeUndefined();
+
+    await stashPendingDestination(href);
+    jest.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error('remove failed'));
+    await expect(clearPendingDestination()).resolves.toBeUndefined();
+    await expect(consumePendingDestination()).resolves.toBe(href);
+  });
+});
+
 describe('pending checkout durability', () => {
   beforeEach(async () => AsyncStorage.clear());
 
@@ -93,4 +182,41 @@ describe('pending checkout durability', () => {
     await clearPendingCheckout();
     expect(await peekPendingCheckout()).toBeNull();
   });
+
+  it('opens the saved order for the same event instead of restarting Stripe', async () => {
+    await stashPendingCheckout(ID);
+    const loadOrder = jest.fn(async () => ({ event_id: 'event-a' }));
+
+    expect(await pendingCheckoutForEvent('event-a', loadOrder)).toBe(ID);
+    expect(loadOrder).toHaveBeenCalledWith(ID);
+    expect(await peekPendingCheckout()).toBe(ID);
+  });
+
+  it('does not redirect a different event to the saved order', async () => {
+    await stashPendingCheckout(ID);
+    expect(await pendingCheckoutForEvent('event-b', async () => ({ event_id: 'event-a' }))).toBeNull();
+  });
+});
+
+
+describe('pending checkout exact cleanup',()=>{
+ beforeEach(async()=>{jest.clearAllMocks();await AsyncStorage.clear();});
+ it('does not clear a newer checkout when an old order screen finishes',async()=>{
+  await stashPendingCheckout('new-order');await clearPendingCheckout('old-order');expect(await peekPendingCheckout()).toBe('new-order');
+  await clearPendingCheckout('new-order');expect(await peekPendingCheckout()).toBeNull();
+ });
+ it('does not clear after the initiating visit retires',async()=>{
+  await stashPendingCheckout(ID);await clearPendingCheckout(ID,()=>false);expect(await peekPendingCheckout()).toBe(ID);
+ });
+ it('strict reads distinguish storage failure from an absent pointer',async()=>{
+  jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('offline'));await expect(peekPendingCheckout(true)).rejects.toThrow('offline');
+  jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('offline'));await expect(peekPendingCheckout()).resolves.toBeNull();
+ });
+ it('serializes a new handoff behind an in-flight exact removal',async()=>{
+  await stashPendingCheckout(ID);let resolve!:(v:string)=>void;
+  jest.mocked(AsyncStorage.getItem).mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));
+  const clearing=clearPendingCheckout(ID);await Promise.resolve();
+  const saving=stashPendingCheckout('new-order');resolve(ID);await Promise.all([clearing,saving]);
+  expect(await peekPendingCheckout()).toBe('new-order');
+ });
 });

@@ -1,0 +1,21 @@
+import React from 'react';
+import {act,create,type ReactTestRenderer} from 'react-test-renderer';
+const mockLoad=jest.fn(),mockPush=jest.fn(),mockUpdate=jest.fn(),mockClose=jest.fn(),mockCheck=jest.fn();
+jest.mock('expo-router',()=>({useRouter:()=>({push:(...a:unknown[])=>mockPush(...a)})}));
+jest.mock('../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:{regular:'System',semibold:'System'}})}));
+jest.mock('../../../lib/attendeeMessageNotification',()=>({loadAttendeeNoticeLinks:(...a:unknown[])=>mockLoad(...a),attendeeMessageEventRoute:(id:string)=>`/event/${id}`}));
+jest.mock('../../../lib/creatorTicketRead',()=>({scopedTicketRequest:async(_scope:unknown,make:()=>unknown)=>{await mockCheck();return make();}}));
+jest.mock('../../../lib/supabase',()=>({supabase:{from:()=>{const q:any={update:(...a:unknown[])=>{mockUpdate(...a);return q;},eq:()=>q,select:()=>q,maybeSingle:async()=>({data:{id:'notice'},error:null})};return q;}}}));
+import {AttendeeMessageInboxRow} from '../AttendeeMessageInboxRow';
+let tree:ReactTestRenderer;const notice={id:'notice',title:'Sunday Table',body:'Saved update'};
+const render=(extra:any={})=><AttendeeMessageInboxRow notice={notice} userId="member" visible enabled onClose={mockClose} {...extra}/>;
+const action=()=>tree.root.findAll(v=>typeof v.props.onPress==='function'&&['Open event','Check event'].includes(v.props.accessibilityLabel))[0];
+beforeEach(()=>{jest.clearAllMocks();mockLoad.mockResolvedValue(new Map([['notice','event']]));mockCheck.mockResolvedValue(undefined);});
+afterEach(()=>act(()=>tree?.unmount()));
+it('opens the exact page/update once after a double activation',async()=>{await act(async()=>{tree=create(render());});const press=action().props.onPress;await act(async()=>{press();press();});expect(mockLoad).toHaveBeenCalledTimes(1);expect(mockUpdate).toHaveBeenCalledWith({status:'read'});expect(mockPush).toHaveBeenCalledWith('/event/event');expect(mockClose).toHaveBeenCalledTimes(1);});
+it('keeps a failed lookup visible for explicit checking without marking read or navigating',async()=>{mockLoad.mockRejectedValueOnce(Error('Offline'));await act(async()=>{tree=create(render());});await act(async()=>action().props.onPress());expect(mockUpdate).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();expect(action().props.accessibilityLabel).toBe('Check event');await act(async()=>action().props.onPress());expect(mockPush).toHaveBeenCalledTimes(1);});
+it.each([{visible:false},{userId:'other'}])('ignores a late target after context changes %p',async(extra)=>{let resolve:any;mockLoad.mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));await act(async()=>{tree=create(render());});await act(async()=>action().props.onPress());await act(async()=>tree.update(render(extra)));await act(async()=>resolve(new Map([['notice','event']])));expect(mockUpdate).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();});
+it('opens a confirmed target when optional read-status bookkeeping fails',async()=>{mockCheck.mockRejectedValueOnce(Error('Status unavailable'));await act(async()=>{tree=create(render());});await act(async()=>action().props.onPress());expect(mockPush).toHaveBeenCalledWith('/event/event');});
+it('keeps the disabled page rollout on Scene without a lookup or chat fallback',async()=>{await act(async()=>{tree=create(render({enabled:false}));});act(()=>action().props.onPress());expect(mockPush).toHaveBeenCalledWith('/(tabs)/explore');expect(mockLoad).not.toHaveBeenCalled();expect(mockUpdate).not.toHaveBeenCalled();});
+
+it('expands the original message in place without an event lookup or mutation',async()=>{await act(async()=>{tree=create(render());});const read=tree.root.findAll(v=>v.props.accessibilityRole==='button'&&v.props.accessibilityLabel==='Read update')[0];act(()=>read.props.onPress());expect(tree.root.findAll(v=>v.props.accessibilityLabel==='Show less').length).toBeGreaterThan(0);expect(mockLoad).not.toHaveBeenCalled();expect(mockUpdate).not.toHaveBeenCalled();});

@@ -1,15 +1,20 @@
+import { useCreatorApplicationStatus } from '../../hooks/useCreatorApplicationStatus';
+import { CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack, useFocusEffect } from 'expo-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter, Stack } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ChevronDown, ChevronRight, Ticket, Users } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import Colors, { SceneDetailColors as Scene, CreatorSurfaceColors } from '../../constants/Colors';
+import { LinearGradient } from 'expo-linear-gradient';
+import ProfileButton from '../../components/ProfileButton';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { FontSizes, LineHeights, type AfterglowFontFamilies } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { friendlyError } from '../../lib/friendlyError';
-import { fetchMyGrants, withdrawOperatorApplication, type OperatorGrant, type OperatorTrack } from '../../lib/operatorApplications';
+import { withdrawOperatorApplication, type OperatorGrant, type OperatorTrack } from '../../lib/operatorApplications';
 
 const TRACK_CARDS: {
   track: OperatorTrack;
@@ -19,19 +24,19 @@ const TRACK_CARDS: {
   Icon: typeof Ticket;
 }[] = [
   {
-    track: 'event_host',
-    // LIZ COPY (decision 16: put on / start; never host, post, lead)
-    title: 'put on events',
-    blurb: 'put your events on the scene. shows, dinners, pop-ups, anything real.',
-    route: '/creator/apply-events',
-    Icon: Ticket,
-  },
-  {
     track: 'community_leader',
-    title: 'start a community',
-    blurb: 'a group people join and belong to, run by you. putting on events comes with it.',
+    title: 'Community',
+    blurb: 'An ongoing group people join, with conversations and events that bring everyone together.',
     route: '/creator/apply-community',
     Icon: Users,
+  },
+  {
+    track: 'event_host',
+    // The existing event application remains the organization track.
+    title: 'Organization',
+    blurb: 'For businesses, venues, teams, or people putting on events.',
+    route: '/creator/apply-events',
+    Icon: Ticket,
   },
 ];
 
@@ -40,17 +45,17 @@ function statusLine(grant: OperatorGrant | undefined): { label: string; tappable
   switch (grant.status) {
     case 'applied':
     case 'in_review':
-      return { label: "a real person is reading this, you'll hear from us within a day", tappable: false };
+      return { label: "Application received. Check Apply to Scene for updates.", tappable: false };
     case 'needs_more_info':
-      return { label: grant.applicant_message ? `one thing before we say yes: ${grant.applicant_message}` : 'one thing before we say yes. tap to update your application.', tappable: true };
+      return { label: grant.applicant_message ? `More information requested: ${grant.applicant_message}` : 'More information requested. Open your application to update it.', tappable: true };
     case 'approved':
-      return { label: "you're in", tappable: false };
+      return { label: 'Approved', tappable: false };
     case 'declined':
-      return { label: 'not the right fit last time. the door stays open, apply again anytime.', tappable: true };
+      return { label: 'Your previous application was not approved. You can apply again.', tappable: true };
     case 'revoked':
-      return { label: 'this track is closed for your account. reach out if that seems wrong.', tappable: false };
+      return { label: 'This application is closed for your account. Contact us if you need help.', tappable: false };
     case 'withdrawn':
-      return { label: 'you withdrew this application. apply again anytime.', tappable: true };
+      return { label: 'Application withdrawn. You can apply again.', tappable: true };
   }
 }
 
@@ -63,6 +68,8 @@ function canWithdraw(grant: OperatorGrant | undefined): boolean {
 
 export default function CreatorApplyScreen() {
   const router = useRouter();
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = React.useMemo(() => createStyles(fonts), [fonts]);
   const queryClient = useQueryClient();
   const [withdrawingId, setWithdrawingId] = React.useState<string | null>(null);
   const [alertInfo, setAlertInfo] = React.useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
@@ -71,33 +78,26 @@ export default function CreatorApplyScreen() {
   // paths" -- this screen never calls the two tracks "paths".
   const [showDifference, setShowDifference] = React.useState(false);
 
-  const { data: grants = [], isLoading, refetch } = useQuery({
-    queryKey: ['my-operator-grants'],
-    queryFn: fetchMyGrants,
-    staleTime: 15_000,
-  });
-
-  useFocusEffect(
-    React.useCallback(() => {
-      refetch();
-    }, [refetch]),
-  );
+  const { grants, isLoading, error: statusError, signedOut, refresh, current } = useCreatorApplicationStatus();
 
   const confirmWithdraw = (grant: OperatorGrant) => {
+    if (!current()) return;
     hapticLight();
     setAlertInfo({
-      title: 'withdraw this application?',
-      message: "you can apply again anytime, this just clears today's request.",
+      title: 'Withdraw this application?',
+      message: "You can apply again anytime. This just clears your current request.",
       buttons: [
-        { text: 'keep it', style: 'cancel' },
+        { text: 'Keep it', style: 'cancel' },
         {
-          text: 'withdraw',
+          text: 'Withdraw',
           onPress: async () => {
+            if (!current()) return;
             setWithdrawingId(grant.id);
             try {
               await withdrawOperatorApplication(grant.id);
               hapticSuccess();
               queryClient.invalidateQueries({ queryKey: ['my-operator-grants'] });
+              if (current()) void refresh().catch(() => undefined);
             } catch (e) {
               setAlertInfo({ title: 'That did not go through', message: friendlyError(e, 'Try again in a moment.') });
             } finally {
@@ -110,26 +110,87 @@ export default function CreatorApplyScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <LinearGradient colors={[Scene.upper, Scene.middle, Scene.lower]} locations={Scene.gradientLocations} style={styles.container}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} hitSlop={12}>
-          <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.headerBtn} hitSlop={8}>
+          <ArrowLeft size={22} color={Scene.text} strokeWidth={2.5} />
         </TouchableOpacity>
+        <Text style={styles.headerLabel}>Apply to Scene</Text>
+        <ProfileButton surface="scene" />
       </View>
 
       {isLoading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.terracotta} />
+          <ActivityIndicator size="large" color={Scene.action} />
         </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>run things on washedup</Text>
-          <Text style={styles.intro}>
-            real people run real things here. tell us who you are and what you want to bring to LA.
-            a human reads every application and replies within a day. choose one, or apply for both.
-          </Text>
+      ) : statusError ? <View style={styles.content}><Text accessibilityRole="alert">Couldn’t load your application status.</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry application status" onPress={() => void refresh().catch(() => undefined)} style={styles.withdrawButton}><Text style={styles.withdrawLink}>Try again</Text></TouchableOpacity></View> : signedOut ? <View style={styles.content}><Text>Sign in to check your applications.</Text></View> : (
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+          <View style={styles.introduction}>
+            <Text accessibilityRole="header" style={styles.title}>Be a part of the Scene.</Text>
+            <Text style={styles.intro}>Bring your community or organization to Scene. Choose one, or apply for both.</Text>
+          </View>
+          <View style={styles.reviewNotice}>
+            <Text style={styles.reviewText}>We’ll review new applications when the refreshed Scene is ready.</Text>
+          </View>
+
+          <View style={styles.trackList}>
+          {TRACK_CARDS.map(({ track, title, blurb, route, Icon }) => {
+            const grant = grants.find((g) => g.track === track);
+            const status = statusLine(grant);
+            const locked = !!status && !status.tappable;
+            return (
+              <View key={track} style={styles.card}>
+                <TouchableOpacity
+                  style={styles.trackChoice}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Apply for ${track === 'community_leader' ? 'a community' : 'an organization'}`}
+                  accessibilityState={{ disabled: locked }}
+                  disabled={locked}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    if (locked || !current()) return;
+                    hapticLight();
+                    router.push(route as never);
+                  }}
+                >
+                  <View style={styles.cardHeading}>
+                    <View style={styles.cardIconWrap}>
+                      <Icon size={20} color={Scene.action} strokeWidth={2} />
+                    </View>
+                    <Text style={styles.cardTitle}>{title}</Text>
+                    {!locked && <ChevronRight size={18} color={Scene.supporting} strokeWidth={2} />}
+                  </View>
+                  <Text style={styles.cardBlurb}>{blurb}</Text>
+                </TouchableOpacity>
+                {status && (
+                  <View style={[styles.statusPanel, grant?.status === 'approved' && styles.statusPanelApproved]}>
+                    <Text style={styles.statusText}>{status.label}</Text>
+                    {grant?.status === 'approved' && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Open ${title.toLowerCase()} creator space`} style={styles.withdrawButton} onPress={() => { if (current()) router.push((CREATOR_PAGES_ENABLED ? '/creator/pages' : track === 'community_leader' ? '/(creator)/today' : '/(creator)/organizer-home') as never); }}><Text style={styles.withdrawLink}>Open creator space</Text></TouchableOpacity>}
+                    {canWithdraw(grant) && (
+                      <TouchableOpacity
+                        style={styles.withdrawButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Withdraw ${title.toLowerCase()} application`}
+                        accessibilityState={{ disabled: withdrawingId === grant!.id, busy: withdrawingId === grant!.id }}
+                        onPress={() => confirmWithdraw(grant!)}
+                        disabled={withdrawingId === grant!.id}
+                      >
+                        {withdrawingId === grant!.id ? (
+                          <ActivityIndicator size="small" color={Scene.action} />
+                        ) : (
+                          <Text style={styles.withdrawLink}>Withdraw</Text>
+                        )}
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+          </View>
 
           <TouchableOpacity
             style={styles.differenceToggle}
@@ -139,80 +200,25 @@ export default function CreatorApplyScreen() {
             }}
             activeOpacity={0.7}
             accessibilityRole="button"
-            accessibilityLabel="see the difference between putting on events and starting a community"
+            accessibilityLabel="See the difference between a community and an organization"
             accessibilityState={{ expanded: showDifference }}
           >
-            <Text style={styles.differenceToggleText}>see the difference</Text>
-            <ChevronDown
-              size={16}
-              color={Colors.terracotta}
-              strokeWidth={2.5}
-              style={showDifference ? styles.chevronOpen : undefined}
-            />
+            <Text style={styles.differenceToggleText}>See the difference</Text>
+            <ChevronDown size={16} color={Scene.action} strokeWidth={2.5} style={showDifference ? styles.chevronOpen : undefined} />
           </TouchableOpacity>
 
           {showDifference && (
             <View style={styles.differenceCard}>
               <View style={styles.differenceRow}>
-                <Text style={styles.differenceWho}>put on events</Text>
-                <Text style={styles.differenceWhat}>one-off events on the scene. no ongoing group, no member roster.</Text>
+                <Text style={styles.differenceWho}>Community</Text>
+                <Text style={styles.differenceWhat}>A group people can join and keep coming back to. Includes shared conversations and events.</Text>
               </View>
               <View style={[styles.differenceRow, styles.differenceRowLast]}>
-                <Text style={styles.differenceWho}>start a community</Text>
-                <Text style={styles.differenceWhat}>an ongoing group people join and belong to. putting on events comes with it.</Text>
+                <Text style={styles.differenceWho}>Organization</Text>
+                <Text style={styles.differenceWhat}>A place to publish events for your business, venue, team, or yourself. Does not include an ongoing member group.</Text>
               </View>
             </View>
           )}
-
-          {TRACK_CARDS.map(({ track, title, blurb, route, Icon }) => {
-            const grant = grants.find((g) => g.track === track);
-            const status = statusLine(grant);
-            const locked = !!status && !status.tappable;
-            return (
-              <TouchableOpacity
-                key={track}
-                style={[styles.card, locked && styles.cardLocked]}
-                activeOpacity={locked ? 1 : 0.8}
-                onPress={() => {
-                  if (locked) return;
-                  hapticLight();
-                  router.push(route as never);
-                }}
-              >
-                <View style={styles.cardIconWrap}>
-                  <Icon size={22} color={Colors.terracotta} strokeWidth={2} />
-                </View>
-                <View style={styles.cardBody}>
-                  <Text style={styles.cardTitle}>{title}</Text>
-                  <Text style={styles.cardBlurb}>{blurb}</Text>
-                  {status && (
-                    <View style={[styles.statusPill, grant?.status === 'approved' && styles.statusPillApproved]}>
-                      <Text
-                        style={[styles.statusText, grant?.status === 'approved' && styles.statusTextApproved]}
-                        numberOfLines={3}
-                      >
-                        {status.label}
-                      </Text>
-                      {canWithdraw(grant) && (
-                        <TouchableOpacity
-                          onPress={() => confirmWithdraw(grant!)}
-                          disabled={withdrawingId === grant!.id}
-                          hitSlop={8}
-                        >
-                          {withdrawingId === grant!.id ? (
-                            <ActivityIndicator size="small" color={Colors.terracotta} style={styles.withdrawSpinner} />
-                          ) : (
-                            <Text style={styles.withdrawLink}>withdraw</Text>
-                          )}
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  )}
-                </View>
-                {!locked && <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />}
-              </TouchableOpacity>
-            );
-          })}
         </ScrollView>
       )}
 
@@ -224,119 +230,44 @@ export default function CreatorApplyScreen() {
         onClose={() => setAlertInfo(null)}
       />
     </SafeAreaView>
+    </LinearGradient>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
+const createStyles = (fonts: AfterglowFontFamilies) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: Scene.lower },
+  safe: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: { paddingHorizontal: 16, paddingVertical: 8 },
-  headerBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-
-  content: { paddingHorizontal: 24, paddingBottom: 48, gap: 14 },
-  title: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displayLG,
-    lineHeight: LineHeights.displayLG,
-    color: Colors.darkWarm,
-    marginBottom: 4,
-  },
-  intro: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    lineHeight: LineHeights.bodyMD,
-    color: Colors.secondary,
-    marginBottom: 12,
-  },
-
-  differenceToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    marginBottom: 14,
-  },
-  differenceToggleText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.terracotta,
-  },
+  header: { paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerBtn: { width: 44, height: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  headerLabel: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Scene.text },
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32, gap: 16 },
+  introduction: { gap: 12 },
+  title: { fontFamily: fonts.display, fontSize: FontSizes.displayLG, lineHeight: LineHeights.displayLG, color: Scene.text },
+  intro: { fontFamily: fonts.regular, fontSize: FontSizes.bodyLG, lineHeight: LineHeights.bodyLG, color: Scene.supporting },
+  reviewNotice: { paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: Scene.action },
+  reviewText: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Scene.supporting },
+  trackList: { width: '100%', gap: 12 },
+  // The View owns full-width geometry; descriptions and status never share the
+  // narrow title/icon row or nest a Withdraw target inside a disabled selector.
+  card: { width: '100%', alignSelf: 'stretch', minWidth: 0, borderRadius: 20, backgroundColor: Scene.surface, borderWidth: 1, borderColor: Scene.border, overflow: 'hidden' },
+  trackChoice: { alignSelf: 'stretch', minWidth: 0, minHeight: 44, padding: 16, gap: 10 },
+  cardHeading: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
+  cardIconWrap: { width: 36, height: 36, flexShrink: 0, borderRadius: 12, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, alignItems: 'center', justifyContent: 'center' },
+  cardTitle: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: FontSizes.bodyLG, lineHeight: LineHeights.bodyLG, color: Scene.text },
+  cardBlurb: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Scene.supporting },
+  statusPanel: { marginHorizontal: 16, marginBottom: 16, padding: 12, gap: 6, borderRadius: 12, backgroundColor: Colors.creamWarm, alignSelf: 'stretch' },
+  statusPanelApproved: { backgroundColor: CreatorSurfaceColors.sunsetGoldLight },
+  statusText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Scene.text },
+  withdrawButton: { minHeight: 44, minWidth: 44, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: 4 },
+  withdrawLink: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Scene.action },
+  differenceToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', gap: 8 },
+  differenceToggleText: { flexShrink: 1, fontFamily: fonts.medium, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Scene.action },
   chevronOpen: { transform: [{ rotate: '180deg' }] },
-  differenceCard: {
-    backgroundColor: Colors.creamWarm,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.borderWarm,
-    marginBottom: 16,
-    overflow: 'hidden',
-  },
-  differenceRow: {
-    padding: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderWarm,
-    gap: 2,
-  },
+  differenceCard: { width: '100%', backgroundColor: Scene.surface, borderRadius: 16, borderWidth: 1, borderColor: Scene.border },
+  differenceRow: { padding: 16, borderBottomWidth: 1, borderBottomColor: Scene.border, gap: 6 },
   differenceRowLast: { borderBottomWidth: 0 },
-  differenceWho: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodySM,
-    color: Colors.darkWarm,
-  },
-  differenceWhat: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    lineHeight: LineHeights.bodySM,
-    color: Colors.secondary,
-  },
-
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 18,
-  },
-  cardLocked: { opacity: 0.9 },
-  cardIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: Colors.accentSubtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardBody: { flex: 1, gap: 4 },
-  cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
-  cardBlurb: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    lineHeight: LineHeights.bodySM,
-    color: Colors.secondary,
-  },
-  statusPill: {
-    marginTop: 8,
-    backgroundColor: Colors.creamWarm,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    alignSelf: 'stretch',
-  },
-  statusPillApproved: { backgroundColor: Colors.goldBadgeSoft },
-  statusText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    lineHeight: LineHeights.bodySM,
-    color: Colors.quoteText,
-  },
-  statusTextApproved: { color: Colors.darkWarm },
-  withdrawLink: {
-    marginTop: 6,
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-  },
-  withdrawSpinner: { marginTop: 6, alignSelf: 'flex-start' },
+  differenceWho: { fontFamily: fonts.medium, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Scene.text },
+  differenceWhat: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Scene.supporting },
 });

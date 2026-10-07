@@ -1,3 +1,7 @@
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { ScaledText as Text } from '../../components/ScaledText';
+import { CreatorScreenHeader } from '../../components/creator/CreatorScreenHeader';
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
 /**
  * Stage 2: name your community. The one client caller of create_community
  * (grant-gated definer RPC, born draft, seats the leader, seeds the five
@@ -7,10 +11,9 @@
  * flow opens it.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
@@ -19,11 +22,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import {
   getCreatorAccess,
   isLeaderAccess,
@@ -35,6 +37,7 @@ import {
   type JoinPolicy,
 } from '../../lib/creatorMode';
 import { isHouseCommunity } from '../../lib/houseCommunity';
+import { setSelectedCommunityId } from '../../lib/selectedCommunity';
 import { hapticSuccess, hapticError } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import {
@@ -67,8 +70,10 @@ const JOIN_POLICY_CHOICES: { value: JoinPolicy; label: string }[] = [
 ];
 
 export default function SetupCommunityScreen() {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
   const queryClient = useQueryClient();
-  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
+  const { data: access } = useCreatorAccessRead();
 
   const [name, setName] = useState('');
   const [handle, setHandle] = useState('');
@@ -198,6 +203,7 @@ export default function SetupCommunityScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <Stack.Screen options={{ headerShown: false }} />
+        <CreatorScreenHeader title="Community created" />
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.kicker}>creator mode</Text>
           <Text style={styles.title}>you're set.</Text>
@@ -206,21 +212,21 @@ export default function SetupCommunityScreen() {
           </Text>
           <TouchableOpacity
             style={styles.createBtn}
-            onPress={() => router.replace('/(creator)/today')}
+            onPress={() => { setSelectedCommunityId(createdCommunity.id); router.dismissTo('/(creator)/today'); }}
             activeOpacity={0.85}
           >
             <Text style={styles.createBtnText}>view community</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.secondaryBtn}
-            onPress={() => router.push('/creator/edit-page')}
+            onPress={() => { setSelectedCommunityId(createdCommunity.id); router.push('/creator/edit-page'); }}
             activeOpacity={0.85}
           >
             <Text style={styles.secondaryBtnText}>edit page</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.secondaryBtn}
-            onPress={() => router.push('/creator/member-invites' as never)}
+            onPress={() => { setSelectedCommunityId(createdCommunity.id); router.push('/creator/member-invites' as never); }}
             activeOpacity={0.85}
           >
             <Text style={styles.secondaryBtnText}>invite members</Text>
@@ -233,11 +239,7 @@ export default function SetupCommunityScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
-        </TouchableOpacity>
-      </View>
+      <CreatorScreenHeader title="Create community" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {/* LIZ COPY */}
         <Text style={styles.kicker}>creator mode</Text>
@@ -257,6 +259,7 @@ export default function SetupCommunityScreen() {
             <Text style={styles.fieldLabel}>community name</Text>
             <TextInput
               style={styles.input}
+              accessibilityLabel="Community name"
               value={name}
               onChangeText={onNameChange}
               maxLength={NAME_MAX}
@@ -272,6 +275,7 @@ export default function SetupCommunityScreen() {
             <Text style={styles.fieldLabel}>city</Text>
             <TextInput
               style={styles.input}
+              accessibilityLabel="City"
               value={city}
               onChangeText={setCity}
               maxLength={CITY_MAX}
@@ -285,6 +289,7 @@ export default function SetupCommunityScreen() {
             <Text style={styles.fieldLabel}>what's it for</Text>
             <TextInput
               style={[styles.input, styles.inputMultiline]}
+              accessibilityLabel="Community purpose"
               value={purpose}
               onChangeText={setPurpose}
               maxLength={PURPOSE_MAX}
@@ -308,6 +313,7 @@ export default function SetupCommunityScreen() {
                     return (
                       <TouchableOpacity
                         key={choice.label}
+                        accessibilityRole="radio" accessibilityState={{ selected }}
                         style={[styles.restrictionPill, selected && styles.restrictionPillSelected]}
                         onPress={() => setRestrictedGender(choice.value)}
                       >
@@ -337,6 +343,7 @@ export default function SetupCommunityScreen() {
                     return (
                       <TouchableOpacity
                         key={choice.value}
+                        accessibilityRole="radio" accessibilityState={{ selected }}
                         style={[styles.restrictionPill, selected && styles.restrictionPillSelected]}
                         onPress={() => setJoinPolicyChoice(choice.value)}
                       >
@@ -358,6 +365,7 @@ export default function SetupCommunityScreen() {
             <Text style={styles.fieldLabel}>handle</Text>
             <TextInput
               style={styles.input}
+              accessibilityLabel="Community handle"
               value={handle}
               onChangeText={(v) => { setHandleTouched(true); setHandle(v.toLowerCase()); }}
               maxLength={HANDLE_MAX}
@@ -405,32 +413,32 @@ export default function SetupCommunityScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   header: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8 },
   content: { padding: 20 },
   kicker: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
   },
   title: {
-    fontFamily: Fonts.display,
+    fontFamily: fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
     marginBottom: 6,
   },
   subtext: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodyMD,
     lineHeight: 20,
     color: Colors.secondary,
     marginBottom: 18,
   },
   fieldLabel: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
@@ -443,7 +451,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
     marginBottom: 8,
@@ -471,22 +479,22 @@ const styles = StyleSheet.create({
     borderColor: Colors.terracotta,
   },
   restrictionPillText: {
-    fontFamily: Fonts.sansMedium,
+    fontFamily: fonts.medium,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
   },
   restrictionPillTextSelected: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     color: Colors.terracotta,
   },
   handlePreview: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.caption,
     color: Colors.tertiary,
     marginBottom: 14,
   },
   problem: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodySM,
     color: Colors.errorRed,
     marginBottom: 10,
@@ -500,7 +508,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   createBtnOff: { opacity: 0.45 },
-  createBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  createBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.white },
   // Screen 21: the two secondary onward actions on the success state. Same
   // bordered/terracotta-text secondary pattern as today.tsx's quickActionSecondary.
   secondaryBtn: {
@@ -513,12 +521,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 10,
   },
-  secondaryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  secondaryBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   quietNote: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.caption,
     color: Colors.tertiary,
     textAlign: 'center',
     marginTop: 10,
   },
 });
+}

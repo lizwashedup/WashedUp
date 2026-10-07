@@ -40,10 +40,12 @@ interface GeneratedPosterProps {
   /** hero usage: extra top padding so the title clears the status bar
    *  and the floating controls */
   topPadding?: number;
+  /** Sunset discovery keeps fallback artwork within the brand palette. */
+  surface?: 'default' | 'scene';
 }
 
-export function GeneratedPoster({ title, category, venue, height, compact, topPadding = 0 }: GeneratedPosterProps) {
-  const ground = CATEGORY_GROUNDS[category?.toLowerCase() ?? ''] ?? DEFAULT_GROUND;
+export function GeneratedPoster({ title, category, venue, height, compact, topPadding = 0, surface = 'default' }: GeneratedPosterProps) {
+  const ground = surface === 'scene' ? DEFAULT_GROUND : CATEGORY_GROUNDS[category?.toLowerCase() ?? ''] ?? DEFAULT_GROUND;
   if (compact) {
     return (
       <View style={[styles.compact, { backgroundColor: ground.bg, height, width: height }]}>

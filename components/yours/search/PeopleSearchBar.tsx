@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, TextInput, Pressable, StyleSheet } from 'react-native';
 import { Search, X } from 'lucide-react-native';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { SEARCH } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 
@@ -13,19 +13,23 @@ import { COPY } from '../state/constants';
 export default function PeopleSearchBar({
   value,
   onChange,
+  appearance,
 }: {
   value: string;
   onChange: (next: string) => void;
+  appearance?: { fonts: AfterglowFontFamilies };
 }) {
+  const s = useMemo(() => appearance ? { ...styles, ...searchAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
+  const iconColor = appearance ? AfterglowColors.muted : Colors.tertiary;
   return (
-    <View style={styles.wrap}>
-      <Search size={SEARCH.iconSize} color={Colors.tertiary} />
+    <View style={s.wrap}>
+      <Search size={SEARCH.iconSize} color={iconColor} />
       <TextInput
-        style={styles.input}
+        style={s.input}
         value={value}
         onChangeText={onChange}
         placeholder={COPY.searchPlaceholder}
-        placeholderTextColor={Colors.tertiary}
+        placeholderTextColor={iconColor}
         autoCapitalize="none"
         autoCorrect={false}
         returnKeyType="search"
@@ -35,10 +39,11 @@ export default function PeopleSearchBar({
         <Pressable
           onPress={() => onChange('')}
           hitSlop={10}
+          style={appearance ? s.clear : undefined}
           accessibilityRole="button"
           accessibilityLabel="Clear search"
         >
-          <X size={SEARCH.iconSize} color={Colors.tertiary} />
+          <X size={SEARCH.iconSize} color={iconColor} />
         </Pressable>
       )}
     </View>
@@ -46,6 +51,7 @@ export default function PeopleSearchBar({
 }
 
 const styles = StyleSheet.create({
+  clear: {},
   wrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -68,3 +74,11 @@ const styles = StyleSheet.create({
     padding: 0,
   },
 });
+
+function searchAppearance(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  wrap: { ...styles.wrap, minHeight: 48, height: undefined, borderRadius: 4,
+    backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, paddingRight: 4 },
+  input: { ...styles.input, ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.ink,
+    minWidth: 0, minHeight: 44, paddingVertical: 10 },
+  clear: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+}); }

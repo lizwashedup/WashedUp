@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, LineHeights, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { KEEP } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 
@@ -25,13 +25,14 @@ function numWord(n: number): string {
   return NUM_WORD[n] ?? String(n);
 }
 
-/** Lowercase "month year", matching the page's quiet lowercase voice. */
-function fmtSince(iso: string | null): string {
+/** Preserve the legacy lowercase voice; staged copy uses a capitalized month. */
+function fmtSince(iso: string | null, capitalized = false): string {
   if (!iso) return '';
   try {
-    return new Date(iso)
-      .toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-      .toLowerCase();
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '';
+    const formatted = date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    return capitalized ? formatted.charAt(0).toLocaleUpperCase() + formatted.slice(1) : formatted.toLowerCase();
   } catch {
     return '';
   }
@@ -56,15 +57,19 @@ function Face({
   name,
   photoUrl,
   tilt,
+  appearance,
 }: {
   name: string | null;
   photoUrl: string | null;
   tilt: number;
+  appearance?: { fonts: AfterglowFontFamilies };
 }) {
+  const [failed, setFailed] = useState(false);
+  const styles = useMemo(() => appearance ? { ...baseStyles, ...heroAppearance(appearance.fonts) } : baseStyles, [appearance?.fonts]);
   return (
     <View style={[styles.face, { transform: [{ rotate: `${tilt}deg` }] }]}>
-      {photoUrl ? (
-        <Image source={{ uri: photoUrl }} style={styles.facePhoto} contentFit="cover" />
+      {photoUrl && !failed ? (
+        <Image source={{ uri: photoUrl }} style={styles.facePhoto} contentFit="cover" cachePolicy="memory-disk" recyclingKey={photoUrl} onError={() => setFailed(true)} accessible={false} />
       ) : (
         <View style={[styles.facePhoto, styles.faceBlank]}>
           <Text style={styles.faceInitial}>
@@ -76,7 +81,8 @@ function Face({
   );
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
+function Stat({ value, label, appearance }: { value: number; label: string; appearance?: { fonts: AfterglowFontFamilies } }) {
+  const styles = useMemo(() => appearance ? { ...baseStyles, ...heroAppearance(appearance.fonts) } : baseStyles, [appearance?.fonts]);
   return (
     <View style={styles.stat}>
       <Text style={styles.statValue}>{value}</Text>
@@ -95,6 +101,7 @@ export default function KeepHero({
   comingUpCount,
   sinceDate,
   hideStats = false,
+  appearance,
 }: {
   myName: string | null;
   myPhoto: string | null;
@@ -106,27 +113,29 @@ export default function KeepHero({
   sinceDate: string | null;
   /** Suppress the 0/0/0 stat row before there is any shared history. */
   hideStats?: boolean;
+  appearance?: { fonts: AfterglowFontFamilies };
 }) {
-  const name = theirName ?? 'them';
-  const since = fmtSince(sinceDate);
+  const styles = useMemo(() => appearance ? { ...baseStyles, ...heroAppearance(appearance.fonts) } : baseStyles, [appearance?.fonts]);
+  const name = theirName?.trim() || 'them';
+  const since = fmtSince(sinceDate, !!appearance);
   const dur = durationLabel(sinceDate);
 
   return (
     <View style={styles.wrap}>
       <View style={styles.photos}>
-        <Face name={myName} photoUrl={myPhoto} tilt={KEEP.heroLeanDeg} />
+        <Face key={`me:${myName}:${myPhoto}`} name={myName} photoUrl={myPhoto} tilt={appearance ? 0 : KEEP.heroLeanDeg} appearance={appearance} />
         <Text style={styles.ampersand}>&</Text>
-        <Face name={theirName} photoUrl={theirPhoto} tilt={-KEEP.heroLeanDeg} />
+        <Face key={`them:${theirName}:${theirPhoto}`} name={theirName} photoUrl={theirPhoto} tilt={appearance ? 0 : -KEEP.heroLeanDeg} appearance={appearance} />
       </View>
 
-      <Text style={styles.headline}>
-        {COPY.keepYouAnd} <Text style={styles.headlineName}>{name}</Text>
+      <Text style={styles.headline} accessibilityRole="header">
+        {appearance ? 'You and' : COPY.keepYouAnd} <Text style={styles.headlineName}>{name}</Text>
       </Text>
 
       {!!since && (
         <Text style={styles.subline}>
-          {COPY.keepSince(since)}
-          {dur ? ` · ${COPY.keepDuration(dur)}` : ''}
+          {appearance ? `Shared plans since ${since}` : COPY.keepSince(since)}
+          {!appearance && dur ? ` · ${COPY.keepDuration(dur)}` : ''}
         </Text>
       )}
 
@@ -136,16 +145,16 @@ export default function KeepHero({
           "0 coming up"). */}
       {!hideStats && (plansCount > 0 || albumsCount > 0 || comingUpCount > 0) && (
         <View style={styles.stats}>
-          {plansCount > 0 && <Stat value={plansCount} label={COPY.keepStatPlans} />}
-          {albumsCount > 0 && <Stat value={albumsCount} label={COPY.keepStatAlbums} />}
-          {comingUpCount > 0 && <Stat value={comingUpCount} label={COPY.keepStatComingUp} />}
+          {plansCount > 0 && <Stat value={plansCount} label={appearance ? 'shared plans' : COPY.keepStatPlans} appearance={appearance} />}
+          {albumsCount > 0 && <Stat value={albumsCount} label={appearance ? 'albums' : COPY.keepStatAlbums} appearance={appearance} />}
+          {comingUpCount > 0 && <Stat value={comingUpCount} label={appearance ? 'upcoming plans' : COPY.keepStatComingUp} appearance={appearance} />}
         </View>
       )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   wrap: { alignItems: 'center', paddingTop: 8 },
   photos: {
     flexDirection: 'row',
@@ -215,3 +224,20 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+
+function heroAppearance(fonts: AfterglowFontFamilies) {
+  return StyleSheet.create({
+    wrap: { ...baseStyles.wrap, paddingHorizontal: 20, paddingTop: 12 },
+    face: { ...baseStyles.face, width: 72, height: 72, borderRadius: 36, marginHorizontal: 0, borderWidth: 0, borderColor: AfterglowColors.paper, backgroundColor: AfterglowColors.avatar },
+    facePhoto: { ...baseStyles.facePhoto, borderRadius: 36, opacity: 1 },
+    faceBlank: { ...baseStyles.faceBlank, backgroundColor: AfterglowColors.avatar },
+    faceInitial: { ...AfterglowType.identity, fontFamily: fonts.semibold, color: AfterglowColors.muted },
+    ampersand: { ...baseStyles.ampersand, ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.clay, marginHorizontal: 12 },
+    headline: { ...baseStyles.headline, ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink, marginTop: 16 },
+    headlineName: { fontFamily: fonts.display, color: AfterglowColors.ink },
+    subline: { ...baseStyles.subline, ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 6 },
+    stats: { ...baseStyles.stats, gap: 24, marginTop: 18, flexWrap: 'wrap' },
+    statValue: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    statLabel: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 2 },
+  });
+}

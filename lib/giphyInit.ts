@@ -1,3 +1,4 @@
+import { LOCAL_DEVELOPMENT_ONLY } from '../constants/LocalDevelopment';
 import { GiphySDK } from '@giphy/react-native-sdk';
 
 // Configure the Giphy SDK once at app boot so the chat MediaPanel's first open
@@ -7,7 +8,7 @@ import { GiphySDK } from '@giphy/react-native-sdk';
 // bundle never has to resolve @giphy/react-native-sdk (native-only, imports
 // react-native's codegenNativeComponent internals — cannot bundle for web).
 export function initGiphySDK() {
-  if (process.env.EXPO_PUBLIC_GIPHY_SDK_KEY) {
+  if (!LOCAL_DEVELOPMENT_ONLY && process.env.EXPO_PUBLIC_GIPHY_SDK_KEY) {
     try { GiphySDK.configure({ apiKey: process.env.EXPO_PUBLIC_GIPHY_SDK_KEY }); }
     catch { /* leave unconfigured; MediaPanel falls back gracefully */ }
   }

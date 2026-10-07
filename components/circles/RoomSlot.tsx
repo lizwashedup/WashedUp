@@ -42,7 +42,7 @@
  */
 import React from 'react';
 import { View, Text, Switch, Alert, StyleSheet } from 'react-native';
-import { Sparkles } from 'lucide-react-native';
+import { MessageCircle } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { CIRCLE_HOME } from '../../constants/YoursDesign';
@@ -77,7 +77,7 @@ export default function RoomSlot({
 
   return (
     <View style={styles.card}>
-      <Sparkles size={CIRCLE_HOME.roomIcon} color={Colors.goldAccent} strokeWidth={1.75} />
+      <MessageCircle size={CIRCLE_HOME.roomIcon} color={Colors.goldAccent} strokeWidth={1.75} />
       <View style={styles.body}>
         <Text style={styles.headline} numberOfLines={2}>
           {roomEnabled ? ROOM_LISTENING_TEXT : COPY.circleRoomSub}

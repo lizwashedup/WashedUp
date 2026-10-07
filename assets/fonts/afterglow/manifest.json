@@ -1,0 +1,50 @@
+{
+  "source": "github/mona-sans v2.0.27",
+  "sourceSha256": "ade8e0e711f2798266e12f02b271aba1c345c5a38be4e98cb72d198248ccc8a7",
+  "fonts": [
+    {
+      "file": "WashedUpUI-Regular.ttf",
+      "axes": {
+        "wght": 400,
+        "wdth": 100,
+        "opsz": 24,
+        "ital": 0
+      },
+      "bytes": 109012,
+      "sha256": "8af1513e5acd0071096042ac96e972db7ca9e6e9584eb022a4e7ad5dee7e5b88"
+    },
+    {
+      "file": "WashedUpUI-Medium.ttf",
+      "axes": {
+        "wght": 580,
+        "wdth": 100,
+        "opsz": 24,
+        "ital": 0
+      },
+      "bytes": 108928,
+      "sha256": "8842a513221267e45fac9e5c979db88c4083ac768d5ddea644eaf43b4b251de7"
+    },
+    {
+      "file": "WashedUpUI-Semibold.ttf",
+      "axes": {
+        "wght": 680,
+        "wdth": 100,
+        "opsz": 24,
+        "ital": 0
+      },
+      "bytes": 108944,
+      "sha256": "89c0796a1e0fcc367ac75ebf846745d35fcd72e21bc98f75cbe205e1c993d80d"
+    },
+    {
+      "file": "WashedUpDisplay-Semibold.ttf",
+      "axes": {
+        "wght": 750,
+        "wdth": 93,
+        "opsz": 100,
+        "ital": 0
+      },
+      "bytes": 108564,
+      "sha256": "ed769715650cc3bb44e564bd3642bbb60cc58a73fa7791eec2762275da8fb196"
+    }
+  ]
+}

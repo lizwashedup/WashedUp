@@ -1,3 +1,4 @@
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 /**
  * The community switcher (C11, doc 08 family): pills at the top of the
  * creator shell's community-scoped tabs, shown only when the creator leads
@@ -6,10 +7,12 @@
  * minimal per decision 15a; the design pass restyles it.
  */
 
-import React from 'react';
-import { ScrollView, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import React, { useMemo } from 'react';
+import { ScrollView, Text, TouchableOpacity, StyleSheet, View } from 'react-native';
+import Colors, { CreatorSurfaceColors } from '../../constants/Colors';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Check } from 'lucide-react-native';
+import { type AfterglowFontFamilies, FontSizes } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
 import type { CreatorAccess } from '../../lib/creatorMode';
 import { setSelectedCommunityId, useLedCommunity } from '../../lib/selectedCommunity';
@@ -19,12 +22,15 @@ interface Props {
 }
 
 export function CommunitySwitcher({ access }: Props) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
   const current = useLedCommunity(access);
   const led = access?.ledCommunities ?? [];
   if (led.length < 2) return null;
   return (
     <ScrollView
       horizontal
+      style={styles.scroll}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.row}
       accessibilityRole="tablist"
@@ -45,10 +51,17 @@ export function CommunitySwitcher({ access }: Props) {
             accessibilityRole="tab"
             accessibilityLabel={c.name}
             accessibilityState={{ selected: on }}
+            aria-selected={on}
           >
-            <Text style={[styles.pillText, on && styles.pillTextOn]} numberOfLines={1}>
-              {c.name.toLowerCase()}
-            </Text>
+            {on && <LinearGradient
+              colors={[CreatorSurfaceColors.selectionTop, CreatorSurfaceColors.selectionBottom]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              pointerEvents="none" accessible={false} style={StyleSheet.absoluteFill}
+            />}
+            <View style={styles.pillContent} pointerEvents="none">
+              {on && <Check size={15} strokeWidth={2} color={Colors.darkWarm} accessible={false} />}
+              <Text style={styles.pillText} numberOfLines={1}>{c.name}</Text>
+            </View>
           </TouchableOpacity>
         );
       })}
@@ -56,9 +69,13 @@ export function CommunitySwitcher({ access }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  scroll: { flexGrow: 0, flexShrink: 0 },
   row: { gap: 8, paddingBottom: 12 },
   pill: {
+    minHeight: 44,
+    overflow: 'hidden',
+    justifyContent: 'center',
     borderRadius: 999,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -67,7 +84,8 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     maxWidth: 220,
   },
-  pillOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
-  pillText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  pillTextOn: { color: Colors.white },
+  pillOn: { backgroundColor: Colors.parchment, borderColor: Colors.goldAccent },
+  pillContent: { flexDirection: 'row', alignItems: 'center', gap: 7, zIndex: 1 },
+  pillText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, flexShrink: 1 },
 });
+}

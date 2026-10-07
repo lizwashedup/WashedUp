@@ -1,9 +1,11 @@
+import { EventMediaImage } from '../events/EventMediaImage';
 /**
  * A community conversation or room row in the Chats list, wearing the
  * app's native chat clothes (mirrors ChatRow: avatar, title, preview,
  * timestamp, unread). Community rows open the community's conversation;
  * room rows carry the community name as a small secondary label and open
- * their thread. Revised doc 09: no hub screen, chats are just chats.
+ * their thread. The optional grouped inbox reuses this presentation for
+ * parents and the original rooms without changing their identities.
  */
 
 import React from 'react';
@@ -11,8 +13,10 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { Home } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { Fonts, FontSizes, type AfterglowFontFamilies } from '../../constants/Typography';
 import type { CommunityChatRowData } from '../../lib/communityChat';
+import { communityNotificationLabel } from '../../lib/communityChatNotificationPresentation';
+import { ChatInboxRow } from './ChatInboxRow';
 
 function formatTime(dateString: string): string {
   const date = new Date(dateString);
@@ -31,55 +35,46 @@ function formatTime(dateString: string): string {
 interface Props {
   row: CommunityChatRowData;
   onPress: () => void;
+  /** The development-only directory opts into the reviewed visual system. */
+  conversationFonts?: AfterglowFontFamilies;
+  showCommunityContext?: boolean;
 }
 
-export const CommunityChatRow = React.memo(function CommunityChatRow({ row, onPress }: Props) {
+export const CommunityChatRow = React.memo(function CommunityChatRow({ row, onPress, conversationFonts, showCommunityContext = false }: Props) {
   const hasUnread = row.unread > 0;
+  const notificationLabel = communityNotificationLabel(row);
+  const timestamp = row.lastAt ? formatTime(row.lastAt) : null;
+  if (conversationFonts) return <ChatInboxRow
+    identity={row.key} title={row.title} preview={row.preview} timestamp={timestamp}
+    eventId={row.eventId} image={row.image} unread={row.unread} fonts={conversationFonts} onPress={onPress}
+    community={showCommunityContext && row.kind === 'community'}
+    metadata={[showCommunityContext ? row.secondary : null, notificationLabel].filter(Boolean).join(' · ') || null}
+  />;
+  const label = [
+    `${row.title}${hasUnread ? `, ${row.unread} unread ${row.unread === 1 ? 'message' : 'messages'}` : ''}`,
+    row.secondary, notificationLabel, row.preview, timestamp,
+  ].filter(Boolean).join('. ');
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.7}
-      style={[styles.row, hasUnread && styles.rowUnread]}
-    >
-      {row.image ? (
-        // T3 (doc 121): the community's cover (rooms: the event image). The
-        // letter tile below stays the no-image fallback. expo-image's default
-        // memory-disk cache means the list hits the network once per URL.
-        <Image source={{ uri: row.image }} style={styles.avatarImage} contentFit="cover" />
-      ) : (
-        <View
-          style={[
-            styles.avatar,
-            row.kind === 'community' && row.accent ? { backgroundColor: row.accent } : null,
-          ]}
-        >
-          <Text style={[styles.avatarInitial, row.kind === 'community' && row.accent ? styles.avatarInitialOnAccent : null]}>
-            {row.title.slice(0, 1).toLowerCase()}
-          </Text>
+    <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel={label} activeOpacity={0.7} style={[styles.row, hasUnread && styles.rowUnread]}>
+      {row.image ? <EventMediaImage eventId={row.eventId ?? ''} reference={row.image} style={styles.avatarImage} contentFit="cover" recyclingKey={row.key} /> : (
+        <View style={[styles.avatar, row.kind === 'community' && row.accent ? { backgroundColor: row.accent } : null]}>
+          <Text style={[styles.avatarInitial, row.kind === 'community' && row.accent ? styles.avatarInitialOnAccent : null]}>{row.title.slice(0, 1).toLowerCase()}</Text>
         </View>
       )}
-
       <View style={styles.content}>
         <View style={styles.top}>
           <View style={styles.titleRow}>
             {hasUnread && <View style={styles.unreadDot} />}
             <Text style={styles.title} numberOfLines={1}>{row.title}</Text>
-            {/* the at-a-glance community marker; final look is a design-pass call */}
             <Home size={12} color={row.accent ?? Colors.terracotta} strokeWidth={2.5} />
           </View>
-          {row.lastAt && <Text style={styles.timestamp}>{formatTime(row.lastAt)}</Text>}
+          {timestamp && <Text style={styles.timestamp}>{timestamp}</Text>}
         </View>
-        {!!row.secondary && (
-          <Text style={styles.secondary} numberOfLines={1}>{row.secondary}</Text>
-        )}
+        {!!row.secondary && <Text style={styles.secondary} numberOfLines={1}>{row.secondary}</Text>}
+        {!!notificationLabel && <Text style={styles.secondary}>{notificationLabel}</Text>}
         <Text style={styles.preview} numberOfLines={1}>{row.preview}</Text>
       </View>
-
-      {hasUnread && (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{row.unread > 9 ? '9+' : row.unread}</Text>
-        </View>
-      )}
+      {hasUnread && <View style={styles.badge}><Text style={styles.badgeText}>{row.unread > 9 ? '9+' : row.unread}</Text></View>}
     </TouchableOpacity>
   );
 });

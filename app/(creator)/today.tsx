@@ -1,19 +1,23 @@
+import { ScaledText as Text } from '../../components/ScaledText';
+import { CreatorScreenHeader } from '../../components/creator/CreatorScreenHeader';
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { EventMediaImage } from '../../components/events/EventMediaImage';
 /**
  * Creator mode: today. Triage, not settings (doc 08). Functionally minimal
  * per decision 15a.
  */
 
-import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
+import React, { useMemo } from 'react';
+import { ActivityIndicator, View, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router } from 'expo-router';
-import { Image } from 'expo-image';
+import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Calendar, Megaphone, Plus, UserPlus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import {
-  getCreatorAccess,
   getCommunityMembers,
   getBroadcasts,
   getCreatorEvents,
@@ -34,20 +38,22 @@ import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
 
 export default function CreatorTodayScreen() {
-  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
+  const { data: access } = useCreatorAccessRead();
   const community = useLedCommunity(access);
 
-  const { data: members = [], refetch: refetchMembers, isRefetching } = useQuery({
+  const membersQuery = useQuery({
     queryKey: ['creator-members', community?.id],
     queryFn: () => getCommunityMembers(community!.id),
     enabled: !!community,
   });
-  const { data: broadcasts = [] } = useQuery({
+  const broadcastsQuery = useQuery({
     queryKey: ['creator-broadcasts', community?.id],
     queryFn: () => getBroadcasts(community!.id),
     enabled: !!community,
   });
-  const { data: allEvents = [] } = useQuery({
+  const eventsQuery = useQuery({
     queryKey: ['creator-events', community?.id],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -56,18 +62,22 @@ export default function CreatorTodayScreen() {
     },
     enabled: access != null,
   });
+  const { data: members = [], refetch: refetchMembers, isRefetching } = membersQuery;
+  const { data: broadcasts = [] } = broadcastsQuery;
+  const { data: allEvents = [] } = eventsQuery;
   const events = allEvents.filter((event) =>
     eventBelongsToWorkspace(event, 'community', community?.id ?? null),
   );
   // inventory C-02: a real link into the persistent room, not a fabricated
   // "pulse" metric -- room count is genuinely available (community.tsx
   // already fetches this the same way), so the home card can be honest.
-  const { data: rooms = [] } = useQuery({
+  const roomsQuery = useQuery({
     queryKey: ['creator-rooms', community?.id],
     queryFn: () => getCommunityRooms(community!.id),
     enabled: !!community,
   });
 
+  const { data: rooms = [] } = roomsQuery;
   const pending = members.filter((m) => m.status === 'pending');
   const activeCount = members.filter((m) => m.status === 'active').length;
   const nextEvent = pickNextUpcomingEvent(events);
@@ -78,19 +88,22 @@ export default function CreatorTodayScreen() {
   // C-02: ticket sales take precedence over a free RSVP count when both
   // exist -- same precedence lib/creatorMode.ts's getMemberEventHistory
   // already uses per-member.
-  const { data: attendees = [] } = useQuery({
+  const attendeesQuery = useQuery({
     queryKey: ['creator-today-attendees', nextEvent?.id],
     queryFn: () => getEventAttendees(nextEvent!.id),
     enabled: !!nextEvent,
   });
-  const counts = countAttendees(attendees);
-  const { data: rsvpCount = null } = useQuery({
+  const counts = countAttendees(attendeesQuery.data ?? []);
+  const rsvpQuery = useQuery({
     queryKey: ['creator-today-rsvp-count', nextEvent?.id],
     queryFn: () => getRsvpCount(nextEvent!.id),
     enabled: !!nextEvent,
   });
+  const rsvpCount = rsvpQuery.data ?? null;
   const attendanceLabel = !nextEvent
     ? null
+    : attendeesQuery.isError || rsvpQuery.isError ? 'Attendance unavailable'
+    : attendeesQuery.isLoading || rsvpQuery.isLoading ? 'Loading attendance…'
     : counts.sold > 0 || !rsvpCount
       ? `${counts.sold} sold · ${counts.checkedIn} checked in`
       : `${rsvpCount} going`;
@@ -106,6 +119,7 @@ export default function CreatorTodayScreen() {
   if (access && access.hasLeaderGrant && access.ledCommunities.length === 0) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
+        <CreatorScreenHeader title="Community overview" />
         <ScrollView contentContainerStyle={styles.content}>
           {/* LIZ COPY */}
           <Text style={styles.kicker}>creator mode</Text>
@@ -118,11 +132,13 @@ export default function CreatorTodayScreen() {
           </Text>
           <TouchableOpacity
             style={styles.entryBtn}
+            accessibilityRole="button"
             onPress={() => router.push('/creator/setup-community' as never)}
             activeOpacity={0.85}
           >
             {/* LIZ COPY: the locked vocabulary */}
-            <Text style={styles.entryBtnText}>start your community</Text>
+            <CreatorActionFill />
+            <Text style={styles.entryBtnText} numberOfLines={1}>start your community</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -131,13 +147,14 @@ export default function CreatorTodayScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+        <CreatorScreenHeader title="Community overview" />
       {/* Screen 11 gap: persistent active-community name. Outside the
           ScrollView on purpose so it survives scrolling, unlike the big
           title below which is the first-paint moment, not the ongoing
           reminder of which community you're in. */}
       {community && (
         <View style={styles.stickyHeader}>
-          <Text style={styles.stickyHeaderText} numberOfLines={1}>{community.name.toLowerCase()}</Text>
+          <Text style={styles.stickyHeaderText} numberOfLines={1}>{community.name}</Text>
         </View>
       )}
       <ScrollView
@@ -145,7 +162,7 @@ export default function CreatorTodayScreen() {
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetchMembers} tintColor={Colors.terracotta} />}
       >
         <Text style={styles.kicker}>creator mode</Text>
-        <Text style={styles.title}>{community ? community.name.toLowerCase() : 'today'}</Text>
+        <Text style={styles.title}>{community ? community.name : 'today'}</Text>
         <WorkspaceSwitcher access={access} />
         <CommunitySwitcher access={access} />
         {!online && <OfflineBanner />}
@@ -155,14 +172,17 @@ export default function CreatorTodayScreen() {
             2026-09-05 -- so it's wired in here in the spec's fixed order. */}
         <View style={styles.quickActions}>
           <TouchableOpacity
-            style={styles.quickAction}
+            style={[styles.quickAction, styles.quickActionPrimary]}
             onPress={() => router.push('/creator/event-form')}
             accessibilityRole="button"
             accessibilityLabel="Create event"
             activeOpacity={0.85}
           >
-            <Plus size={16} color={Colors.white} strokeWidth={2.5} />
-            <Text style={styles.quickActionText}>create event</Text>
+            <CreatorActionFill />
+            <View style={styles.quickActionContent}>
+              <Plus size={16} color={Colors.white} strokeWidth={2.5} />
+              <Text style={styles.quickActionText} numberOfLines={1}>create event</Text>
+            </View>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionSecondary]}
@@ -172,7 +192,7 @@ export default function CreatorTodayScreen() {
             activeOpacity={0.85}
           >
             <Megaphone size={16} color={Colors.terracotta} strokeWidth={2.5} />
-            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]}>broadcast</Text>
+            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]} numberOfLines={1}>broadcast</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionSecondary]}
@@ -182,17 +202,21 @@ export default function CreatorTodayScreen() {
             activeOpacity={0.85}
           >
             <UserPlus size={16} color={Colors.terracotta} strokeWidth={2.5} />
-            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]}>invite</Text>
+            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]} numberOfLines={1}>invite</Text>
           </TouchableOpacity>
         </View>
 
-        {/* the one thing that needs attention first */}
+        {/* Unknown reads must not appear as a zero or empty community. */}
+        {membersQuery.isError || membersQuery.isLoading ? (
+          <OverviewReadState label="Members" query={membersQuery} />
+        ) : (
         <TouchableOpacity
+          accessibilityRole="button"
           style={[styles.card, pending.length > 0 && styles.cardAttention]}
           onPress={() => router.push('/(creator)/members')}
           activeOpacity={0.8}
         >
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.cardTitle}>
               {pending.length > 0
                 ? `${pending.length} ${pending.length === 1 ? 'person wants' : 'people want'} in`
@@ -205,25 +229,29 @@ export default function CreatorTodayScreen() {
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.card} onPress={() => router.push('/(creator)/events')} activeOpacity={0.8}>
+        )}
+        {eventsQuery.isError || eventsQuery.isLoading ? (
+          <OverviewReadState label="Events" query={eventsQuery} />
+        ) : (
+        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(creator)/events')} activeOpacity={0.8}>
           {/* the next event's cover, so the home reads finished not skeletal */}
           {nextEvent?.image_url ? (
-            <Image source={{ uri: nextEvent.image_url }} style={styles.cardThumb} contentFit="cover" />
+            <EventMediaImage eventId={nextEvent.id} reference={nextEvent.image_url} style={styles.cardThumb} contentFit="cover" />
           ) : (
             <View style={[styles.cardThumb, styles.cardThumbFallback]}>
               <Calendar size={18} color={Colors.warmGray} strokeWidth={2} />
             </View>
           )}
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             {/* copy to the taste gate: the card's own eyebrow gives hierarchy */}
             <Text style={styles.cardEyebrow}>{nextEvent ? 'your next event' : 'events'}</Text>
-            <Text style={styles.cardTitle} numberOfLines={1}>{nextEvent ? nextEvent.title : 'no events on the calendar'}</Text>
-            <Text style={styles.cardMeta} numberOfLines={1}>
+            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : 'Plan your next gathering'}</Text>
+            <Text style={styles.cardMeta}>
               {nextEvent
                 ? [nextEvent.event_date ? formatEventDateLA(nextEvent.event_date) : null, nextEvent.venue]
                     .filter(Boolean)
                     .join(' · ')
-                : 'event posting lands with discovery'}
+                : 'Bring your community together. Start with an event.'}
             </Text>
             {attendanceLabel && (
               <Text style={styles.cardCounts} numberOfLines={1}>{attendanceLabel}</Text>
@@ -232,8 +260,16 @@ export default function CreatorTodayScreen() {
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.card} onPress={() => router.push('/(creator)/community')} activeOpacity={0.8}>
-          <View style={{ flex: 1 }}>
+        )}
+        {nextEvent && (attendeesQuery.isError || rsvpQuery.isError) && <OverviewReadState label="Attendance" query={{
+          isError: true, isFetching: attendeesQuery.isFetching || rsvpQuery.isFetching,
+          refetch: () => Promise.all([attendeesQuery.refetch(), rsvpQuery.refetch()]),
+        }} />}
+        {broadcastsQuery.isError || broadcastsQuery.isLoading ? (
+          <OverviewReadState label="Updates" query={broadcastsQuery} />
+        ) : (
+        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(creator)/community')} activeOpacity={0.8}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.cardTitle}>
               {latestBroadcast ? 'last broadcast' : 'say something to your people'}
             </Text>
@@ -244,17 +280,20 @@ export default function CreatorTodayScreen() {
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
         </TouchableOpacity>
 
-        {community && rooms.length > 0 && (
+        )}
+        {community && (roomsQuery.isError || roomsQuery.isLoading) && <OverviewReadState label="Chat spaces" query={roomsQuery} />}
+        {community && !roomsQuery.isError && !roomsQuery.isLoading && rooms.length > 0 && (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.card}
             onPress={() => router.push(`/community-topic/${rooms[0].id}` as never)}
             activeOpacity={0.8}
           >
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.cardTitle}>
                 {rooms.length === 1 ? rooms[0].name : `${rooms.length} chat spaces open`}
               </Text>
-              <Text style={styles.cardMeta} numberOfLines={1}>
+              <Text style={styles.cardMeta}>
                 the chat spaces members join. tap to open{rooms.length > 1 ? ' the first one' : ''}.
               </Text>
             </View>
@@ -266,7 +305,27 @@ export default function CreatorTodayScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function OverviewReadState({ label, query }: {
+  label: string;
+  query: { isError: boolean; isFetching: boolean; refetch: () => Promise<unknown> };
+}) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
+  return <View style={styles.card} accessibilityLiveRegion="polite">
+    <View style={{ flex: 1 }}>
+      <Text style={styles.cardTitle}>{query.isError ? `${label} unavailable` : `Loading ${label.toLowerCase()}…`}</Text>
+      {query.isError && <Text style={styles.cardMeta}>Your information couldn’t be loaded. Try again.</Text>}
+    </View>
+    {query.isError ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Retry ${label.toLowerCase()}`}
+      style={styles.retry} disabled={query.isFetching} onPress={() => void query.refetch()}>
+      <Text style={styles.retryText}>{query.isFetching ? 'Checking…' : 'Retry'}</Text>
+    </TouchableOpacity> : <ActivityIndicator color={Colors.terracotta} />}
+  </View>;
+}
+
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  retry: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+  retryText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   container: { flex: 1, backgroundColor: Colors.parchment },
   stickyHeader: {
     paddingHorizontal: 20,
@@ -276,14 +335,18 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.parchment,
   },
   stickyHeaderText: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.bodySM,
     color: Colors.darkWarm,
   },
   content: { padding: 20, gap: 12 },
-  quickActions: { flexDirection: 'row', gap: 10 },
+  quickActions: { marginBottom: 8, flexWrap: 'wrap', flexDirection: 'row', gap: 10 },
   quickAction: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 92,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -292,21 +355,23 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 12,
   },
+  quickActionContent: { flexDirection: 'row', alignItems: 'center', gap: 6, zIndex: 1 },
+  quickActionPrimary: { flexBasis: '100%' },
   quickActionSecondary: {
     backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.terracotta,
   },
-  quickActionText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
+  quickActionText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodySM, color: Colors.white },
   quickActionTextSecondary: { color: Colors.terracotta },
   kicker: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
   },
   title: {
-    fontFamily: Fonts.display,
+    fontFamily: fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
@@ -324,7 +389,7 @@ const styles = StyleSheet.create({
   },
   cardAttention: { borderColor: Colors.gold, borderWidth: 1.5 },
   entryText: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodyMD,
     lineHeight: 21,
     color: Colors.secondary,
@@ -337,11 +402,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  entryBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  cardEyebrow: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.terracotta, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
-  cardTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginBottom: 3 },
-  cardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
-  cardCounts: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, marginTop: 2 },
-  cardThumb: { width: 48, height: 48, borderRadius: 10, backgroundColor: Colors.inputBg },
+  entryBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  cardEyebrow: { fontFamily: fonts.semibold, fontSize: FontSizes.micro, color: Colors.terracotta, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
+  cardTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyLG, lineHeight: 23, color: Colors.darkWarm, marginBottom: 3 },
+  cardMeta: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: 19, color: Colors.secondary },
+  cardCounts: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, marginTop: 2 },
+  cardThumb: { width: 64, height: 80, borderRadius: 10, backgroundColor: Colors.inputBg },
   cardThumbFallback: { alignItems: 'center', justifyContent: 'center' },
 });
+}

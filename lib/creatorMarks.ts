@@ -30,17 +30,21 @@ export async function populateCreatorMarks(creatorIds: string[]): Promise<void> 
   }
 }
 
-// Plan shape expected by PlanCard (person-first).
-export interface PlanCardPlan {
+// Shared card shape; Circle values come only from the supplied eligible row.
+export interface PlanCardPlan extends Pick<Plan, 'circle_id' | 'circle_visibility' | 'stranger_cap' | 'circle_size' | 'circle_in_count' | 'circle_metadata_known' | 'spots_remaining'> {
   id: string;
   title: string;
   host_message: string | null;
   start_time: string;
+  end_time?: string | null;
+  status?: string;
   location_text: string | null;
   neighborhood: string | null;
   slug: string | null;
   category: string | null;
   gender_rule?: string | null;
+  target_age_min?: number | null;
+  target_age_max?: number | null;
   max_invites: number;
   member_count: number;
   is_featured?: boolean;
@@ -65,16 +69,29 @@ export function toPlanCardPlan(plan: Plan): PlanCardPlan {
     title: plan.title,
     host_message: plan.host_message ?? null,
     start_time: plan.start_time,
+    end_time: plan.end_time,
+    status: plan.status,
     location_text: plan.location_text ?? null,
     neighborhood: plan.neighborhood ?? null,
     slug: plan.slug ?? null,
     category: plan.category ?? null,
     gender_rule: plan.gender_rule ?? null,
+    target_age_min: plan.target_age_min,
+    target_age_max: plan.target_age_max,
     max_invites: plan.max_invites ?? 0,
     member_count: plan.member_count ?? 0,
     is_featured: plan.is_featured ?? false,
     featured_type: plan.featured_type ?? null,
     allow_duplicate: plan.allow_duplicate ?? true,
+    // Preserve configured outside capacity and known Circle participation as
+    // separate source values. Missing data must not become public/zero/full.
+    circle_id: plan.circle_id,
+    circle_metadata_known: plan.circle_metadata_known,
+    spots_remaining: plan.spots_remaining,
+    circle_visibility: plan.circle_visibility,
+    stranger_cap: plan.stranger_cap,
+    circle_size: plan.circle_size,
+    circle_in_count: plan.circle_in_count,
     creator: {
       id: plan.creator?.id ?? '',
       first_name_display: plan.creator?.first_name_display ?? 'Creator',
