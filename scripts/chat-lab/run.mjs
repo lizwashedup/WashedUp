@@ -45,6 +45,8 @@ const client = key => {
 };
 const admin = client(config.SERVICE_ROLE_KEY);
 const checks = [], timings = [], streams = [];
+let typingCloseWindows = 0;
+const typingReconnectCycles = 20;
 const pendingJoins = new Set();
 const run = randomUUID(), community = randomUUID(), topic = randomUUID();
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -183,12 +185,48 @@ try {
     assert.deepEqual(a.map(row => row.id), b.map(row => row.id));
     assert.equal(a.length, 66 + 2 * reconnectCycles);
   });
+  await check('Shared-name typing broadcasts recover through twenty socket teardowns', async () => {
+    // Leave data channels so removing typing is genuinely the last socket user.
+    await Promise.all([alice, bob].map(stopListening));
+    const received = new Map([[alice, []], [bob, []]]);
+    const joins = new Map();
+    const join = async person => {
+      let active = true, ready = false;
+      if (person.api.realtime.isDisconnecting()) typingCloseWindows++;
+      const channel = person.api.channel(`typing:community-topic:${topic}`, {config: {broadcast: {self: false}}})
+        .on('broadcast', {event: 'typing'}, event => { if (active) received.get(person).push(event.payload); });
+      const cancel = subscribeChatWhenReady(() => person.api.realtime.isDisconnecting(),
+        () => channel.subscribe(status => { if (active) ready = status === 'SUBSCRIBED'; }), () => active);
+      pendingJoins.add(cancel);
+      joins.set(person, {channel, stop: () => {active = false; cancel();}});
+      await until(() => ready, 'typing broadcast join');
+    };
+    await Promise.all([alice, bob].map(join));
+    for (let cycle = 0; cycle < typingReconnectCycles; cycle++) {
+      const previous = joins.get(bob);
+      previous.stop();
+      await bob.api.removeChannel(previous.channel);
+      await join(bob);
+      for (const [sender, receiver] of [[alice, bob], [bob, alice]]) {
+        const result = await joins.get(sender).channel.send({type: 'broadcast', event: 'typing',
+          payload: {userId: sender.id, name: 'Local tester', isTyping: cycle % 2 === 0, cycle}});
+        assert.equal(result, 'ok');
+        await until(() => received.get(receiver).some(p => p.userId === sender.id && p.cycle === cycle
+          && p.isTyping === (cycle % 2 === 0)), 'typing broadcast after socket close');
+      }
+    }
+    assert(typingCloseWindows > 0, 'Must exercise an actual SDK closing window');
+    for (const person of [alice, bob]) {
+      assert.equal(received.get(person).length, typingReconnectCycles);
+      const last = joins.get(person); last.stop(); await person.api.removeChannel(last.channel);
+    }
+  });
 } catch (error) {
   failure = error.message; console.error(`FAIL ${failure}`); process.exitCode = 1;
 } finally {
   for (const stop of pendingJoins) stop();
   for (const value of clients) {await value.removeAllChannels(); value.realtime.disconnect(); value.auth.stopAutoRefresh();}
   await writeFile(reportPath, JSON.stringify({scope: 'Local real services with scoped topic-policy fixture; not full-app/native/production parity', checks, failure,
-    streams, reconnectCycles, expectedMessages: 66 + 2 * reconnectCycles,
+    streams, reconnectCycles, typingReconnectCycles, typingCloseWindows, expectedMessages: 66 + 2 * reconnectCycles,
     localRoundTripMs: timings.map(Math.round), realServiceClients: 3, productionRequests: 0}, null, 2) + '\n');
 }

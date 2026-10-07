@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { subscribeChatWhenReady } from '../lib/chatRealtimeSubscription';
 
 // Ephemeral typing state over a Supabase Realtime Broadcast channel. This is
 // deliberately a SEPARATE channel from the chat data channel (chat:${eventId})
@@ -87,15 +88,22 @@ export function useTypingIndicator(
       flush();
     });
 
-    channel.subscribe((status) => {
-      if (!isCurrent()) return;
-      subscribedRef.current = status === 'SUBSCRIBED';
-      if (!subscribedRef.current) {
-        lastSentRef.current = 0;
-        peersRef.current.clear();
-        flush();
-      }
-    });
+    // Broadcast names must stay shared across members. Delay only the join
+    // while the SDK's previous socket closes, and retire it with this visit.
+    const stopWaiting = subscribeChatWhenReady(
+      () => supabase.realtime?.isDisconnecting() ?? false,
+      () => {
+        channel.subscribe((status) => {
+          if (!isCurrent()) return;
+          subscribedRef.current = status === 'SUBSCRIBED';
+          if (!subscribedRef.current) {
+            lastSentRef.current = 0;
+            peersRef.current.clear();
+            flush();
+          }
+        });
+      }, isCurrent,
+    );
     channelRef.current = channel;
 
     // Self-healing prune: if a peer's "stopped" event never arrives, their
@@ -114,6 +122,7 @@ export function useTypingIndicator(
     }, TYPING_PRUNE_INTERVAL_MS);
 
     return () => {
+      stopWaiting();
       clearInterval(pruneTimer);
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
       stopTimerRef.current = null;

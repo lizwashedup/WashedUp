@@ -80,7 +80,10 @@ and recovery; it is not a days-long soak or an OS suspension simulation.
 The harness checks both-way delivery, Unicode, a 40-message concurrent burst,
 lost-response recovery, same-ID retry deduplication, 20-message missed-history
 recovery, six reconnect cycles, outsider access denial, sender impersonation
-denial, and archived-topic send denial. The successful final history has 78
+denial, and archived-topic send denial. It also checks twenty shared-name typing
+broadcast reconnects, with both-way delivery and at least one observed SDK
+socket-close window. Those ephemeral broadcasts do not add message rows.
+The successful default final history has 78
 distinct messages. Recorded local round trips are diagnostics, not a latency
 benchmark. History recovery is explicitly driven by the harness; separate hook
 tests verify the app's refresh ownership.
