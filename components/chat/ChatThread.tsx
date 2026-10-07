@@ -1586,7 +1586,7 @@ function ChatThread(props: ChatThreadProps) {
     const requireAttempt = () => { if (!attemptScope.isCurrent()) throw new Error('Voice attempt ended'); };
     try {
       if (!session.url) {
-        const url = await requestWithDeadline(uploadAudioToStorage(id, currentUserId, uri, attemptScope), 30_000);
+        const url = await requestWithDeadline(uploadAudioToStorage(id, currentUserId, uri, attemptScope, session.sendId), 30_000);
         requireAttempt(); session.url = url;
       }
       requireAttempt();

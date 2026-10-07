@@ -291,3 +291,44 @@ protected base and require no additional native dependency or build. The feature
 branch remains `feature/chat-loading-20261006`; the protected release branch
 still points at `9c2994b10e9f263e98a262e87a9bf7a94ee941c5`. Nothing was pushed,
 merged, built natively, published, deployed or sent to production users.
+
+## Follow-up: research-led media retry recovery — October 7
+
+Continued from `1457537eb9a06675207fa0077c88da2ef2869fcd`. See
+`docs/chat-failure-research-2026-10-07.md` for primary references, rationale,
+failure cases, verification and remaining limits. Voice uploads now retain the
+recording's existing send UUID as their object key through explicit retries.
+Photo and voice upload recovery recognizes explicit current/legacy duplicate
+object responses, while retaining real permission/server/conflict errors.
+This fixes duplicate-object risk after a lost voice-upload response and photo
+retry failures caused by named or legacy duplicate responses. It does not add
+automatic retries, overwrite objects, change storage policy, or provide a
+durable media outbox.
+
+Verification: 529 tests passed in 15 independent suites; seven new regression
+executions failed on previous source. TypeScript, auth invariants, diff checks
+and offline iOS JavaScript/Hermes export passed. These counts describe this
+pass and overlap earlier suites. No new real Storage, native microphone, device
+performance or production test is claimed. The research note describes the
+specific uncertainty around simulator typing and future matching-device timing.
+
+Files changed:
+
+- `components/chat/ChatThread.tsx`
+- `components/chat/__tests__/ChatThreadEntryLifetime.test.tsx`
+- `lib/uploadAudio.ts`
+- `lib/uploadPhoto.ts`
+- `lib/storageObjectConflict.ts`
+- `lib/__tests__/uploadAudio.scope.test.ts`
+- `lib/__tests__/uploadPhoto.retry.test.ts`
+- `lib/__tests__/storageObjectConflict.test.ts`
+- `docs/chat-failure-research-2026-10-07.md`
+- `docs/chat-phase2-audit-2026-10-07.md`
+
+Evidence is in `evidence/media-retry-*.log`, `evidence/media-retry-regression/`,
+and `evidence/media-retry-final/` in the external verification pack. Feature
+branch remains `feature/chat-loading-20261006`, with protected base
+`9c2994b10e9f263e98a262e87a9bf7a94ee941c5`. No native dependencies/configuration
+changed: the changes are structurally OTA-compatible and require no future
+native build. No release, push, merge, deployment, production write or native
+build was performed. Final work remains isolated for review.

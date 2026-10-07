@@ -1,6 +1,7 @@
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase, SUPABASE_URL } from './supabase';
+import { isStorageObjectConflict } from './storageObjectConflict';
 
 /**
  * Upload a base64-encoded image to Supabase Storage.
@@ -28,10 +29,9 @@ export async function uploadBase64ToStorage(
     });
 
   if (error) {
-    const status = Number((error as any).statusCode ?? (error as any).status);
     // Only a caller with a stable, unique path may treat an existing object
     // as the result of its own earlier upload whose response was lost.
-    if (!(options?.existingIsSuccess && status === 409)) throw error;
+    if (!(options?.existingIsSuccess && isStorageObjectConflict(error))) throw error;
   }
 
   const { data: urlData } = supabase.storage

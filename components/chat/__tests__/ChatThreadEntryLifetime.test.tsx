@@ -914,3 +914,17 @@ it('surfaces a failed shared reaction preflight instead of silently accepting th
   expect(alert().title).toBe('Reaction not confirmed'); expect(alert().message).toBe('Please try again.');
   expect(alert().buttons).toBeUndefined();
 });
+
+it('keeps one recording upload identity after response loss and starts another after confirmation', async () => {
+  mockUploadAudio.mockRejectedValueOnce(Error('Response lost'));
+  await mount(); await makeVoiceDraft();
+  await act(async () => voiceControls().onSend());
+  const uploadId = mockUploadAudio.mock.calls[0][4];
+  expect(uploadId).toEqual(expect.any(String));
+  expect(voiceControls().retryAvailable).toBe(true);
+  await act(async () => voiceControls().onSend());
+  expect(mockUploadAudio.mock.calls[1][4]).toBe(uploadId);
+  expect(mockChat.sendAudio.mock.calls[0][3]).toBe(uploadId);
+  await makeVoiceDraft(); await act(async () => voiceControls().onSend());
+  expect(mockUploadAudio.mock.calls[2][4]).not.toBe(uploadId);
+});
