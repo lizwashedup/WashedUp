@@ -121,7 +121,7 @@ it('a retired room read cannot repopulate the next visit', async () => {
 it('existing optimistic sends stay in the topic source beside the broadcast history', async () => {
   const receipt = deferred<any>(); mockInsert.mockReturnValueOnce(receipt.promise); const fixture = mount(); await flush(); let sending!: Promise<void>;
   act(() => { sending = fixture.chat.sendMessage('Hello', undefined, undefined, undefined, 'own-send'); }); await flush(); expect(fixture.chat.roomItems.some(row => row.source === 'topic' && row.message.id === 'own-send' && row.message.delivery_state === 'sending')).toBe(true);
-  expect(fixture.chat.roomItems.some(row => row.source === 'broadcast')).toBe(true); await act(async () => { receipt.resolve({ data: { id: 'own-send', created_at: '2026-09-15T12:00:00Z' }, error: null }); await sending; });
+  expect(fixture.chat.roomItems.some(row => row.source === 'broadcast')).toBe(true); await act(async () => { receipt.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Hello', id: 'own-send', created_at: '2026-09-15T12:00:00Z' }, error: null }); await sending; });
   expect(fixture.chat.roomItems.find(row => row.key === 'topic:own-send')?.message).toMatchObject({ body: 'Hello', delivery_state: undefined });
 });
 it('broadcast changes use the existing coalesced realtime refresh queue', async () => {

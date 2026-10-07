@@ -36,7 +36,7 @@ jest.mock('../ChatThread', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../menu/MenuCard', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../circles/AddPeopleSheet', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../circles/plan/CirclePlanComposer', () => ({ __esModule: true, default: () => null }));
-jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View }));
+jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('lucide-react-native', () => ({ CalendarPlus: () => null, Users: () => null, ChevronLeft: () => null, MessageCircle: () => null }));
 
 let tree: ReactTestRenderer | undefined;

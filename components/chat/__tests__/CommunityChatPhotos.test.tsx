@@ -48,7 +48,7 @@ jest.mock('../../../hooks/useTypingIndicator', () => ({ useTypingIndicator: () =
 jest.mock('../../../hooks/useTopicChat', () => ({ isObsoleteTopicOperation: () => false, useTopicChat: () => ({ isCurrent: mockCurrent, messages: mockMessages, loading: false, currentUserId: mockViewerId, currentUserName: 'Alice', refresh: mockRefresh, sendMessage: mockSend, deleteMessage: mockDeleteOwn }) }));
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => mockQueryClient,
-  useInfiniteQuery: () => ({ data: { pages: [{ messages: mockBroadcasts }] }, isLoading: false, isError: false }),
+  useInfiniteQuery: () => ({ data: { pages: [{ messages: mockBroadcasts }] }, isLoading: false, isError: false, refetch: jest.fn().mockResolvedValue(undefined) }),
   useQuery: ({ queryKey }: any) => {
     const data: Record<string, unknown> = {
       'community-my-membership': { status: mockMembership },

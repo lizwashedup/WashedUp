@@ -22,7 +22,7 @@ const event = {
   host_user_id: 'creator-a',
 };
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => { const cleanup = callback(); mockBlur = cleanup; return cleanup; }, [callback]), useRouter: () => ({ back: mockBack, push: mockPush }), useLocalSearchParams: () => ({ id: 'topic-a' }), Stack: { Screen: () => null } }));
-jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View }));
+jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true, CREATOR_PAGES_ENABLED: true }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').AfterglowFallbackFonts }) }));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: 'attendee-a', epoch: 1, isLoading: false, isCurrent: mockCurrent }) }));
@@ -98,7 +98,7 @@ afterEach(() => { act(() => tree?.unmount()); });
 
 
 it('renders both original source items and independent Intros identity', () => {
-  mount(); const list = tree.root.findByType(FlatList); expect(list.props.data).toEqual(mockItems); expect(list.props.keyExtractor(mockItems[0])).not.toBe(list.props.keyExtractor(mockItems[1]));
+  mount(); const list = tree.root.findByType(FlatList); expect(list.props.inverted).toBe(true); expect(list.props.data).toEqual([...mockItems].reverse()); expect(list.props.keyExtractor(mockItems[0])).not.toBe(list.props.keyExtractor(mockItems[1]));
   expect(tree.root.findByType(ChatContextHeader).props.title).toBe('Say hello'); expect(tree.root.findByType(ChatContextHeader).props.subtitle).toBe('Sunset Club LA');
   expect(copy()).toContain('Original standard introduction'); expect(copy()).toContain('Original parent'); expect(mockLegacyMark).not.toHaveBeenCalled(); expect(mockMark).not.toHaveBeenCalled();
 });
@@ -123,7 +123,7 @@ it('a same-day source transition does not repeat the day separator', () => {
   mount(); const day = require('../../../lib/communityChatUi').formatChatDay(mockItems[0].message.created_at); expect(copy().filter(text => text === day)).toHaveLength(1);
 });
 it('loading older Intros does not count as new activity while scrolled up', () => {
-  mount(); act(() => tree.root.findByType(FlatList).props.onScroll({ nativeEvent: { contentOffset: { y: 0 }, contentSize: { height: 2000 }, layoutMeasurement: { height: 400 } } }));
+  mount(); act(() => tree.root.findByType(FlatList).props.onScroll({ nativeEvent: { contentOffset: { y: 200 }, contentSize: { height: 2000 }, layoutMeasurement: { height: 400 } } }));
   const old = { ...mockItems[0], key: 'broadcast:older', message: { ...mockItems[0].message, id: 'older', created_at: '2026-09-14T12:00:00Z' } };
   mockItems = [old, ...mockItems]; act(() => tree.update(<CommunityTopicScreen />));
   expect(button('Scroll to latest messages').findAllByType(Text)).toHaveLength(0);

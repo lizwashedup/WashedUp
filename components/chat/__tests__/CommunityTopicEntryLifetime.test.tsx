@@ -31,7 +31,8 @@ const mockPush = jest.fn(), mockInvalidate = jest.fn().mockResolvedValue(undefin
 const mockRefresh = jest.fn().mockResolvedValue(undefined);
 const mockConfirmed = new Set<string>();
 const mockVerifyTarget = jest.fn();
-jest.mock('../../../lib/topicComposerDraft', () => ({ ...jest.requireActual('../../../lib/topicComposerDraft'), verifyTopicComposerTarget: (...args:any[]) => mockVerifyTarget(...args), checkTopicComposerAttempt: async (_room: string, attempt: {id: string}) => mockConfirmed.has(attempt.id) }));
+const mockCheckAttempt = jest.fn();
+jest.mock('../../../lib/topicComposerDraft', () => ({ ...jest.requireActual('../../../lib/topicComposerDraft'), verifyTopicComposerTarget: (...args:any[]) => mockVerifyTarget(...args), checkTopicComposerAttempt: (...args:any[]) => mockCheckAttempt(...args) }));
 const mockReact = jest.fn();
 const mockEdit = jest.fn();
 const mockLocation = jest.fn();
@@ -128,7 +129,7 @@ async function flush() { await act(async () => { for (let i = 0; i < 24; i++) aw
 function type(text: string) { act(() => input().props.onChangeText(text)); }
 beforeEach(async () => {
   mockLocation.mockReset().mockResolvedValue(undefined);
-  await AsyncStorage.clear(); mockConfirmed.clear();
+  await AsyncStorage.clear(); mockConfirmed.clear(); mockCheckAttempt.mockReset().mockImplementation(async (_room: string, attempt: {id:string}) => mockConfirmed.has(attempt.id));
   jest.clearAllMocks(); mockIntroError=false; mockIntroFetching=false; mockIntroQuery=undefined; mockIntroRefetch.mockReset().mockResolvedValue({}); mockHasSaidHi.mockReset().mockResolvedValue(true); mockMembersError=false; mockMembersLoading=false; mockRoomId='11111111-1111-4111-8111-111111111111'; mockViewerId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; mockEpoch=1; mockMembership='active'; mockSaidHi=true;
   mockMessagesLoading=false;mockLedCommunities=[];mockFirstMessage=null;mockMessages=[];mockMembers=[];mockArchived=false;
   mockSend.mockResolvedValue(undefined); mockRefresh.mockResolvedValue(undefined); mockVerifyTarget.mockResolvedValue(undefined);
@@ -695,4 +696,15 @@ it('does not open the camera when camera permission returns after the account ch
   await act(async () => { permission.resolve({ status: 'granted' }); await work; });
   expect(mockCamera).not.toHaveBeenCalled();
   expect(preview().visible).toBe(false);
+});
+
+
+it('finishes a confirmed new topic send without duplicate receipt reads or waiting for history refresh', async () => {
+ mockCheckAttempt.mockReturnValue(new Promise(()=>{}));
+ mockRefresh.mockReturnValue(new Promise(()=>{}));
+ await mount();type('A new topic message');let done=false;
+ act(()=>{void composer().onSend().then(()=>{done=true;});});await flush();await flush();
+ expect(mockSend).toHaveBeenCalledTimes(1);
+ expect(mockCheckAttempt).not.toHaveBeenCalled();
+ expect(done).toBe(true);expect(composer().sending).toBe(false);expect(input().props.value).toBe('');
 });

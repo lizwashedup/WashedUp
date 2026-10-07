@@ -1,3 +1,7 @@
+/** The outer UI guard must leave room for identity (8s), insert (12s)
+ * and lost-response lookup (8s), rather than retiring recovery at 12s. */
+export const CHAT_SEND_ATTEMPT_DEADLINE_MS = 35_000;
+
 export interface ChatSendReceipt { id: string; created_at: string }
 type ReadResult = { data: ChatSendReceipt | null; error: unknown };
 

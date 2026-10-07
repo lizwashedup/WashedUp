@@ -1,3 +1,4 @@
+import { CHAT_SEND_ATTEMPT_DEADLINE_MS } from '../lib/chatSendReceipt';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TextInput } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
@@ -60,7 +61,7 @@ export function useCommunityReplyComposer(parentId: string, parentScope: Communi
       if(!confirmed){
         if(checkOnly){setFailure('Your reply is kept. Retry the original when you’re ready.');return;}
         if(previous)await verifyTopicComposerTarget(room,attempt,scope);
-        await requestWithDeadline(sendBroadcastReply(parentId,attempt.text,scope,attempt.id,attempt.mentions??null),12_000);
+        await requestWithDeadline(sendBroadcastReply(parentId,attempt.text,scope,attempt.id,attempt.mentions??null),CHAT_SEND_ATTEMPT_DEADLINE_MS);
       }
       if(!scope.isCurrent())return;
       await composer.finish(attempt);

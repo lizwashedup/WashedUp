@@ -1,8 +1,9 @@
 jest.mock('../../ProfileButton', () => ({ __esModule: true, default: () => require('react').createElement(require('react-native').TouchableOpacity, { accessibilityRole: 'button', accessibilityLabel: 'Profile' }) }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { FlatList, Text, TextInput, TouchableOpacity } from 'react-native';
+import { FlatList, Modal, Text, TextInput, TouchableOpacity } from 'react-native';
 import CommunityTopicScreen from '../../../app/community-topic/[id]';
+import { ChatOptionsButton } from '../ChatOptionsButton';
 import { ChatContextHeader } from '../ChatContextHeader';
 import { showAddToCalendar } from '../../../lib/addToCalendar';
 import { formatEventDateLA, formatTimestampLA } from '../../../lib/laDate';
@@ -21,7 +22,7 @@ const event = {
   host_user_id: 'creator-a',
 };
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(callback, [callback]), useRouter: () => ({ back: mockBack, push: mockPush }), useLocalSearchParams: () => ({ id: 'topic-a' }), Stack: { Screen: () => null } }));
-jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View }));
+jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').AfterglowFallbackFonts }) }));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: 'attendee-a', epoch: 1, isCurrent: require('react').useCallback(() => true, []), isLoading: false, error: null, retry: async () => {} }) }));
@@ -69,6 +70,8 @@ let tree: ReactTestRenderer;
 function mount() { act(() => { tree = create(<CommunityTopicScreen />); }); }
 function buttons() { return tree.root.findAllByType(TouchableOpacity); }
 function button(label: string) { return buttons().find(node => node.props.accessibilityLabel === label)!; }
+function openOptions() { act(() => button('Chat options').props.onPress()); }
+function dismissOptions() { act(() => tree.root.findByType(ChatOptionsButton).findByType(Modal).props.onDismiss()); }
 function copy() { return tree.root.findAllByType(Text).map(node => React.Children.toArray(node.props.children).join('')); }
 beforeEach(() => {
   jest.requireMock('../../../constants/FeatureFlags').CREATOR_PAGES_ENABLED = false;
@@ -161,17 +164,17 @@ it('preserves the say-hi veil and creator welcome while event navigation remains
 });
 
 it.each([
-  [{ muted: false, ready: false, isChecking: true }, 'Checking chat notifications', true],
-  [{ muted: undefined, ready: false, isChecking: false }, 'Check chat notification setting', false],
+  [{ muted: false, ready: false, isChecking: true }, 'Checking notifications…', true],
+  [{ muted: undefined, ready: false, isChecking: false }, 'Check notification setting', false],
   [{ muted: true, ready: true, isChecking: false }, 'Unmute chat', false],
 ] as const)('preserves the notification controller state in compact chrome (%s)', (state, label, disabled) => {
   mockMute = { ...mockMute, ...state };
   mount();
+  openOptions();
   expect(button(label).props.disabled).toBe(disabled);
   expect(button(label).props.accessibilityState).toEqual({ disabled, busy: disabled });
-  expect(button(label).props['aria-disabled']).toBe(disabled);
   expect(button(label).props.hitSlop).toBeUndefined();
-  if (!disabled) act(() => { void button(label).props.onPress(); });
+  if (!disabled) { act(() => { void button(label).props.onPress(); }); expect(mockToggle).not.toHaveBeenCalled(); dismissOptions(); }
   expect(mockToggle).toHaveBeenCalledTimes(disabled ? 0 : 1);
 });
 
@@ -193,10 +196,10 @@ it('retains the legacy title, context card, calendar, album and notification slo
 
 it('uses parent mute in a persistent topic header and keeps event-attendee notification controls independent', async () => {
   jest.requireMock('../../../constants/FeatureFlags').CREATOR_PAGES_ENABLED = true;
-  mockTopic={...mockTopic,explore_event_id:null};mockMeta={...mockMeta,explore_event_id:null};mockMembership='active';mount();
-  expect(button('Unmute all community chats')).toBeDefined();await act(async()=>{await button('Unmute all community chats').props.onPress();});
+  mockTopic={...mockTopic,explore_event_id:null};mockMeta={...mockMeta,explore_event_id:null};mockMembership='active';mount();openOptions();
+  expect(button('Unmute all community chats')).toBeDefined();await act(async()=>{await button('Unmute all community chats').props.onPress();});dismissOptions();
   expect(mockParentNotifications.change).toHaveBeenCalledWith(false);expect(mockToggle).not.toHaveBeenCalled();
 });
 it('does not show a parent-unmute action in an attendee event header with staged creator features enabled',()=>{
-  jest.requireMock('../../../constants/FeatureFlags').CREATOR_PAGES_ENABLED=true;mount();expect(button('Unmute all community chats')).toBeUndefined();expect(button('Mute chat')).toBeDefined();
+  jest.requireMock('../../../constants/FeatureFlags').CREATOR_PAGES_ENABLED=true;mount();openOptions();expect(button('Unmute all community chats')).toBeUndefined();expect(button('Mute chat')).toBeDefined();
 });

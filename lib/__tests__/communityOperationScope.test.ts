@@ -28,7 +28,7 @@ beforeEach(() => {
   getUser.mockResolvedValue(auth());
   blocked.mockResolvedValue(new Set());
   rpc.mockResolvedValue({ data: { cards: [], attendee_topics: [] }, error: null } as any);
-  execute.mockReset().mockImplementation((request: Request) => ({ data: request.operation === 'insert' ? receipt : [], error: null }));
+  execute.mockReset().mockImplementation((request: Request) => ({ data: request.operation === 'insert' ? { ...receipt, ...(request.payload as object) } : [], error: null }));
   from.mockImplementation(((table: string) => {
     const request: Request = { table, operation: 'select', filters: [], order: [] }; requests.push(request);
     const chain: any = {};
@@ -347,21 +347,21 @@ const otherId='54000000-0000-4000-8000-000000000002';
 function alexMention(id=selectedId) { return addChatMentionReference('Hi @Alex',null,id,'Alex',3); }
 it('sends main mentions with the selected identity and confirms the exact saved body', async () => {
  const mentions=alexMention();
- execute.mockResolvedValueOnce({data:{...receipt,body:'Hi @Alex',mention_data:mentions},error:null});
+ execute.mockResolvedValueOnce({data:{...receipt,community_id:'community-a',sender_id:'account-a',kind:'message',image_url:null,body:'Hi @Alex',mention_data:mentions},error:null});
  await expect(community.sendCommunityMessage('community-a','Hi @Alex',undefined,'client-uuid',scope(),mentions)).resolves.toBeUndefined();
  expect(requests[0].payload).toMatchObject({body:'Hi @Alex',mention_data:mentions});
- expect(requests[0].columns).toBe('id, created_at, body, mention_data');
+ expect(requests[0].columns).toBe('id, created_at, community_id, sender_id, body, kind, image_url, mention_data');
 });
 it('does not confirm a send from a same-name different-person receipt', async () => {
- execute.mockResolvedValue({data:{...receipt,body:'Hi @Alex',mention_data:alexMention(otherId)},error:null});
+ execute.mockResolvedValue({data:{...receipt,community_id:'community-a',sender_id:'account-a',kind:'message',image_url:null,body:'Hi @Alex',mention_data:alexMention(otherId)},error:null});
  await expect(community.sendCommunityMessage('community-a','Hi @Alex',undefined,'client-uuid',scope(),alexMention())).rejects.toThrow('identity');
  expect(requests).toHaveLength(2);
  expect(requests[1].filters).toEqual([['id','client-uuid'],['community_id','community-a'],['sender_id','account-a']]);
 });
 it('can recover a lost main send response with the original mention identity', async () => {
- execute.mockResolvedValueOnce({data:null,error:Error('response lost')}).mockResolvedValueOnce({data:{...receipt,body:'Hi @Alex',mention_data:alexMention()},error:null});
+ execute.mockResolvedValueOnce({data:null,error:Error('response lost')}).mockResolvedValueOnce({data:{...receipt,community_id:'community-a',sender_id:'account-a',kind:'message',image_url:null,body:'Hi @Alex',mention_data:alexMention()},error:null});
  await expect(community.sendCommunityMessage('community-a','Hi @Alex',undefined,'client-uuid',scope(),alexMention())).resolves.toBeUndefined();
- expect(requests[1].columns).toBe('id, created_at, body, mention_data');
+ expect(requests[1].columns).toBe('id, created_at, community_id, sender_id, body, kind, image_url, mention_data');
 });
 it('clears explicit mention identity atomically when editing and checks the exact original revision', async () => {
  const original={id:'message-one',body:'Hi @Alex',edited_at:null,mentions:alexMention()};
@@ -440,7 +440,7 @@ it('bounds a main-chat media insert and reconciles its original receipt', async 
 
 it.each(['id', 'body', 'image_url'])('does not accept a different %s as confirmation of a main-chat photo', async field => {
   execute.mockResolvedValue({ data: { ...receipt, body: 'Caption', image_url: 'https://example.test/photo.jpg', [field]: 'different' }, error: null });
-  await expect(community.sendCommunityMessage('community-a', 'Caption', 'https://example.test/photo.jpg', receipt.id, scope())).rejects.toThrow('saved message differs');
+  await expect(community.sendCommunityMessage('community-a', 'Caption', 'https://example.test/photo.jpg', receipt.id, scope())).rejects.toThrow('saved message or mention identity differs');
 });
 
 it('bounds a stalled media receipt lookup without reporting delivery', async () => {
@@ -569,4 +569,52 @@ it('returns a fully blocked page without waiting for stalled metadata', async ()
   epoch++;
   metadata.resolve({ data: [], error: null });
   await flush();
+});
+
+
+it('recovers a stalled reply insert using the same receipt after its phase deadline', async () => {
+ jest.useFakeTimers(); const insert=pending();
+ execute.mockReturnValueOnce(insert.promise).mockResolvedValueOnce({data:{...receipt,id:'reply-id',body:'Hello',sender_id:'account-a',broadcast_id:'parent-id'},error:null});
+ const operation=community.sendBroadcastReply('parent-id','Hello',scope(),'reply-id').catch(error=>error);
+ try {
+  await jest.advanceTimersByTimeAsync(12_001);
+  expect(requests).toHaveLength(2);
+  expect(await operation).toBeUndefined();
+  expect(requests[1].filters).toEqual([['id','reply-id'],['broadcast_id','parent-id'],['sender_id','account-a']]);
+ } finally {insert.resolve({data:null,error:Error('Late response')});await operation;jest.useRealTimers();}
+});
+
+it('ends a stalled reply identity check without dispatching a write', async () => {
+ jest.useFakeTimers();const identity=pending();getUser.mockReturnValueOnce(identity.promise);
+ let finished=false;const operation=community.sendBroadcastReply('parent-id','Hello',scope(),'reply-id').catch(error=>{finished=true;return error;});
+ try {
+  await jest.advanceTimersByTimeAsync(8_001);expect(finished).toBe(true);
+  expect(await operation).toMatchObject({name:'RequestDeadlineError'});expect(requests).toHaveLength(0);
+ } finally {identity.resolve(auth());await operation;jest.useRealTimers();}
+});
+
+
+it.each(['id','community_id','sender_id','body','kind','image_url','mention_data'])('rejects a main text receipt with different %s', async field => {
+ const saved={...receipt,community_id:'community-a',sender_id:'account-a',body:'Hello',kind:'message',image_url:null,mention_data:null,[field]:'wrong'};
+ execute.mockResolvedValue({data:saved,error:null});
+ await expect(community.sendCommunityMessage('community-a','Hello',undefined,receipt.id,scope())).rejects.toThrow();
+ expect(requests.filter(request=>request.operation==='insert')).toHaveLength(1);
+ expect(requests[1].filters).toEqual([['id',receipt.id],['community_id','community-a'],['sender_id','account-a']]);
+});
+
+it('bounds both reply write and receipt lookup without dispatching a second write', async () => {
+ jest.useFakeTimers(); const insert = pending(), lookup = pending();
+ execute.mockReturnValueOnce(insert.promise).mockReturnValueOnce(lookup.promise);
+ let finished = false;
+ const operation = community.sendBroadcastReply('parent-id', 'Hello', scope(), 'reply-id').catch(error => { finished = true; return error; });
+ try {
+  await jest.advanceTimersByTimeAsync(12_001);
+  expect(finished).toBe(false); expect(requests).toHaveLength(2);
+  await jest.advanceTimersByTimeAsync(8_000);
+  expect(finished).toBe(true); expect(await operation).toMatchObject({ name: 'RequestDeadlineError' });
+  expect(requests.filter(request => request.operation === 'insert')).toHaveLength(1);
+ } finally {
+  insert.resolve({ data: null, error: Error('Late insert') }); lookup.resolve({ data: null, error: null });
+  await operation; jest.useRealTimers();
+ }
 });

@@ -122,7 +122,7 @@ it('a retired send receipt cannot confirm the new visit’s pending row with the
   await act(async () => { previous.resolve({ data: { id: 'send-id', created_at: '2026-09-13T11:00:00Z' }, error: null }); await first; });
   expect(fixture.chat.messages.find(row => row.id === 'send-id')).toMatchObject({ body: 'Current send', delivery_state: 'sending' });
   expect(mockInvalidate).not.toHaveBeenCalled();
-  await act(async () => { current.resolve({ data: { id: 'send-id', created_at: '2026-09-13T12:00:00Z' }, error: null }); await second; });
+  await act(async () => { current.resolve({ data: { ...message('send-id', { body: 'Current send' }), topic_id: 'topic-a', created_at: '2026-09-13T12:00:00Z' }, error: null }); await second; });
   expect(fixture.chat.messages.find(row => row.id === 'send-id')?.delivery_state).toBeUndefined();
 });
 
@@ -330,7 +330,7 @@ it('retains the existing toggle-off rule when the server already stores the chos
   expect(fixture.chat.messages[0].reactions).toEqual([{ user_id: 'bob', reaction: '🔥' }]);
 });
 it('a restored reply outside the current history page loads its exact parent before sending', async () => {
-  const fixture=mount();await flush();mockRead.mockResolvedValueOnce(page([message('older-parent')]));mockTransport.mockResolvedValue({data:{id:'fixed-reply',created_at:'2026-09-18T19:00:00Z'},error:null});
+  const fixture=mount();await flush();mockRead.mockResolvedValueOnce(page([message('older-parent')]));mockTransport.mockResolvedValue({data:{...message('fixed-reply',{body:'A restored reply',reply_to_message_id:'older-parent'}),topic_id:'topic-a',created_at:'2026-09-18T19:00:00Z'},error:null});
   await act(async()=>{await fixture.chat.sendMessage('A restored reply',undefined,'older-parent',undefined,'fixed-reply');});
   expect(mockRead.mock.calls.at(-1)[3]).toEqual({messageIds:['older-parent'],strictEnrichment:true});
   expect(mockTransport.mock.calls.find(call=>call[1]==='insert')?.[2]).toMatchObject({id:'fixed-reply',reply_to_message_id:'older-parent'});
@@ -347,11 +347,11 @@ it('sends selected topic identities with body-bound exact receipts',async()=>{
  const sending=start(()=>f.chat.sendMessage(' @Alex ',undefined,undefined,undefined,'mention-id',{...selectedMention,text:' @Alex ',references:[{...selectedMention.references[0],start:1,end:6}]}));await flush();
  expect(f.chat.messages.find(row=>row.id==='mention-id')?.mention_data).toEqual(selectedMention);
  expect(mockTransport.mock.calls[0][2]).toMatchObject({body:'@Alex',mention_data:selectedMention});
- await act(async()=>{pending.resolve({data:{id:'mention-id',body:'@Alex',created_at:'2026-09-13T11:00:00Z',mention_data:selectedMention},error:null});await sending;});
+ await act(async()=>{pending.resolve({data:{topic_id:'topic-a',sender_id:'alice',id:'mention-id',body:'@Alex',created_at:'2026-09-13T11:00:00Z',mention_data:selectedMention},error:null});await sending;});
  expect(f.chat.messages.find(row=>row.id==='mention-id')).toMatchObject({mention_data:selectedMention,delivery_state:undefined});
 });
 it('refuses a same-body topic receipt for a different selected person',async()=>{
- const f=mount();await flush();mockTransport.mockResolvedValue({data:{id:'mention-id',body:'@Alex',created_at:'2026-09-13T11:00:00Z',mention_data:{...selectedMention,references:[{...selectedMention.references[0],userId:'dddddddd-dddd-4ddd-8ddd-dddddddddddd'}]}},error:null});
+ const f=mount();await flush();mockTransport.mockResolvedValue({data:{topic_id:'topic-a',sender_id:'alice',id:'mention-id',body:'@Alex',created_at:'2026-09-13T11:00:00Z',mention_data:{...selectedMention,references:[{...selectedMention.references[0],userId:'dddddddd-dddd-4ddd-8ddd-dddddddddddd'}]}},error:null});
  await act(async()=>{await expect(f.chat.sendMessage('@Alex',undefined,undefined,undefined,'mention-id',selectedMention)).rejects.toThrow('Delivery could not be confirmed');});
  expect(f.chat.messages.some(row=>row.id==='mention-id')).toBe(false);
 });
@@ -674,4 +674,13 @@ it('bounds a stalled write, checks its desired receipt and ignores a later write
     expect(mockTransport).toHaveBeenCalledTimes(count);
     expect(fixture.chat.messages[0].reactions).toEqual([{ user_id: 'alice', reaction: '🔥' }]);
   } finally { jest.useRealTimers(); }
+});
+
+
+it.each(['id', 'topic_id', 'sender_id', 'body', 'image_url', 'reply_to_message_id', 'location_lat', 'location_lng', 'mention_data'])('rejects a text acknowledgement with a different %s', async field => {
+ const saved={id:'stable-text',topic_id:'topic-a',sender_id:'alice',body:'Original',created_at:'2026-10-06T12:00:00Z',image_url:null,reply_to_message_id:null,location_lat:null,location_lng:null,mention_data:null,[field]:'wrong'};
+ mockTransport.mockResolvedValue({data:saved,error:null});const f=mount();await flush();
+ await act(async()=>{await expect(f.chat.sendMessage('Original',undefined,undefined,undefined,'stable-text')).rejects.toThrow('Delivery could not be confirmed');});
+ expect(mockTransport.mock.calls.filter(call=>call[1]==='insert')).toHaveLength(1);
+ expect(f.chat.messages.some(row=>row.id==='stable-text')).toBe(false);
 });

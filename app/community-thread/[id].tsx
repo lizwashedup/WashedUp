@@ -1,3 +1,4 @@
+import { CHAT_SEND_ATTEMPT_DEADLINE_MS } from '../../lib/chatSendReceipt';
 import { getCommunityMessageAnchorWindow, CommunityMessageUnavailableError } from '../../lib/communityMessageAnchor';
 import { useChatMessageAnchor, useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
 import { ChatMessageAnchorNotice } from '../../components/chat/ChatMessageAnchorNotice';
@@ -495,7 +496,7 @@ export default function CommunityThreadScreen() {
         if (original.kind === 'edit' && original.edit) {
           await requestWithDeadline(editCommunityMessage(original.id, original.text, sendScope, { communityId: id, original: original.edit, mentions: original.mentions ?? null }), 12_000);
         } else {
-          await requestWithDeadline(sendCommunityMessage(id, original.text, undefined, original.id, sendScope, original.mentions ?? null), 12_000);
+          await requestWithDeadline(sendCommunityMessage(id, original.text, undefined, original.id, sendScope, original.mentions ?? null), CHAT_SEND_ATTEMPT_DEADLINE_MS);
         }
       }
       if (!sendScope.isCurrent()) return;

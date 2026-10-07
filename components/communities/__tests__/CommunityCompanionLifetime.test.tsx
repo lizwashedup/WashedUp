@@ -254,13 +254,31 @@ describe.each(['message', 'broadcast'] as const)('%s companion lifetime', kind =
     expect(recovery('Check original reply')).toBeUndefined();
   });
 
+  it('allows slow reply recovery to finish without retiring the original or losing newer typing', async () => {
+    jest.useFakeTimers(); const pending = deferred(); mockReply.mockReturnValueOnce(pending.promise);
+    try {
+      await mount(); await showReplies(); type('Original reply');
+      await act(async () => { sendButton().props.onPress(); await jest.advanceTimersByTimeAsync(1); });
+      type('Next reply');
+      await act(async () => { await jest.advanceTimersByTimeAsync(14_000); });
+      expect(mockReply).toHaveBeenCalledTimes(1);
+      expect(sendButton().props.disabled).toBe(true);
+      expect(mockSuccess).not.toHaveBeenCalled();
+      await act(async () => { pending.resolve(); await jest.advanceTimersByTimeAsync(1); });
+      expect(input().props.value).toBe('Next reply');
+      expect(sendButton().props.disabled).toBe(false);
+      expect(recovery('Check original reply')).toBeUndefined();
+      expect(mockReply).toHaveBeenCalledTimes(1);
+    } finally { jest.useRealTimers(); }
+  });
+
   it('ends a stalled reply send with recovery and ignores its late completion', async () => {
     jest.useFakeTimers(); const pending=deferred(); mockReply.mockReturnValueOnce(pending.promise);
     try {
       await mount(); await showReplies(); type('Keep this reply');
       await act(async () => { sendButton().props.onPress(); await jest.advanceTimersByTimeAsync(1); });
       expect(mockReply).toHaveBeenCalledTimes(1);
-      await act(async () => { await jest.advanceTimersByTimeAsync(12001); });
+      await act(async () => { await jest.advanceTimersByTimeAsync(35001); });
       expect(recovery('Check original reply')).toBeDefined();
       expect(input().props.value).toBe('Keep this reply');
       await act(async () => pending.resolve());

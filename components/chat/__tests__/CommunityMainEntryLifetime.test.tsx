@@ -368,7 +368,7 @@ it('ends a stalled main send and retains the original attempt for an explicit re
   const wait=deferred();mockSend.mockReturnValueOnce(wait.promise);
   await mount();type('Keep this original');let work!:Promise<void>;act(()=>{work=composer().onSend();});await flush();
   const original=mockSend.mock.calls[0];expect(original).toBeDefined();
-  await act(async()=>{await jest.advanceTimersByTimeAsync(12_000);await work;});
+  await act(async()=>{await jest.advanceTimersByTimeAsync(35_000);await work;});
   expect(composer().sending).toBe(false);expect(input().props.value).toBe('Keep this original');expect(original[4].isCurrent()).toBe(false);
   expect(tree.root.findAllByType(TouchableOpacity).some(n=>n.props.accessibilityLabel==='Retry original message')).toBe(true);
   await act(async()=>{await composer().onSend();});expect(mockSend.mock.calls[1][3]).toBe(original[3]);expect(input().props.value).toBe('');
@@ -509,4 +509,18 @@ it('does not open the camera when camera permission returns after the account ch
   await act(async () => { permission.resolve({ status: 'granted' }); await work; });
   expect(mockCamera).not.toHaveBeenCalled();
   expect(preview().visible).toBe(false);
+});
+
+
+it('allows a confirmed main send to finish recovery after twelve seconds', async () => {
+ jest.useFakeTimers(); const wait=deferred(); mockSend.mockReturnValueOnce(wait.promise);
+ let work: Promise<void> | undefined;
+ try {
+  await mount(); type('Recover original'); act(()=>{work=composer().onSend();}); await flush();
+  await act(async()=>{await jest.advanceTimersByTimeAsync(14_000);});
+  expect(composer().sending).toBe(true);
+  expect(mockSend.mock.calls[0][4].isCurrent()).toBe(true);
+  await act(async()=>{wait.resolve();await work;});
+  expect(composer().sending).toBe(false);expect(input().props.value).toBe('');expect(mockSend).toHaveBeenCalledTimes(1);
+ } finally {wait.resolve();await work;jest.useRealTimers();}
 });

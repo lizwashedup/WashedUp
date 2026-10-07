@@ -17,7 +17,7 @@ let mockOnline = true;
 let mockMute = { muted: false as boolean | null, ready: true, isChecking: false, toggle: mockToggle };
 const mockPinned = { id: 'event-a', title: 'Sunset volleyball', event_date: '2026-09-19T23:00:00Z', venue: 'Ocean Park' };
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(callback, [callback]), useRouter: () => ({ push: mockPush, back: mockBack }), useLocalSearchParams: () => ({ id: '11111111-1111-4111-8111-111111111111' }), Stack: { Screen: () => null } }));
-jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View }));
+jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').AfterglowFonts }) }));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => mockViewer }));

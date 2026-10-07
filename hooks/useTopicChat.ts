@@ -598,13 +598,22 @@ export function useTopicChat(topicId: string | undefined, context?: TopicRoomCon
     setMessages((current) => isCurrentSend() ? mergeTopicMessagesWithPending(current, optimisticPending) : current);
 
     const media = !!imageUrl || !!location;
-    const columns = media ? `id, created_at, body, image_url, location_lat, location_lng, reply_to_message_id${mentionData ? ', mention_data' : ''}` : mentionData ? 'id, created_at, body, mention_data' : 'id, created_at';
-    const checkedReceipt = (result: any) => result.data &&
-      ((media && (result.data.id !== optimisticId || result.data.body !== trimmed || result.data.image_url !== (imageUrl ?? null) ||
-        result.data.location_lat !== (location?.latitude ?? null) || result.data.location_lng !== (location?.longitude ?? null) ||
-        result.data.reply_to_message_id !== (parent?.id ?? null))) ||
-        (mentionData && (result.data.body !== trimmed || !sameChatMentionIdentity(trimmed, mentionData, result.data.mention_data))))
-        ? { data: null, error: Error('The saved message differs. Your original is kept.') } : result;
+    const columns = media ? `id, created_at, body, image_url, location_lat, location_lng, reply_to_message_id${mentionData ? ', mention_data' : ''}`
+      : 'id, created_at, topic_id, sender_id, body, image_url, location_lat, location_lng, reply_to_message_id, mention_data';
+    const checkedReceipt = (result: any) => {
+      const row = result.data;
+      if (!row) return result;
+      const matches = media
+        ? row.id === optimisticId && row.body === trimmed && row.image_url === (imageUrl ?? null)
+          && row.location_lat === (location?.latitude ?? null) && row.location_lng === (location?.longitude ?? null)
+          && row.reply_to_message_id === (parent?.id ?? null)
+          && (!mentionData || sameChatMentionIdentity(trimmed, mentionData, row.mention_data))
+        : row.id === optimisticId && row.topic_id === topicId && row.sender_id === userId && row.body === trimmed
+          && !row.image_url && row.location_lat == null && row.location_lng == null
+          && (row.reply_to_message_id ?? null) === (parent?.id ?? null)
+          && sameChatMentionIdentity(trimmed, mentionData, row.mention_data);
+      return matches ? result : { data: null, error: Error('The saved message differs. Your original is kept.') };
+    };
     const { receipt: confirmed, failure: insertFailure } = await resolveChatSendReceipt(
       async () => checkedReceipt(await requestWithDeadline(supabase
         .from('community_topic_messages')

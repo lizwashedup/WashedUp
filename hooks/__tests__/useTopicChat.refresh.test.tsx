@@ -508,11 +508,11 @@ it('keeps a send confirmed during a pending refresh and preserves another pendin
     sendA = fixture.chat.sendMessage('Same text', undefined, undefined, undefined, 'send-a');
     sendB = fixture.chat.sendMessage('Same text', undefined, undefined, undefined, 'send-b');
   });
-  await act(async () => { first.resolve({ data: { id: 'send-a', created_at: message(20).created_at }, error: null }); await sendA; });
+  await act(async () => { first.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Same text', id: 'send-a', created_at: message(20).created_at }, error: null }); await sendA; });
   await act(async () => { stale.resolve(page([message(10)])); await refresh; });
   expect(fixture.chat.messages.map(row => row.id).sort()).toEqual(['message-10', 'send-a', 'send-b']);
   expect(fixture.chat.messages.find(row => row.id === 'send-b')?.delivery_state).toBe('sending');
-  await act(async () => { second.resolve({ data: { id: 'send-b', created_at: message(21).created_at }, error: null }); await sendB; });
+  await act(async () => { second.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Same text', id: 'send-b', created_at: message(21).created_at }, error: null }); await sendB; });
 });
 
 it('accepts the authoritative server row for the exact pending UUID without duplicating or dropping another send', async () => {
@@ -530,8 +530,8 @@ it('accepts the authoritative server row for the exact pending UUID without dupl
   expect(fixture.chat.messages.filter(row => row.id === 'send-a')).toEqual([confirmed]);
   expect(fixture.chat.messages.find(row => row.id === 'send-b')?.delivery_state).toBe('sending');
   await act(async () => {
-    first.resolve({ data: { id: 'send-a', created_at: confirmed.created_at }, error: null });
-    second.resolve({ data: { id: 'send-b', created_at: message(21).created_at }, error: null });
+    first.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Same text', id: 'send-a', created_at: confirmed.created_at }, error: null });
+    second.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Same text', id: 'send-b', created_at: message(21).created_at }, error: null });
     await Promise.all([sendA, sendB]);
   });
 });
@@ -579,7 +579,7 @@ it('returning to latest keeps ownership of a send already awaiting its receipt',
   let sending!: Promise<unknown>; act(() => { sending = fixture.chat.sendMessage('See you soon', undefined, undefined, undefined, 'owned-send'); }); await flush();
   fixture.anchor(null); await flush();
   expect(fixture.chat.messages.some(row => row.id === 'owned-send' && row.delivery_state === 'sending')).toBe(true);
-  await act(async () => { receipt.resolve({ data: { id: 'owned-send', created_at: '2026-09-21T12:00:00Z' }, error: null }); await sending; });
+  await act(async () => { receipt.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'See you soon', id: 'owned-send', created_at: '2026-09-21T12:00:00Z' }, error: null }); await sending; });
   expect(fixture.chat.messages.find(row => row.id === 'owned-send')).toMatchObject({ body: 'See you soon', delivery_state: undefined });
 });
 

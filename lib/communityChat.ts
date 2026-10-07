@@ -574,12 +574,20 @@ export async function sendCommunityMessage(communityId: string, body: string, im
   const mentionData = mentions ? trimChatMentionDocument(body, mentions) : null;
   const savedBody = trimmed.slice(0, 4000);
   const media = !!imageUrl || !!parseCommunityLocation(savedBody);
-  const columns = media ? `id, created_at, body, image_url${mentions !== undefined ? ', mention_data' : ''}` : mentions !== undefined ? 'id, created_at, body, mention_data' : 'id, created_at';
+  const columns = media ? `id, created_at, body, image_url${mentions !== undefined ? ', mention_data' : ''}`
+    : 'id, created_at, community_id, sender_id, body, kind, image_url, mention_data';
   const sendId = sendIdOverride ?? Crypto.randomUUID();
-  const checkedReceipt = (result: any) => result.data &&
-    ((media && (result.data.id !== sendId || result.data.body !== savedBody || result.data.image_url !== (imageUrl ?? null))) ||
-      (mentions !== undefined && (result.data.body !== savedBody || !sameChatMentionIdentity(savedBody, mentionData, result.data.mention_data))))
-      ? { data: null, error: Error(media ? 'The saved message differs. Your original is kept.' : 'The saved mention identity differs. Your message is kept.') } : result;
+  const checkedReceipt = (result: any) => {
+    const row = result.data;
+    if (!row) return result;
+    const matches = media
+      ? row.id === sendId && row.body === savedBody && row.image_url === (imageUrl ?? null)
+        && (mentions === undefined || sameChatMentionIdentity(savedBody, mentionData, row.mention_data))
+      : row.id === sendId && row.community_id === communityId && row.sender_id === senderId
+        && row.body === savedBody && row.kind === 'message' && !row.image_url
+        && sameChatMentionIdentity(savedBody, mentionData, row.mention_data);
+    return matches ? result : { data: null, error: Error('The saved message or mention identity differs. Your original is kept.') };
+  };
   const { receipt, failure } = await resolveChatSendReceipt(
     async () => checkedReceipt(await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcasts').insert({
       id: sendId,
@@ -725,7 +733,7 @@ export async function getBroadcastReplyMembers(broadcastId: string, scope?: Comm
 }
 
 export async function sendBroadcastReply(broadcastId: string, body: string, scope?: CommunityOperationScope, sendId?: string, mentions?: ChatMentionDocument | null): Promise<void> {
-  const user = await communityOperationUser(scope);
+  const user = await requestWithDeadline(communityOperationUser(scope), 8_000);
   if (!user) throw new Error('Not signed in');
   const trimmed = body.trim();
   if (!trimmed || trimmed.length > 4000) throw Error('Write a reply of up to 4,000 characters.');
@@ -735,7 +743,7 @@ export async function sendBroadcastReply(broadcastId: string, body: string, scop
     ...(sendId ? {id: sendId} : {}), ...(mentions !== undefined ? {mention_data: mentionData} : {}) };
   // Existing callers keep their original contract until their durable composer is connected.
   if (!sendId) {
-    const {error} = await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies').insert(payload));
+    const {error} = await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies').insert(payload)), 12_000);
     if (error) throw error;
     return;
   }
@@ -745,10 +753,10 @@ export async function sendBroadcastReply(broadcastId: string, body: string, scop
     mentions !== undefined && !sameChatMentionIdentity(trimmed, mentionData, result.data.mention_data))
       ? {data:null,error:Error('Your original reply could not be confirmed. Your draft is kept.')} : result;
   const {receipt, failure} = await resolveChatSendReceipt(
-    async () => checkedReceipt(await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
-      .insert(payload).select(columns).single())),
-    async () => checkedReceipt(await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
-      .select(columns).eq('id',sendId).eq('broadcast_id',broadcastId).eq('sender_id',user.id).maybeSingle())),
+    async () => checkedReceipt(await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
+      .insert(payload).select(columns).single()), 12_000)),
+    async () => checkedReceipt(await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
+      .select(columns).eq('id',sendId).eq('broadcast_id',broadcastId).eq('sender_id',user.id).maybeSingle()), 8_000)),
   );
   assertCommunityScope(scope);
   if (!receipt) throw failure ?? Error('Delivery could not be confirmed. Your reply is kept.');

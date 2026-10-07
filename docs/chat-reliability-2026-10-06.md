@@ -2,6 +2,8 @@
 
 Date: October 6, 2026 (America/Los_Angeles).
 
+Latest status: [October 7 repair and audit](chat-audit-2026-10-07.md). That report supersedes the incremental file lists and final-check counts below; earlier entries remain historical evidence.
+
 ## Founder direction and scope
 
 Liz wants dependable, consistent everyday messaging comparable to WhatsApp: prompt conversation opening, reliable sending, consistent replies/reactions, and continuity when returning. She reports lag and errors and dislikes main community chats feeling different from other conversations. This is the next product priority. Hangouts follow chat; simplifying creation and approval follows Hangouts.

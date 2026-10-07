@@ -534,11 +534,13 @@ export default function CommunityTopicScreen() {
       const original = await composerDraft.prepare();
       preparedOriginal = true;
       if (!entryIsCurrent()) return;
-      if (!await checkTopicComposerAttempt(id, original, readableScope)) {
+      const alreadyConfirmed = (resumingOriginal || original.kind === 'edit') && await checkTopicComposerAttempt(id, original, readableScope);
+      if (!alreadyConfirmed) {
         if (resumingOriginal) await verifyTopicComposerTarget(id, original, readableScope);
         if (original.kind === 'edit') await editMessage(original.id, original.text, original.mentions, original.edit ?? undefined);
         else await sendMessage(original.text, undefined, original.replyId ?? undefined, undefined, original.id, original.mentions);
-        if (!await checkTopicComposerAttempt(id, original, readableScope)) throw Error('Your original message has not been confirmed yet.');
+        // New text sends return only after their exact receipt is validated.
+        if (original.kind === 'edit' && !await checkTopicComposerAttempt(id, original, readableScope)) throw Error('Your original message has not been confirmed yet.');
       }
       if (!entryIsCurrent()) return;
       await composerDraft.finish(original);
@@ -547,7 +549,9 @@ export default function CommunityTopicScreen() {
       if (original.kind === 'send' && (gated || gateChecking)) { setJustSaidHi(true); queryClient.invalidateQueries({ queryKey: ['topic-said-hi', id, myId] }); }
       if (anchor && original.kind === 'send') { setIsAtBottom(true); clearAnchor(); }
       else {
-        await refreshMessages(true);
+        // The confirmed bubble is already present. History refresh owns its
+        // own loading/error state and must not keep the composer locked.
+        void refreshMessages(true).catch(() => {});
         if (entryIsCurrent() && !anchor) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
       }
     } catch (error) {
