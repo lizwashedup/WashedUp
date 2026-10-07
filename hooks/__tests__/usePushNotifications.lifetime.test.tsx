@@ -6,12 +6,13 @@ let mockPlatform = 'ios';
 const mockInitialize = jest.fn(), mockLogin = jest.fn(), mockLogout = jest.fn();
 const mockGetId = jest.fn(), mockOptedIn = jest.fn(), mockPermission = jest.fn(), mockPrompt = jest.fn();
 const mockOptIn = jest.fn(), mockOptOut = jest.fn();
-const mockNativePermission = jest.fn(), mockCanRequest = jest.fn();
+const mockNativePermission = jest.fn(), mockCanRequest = jest.fn(), mockProvisional = jest.fn();
 const mockNativeStatuses = { NotDetermined: 0, Denied: 1, Authorized: 2, Provisional: 3, Ephemeral: 4 } as const;
 let mockCachedPermission = false;
 const mockUpsert = jest.fn(), mockAdd = jest.fn(), mockRemove = jest.fn(), mockAuthUnsubscribe = jest.fn();
 const mockClaim = jest.fn(), mockPermissionAdd = jest.fn(), mockPermissionRemove = jest.fn();
 const mockUserAdd = jest.fn(), mockUserRemove = jest.fn(), mockAppStateAdd = jest.fn();
+const mockTelemetry = jest.fn();
 const mockAuthListeners = new Set<(...args: any[]) => void>();
 const mockOnAuth = jest.fn((callback: (...args: any[]) => void) => {
   mockAuthListeners.add(callback);
@@ -24,6 +25,9 @@ jest.mock('react-native', () => ({
 jest.mock('react-native-css-interop', () => ({ createInteropElement: (...args: any[]) => require('react').createElement(...args) }));
 jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: { extra: { oneSignalAppId: 'fixture-only-app-id' } } } }));
 jest.mock('../../constants/LocalDevelopment', () => ({ get LOCAL_DEVELOPMENT_ONLY() { return mockLocal; } }));
+jest.mock('../../lib/pushRegistrationTelemetry', () => ({
+  recordPushRegistrationState: (...args: any[]) => mockTelemetry(...args),
+}));
 jest.mock('../../lib/oneSignalShim', () => ({
   OneSignal: {
     initialize: (...args: any[]) => mockInitialize(...args), login: (...args: any[]) => mockLogin(...args), logout: () => mockLogout(),
@@ -39,6 +43,7 @@ jest.mock('../../lib/oneSignalShim', () => ({
       // Deliberately stale, matching installed SDK's initial cached value.
       hasPermission: () => mockCachedPermission, getPermissionAsync: () => mockPermission(),
       requestPermission: (...args: any[]) => mockPrompt(...args), permissionNative: () => mockNativePermission(), canRequestPermission: () => mockCanRequest(),
+      registerForProvisionalAuthorization: (...args: any[]) => mockProvisional(...args),
       addEventListener: (...args: any[]) => mockPermissionAdd(...args),
       removeEventListener: (...args: any[]) => mockPermissionRemove(...args),
     },
@@ -72,6 +77,7 @@ beforeEach(() => {
   mockInitialize.mockImplementation(() => {}); mockLogin.mockImplementation(() => {}); mockLogout.mockImplementation(() => {});
   mockGetId.mockResolvedValue('device-one'); mockOptedIn.mockResolvedValue(true); mockPermission.mockResolvedValue(true);
   mockNativePermission.mockResolvedValue(mockNativeStatuses.Authorized); mockCanRequest.mockResolvedValue(true);
+  mockProvisional.mockImplementation((done: (accepted: boolean) => void) => done(true));
   mockPrompt.mockResolvedValue(true); mockUpsert.mockResolvedValue({ error: null });
   mockClaim.mockResolvedValue({ data: { status: 'claimed' }, error: null });
   mockAppStateAdd.mockReturnValue({ remove: jest.fn() });
@@ -93,6 +99,29 @@ it('retains the current payload and conflict key for an opted-in identified subs
   await render('alice');
   expect(mockUpsert).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'alice', platform: 'ios', onesignal_player_id: 'device-one', last_seen_at: expect.any(String) }), { onConflict: 'onesignal_player_id' });
   expect(mockPrompt).not.toHaveBeenCalled();
+});
+
+it('silently requests provisional authorization for an unasked iOS account', async () => {
+  mockNativePermission.mockResolvedValue(mockNativeStatuses.NotDetermined);
+  await render('alice');
+  expect(mockProvisional).toHaveBeenCalledTimes(1);
+  expect(mockPrompt).not.toHaveBeenCalled();
+});
+
+it('does not claim provisional permission when the native SDK rejects it', async () => {
+  mockNativePermission.mockResolvedValue(mockNativeStatuses.NotDetermined);
+  mockProvisional.mockImplementation((done: (accepted: boolean) => void) => done(false));
+  await render('alice');
+  expect(mockTelemetry).toHaveBeenCalledWith(
+    'alice', 'failed', 'not_determined', 'provisional_not_granted',
+  );
+  expect(mockTelemetry).not.toHaveBeenCalledWith('alice', 'provisional_granted', 'provisional');
+});
+
+it('never requests provisional authorization on Android', async () => {
+  mockPlatform = 'android'; mockPermission.mockResolvedValue(false);
+  await render('alice');
+  expect(mockProvisional).not.toHaveBeenCalled();
 });
 
 it('retires a queued subscription callback through A → B → A and unmount', async () => {
@@ -144,6 +173,16 @@ it('shares one in-flight explicit permission request and registration for double
   const first = api.registerForPushNotifications({ prompt: true, userId: 'alice' });
   const second = api.registerForPushNotifications({ prompt: true, userId: 'alice' }); await settle(); expect(mockPrompt).toHaveBeenCalledTimes(1);
   pending.resolve(true); expect(await first).toBe('device-one'); expect(await second).toBe('device-one'); expect(mockUpsert).toHaveBeenCalledTimes(1);
+});
+
+it('uses a deliberate CTA to upgrade provisional iOS permission', async () => {
+  await render('alice'); mockUpsert.mockClear(); mockPrompt.mockClear();
+  mockNativePermission.mockResolvedValue(mockNativeStatuses.Provisional);
+  mockPermission.mockResolvedValue(true);
+  expect(await api.registerPushNotificationsWithResult({ prompt: true, userId: 'alice' }))
+    .toEqual({ status: 'registered', subscriptionId: 'device-one' });
+  expect(mockPrompt).toHaveBeenCalledWith(true);
+  expect(mockUpsert).toHaveBeenCalledTimes(1);
 });
 
 it.each(['permission', 'native', 'requestability', 'opted-in', 'subscription', 'token'] as const)('releases stalled %s registration into an explicit retry without accepting its late result', async stage => {

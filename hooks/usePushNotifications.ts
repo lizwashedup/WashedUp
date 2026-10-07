@@ -5,6 +5,7 @@ import { AppState, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
+import { recordPushRegistrationState, type PushPermissionTelemetry } from '../lib/pushRegistrationTelemetry';
 
 // Native status/registration transport must release failed attempts for retry.
 // The OS permission decision itself stays open for the person to answer.
@@ -48,6 +49,7 @@ type PushIdentity = {
   subscription: { id: string | null; optedIn: boolean } | null;
   subscriptionWaiters: Set<(subscription: { id: string | null; optedIn: boolean }) => void>;
   reconciliation: Promise<void> | null;
+  provisionalRegistration: Promise<void> | null;
 };
 
 // The root is the single identity owner. Object identity also distinguishes
@@ -115,6 +117,15 @@ function devicePlatform(): 'ios' | 'android' | 'web' | null {
   return null;
 }
 
+function permissionTelemetry(native: unknown): PushPermissionTelemetry {
+  if (native === OSNotificationPermission.NotDetermined) return 'not_determined';
+  if (native === OSNotificationPermission.Denied) return 'denied';
+  if (native === OSNotificationPermission.Authorized) return 'authorized';
+  if (native === OSNotificationPermission.Provisional) return 'provisional';
+  if (native === OSNotificationPermission.Ephemeral) return 'ephemeral';
+  return 'unknown';
+}
+
 async function bindIdentity(identity: PushIdentity): Promise<boolean> {
   if (!identity.isCurrent() || !(await ensureOneSignalReady()) || !identity.isCurrent()) return false;
   try {
@@ -146,8 +157,9 @@ function unlinkRetiredIdentity(revision: number) {
 
 function upsertDeviceToken(identity: PushIdentity, playerId: string): Promise<boolean> {
   const platform = devicePlatform();
+  const userId = identity.userId;
   const canWrite = () => identity.isCurrent() && (!identity.subscription || (identity.subscription.optedIn && identity.subscription.id === playerId));
-  if (!canWrite() || !identity.userId || !platform || platform === 'web') return Promise.resolve(false);
+  if (!canWrite() || !userId || !platform || platform === 'web') return Promise.resolve(false);
   const existing = identity.writes.get(playerId);
   if (existing) return existing;
   const task = Promise.resolve().then(async () => {
@@ -155,7 +167,7 @@ function upsertDeviceToken(identity: PushIdentity, playerId: string): Promise<bo
     try {
       const { error } = await requestWithDeadline(supabase.from('device_tokens').upsert(
         {
-          user_id: identity.userId,
+          user_id: userId,
           platform,
           onesignal_player_id: playerId,
           last_seen_at: new Date().toISOString(),
@@ -183,6 +195,12 @@ function upsertDeviceToken(identity: PushIdentity, playerId: string): Promise<bo
         );
         if (!canWrite()) return false;
         if (claimError || data?.status !== 'claimed') {
+          recordPushRegistrationState(
+            userId,
+            'failed',
+            'unknown',
+            claimError ? 'claim_error' : String(data?.status ?? error.code ?? 'write_error'),
+          );
           console.error(
             '[PushNotifications] Failed to claim device token:',
             claimError?.message ?? data?.status ?? error.message,
@@ -191,8 +209,11 @@ function upsertDeviceToken(identity: PushIdentity, playerId: string): Promise<bo
           return false;
         }
       }
+      recordPushRegistrationState(userId, 'registered');
       return true;
     } catch (err) {
+      const code = err instanceof Error ? err.name : 'unknown';
+      recordPushRegistrationState(userId, 'failed', 'unknown', code);
       if (identity.isCurrent() && __DEV__) console.warn('[PushNotifications] Token registration failed:', err);
       return false;
     }
@@ -236,6 +257,44 @@ function reconcileSubscription(identity: PushIdentity): Promise<void> {
   identity.reconciliation = task;
   void task.finally(() => {
     if (identity.reconciliation === task) identity.reconciliation = null;
+  });
+  return task;
+}
+
+function registerProvisionallyIfEligible(identity: PushIdentity): Promise<void> {
+  if (Platform.OS !== 'ios' || !identity.isCurrent() || !identity.userId) return Promise.resolve();
+  if (identity.provisionalRegistration) return identity.provisionalRegistration;
+  const task = Promise.resolve().then(async () => {
+    if (!(await bindIdentity(identity)) || !identity.isCurrent()) return;
+    const native = await pushRead(OneSignal.Notifications.permissionNative());
+    recordPushRegistrationState(identity.userId!, 'permission_observed', permissionTelemetry(native));
+    if (!identity.isCurrent() || native !== OSNotificationPermission.NotDetermined) return;
+    recordPushRegistrationState(identity.userId!, 'provisional_requested', 'not_determined');
+    const accepted = await pushRead(new Promise<boolean>((resolve) => {
+      OneSignal.Notifications.registerForProvisionalAuthorization(resolve);
+    }));
+    if (!identity.isCurrent()) return;
+    if (accepted !== true) {
+      recordPushRegistrationState(identity.userId!, 'failed', 'not_determined', 'provisional_not_granted');
+      return;
+    }
+    recordPushRegistrationState(identity.userId!, 'provisional_granted', 'provisional');
+    await reconcileSubscription(identity);
+  }).catch((error) => {
+    // A foreground transition or subscription observer retries. Quiet
+    // authorization must never block authentication or navigation.
+    if (identity.isCurrent() && identity.userId) {
+      recordPushRegistrationState(
+        identity.userId,
+        'failed',
+        'unknown',
+        error instanceof Error ? error.name : 'provisional_error',
+      );
+    }
+  });
+  identity.provisionalRegistration = task;
+  void task.finally(() => {
+    if (identity.provisionalRegistration === task) identity.provisionalRegistration = null;
   });
   return task;
 }
@@ -318,6 +377,7 @@ export function usePushNotifications(
       subscription: null,
       subscriptionWaiters: new Set(),
       reconciliation: null,
+      provisionalRegistration: null,
     };
     owned.current = identity;
     currentIdentity = identity;
@@ -345,6 +405,7 @@ export function usePushNotifications(
 
     void bindIdentity(identity).then(async (bound) => {
       if (!bound || !identity.isCurrent() || !identity.userId) return;
+      recordPushRegistrationState(identity.userId, 'identity_ready');
       try {
         OneSignal.User.pushSubscription.addEventListener('change', onSubscriptionChange);
         attached = onSubscriptionChange;
@@ -365,9 +426,12 @@ export function usePushNotifications(
       }
       if (AppState?.addEventListener) {
         appStateSubscription = AppState.addEventListener('change', (state) => {
-          if (state === 'active' && identity.isCurrent()) void reconcileSubscription(identity);
+          if (state === 'active' && identity.isCurrent()) {
+            void registerProvisionallyIfEligible(identity).then(() => reconcileSubscription(identity));
+          }
         });
       }
+      void registerProvisionallyIfEligible(identity);
       try {
         const observed = identity.subscription;
         const [id, optedIn] = await Promise.all([
@@ -493,10 +557,19 @@ export function registerPushNotificationsWithResult(
     try {
       // Installed SDK's synchronous hasPermission is an initially-false
       // cache; initialization's bridge tick does not await its population.
+      const nativeBeforePrompt = Platform.OS === 'ios' && options.prompt
+        ? await pushRead(OneSignal.Notifications.permissionNative())
+        : null;
+      if (!identity.isCurrent()) return { status: 'obsolete' };
       const hasPermission = await pushRead(OneSignal.Notifications.getPermissionAsync());
       if (!identity.isCurrent()) return { status: 'obsolete' };
       if (typeof hasPermission !== 'boolean') return { status: 'failed' };
-      if (!hasPermission) {
+      // Provisional authorization already permits quiet delivery, so the SDK
+      // reports permission=true. A deliberate CTA must still request full
+      // alert/sound/badge authorization.
+      const shouldUpgradeProvisional = options.prompt
+        && nativeBeforePrompt === OSNotificationPermission.Provisional;
+      if (!hasPermission || shouldUpgradeProvisional) {
         if (!options.prompt) {
           // Android's installed bridge maps every false permission to
           // Denied, including an unasked prompt. Check prompt availability
@@ -521,6 +594,7 @@ export function registerPushNotificationsWithResult(
         await Promise.resolve();
         if (!identity.isCurrent() || (options.canPrompt && options.canPrompt() !== true)) return { status: 'obsolete' };
         if (!permissionRequest) {
+          recordPushRegistrationState(identity.userId!, 'prompt_requested', permissionTelemetry(nativeBeforePrompt));
           const request = Promise.resolve(OneSignal.Notifications.requestPermission(true));
           permissionRequest = request;
           void request.then(
@@ -530,8 +604,12 @@ export function registerPushNotificationsWithResult(
         }
         const granted = await permissionRequest;
         if (!identity.isCurrent()) return { status: 'obsolete' };
-        if (granted === false) return { status: 'permission-denied' };
+        if (granted === false) {
+          recordPushRegistrationState(identity.userId!, 'permission_observed', 'denied');
+          return { status: 'permission-denied' };
+        }
         if (granted !== true) return { status: 'failed' };
+        recordPushRegistrationState(identity.userId!, 'permission_observed', 'authorized');
       }
       // Honor subscription opt-out independently of OS permission. This
       // path never calls optIn/optOut or changes a user's saved preference.
