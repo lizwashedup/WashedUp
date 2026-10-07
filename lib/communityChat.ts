@@ -501,24 +501,30 @@ export async function getCommunityBroadcasts(
   };
   if (fetched.length === 0) return { messages: [], ...pageMeta };
 
-  // hide messages from anyone blocked (either direction). System cards with a
-  // null sender always stay. This runs for the initial load AND every realtime
-  // refetch (the thread screen invalidates this query on insert).
-  const blocked = await scopedCommunityRequest(scope, () => getBlockedWith(viewerId, fetched.map((b) => b.sender_id)));
-  assertCommunityScope(scope);
-  const broadcasts = fetched.filter((b) => !b.sender_id || !blocked.has(b.sender_id));
-  if (broadcasts.length === 0) return { messages: [], ...pageMeta };
-
-  const ids = broadcasts.map((b) => b.id);
-  const senderIds = Array.from(new Set(broadcasts.map((b) => b.sender_id).filter(Boolean))) as string[];
-  const [{ data: reactions, error: reactionsError }, { data: replies, error: repliesError }, { data: profiles, error: profilesError }] = await scopedCommunityRequest(scope, () => Promise.all([
+  // Privacy and display metadata both depend on the fetched page, not on
+  // each other. Start them together, but never return a row before the mutual
+  // block check succeeds. Metadata is read only for the fetched page.
+  const privacy = scopedCommunityRequest(scope, () => getBlockedWith(viewerId, fetched.map((b) => b.sender_id)));
+  const ids = fetched.map((b) => b.id);
+  const senderIds = Array.from(new Set(fetched.map((b) => b.sender_id).filter(Boolean))) as string[];
+  const enrichment = scopedCommunityRequest(scope, () => Promise.all([
     supabase.from('community_broadcast_reactions').select('broadcast_id, emoji, user_id').in('broadcast_id', ids),
     supabase.from('community_broadcast_replies').select('broadcast_id').in('broadcast_id', ids),
     senderIds.length > 0
       ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', senderIds)
       : Promise.resolve({ data: [] } as any),
-  ]));
+  ])).then(data => ({ data }), error => ({ error }));
+  // Attach the rejection handler immediately: a fast metadata failure must
+  // not become unhandled while privacy is pending (or after an empty return).
+  const blocked = await privacy;
   assertCommunityScope(scope);
+  const broadcasts = fetched.filter((b) => !b.sender_id || !blocked.has(b.sender_id));
+  if (broadcasts.length === 0) return { messages: [], ...pageMeta };
+
+  const metadata = await enrichment;
+  assertCommunityScope(scope);
+  if ('error' in metadata) throw metadata.error;
+  const [{ data: reactions, error: reactionsError }, { data: replies, error: repliesError }, { data: profiles, error: profilesError }] = metadata.data;
 
   if (options?.strictEnrichment && (reactionsError || repliesError || profilesError)) throw reactionsError || repliesError || profilesError;
 

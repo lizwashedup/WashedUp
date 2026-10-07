@@ -140,3 +140,35 @@ Base remains `9c2994b10e9f263e98a262e87a9bf7a94ee941c5`; feature branch `feature
 10. `docs/chat-reliability-2026-10-06.md` — evidence and limitations.
 
 JavaScript-only; structurally OTA-compatible relative to the protected base, subject to normal integration/device checks. No new native-build ledger item is needed. No merge, push, OTA, build submission, backend deployment or production mutation was performed. The protected release checkout/branch is not part of these changes.
+
+
+## October 6: community history read overlap
+
+Continued from `96b743e` on the same isolated feature branch. Verified clean feature status, canonical origin, separate worktrees and fetched release commit `9c2994b10e9f263e98a262e87a9bf7a94ee941c5` before editing. Read relevant scope, handoff and native-build instructions; existing production/build restrictions remain in force.
+
+`getCommunityBroadcasts` previously waited for mutual-block checks before starting names/photos, reactions and reply counts. These reads now start together after the source history page arrives. Nothing is returned until privacy succeeds and the current account/visit is rechecked. The existing metadata requirements and strict error behavior remain for visible messages. A fully blocked page still returns empty with the raw cursor, without waiting on metadata. Early and late metadata rejection is handled even when privacy remains pending or the page has already returned empty.
+
+This improves the shared broadcast reader used by legacy main chat, mapped main history and broadcast introductions/anchor reads. It does not change their storage, permissions, pagination, renderer or read acknowledgements.
+
+### Timing evidence and tradeoff
+
+Two virtual-clock tests use a 100 ms history response, then 200/400 ms privacy and metadata responses in opposite orders. With the old sequential dependencies the configured path takes 700 ms; the updated function returns the same permitted, fully enriched row at 500 ms. Neither case returns a page at 499 ms. These are controlled loader tests, not production, native cold-open or animation measurements. Auth is immediate in these fixtures. The improvement replaces two sequential waits with overlapping reads; it still waits for the slower of privacy and metadata and does not yet progressively render message text before metadata.
+
+Tradeoff: metadata requests now include IDs from the fetched source page before the block result is known. Blocked messages and their metadata are never included in the returned page or rendered. The query fields remain unchanged (no handles or extra profile fields), and ID filters remain bounded by the source page. This can fetch metadata that will be discarded, including up to three requests on a fully blocked page that previously skipped metadata. Empty source pages still start no privacy or metadata requests. Server authorization remains unchanged.
+
+### Verification
+
+Eight new controlled-delay/privacy/error cases, plus the existing account-retirement case adjusted to assert no result or further dispatch after retirement rather than prohibiting already-started parallel reads. Before the change, three new overlap cases failed and the other 61 cases in that suite passed. Final run: **166 tests passed across six suites**, normal exit:
+
+- `lib/__tests__/communityOperationScope.test.ts`
+- `lib/__tests__/communityRoomHistory.test.ts`
+- `lib/__tests__/communityMessageAnchor.test.ts`
+- `lib/__tests__/communityConversationRealtime.test.ts`
+- `components/chat/__tests__/CommunityMainQueryIsolation.test.tsx`
+- `hooks/__tests__/useTopicChat.intros.test.tsx`
+
+Coverage includes privacy finishing after metadata; privacy transport rejection; account changes during privacy/enrichment; metadata rejection before privacy; fully blocked pages with failed or stalled metadata; empty history; retained raw cursors; strict reply-count failures; reaction identity; mapped/legacy rooms; message anchors; introduction routing; and reconnect/return refresh.
+
+Logs: `/tmp/washedup-community-overlap-before.log`, `/tmp/washedup-community-overlap-final.log`, `/tmp/washedup-community-overlap-types.log`, `/tmp/washedup-community-overlap-export.log`. TypeScript, auth invariants, `git diff --check` and offline local iOS/Hermes export all passed. Export output: `/tmp/washedup-community-overlap-export-20261006`; Sentry auto-upload disabled. No standalone lint command is configured. Existing native fixture bypasses this loader, so rerunning that fixture would not validate this change; no new simulator performance claim is made.
+
+This increment changes only `lib/communityChat.ts`, `lib/__tests__/communityOperationScope.test.ts` and this evidence file. Together with the ten-file list above, the full feature comparison now comprises twelve files: the same ten plus those two library files. No native dependency/configuration or database changes; structurally OTA-compatible relative to the protected base, with native/production validation still outstanding. No release or production action performed.

@@ -108,14 +108,16 @@ it('does not continue blocked filtering or enrichment after the primary page is 
   expect(requests).toHaveLength(1);
 });
 
-it('does not enrich the previous account page after a delayed block check', async () => {
+it('does not return or start further work after a delayed block check loses its account', async () => {
   const check = pending<Set<string>>(); blocked.mockReturnValueOnce(check.promise);
   execute.mockReturnValueOnce({ data: [row], error: null });
   const operation = community.getCommunityBroadcasts('community-a', undefined, scope());
   const assertion = expect(operation).rejects.toMatchObject(obsolete);
-  await flush(); epoch++;
+  await flush();
+  expect(requests).toHaveLength(4);
+  epoch++;
   check.resolve(new Set()); await assertion;
-  expect(requests).toHaveLength(1);
+  expect(requests).toHaveLength(4);
 });
 
 it('does not return account-specific reactions from a retired enrichment result', async () => {
@@ -471,4 +473,100 @@ it('legacy topic join rejects mismatched auth even before the observer reports i
 it('legacy topic join preserves the initiating user and exact topic upsert', async () => {
  await community.joinTopic('topic-a',scope());
  expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({table:'community_topic_members',operation:'upsert',payload:{topic_id:'topic-a',user_id:'account-a'},conflict:{onConflict:'topic_id,user_id'}});
+});
+
+
+it.each([[200, 400], [400, 200]])('overlaps a %i ms privacy check with %i ms enrichment after history, without early disclosure', async (privacyMs, metadataMs) => {
+  jest.useFakeTimers();
+  try {
+    const hidden = { ...row, id: 'hidden', sender_id: 'blocked-peer' };
+    const delayed = (value: unknown, ms: number) => new Promise(resolve => setTimeout(() => resolve(value), ms));
+    blocked.mockImplementationOnce(() => delayed(new Set(['blocked-peer']), privacyMs) as Promise<Set<string>>);
+    execute.mockImplementation((request: Request) => delayed({ data: request.table === 'community_broadcasts' ? [row, hidden]
+      : request.table === 'profiles_public' ? [{ id: 'account-a', first_name_display: 'A' }]
+      : request.table === 'community_broadcast_reactions' ? [{ broadcast_id: row.id, emoji: 'heart', user_id: 'account-a' }]
+      : [{ broadcast_id: row.id }], error: null }, request.table === 'community_broadcasts' ? 100 : metadataMs));
+    let page: community.CommunityBroadcastPage | undefined;
+    const operation = community.getCommunityBroadcasts('community-a', undefined, scope(), { strictEnrichment: true }).then(result => { page = result; });
+    await jest.advanceTimersByTimeAsync(499);
+    expect(page).toBeUndefined();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(page?.messages.map(message => message.id)).toEqual([row.id]);
+    expect(page?.messages[0]).toMatchObject({ sender_name: 'A', reply_count: 1, reactions: [{ emoji: 'heart', count: 1, mine: true }] });
+    expect(page?.olderCursor?.id).toBe(hidden.id);
+    await operation;
+  } finally { await jest.runAllTimersAsync(); jest.useRealTimers(); }
+});
+
+it('never returns messages when the account changes while privacy is pending after enrichment', async () => {
+  const privacy = pending<Set<string>>();
+  blocked.mockReturnValueOnce(privacy.promise);
+  execute.mockImplementation((request: Request) => ({ data: request.table === 'community_broadcasts' ? [row] : [], error: null }));
+  const owner = scope();
+  const operation = community.getCommunityBroadcasts('community-a', undefined, owner);
+  const assertion = expect(operation).rejects.toMatchObject(obsolete);
+  await flush();
+  expect(requests.map(request => request.table)).toContain('profiles_public');
+  epoch++;
+  privacy.resolve(new Set());
+  await assertion;
+});
+
+it('keeps a fully blocked page empty even if speculative metadata fails', async () => {
+  blocked.mockResolvedValueOnce(new Set(['account-a']));
+  execute.mockImplementation((request: Request) => request.table === 'community_broadcasts'
+    ? { data: [row], error: null } : Promise.reject(Error('Metadata unavailable')));
+  const page = await community.getCommunityBroadcasts('community-a', undefined, scope(), { strictEnrichment: true });
+  expect(page.messages).toEqual([]);
+  expect(page.olderCursor).toEqual({ id: row.id, created_at: row.created_at });
+  await flush();
+});
+
+it('does not start privacy or metadata reads for an empty history page', async () => {
+  const page = await community.getCommunityBroadcasts('community-a', undefined, scope());
+  expect(page).toEqual({ messages: [], hasMore: false, olderCursor: null });
+  expect(blocked).not.toHaveBeenCalled();
+  expect(requests.map(request => request.table)).toEqual(['community_broadcasts']);
+});
+
+
+it('handles an early metadata rejection while privacy is still pending', async () => {
+  const privacy = pending<Set<string>>(), failure = Error('Metadata transport failed');
+  blocked.mockReturnValueOnce(privacy.promise);
+  execute.mockImplementation((request: Request) => request.table === 'community_broadcasts'
+    ? { data: [row], error: null } : Promise.reject(failure));
+  const operation = community.getCommunityBroadcasts('community-a', undefined, scope());
+  const assertion = expect(operation).rejects.toBe(failure);
+  await flush();
+  expect(requests).toHaveLength(4);
+  privacy.resolve(new Set());
+  await assertion;
+});
+
+it('fails closed if the privacy transport rejects after metadata has completed', async () => {
+  let rejectPrivacy!: (error: Error) => void;
+  blocked.mockReturnValueOnce(new Promise<Set<string>>((_resolve, reject) => { rejectPrivacy = reject; }));
+  execute.mockImplementation((request: Request) => ({ data: request.table === 'community_broadcasts' ? [row] : [], error: null }));
+  const failure = Error('Privacy unavailable');
+  const operation = community.getCommunityBroadcasts('community-a', undefined, scope());
+  const assertion = expect(operation).rejects.toBe(failure);
+  await flush();
+  expect(requests).toHaveLength(4);
+  rejectPrivacy(failure);
+  await assertion;
+});
+
+it('returns a fully blocked page without waiting for stalled metadata', async () => {
+  const metadata = pending();
+  blocked.mockResolvedValueOnce(new Set(['account-a']));
+  execute.mockImplementation((request: Request) => request.table === 'community_broadcasts'
+    ? { data: [row], error: null } : metadata.promise);
+  let result: community.CommunityBroadcastPage | undefined;
+  const operation = community.getCommunityBroadcasts('community-a', undefined, scope(), { strictEnrichment: true }).then(page => { result = page; });
+  await flush();
+  expect(result?.messages).toEqual([]);
+  await operation;
+  epoch++;
+  metadata.resolve({ data: [], error: null });
+  await flush();
 });
