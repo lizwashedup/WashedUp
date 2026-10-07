@@ -53,3 +53,31 @@ it('does not append a second bubble for an edit', () => {
   act(() => { tree = create(<Harness attempt={{...original, kind:'edit',edit:{id:'original',body:'Before',edited_at:null}}}/>); });
   expect(hook.messages).toEqual([]);
 });
+
+it('keeps a long unchanged history stable through unrelated composer renders', () => {
+  act(() => { tree = create(<Harness />); });
+  const messages = Array.from({ length: 500 }, (_, i) => ({ ...hook.messages[0], id: `saved-${i}`, localDelivery: undefined }));
+  act(() => tree.update(<Harness messages={messages} attempt={null} sending={false}/>));
+  const first = hook.messages;
+  for (let i = 0; i < 25; i++) {
+    act(() => tree.update(<Harness messages={messages} attempt={null} sending={false}/>));
+    expect(hook.messages).toBe(first);
+  }
+  expect(hook.messages).toBe(messages);
+});
+
+it('reuses an unchanged pending list but updates delivery status and same-ID server edits', () => {
+  const messages: CommunityBroadcast[] = [];
+  act(() => { tree = create(<Harness messages={messages}/>); });
+  const pending = hook.messages;
+  act(() => tree.update(<Harness messages={messages}/>));
+  expect(hook.messages).toBe(pending);
+  act(() => tree.update(<Harness messages={messages} sending={false}/>));
+  expect(hook.messages).not.toBe(pending);
+  expect(hook.messages[0].localDelivery).toBe('unconfirmed');
+  const echo = { ...hook.messages[0], localDelivery: undefined };
+  act(() => tree.update(<Harness messages={[echo]} attempt={null} sending={false}/>));
+  const edited = { ...echo, body: 'Edited on the other device', edited_at: '2026-10-07T20:00:00Z' };
+  act(() => tree.update(<Harness messages={[edited]} attempt={null} sending={false}/>));
+  expect(hook.messages).toEqual([edited]);
+});

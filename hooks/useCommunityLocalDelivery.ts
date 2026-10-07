@@ -15,11 +15,11 @@ export function useCommunityLocalDelivery(
     sender_id: scope.userId, sender_name: null, sender_photo: null, kind: 'message', payload: null,
     image_url: null, edited_at: null, reactions: [], reply_count: 0,
   } : null, [scope, attempt?.id]);
-  const rows = saved.scope === scope ? saved.rows : [];
   useEffect(() => {
-    const ids = new Set(messages.map(message => message.id));
     setSaved(previous => {
       if (previous.scope !== scope) return { scope, rows: [] };
+      if (previous.rows.length === 0) return previous;
+      const ids = new Set(messages.map(message => message.id));
       const remaining = previous.rows.filter(row => !ids.has(row.id));
       return remaining.length === previous.rows.length ? previous : { scope, rows: remaining };
     });
@@ -34,9 +34,15 @@ export function useCommunityLocalDelivery(
       ...(previous.scope === scope ? previous.rows.filter(row => row.id !== original.id) : []),
     ] }));
   }, [scope, pending]);
-  const local = [...rows];
-  if (pending && !local.some(row => row.id === pending.id)) local.unshift({ ...pending, localDelivery: sending ? 'sending' : 'unconfirmed' });
-  const serverIds = new Set(messages.map(message => message.id));
-  const combined: CommunityDeliveryRow[] = [...local.filter(row => !serverIds.has(row.id)), ...messages];
+  // Composer/keyboard renders must not rebuild an unchanged history. Depend on
+  // the full server array, not just IDs: edits and reactions keep their IDs.
+  const combined = useMemo<CommunityDeliveryRow[]>(() => {
+    const local = saved.scope === scope ? [...saved.rows] : [];
+    if (pending && !local.some(row => row.id === pending.id)) local.unshift({ ...pending, localDelivery: sending ? 'sending' : 'unconfirmed' });
+    if (local.length === 0) return messages;
+    const serverIds = new Set(messages.map(message => message.id));
+    const additions = local.filter(row => !serverIds.has(row.id));
+    return additions.length === 0 ? messages : [...additions, ...messages];
+  }, [scope, saved, pending, sending, messages]);
   return { messages: combined, confirm };
 }

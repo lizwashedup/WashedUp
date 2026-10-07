@@ -1,9 +1,9 @@
 # WashedUp chat: full scoped recheck — October 7, 2026
 
-Latest continuation: **2,467 passing tests, 11 unchanged baseline failures,
-170 suites**. The final crosscheck section at the end records a delayed-send
-scroll correction and another successful local multi-client transport run.
-Earlier simulator and transport results remain separately identified.
+Latest continuation: **2,481 passing tests, 11 unchanged baseline failures,
+172 suites**. The scroll/speed section at the end records three targeted CPU/
+allocation improvements, before/after evidence and the updated simulator check.
+Earlier correctness, simulator and transport results remain separately identified.
 
 ## Initial full-recheck result
 
@@ -424,3 +424,122 @@ commit. The remaining practical acceptance step is testing this exact candidate
 on the intended phone binary, especially scrolling during arrivals/delayed sends
 and keyboard transitions; there is no new founder setup requirement for the
 completed code and local transport checks.
+
+## Scroll and speed pass — October 7, 2026
+
+Started from isolated feature commit
+`44ac226fd9a192fc52bc7e23edcaa90b42adf684` on
+`feature/chat-loading-20261006`. The initial tracked worktree was clean;
+the canonical origin, protected release ref and ancestry still matched
+`9c2994b10e9f263e98a262e87a9bf7a94ee941c5`. Remote fetch completed without
+changing working files. The only temporary checkout addition was the dependency
+symlink, removed before the final commit.
+
+### Changes and measured scope
+
+1. Community local delivery now retains the same message-array reference during
+   unrelated composer/keyboard renders. With no extra local rows it returns the
+   authoritative history directly, avoiding a history scan and array copy.
+   Pending status, confirmations, early echoes, same-ID edits, deletes and
+   account/room retirement retain their existing behavior. Memoization depends
+   on the complete history array, not a list of IDs.
+2. LA date grouping reuses one explicitly LA/en-US formatter instead of creating
+   two formatters per adjacent-row comparison. Relative today/yesterday labels
+   still read the current day; device-local time labels are unchanged. There is
+   no unbounded message/timestamp cache.
+3. LinkifiedText memoizes parsing only. Current styles, full-link presentation,
+   accessibility and profile callbacks still render from current props. The
+   existing nested Text structure and Dynamic Type remount are retained. Text,
+   known-name sets and authoritative identity documents invalidate the parsing.
+
+Three new performance assertions failed against the unchanged source, then
+passed after the optimizations. Both runs are preserved separately. Ten cases
+were added overall, including LA midnight/year/DST boundaries, changing day
+labels, delivery status/edits, current profile callbacks and cleared identities.
+
+| Measurement | Before | After | Scope |
+| --- | ---: | ---: | --- |
+| Parsing during mount + 25 unchanged parent updates | 26 calls each | 1 call each | Identity, URL and mention parsers in mounted component tests |
+| Unchanged 500-row community list during 25 parent updates | New array each render | Same history reference | Hook regression; does not imply all FlatList rows avoid rendering |
+| 499 adjacent LA-day comparisons over 500 synthetic timestamps | 19.91 ms median | 0.49 ms median | 21 paired Node CPU rounds, alternating order after warmup |
+
+The last row measures only that helper, not overall chat speed, native frames,
+network delivery, or app cold start. Separate initial-process measurements are
+also retained; single cold samples are too noisy to establish launch improvement.
+No native frame-rate or production latency claim is made.
+
+### Review and checks
+
+- Rechecked list follow/gesture ownership, bounded reply and notification-anchor
+  retries, content-size/layout callbacks, keyboard adapters, delayed-send scroll
+  guards, local delivery lifecycle, grouping and rich-text updates. Retained the
+  existing privacy/admission/account gates and transport behavior.
+- Final selected inventory: **172 suites, 168 passing suites, 2,481 passing
+  tests, 11 failing tests, zero pending and zero timeouts**. The four failing
+  suites and their 11 baseline failures match the earlier documented results;
+  no unrelated fixes were made. Each suite ran in its own Jest process, at most
+  two concurrently, with a 60-second bound. This is the selected chat/adjacent
+  inventory, not every repository test.
+- The four directly affected suites passed independently: **23 tests**.
+  LinkifiedText's existing mention suite and new performance suite were added
+  to the wider inventory. This accounts for four previously unselected tests
+  plus ten newly added cases; repeated runs are not added together.
+- TypeScript, auth invariants, whitespace checks and offline iOS JavaScript/
+  Hermes export passed. Node 24.19 was available; pinned Node 20.20.1 remains
+  unavailable. No standalone lint command is configured.
+- The preceding local multi-client transport run remains evidence for unchanged
+  transport paths. It was not rerun or counted as new verification in this pass.
+
+### Updated native fixture observation
+
+Reloaded the existing iPhone 17e / iOS 26.4 simulator fixture with marker
+`Chat speed checks r9 · Local only · Mona loaded`. It imports this checkout's
+actual screen/component source and runs inside the existing local development
+binary (1.0.6/build44). It is **not** the protected Build51 binary. The fixture
+uses synthetic identity/history/send services with external networking blocked.
+
+All three surfaces — shared, main community and topic — loaded their 500-row
+fixture, opened the native keyboard, accepted an on-screen key and completed
+a local send with the composer cleared. These are functional observations;
+tool-call durations are not send/typing latency measurements.
+
+One topic scroll action was accepted and displayed Latest; tapping Latest then
+visibly returned the new message fully above the composer with the keyboard
+open. Longer scroll/drag attempts encountered ScreenCaptureKit capture failure
+and `noWindowsAvailable`. Thus long-history gesture endurance, animation/FPS,
+repeated keyboard transitions and physical-device feel remain unverified.
+The control-tool failures do not themselves establish an app freeze.
+
+Metro also emitted a VirtualizedList slow-update warning (`dt: 44533`,
+`prevDt: 35308`). The installed list source calculates these values from the
+interval between scroll-event timestamps, not a measured render duration;
+the warning cannot be read as a 44-second render. It is retained as an unresolved
+profiling signal, not dismissed as proof of smoothness or treated as a reason
+for an unmeasured list-engine rewrite.
+
+### Every file changed in this continuation
+
+- `components/LinkifiedText.tsx`
+- `components/__tests__/LinkifiedText.performance.test.tsx`
+- `hooks/useCommunityLocalDelivery.ts`
+- `hooks/__tests__/useCommunityLocalDelivery.test.tsx`
+- `lib/communityChatUi.ts`
+- `lib/__tests__/communityChatUi.test.ts`
+- `docs/chat-full-recheck-2026-10-07.md`
+
+Evidence is outside the checkout at
+`/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/scroll-speed-20261007/`:
+before/after source and test evidence, the 172-suite inventory/results, paired
+benchmark script/results, typecheck/auth/export logs, simulator observations,
+and final comparisons with both this pass's starting commit and the protected
+release. The external fixture changed only its visible verification marker.
+
+These changes are JavaScript-only and require no new native dependency or
+configuration. They are OTA-compatible in source terms, subject to the existing
+Build51 integration/release gates; nothing was published. Release/push/auth/OTP/
+lifecycle/native/backend configuration paths were not edited by this pass.
+No production requests, notifications, builds, deployment, merge or push occurred.
+The next useful acceptance step remains sustained scrolling and keyboard testing
+on the intended phone candidate after safe integration. This pass establishes
+specific reduced work and passing scoped regressions, not a guarantee that all
+possible freezes or errors have been eliminated.
