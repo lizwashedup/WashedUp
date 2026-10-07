@@ -4,6 +4,7 @@ import { useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
 import { ChatMessageAnchorNotice } from './ChatMessageAnchorNotice';
 import { addChatMentionReference, rebaseChatMentions, readChatMentionDocument } from '../../lib/chatMentionIdentity';
 import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
+import { useChatResumeRefresh } from '../../hooks/useChatResumeRefresh';
 import LinkifiedText from '../LinkifiedText';
 import { ChatMentionPicker } from './ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
@@ -1243,8 +1244,11 @@ function ChatThread(props: ChatThreadProps) {
   // 2026-05-18 "chat is slow" reports.
   const lastChatFocusFetchRef = useRef(0);
   const hasFocusedChatRef = useRef(false);
+  const chatFocusedRef = useRef(false);
+  useChatResumeRefresh(refetch, isCurrentEntry, chatFocusedRef);
   useFocusEffect(
     useCallback(() => {
+      chatFocusedRef.current = true;
       const nowTs = Date.now();
       const isFirstFocus = !hasFocusedChatRef.current;
       hasFocusedChatRef.current = true;
@@ -1256,6 +1260,7 @@ function ChatThread(props: ChatThreadProps) {
         refetch(true);
       }
       Notifications.setBadgeCountAsync(0).catch(() => {});
+      return () => { chatFocusedRef.current = false; };
     }, [refetch]),
   );
 

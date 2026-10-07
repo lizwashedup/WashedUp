@@ -72,6 +72,11 @@ From the application worktree, with its existing dependencies available:
 node scripts/chat-lab/run.mjs /absolute/private/connection.json /absolute/report.json
 ```
 
+For a larger bounded reconnect run, prefix the command with
+`CHAT_LAB_RECONNECT_CYCLES=60` (allowed range 1–100; default 6). The expected
+message total becomes `66 + 2 * cycles`. This stresses repeated socket teardown
+and recovery; it is not a days-long soak or an OS suspension simulation.
+
 The harness checks both-way delivery, Unicode, a 40-message concurrent burst,
 lost-response recovery, same-ID retry deduplication, 20-message missed-history
 recovery, six reconnect cycles, outsider access denial, sender impersonation

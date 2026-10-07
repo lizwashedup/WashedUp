@@ -200,3 +200,94 @@ structurally OTA-compatible; no future native build is required by this change.
 No merge, push, deployment, production mutation, notification, build or release
 was performed. Final branch/base comparison and file inventory are saved in
 `evidence/two-client-final/` in the external verification pack.
+
+## Follow-up: foreground recovery, typing state and device substitutes — October 7
+
+Continued from `446d1941bd8e4eda713e7e15f26037cd60102eb3` in the same isolated
+worktree. Git status was clean, canonical origin and protected branch were
+verified, and remote state was fetched without changing the checkout.
+
+Confirmed fixes:
+
+- Shared Plan/Circle/DM chats and ordinary topic chats now silently refresh
+  visible history after returning from inactive/background state. Previously,
+  shared chats depended on navigation focus or streaming reconnect, and topic
+  foreground refresh was restricted to the Intros layout. The new helper checks
+  current room/account and navigation focus again immediately before dispatch,
+  ignores duplicate active events, cancels retired listeners and leaves existing
+  history visible. It does not register push, acknowledge delivery, or send.
+- Typing before a broadcast subscription is ready no longer consumes the
+  throttle window and delays the first usable typing signal. A lost/error/closed
+  subscription resets readiness and clears stale peers instead of continuing
+  to broadcast as though connected. Malformed broadcast identity/state is
+  ignored and an invalid display-name value cannot become a React child.
+  Room names and broadcast protocol remain unchanged. This is not a new
+  broadcast authentication policy or a full typing-channel lifecycle redesign.
+
+Verification completed:
+
+- **745 tests passed in 23 independent suites** covering shared/topic data
+  hooks, drafts, scope retirement, entry lifetimes, typing, media and voice
+  recovery, and keyboard adapters. UI-branch tests include iOS and Android;
+  they are not Android native-device validation.
+- Eight new regression executions failed against the previous committed
+  implementations: shared foreground return on both platform branches, ordinary
+  topic return, pre-subscription typing throttle, three connection-error states,
+  and malformed typing payloads. The repaired source passed these cases.
+- The new foreground helper test executes **100 modeled lifecycle cycles** and
+  tests blur/account/background/unmount retirement before queued dispatch,
+  duplicate active events, rejected reads and replacement listeners.
+- The real local Supabase lab passed all ten scenarios with **60 reconnect
+  cycles and 186 distinct messages**. The bounded cycle count is now configurable
+  in the checked-in lab. This tests actual socket teardown/history/live recovery,
+  not OS suspension, days-long reliability or physical network performance.
+- TypeScript, auth invariants, diff whitespace checks and offline local iOS
+  JavaScript/Hermes export passed. Export:
+  `/tmp/washedup-chat-resume-export-20261007`. Earlier aggregate-pipeline and
+  standalone-lint limitations remain; no full-repository green claim is made.
+
+The existing native fixture was restarted and reloaded through its local Metro
+development server; the visible `Chat resume checks r7 · Local only · Mona
+loaded` banner confirmed current source. It still runs in the existing local
+development binary, not Build 51. A fictional topic message was confirmed and
+the native input cleared. An immediate following on-screen q action showed a
+blank composer; a subsequent q appeared and survived leaving/reopening the
+topic through real local draft storage. The minimal-input comparison then hit
+invalidated accessibility controls during the send/key sequence. That mixture
+does not establish the root cause or certify rapid-input correctness. No native
+patch, prefix stripping, forced event-count override, or input remount was
+introduced. Keyboard smoothness, scroll FPS and actual cold-open performance
+remain unmeasured by this pass.
+
+The native preview now contains the final app source from this follow-up, but
+its backend, navigation and identity boundaries remain synthetic. Real local
+SDK integration and native fixture checks are separate evidence. They do not
+prove complete native-app-to-app delivery, production policy parity, push while
+suspended, actual microphone/photo transfers on weak networks, or release-binary
+compatibility. Those gaps cannot be eliminated by mocked lifecycle events.
+
+Files changed in this follow-up:
+
+- `app/community-topic/[id].tsx`
+- `components/chat/ChatThread.tsx`
+- `components/chat/__tests__/ChatThreadComposerAccessibility.test.tsx`
+- `components/chat/__tests__/CommunityTopicEntryLifetime.test.tsx`
+- `hooks/useChatResumeRefresh.ts`
+- `hooks/__tests__/useChatResumeRefresh.test.tsx`
+- `hooks/useTypingIndicator.ts`
+- `hooks/__tests__/useTypingIndicator.lifetime.test.tsx`
+- `scripts/chat-lab/run.mjs`
+- `scripts/chat-lab/README.md`
+- `docs/chat-phase2-audit-2026-10-07.md`
+
+Logs and per-suite results are in the external verification pack's
+`evidence/resume-*` files and `evidence/resume-regression/`; final comparison
+against the exact protected base and candidate metadata are in
+`evidence/resume-final/`. The local Supabase stack was stopped after verification.
+The external native fixture and its README were updated to revision r7.
+
+All app changes are JavaScript/TypeScript, structurally OTA-compatible with the
+protected base and require no additional native dependency or build. The feature
+branch remains `feature/chat-loading-20261006`; the protected release branch
+still points at `9c2994b10e9f263e98a262e87a9bf7a94ee941c5`. Nothing was pushed,
+merged, built natively, published, deployed or sent to production users.

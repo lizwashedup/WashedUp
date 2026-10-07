@@ -12,6 +12,9 @@ import {resolveChatSendReceipt} from '../../lib/chatSendReceipt.ts';
 import {mergeTopicMessagesWithPending} from '../../lib/topicPendingMessages.ts';
 
 const [connectionPath, reportPath] = process.argv.slice(2);
+const reconnectCycles = Number(process.env.CHAT_LAB_RECONNECT_CYCLES ?? 6);
+assert(Number.isInteger(reconnectCycles) && reconnectCycles >= 1 && reconnectCycles <= 100,
+  'CHAT_LAB_RECONNECT_CYCLES must be an integer from 1 to 100');
 assert(connectionPath && reportPath, 'Usage: node run.mjs /private/local-connection.json /local/report.json');
 const config = JSON.parse(await readFile(connectionPath, 'utf8'));
 const endpoint = new URL(config.API_URL);
@@ -154,8 +157,8 @@ try {
     const live = await send(alice, 'After reconnect');
     await until(() => bob.rows.some(row => row.id === live), 'post-reconnect live event');
   });
-  await check('Six repeated reconnects recover history and keep live delivery working', async () => {
-    for (let cycle = 0; cycle < 6; cycle++) {
+  await check(`${reconnectCycles} repeated reconnects recover history and keep live delivery working`, async () => {
+    for (let cycle = 0; cycle < reconnectCycles; cycle++) {
       await stopListening(bob); const missed = await send(alice, `Missed cycle ${cycle}`);
       await listen(bob); assert((await history(bob)).some(row => row.id === missed));
       const live = await send(alice, `Live cycle ${cycle}`);
@@ -178,7 +181,7 @@ try {
     assert(refused.error, 'Archived-room insert must be rejected');
     const a = await history(alice), b = await history(bob);
     assert.deepEqual(a.map(row => row.id), b.map(row => row.id));
-    assert.equal(a.length, 78); // 2 + 1 + 40 + 1 + 1 + 20 + 1 + 12
+    assert.equal(a.length, 66 + 2 * reconnectCycles);
   });
 } catch (error) {
   failure = error.message; console.error(`FAIL ${failure}`); process.exitCode = 1;
@@ -186,5 +189,6 @@ try {
   for (const stop of pendingJoins) stop();
   for (const value of clients) {await value.removeAllChannels(); value.realtime.disconnect(); value.auth.stopAutoRefresh();}
   await writeFile(reportPath, JSON.stringify({scope: 'Local real services with scoped topic-policy fixture; not full-app/native/production parity', checks, failure,
-    streams, localRoundTripMs: timings.map(Math.round), realServiceClients: 3, productionRequests: 0}, null, 2) + '\n');
+    streams, reconnectCycles, expectedMessages: 66 + 2 * reconnectCycles,
+    localRoundTripMs: timings.map(Math.round), realServiceClients: 3, productionRequests: 0}, null, 2) + '\n');
 }

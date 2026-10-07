@@ -75,10 +75,10 @@ export function useTypingIndicator(
     channel.on('broadcast', { event: 'typing' }, ({ payload }) => {
       if (!isCurrent()) return;
       const p = payload as TypingPayload;
-      if (!p?.userId || p.userId === currentUserId) return;
+      if (typeof p?.userId !== 'string' || !p.userId || p.userId === currentUserId || typeof p.isTyping !== 'boolean') return;
       if (p.isTyping) {
         peersRef.current.set(p.userId, {
-          name: p.name ?? 'Someone',
+          name: typeof p.name === 'string' ? p.name : 'Someone',
           expiresAt: Date.now() + TYPING_EXPIRY_MS,
         });
       } else {
@@ -88,7 +88,13 @@ export function useTypingIndicator(
     });
 
     channel.subscribe((status) => {
-      if (isCurrent() && status === 'SUBSCRIBED') subscribedRef.current = true;
+      if (!isCurrent()) return;
+      subscribedRef.current = status === 'SUBSCRIBED';
+      if (!subscribedRef.current) {
+        lastSentRef.current = 0;
+        peersRef.current.clear();
+        flush();
+      }
     });
     channelRef.current = channel;
 
@@ -135,7 +141,7 @@ export function useTypingIndicator(
   // TYPING_BROADCAST_THROTTLE_MS and (re)arms an idle timer that sends a
   // "stopped" after TYPING_IDLE_STOP_MS of no further keystrokes.
   const broadcastTyping = useCallback(() => {
-    if (!isCurrent()) return;
+    if (!isCurrent() || !subscribedRef.current) return;
     const now = Date.now();
     if (now - lastSentRef.current > TYPING_BROADCAST_THROTTLE_MS) {
       lastSentRef.current = now;

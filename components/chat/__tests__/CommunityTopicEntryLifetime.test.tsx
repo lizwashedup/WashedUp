@@ -10,7 +10,7 @@ import { MessageActionsMenu } from '../MessageActionsMenu';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { FlatList, Text, TextInput, TouchableOpacity } from 'react-native';
+import { AppState, FlatList, Text, TextInput, TouchableOpacity } from 'react-native';
 import CommunityTopicScreen from '../../../app/community-topic/[id]';
 import { BrandedAlert } from '../../BrandedAlert';
 import { CommunityChatComposer } from '../CommunityChatComposer';
@@ -708,4 +708,29 @@ it('finishes a confirmed new topic send without duplicate receipt reads or waiti
  expect(mockSend).toHaveBeenCalledTimes(1);
  expect(mockCheckAttempt).not.toHaveBeenCalled();
  expect(done).toBe(true);expect(composer().sending).toBe(false);expect(input().props.value).toBe('');
+});
+
+
+it('catches up an ordinary topic on foreground return and ignores later returns after blur', async () => {
+  const callbacks = new Set<(state: any) => void>();
+  const originalState = AppState.currentState;
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => {
+    callbacks.add(callback); return { remove: () => { callbacks.delete(callback); } };
+  });
+  const emit = (state: string) => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: state });
+    act(() => callbacks.forEach(callback => callback(state)));
+  };
+  try {
+    await mount(); await flush(); mockRefresh.mockClear();
+    emit('background'); emit('active'); await flush();
+    expect(mockRefresh).toHaveBeenCalledTimes(1); expect(mockRefresh).toHaveBeenCalledWith(true);
+    emit('active'); await flush(); expect(mockRefresh).toHaveBeenCalledTimes(1);
+    act(() => mockFocusCleanup?.()); emit('background'); emit('active'); await flush();
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+  } finally {
+    act(() => tree?.unmount()); spy.mockRestore();
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: originalState });
+  }
 });

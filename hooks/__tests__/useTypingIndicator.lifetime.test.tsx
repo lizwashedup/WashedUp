@@ -81,3 +81,26 @@ it.each(['event', 'circle', 'community-topic'] as const)('preserves %s channel n
   act(() => jest.advanceTimersByTime(5000)); expect(typing.typingUsers).toEqual([]);
   expect(channel.send).toHaveBeenLastCalledWith({ type: 'broadcast', event: 'typing', payload: { userId: 'alice', name: 'Alice', isTyping: false } });
 });
+
+it('does not consume the typing throttle before the channel is ready', () => {
+  mount(); act(() => typing.broadcastTyping()); subscribe(); act(() => typing.broadcastTyping());
+  expect(mockChannels[0].send).toHaveBeenCalledTimes(1);
+});
+it.each(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'])('clears stale peers and suspends broadcasts after %s', status => {
+  mount(); subscribe(); receive(0); act(() => typing.broadcastTyping());
+  const channel = mockChannels[0]; act(() => channel.status(status));
+  expect(typing.typingUsers).toEqual([]);
+  act(() => { jest.advanceTimersByTime(5001); typing.broadcastTyping(); });
+  expect(channel.send).toHaveBeenCalledTimes(1);
+  subscribe(); act(() => typing.broadcastTyping()); expect(channel.send).toHaveBeenCalledTimes(2);
+});
+it('ignores malformed peer identity/state and makes a malformed name renderable', () => {
+  mount(); const channel = mockChannels[0];
+  act(() => {
+    channel.receive({ payload: { userId: {}, isTyping: true } });
+    channel.receive({ payload: { userId: 'friend', isTyping: 'true' } });
+  });
+  expect(typing.typingUsers).toEqual([]);
+  act(() => channel.receive({ payload: { userId: 'friend', isTyping: true, name: { bad: 'payload' } } }));
+  expect(typing.typingUsers).toEqual([{ userId: 'friend', name: 'Someone' }]);
+});

@@ -4,6 +4,7 @@ import { ChatMessageAnchorNotice } from '../../components/chat/ChatMessageAnchor
 import { addChatMentionReference, rebaseChatMentions, readChatMentionDocument } from '../../lib/chatMentionIdentity';
 import { ChatOptionsButton } from '../../components/chat/ChatOptionsButton';
 import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
+import { useChatResumeRefresh } from '../../hooks/useChatResumeRefresh';
 import { ChatMentionPicker } from '../../components/chat/ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { ChatBubbleFill } from '../../components/chat/ChatBubbleFill';
@@ -365,13 +366,7 @@ export default function CommunityTopicScreen() {
     if (introLayout) void refreshMessages(true);
     return () => { coreFocused.current = false; };
   }, [!!introLayout, refreshMessages]));
-  useEffect(() => {
-    if (!introLayout) return;
-    const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active' && coreFocused.current) void refreshMessages(true);
-    });
-    return () => subscription.remove();
-  }, [!!introLayout, refreshMessages]);
+  useChatResumeRefresh(refreshMessages, entryIsCurrent, coreFocused);
   const retryIntroStatus = () => {
     if (!entryIsCurrent() || !coreFocused.current || !gateChecking || introRetryAttempt.current || introStatusFetching) return;
     const attempt = {};
