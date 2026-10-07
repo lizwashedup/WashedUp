@@ -73,7 +73,17 @@ describe.each(['message', 'broadcast'] as const)('%s companion lifetime', kind =
   const recovery = (label: string) => tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === label)!;
   function type(text: string) { act(() => input().props.onChangeText(text)); }
   async function showReplies() { await act(async () => { replyToggle().props.onPress(); }); }
-  async function flush() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); }
+  async function flush() {
+    // React Query, the composer draft restore and mention lookup each add a
+    // continuation. Drain several event-loop turns inside act so the assertion
+    // never races the final state publication on a slower CI worker.
+    for (let turn = 0; turn < 4; turn++) {
+      await act(async () => {
+        await Promise.resolve();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+    }
+  }
   async function mount() { await act(async () => { tree = create(render()); }); }
   async function update() { await act(async () => tree.update(render())); }
   const visibleText = () => {

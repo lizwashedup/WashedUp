@@ -275,7 +275,15 @@ it('does not let a retired insert finalizer unlock a newer pending report', asyn
   let old!: Promise<void>; await act(async () => { old = f.submit()(); await Promise.resolve(); });
   f.update({ reportedUserId: 'target-b' }); f.choose(); const submit = f.submit();
   let next!: Promise<void>; await act(async () => { next = submit(); await Promise.resolve(); });
-  await act(async () => { first.resolve({ error: null }); await old; await submit(); });
+  await act(async () => {
+    first.resolve({ error: null });
+    await old;
+    // A retained duplicate callback while the new report is pending must be
+    // ignored. Do not await it here: a correct implementation may return the
+    // in-flight second promise, which is deliberately resolved below.
+    void submit();
+    await Promise.resolve();
+  });
   expect(mockInsert).toHaveBeenCalledTimes(2);
   expect(f.onClose).not.toHaveBeenCalled();
   await act(async () => { second.resolve({ error: null }); await next; });
