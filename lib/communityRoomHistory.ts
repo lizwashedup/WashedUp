@@ -88,6 +88,7 @@ export async function getCommunityIntroRoom(topicId: string, scope: CommunityOpe
 /** Read through original source adapters. This never marks either room read. */
 export async function getCommunityRoomHistory(
   communityId: string, role: CommunityCoreRoomRole, scope: CommunityOperationScope, cursor?: CommunityRoomCursor,
+  options?: { onBasicPage?: (page: CommunityRoomHistoryPage) => void },
 ): Promise<CommunityRoomHistoryPage> {
   target(communityId, role);
   if (cursor && (cursor.communityId !== communityId || cursor.role !== role || !uuid(cursor.id) || !timestamp(cursor.created_at)
@@ -110,7 +111,22 @@ export async function getCommunityRoomHistory(
   });
   const broadcastIds = refs.filter(r => r.source === 'broadcast').map(r => r.id);
   const topicIds = refs.filter(r => r.source === 'topic').map(r => r.id);
-  const broadcasts = broadcastIds.length ? await read(scope, () => getCommunityBroadcasts(communityId, undefined, scope, { messageIds: broadcastIds, strictEnrichment: true })) : null;
+  const broadcasts = broadcastIds.length ? await read(scope, () => getCommunityBroadcasts(communityId, undefined, scope, { messageIds: broadcastIds, strictEnrichment: true,
+    onBasicPage: role === 'main' && options?.onBasicPage ? async page => {
+      // Validate the mapped source and recheck identity before any early paint.
+      await account(scope);
+      const byId = new Map(page.messages.map(message => [message.id, message]));
+      const messages: CommunityRoomMessage[] = refs.flatMap(ref => {
+        const message = byId.get(ref.id);
+        if (!message) return [];
+        if (ref.source !== 'broadcast' || message.kind === 'intro') throw Error('This message no longer belongs to this room.');
+        return [{ key: ref.key, source: 'broadcast' as const, message }];
+      });
+      const oldest = refs[refs.length - 1];
+      options.onBasicPage!({ messages, hasMore: refs.length === CHAT_NEWEST_PAGE_SIZE,
+        olderCursor: oldest ? { communityId, role, source: 'broadcast', id: oldest.id, created_at: oldest.created_at } : null });
+    } : undefined,
+  })) : null;
   const topics = topicIds.length ? await read(scope, () => getTopicMessages(layout.rooms[0].id, undefined, scope, { messageIds: topicIds, strictEnrichment: true, resolveReplyParents: true })) : null;
   const broadcastById = new Map(broadcasts?.messages.map(m => [m.id, m]));
   const topicById = new Map(topics?.messages.map(m => [m.id, m]));

@@ -695,15 +695,15 @@ it('keeps the chosen duplicate-name member through composer storage and send',as
  expect(mockSend.mock.calls[0][0]).toBe('@Alex');
  expect(mockSend.mock.calls[0][5]).toMatchObject({text:'@Alex',references:[{userId:members[1].id,label:'Alex',start:0,end:5}]});
 });
-it('retains selected identities when an uncertain send restores its draft',async()=>{
+it('retains selected identities in an uncertain original while leaving the next draft empty',async()=>{
  const member={id:'11111111-1111-4111-8111-111111111111',first_name:'Alex',avatar_url:null};
  mockSend.mockResolvedValue(false);
  await act(async()=>{tree=create(<ChatThread {...baseProps} members={[member]} id={mockRoomId} readOnly={null}/>);});
  type('@Al');act(()=>tree!.root.findByType(require('../ChatMentionPicker').ChatMentionPicker).props.onSelect(member));await flush();
  act(()=>sendTap()({},true));await flush();
- expect(input().props.value).toBe('@Alex');
+ expect(input().props.value).toBe('');
  const keys=await AsyncStorage.getAllKeys();const saved=JSON.parse((await AsyncStorage.getItem(keys.find(k=>k.startsWith('chat-composer:'))!))!);
- expect(saved.draft.mentions.references[0].userId).toBe(member.id);expect(saved.draft.attempt.mentions.references[0].userId).toBe(member.id);
+ expect(saved.draft.mentions).toBeNull();expect(saved.draft.attempt.mentions.references[0].userId).toBe(member.id);
 });
 
 

@@ -1,3 +1,4 @@
+import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { useChatMessageAnchor, useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
 import { ChatMessageAnchorNotice } from '../../components/chat/ChatMessageAnchorNotice';
 import { addChatMentionReference, rebaseChatMentions, readChatMentionDocument } from '../../lib/chatMentionIdentity';
@@ -527,11 +528,14 @@ export default function CommunityTopicScreen() {
   };
   const handleSend = async () => {
     if (!entryIsCurrent() || !id || !readableScope || (!draft.trim() && !composerDraft.draft.attempt) || sendAttemptRef.current || (topicMeta && isEventRoomClosed(topicMeta))) return;
+    const finishTiming = beginChatTiming('community-topic', 'send-to-confirmation');
+    let timingOutcome: ChatTimingOutcome = 'retired';
     const token = {}; sendAttemptRef.current = token; setSending(true);
     const resumingOriginal = !!composerDraft.draft.attempt;
     let preparedOriginal = false;
+    let original: Awaited<ReturnType<typeof composerDraft.prepare>> | null = null;
     try {
-      const original = await composerDraft.prepare();
+      original = await composerDraft.prepare({ detachText: true, onDetach: () => { composerInputRef.current?.clear(); draftRef.current = ''; setMentionQuery(null); } });
       preparedOriginal = true;
       if (!entryIsCurrent()) return;
       const alreadyConfirmed = (resumingOriginal || original.kind === 'edit') && await checkTopicComposerAttempt(id, original, readableScope);
@@ -543,9 +547,9 @@ export default function CommunityTopicScreen() {
         if (original.kind === 'edit' && !await checkTopicComposerAttempt(id, original, readableScope)) throw Error('Your original message has not been confirmed yet.');
       }
       if (!entryIsCurrent()) return;
+      timingOutcome = 'ok'; finishTiming();
       await composerDraft.finish(original);
       if (!entryIsCurrent()) return;
-      setMentionQuery(null); stopTyping();
       if (original.kind === 'send' && (gated || gateChecking)) { setJustSaidHi(true); queryClient.invalidateQueries({ queryKey: ['topic-said-hi', id, myId] }); }
       if (anchor && original.kind === 'send') { setIsAtBottom(true); clearAnchor(); }
       else {
@@ -555,8 +559,10 @@ export default function CommunityTopicScreen() {
         if (entryIsCurrent() && !anchor) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
       }
     } catch (error) {
+      timingOutcome = 'error';
+      if (original) composerDraft.restoreFailedText(original);
       if (entryIsCurrent() && !isObsoleteTopicOperation(error)) setAlertInfo({ title: preparedOriginal || resumingOriginal ? 'Message not confirmed' : editingMessageId ? 'Changes not saved' : 'Message not sent', message: friendlyError(error, 'Your original message is kept. Check it before trying again.') });
-    } finally { if (entryIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); } }
+    } finally { finishTiming(entryIsCurrent() ? timingOutcome : 'retired'); if (entryIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); } }
   };
 
   const handleNotifications = async () => {

@@ -1,3 +1,4 @@
+import { measureChatPhase } from './chatPerformance';
 import { validOptionalMentionDocument, trimChatMentionDocument, sameChatMentionIdentity, type ChatMentionDocument } from './chatMentionIdentity';
 import type { TopicDraftEdit } from './topicComposerDraft';
 import { requestWithDeadline } from './requestWithDeadline';
@@ -388,6 +389,8 @@ export interface IntroPayload {
 }
 
 export interface CommunityBroadcast {
+  /** Text passed privacy checks; reactions, reply counts and sender details are not ready. */
+  metadata_pending?: boolean;
   mention_data?: ChatMentionDocument | null;
   id: string;
   body: string;
@@ -449,6 +452,8 @@ export interface CommunityBroadcastPage {
 
 /** Exact-source reads let the D09 reader reuse enrichment without scanning another room. */
 export interface CommunityMessageReadOptions {
+  /** Opt-in read-only first paint, after privacy. Default readers remain fully enriched. */
+  onBasicPage?: (page: CommunityBroadcastPage) => void | Promise<void>;
   messageIds?: readonly string[];
   strictEnrichment?: boolean;
   resolveReplyParents?: boolean;
@@ -464,7 +469,7 @@ export async function getCommunityBroadcasts(
   scope?: CommunityOperationScope,
   options?: CommunityMessageReadOptions,
 ): Promise<CommunityBroadcastPage> {
-  const user = await communityOperationUser(scope);
+  const user = await measureChatPhase('community-main', 'identity', () => communityOperationUser(scope));
   assertCommunityScope(scope);
   const viewerId = user?.id;
   if (options?.messageIds?.length === 0) return { messages: [], hasMore: false, olderCursor: null };
@@ -490,7 +495,7 @@ export async function getCommunityBroadcasts(
   if (options?.broadcastKind === 'main') query = query.neq('kind', 'intro');
 
   if (olderThan) query = query.or(olderChatFilter(olderThan));
-  const { data: rows, error } = await scopedCommunityRequest(scope, () => query);
+  const { data: rows, error } = await measureChatPhase('community-main', 'history', () => scopedCommunityRequest(scope, () => query));
   assertCommunityScope(scope);
   if (error) throw error;
   const fetched = rows ?? [];
@@ -504,22 +509,29 @@ export async function getCommunityBroadcasts(
   // Privacy and display metadata both depend on the fetched page, not on
   // each other. Start them together, but never return a row before the mutual
   // block check succeeds. Metadata is read only for the fetched page.
-  const privacy = scopedCommunityRequest(scope, () => getBlockedWith(viewerId, fetched.map((b) => b.sender_id)));
+  const privacy = measureChatPhase('community-main', 'privacy', () => scopedCommunityRequest(scope, () => getBlockedWith(viewerId, fetched.map((b) => b.sender_id))));
   const ids = fetched.map((b) => b.id);
   const senderIds = Array.from(new Set(fetched.map((b) => b.sender_id).filter(Boolean))) as string[];
-  const enrichment = scopedCommunityRequest(scope, () => Promise.all([
+  const enrichment = measureChatPhase('community-main', 'metadata', () => scopedCommunityRequest(scope, () => Promise.all([
     supabase.from('community_broadcast_reactions').select('broadcast_id, emoji, user_id').in('broadcast_id', ids),
     supabase.from('community_broadcast_replies').select('broadcast_id').in('broadcast_id', ids),
     senderIds.length > 0
       ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', senderIds)
       : Promise.resolve({ data: [] } as any),
-  ])).then(data => ({ data }), error => ({ error }));
+  ]))).then(data => ({ data }), error => ({ error }));
   // Attach the rejection handler immediately: a fast metadata failure must
   // not become unhandled while privacy is pending (or after an empty return).
   const blocked = await privacy;
   assertCommunityScope(scope);
   const broadcasts = fetched.filter((b) => !b.sender_id || !blocked.has(b.sender_id));
   if (broadcasts.length === 0) return { messages: [], ...pageMeta };
+
+  if (options?.onBasicPage) {
+    await options.onBasicPage({ ...pageMeta, messages: broadcasts.map(b => ({ ...b,
+      sender_name: null, sender_photo: null, reactions: [], reply_count: 0, metadata_pending: true,
+    })) });
+    assertCommunityScope(scope);
+  }
 
   const metadata = await enrichment;
   assertCommunityScope(scope);

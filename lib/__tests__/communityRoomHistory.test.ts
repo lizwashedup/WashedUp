@@ -37,6 +37,29 @@ describe('source-preserving community room reader', () => {
     expect(mockTopics).toHaveBeenCalledWith(topic, undefined, scope, { messageIds: [message], strictEnrichment: true, resolveReplyParents: true });
     expect(mockBroadcasts).toHaveBeenCalledWith(page, undefined, scope, { messageIds: [message], strictEnrichment: true });
   });
+  it('publishes main text in authoritative order before enrichment completes', async () => {
+    const other = '0e100000-0000-4000-8000-000000000004';
+    mockRpc.mockImplementation(async (name: string) => ({ data: name === 'get_community_room_identities' ? layout() : [ref('broadcast', other), ref()], error: null }));
+    const basic = jest.fn();
+    mockBroadcasts.mockImplementation(async (_id, _cursor, _scope, options) => {
+      await options.onBasicPage(result([{ id: message, kind: 'message', metadata_pending: true }, { id: other, kind: 'message', metadata_pending: true }]));
+      expect(basic).toHaveBeenCalledTimes(1);
+      expect(basic.mock.calls[0][0].messages.map((row: any) => row.message.id)).toEqual([other, message]);
+      return result([{ id: other, kind: 'message' }, { id: message, kind: 'message' }]);
+    });
+    await getCommunityRoomHistory(page, 'main', scope, undefined, { onBasicPage: basic });
+    expect(basic.mock.calls[0][0].olderCursor).toMatchObject({ id: message, source: 'broadcast', role: 'main' });
+  });
+  it.each(['account', 'wrong room'])('refuses early mapped text after %s changes', async reason => {
+    const basic = jest.fn();
+    mockBroadcasts.mockImplementation(async (_id, _cursor, _scope, options) => {
+      if (reason === 'account') mockGetUser.mockResolvedValue({ data: { user: { id: 'other' } }, error: null });
+      await options.onBasicPage(result([{ id: message, kind: reason === 'wrong room' ? 'intro' : 'message' }]));
+      return result([]);
+    });
+    await expect(getCommunityRoomHistory(page, 'main', scope, undefined, { onBasicPage: basic })).rejects.toThrow();
+    expect(basic).not.toHaveBeenCalled();
+  });
   it('uses stable roles even when the creator renames included rooms', async () => {
     const rooms = await getCommunityRoomIdentities(page, scope);
     expect(rooms?.rooms.map(r => [r.id, r.role, r.name])).toEqual([[topic, 'intros', 'Say hello'], [page, 'main', 'The lounge']]);

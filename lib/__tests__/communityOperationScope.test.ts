@@ -20,7 +20,7 @@ const auth = (id = 'account-a') => ({ data: { user: { id } }, error: null } as a
 const receipt = { id: 'client-uuid', created_at: '2026-09-13T20:00:00Z' };
 const row = { id: 'message-one', sender_id: 'account-a', created_at: receipt.created_at, body: 'hello', kind: 'message', payload: null, image_url: null, edited_at: null };
 function pending<T = any>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
-async function flush() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
+async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 const obsolete = { name: 'ObsoleteCommunityOperationError' };
 
 beforeEach(() => {
@@ -617,4 +617,24 @@ it('bounds both reply write and receipt lookup without dispatching a second writ
   insert.resolve({ data: null, error: Error('Late insert') }); lookup.resolve({ data: null, error: null });
   await operation; jest.useRealTimers();
  }
+});
+
+it('publishes read-only text after privacy, before slow metadata, then returns complete details',async()=>{
+ const privacy=pending<Set<string>>(),metadata=pending();blocked.mockReturnValueOnce(privacy.promise);
+ execute.mockImplementation((r:Request)=>r.table==='community_broadcasts'?{data:[row,{...row,id:'blocked',sender_id:'blocked-person'}],error:null}:metadata.promise);
+ const onBasicPage=jest.fn();const operation=community.getCommunityBroadcasts('community-a',undefined,scope(),{strictEnrichment:true,onBasicPage});
+ await flush();expect(onBasicPage).not.toHaveBeenCalled();
+ privacy.resolve(new Set(['blocked-person']));await flush();
+ expect(onBasicPage).toHaveBeenCalledTimes(1);expect(onBasicPage.mock.calls[0][0].messages).toMatchObject([{id:row.id,metadata_pending:true,reactions:[],reply_count:0}]);
+ metadata.resolve({data:[],error:null});const full=await operation;expect(full.messages).toHaveLength(1);expect(full.messages[0].metadata_pending).toBeUndefined();
+});
+it('publishes no early text when privacy fails or the account retires',async()=>{
+ const privacy=pending<Set<string>>();blocked.mockReturnValueOnce(privacy.promise);execute.mockImplementation((r:Request)=>({data:r.table==='community_broadcasts'?[row]:[],error:null}));
+ const onBasicPage=jest.fn();const operation=community.getCommunityBroadcasts('community-a',undefined,scope(),{onBasicPage});const failure=expect(operation).rejects.toMatchObject(obsolete);
+ await flush();epoch++;privacy.resolve(new Set());await failure;expect(onBasicPage).not.toHaveBeenCalled();
+});
+it('does not promote missing metadata to confirmed empty reactions after early text',async()=>{
+ execute.mockImplementation((r:Request)=>r.table==='community_broadcasts'?{data:[row],error:null}:{data:null,error:Error('Metadata failed')});
+ const onBasicPage=jest.fn();await expect(community.getCommunityBroadcasts('community-a',undefined,scope(),{strictEnrichment:true,onBasicPage})).rejects.toThrow('Metadata failed');
+ expect(onBasicPage.mock.calls[0][0].messages[0].metadata_pending).toBe(true);
 });

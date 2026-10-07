@@ -153,7 +153,7 @@ it('a retired send cannot clear a new room draft or release its active send lock
   mockRoomId='22222222-2222-4222-8222-222222222222';await update();expect(composer().sending).toBe(false);type('B message');
   let freshSend!:Promise<void>;act(()=>{freshSend=composer().onSend();});
   await act(async()=>{old.resolve();await oldSend;});
-  expect(input().props.value).toBe('B message');expect(composer().sending).toBe(true);
+  expect(input().props.value).toBe('');expect(composer().sending).toBe(true);
   await act(async()=>{fresh.resolve();await freshSend;});expect(composer().sending).toBe(false);
 });
 
@@ -279,6 +279,7 @@ it('keeps a mention chosen during an earlier text send', async () => {
   const pending = deferred(); mockSend.mockReturnValue(pending.promise);
   await mount(); type('@A');
   let work!: Promise<void>; act(() => { work = composer().onSend(); });
+  type('@A'); // A new mention belongs to the next draft after the original detaches.
   act(() => mention()!.props.onPress());
   expect(input().props.value).toBe('@Amelia ');
   await act(async () => { pending.resolve(); await work; });
@@ -496,7 +497,7 @@ it('keeps the selected topic mention and UUID in an uncertain send attempt',asyn
  await act(async()=>{await composer().onSend();});
  const raw=await AsyncStorage.getItem(`topic-composer:v1:${mockViewerId}:${mockRoomId}`);const stored=JSON.parse(raw!);
  expect(stored.draft.attempt.mentions.references[0].userId).toBe(mockMembers[0].id);
- expect(stored.draft.mentions.references[0].userId).toBe(mockMembers[0].id);
+ expect(stored.draft.mentions).toBeNull();expect(stored.draft.attemptDetached).toBe(true);
  await act(async()=>{await composer().onSend();});
  expect(mockSend.mock.calls[1][4]).toBe(mockSend.mock.calls[0][4]);expect(mockSend.mock.calls[1][5]).toEqual(mockSend.mock.calls[0][5]);
 });

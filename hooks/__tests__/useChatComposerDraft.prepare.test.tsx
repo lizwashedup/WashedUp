@@ -156,3 +156,33 @@ it('surfaces a stalled ordinary draft save and recovers the same words before se
     expect(hook.error).toBe(false); expect(hook.draft).toMatchObject({ text: 'Words awaiting storage', attempt: null });
   } finally { blockedWrite.resolve(); await flush(); }
 });
+
+it('detaches before a slow storage write and preserves identical next typing across a saved reload', async () => {
+  await act(async () => { tree = create(<Harness />); });
+  await act(async () => hook.change({ text: 'Hello' })); await flush();
+  const blockedWrite = deferred(); const write = jest.mocked(AsyncStorage.setItem).getMockImplementation()!;
+  jest.mocked(AsyncStorage.setItem).mockImplementationOnce((key, value) => blockedWrite.promise.then(() => write(key, value)));
+  const transport = jest.fn(); let preparing!: Promise<ChatDraftAttempt>;
+  act(() => { preparing = hook.prepare({detachText:true}).then(value => { transport(); return value; }); }); await flush();
+  expect(hook.draft.text).toBe(''); expect(hook.draft.attempt?.text).toBe('Hello'); expect(transport).not.toHaveBeenCalled();
+  await act(async () => hook.change({text:'Hello'}));
+  blockedWrite.resolve(); await flush(); const original = await preparing;
+  expect(transport).toHaveBeenCalledTimes(1);
+  await act(async () => hook.retry()); // Reload the serialized distinction, not just in-memory state.
+  await act(async () => hook.finish(original));
+  expect(hook.draft.text).toBe('Hello'); expect(hook.draft.attempt).toBeNull();
+});
+
+it('preserves an identical revision made during reply validation without clearing its native editor',async()=>{
+ const checking=deferred();const library=require('../../lib/chatComposerDraft');
+ const verify=jest.spyOn(library,'verifyChatComposerTarget').mockReturnValue(checking.promise);
+ try{
+  await act(async()=>{tree=create(<Harness/>);});await act(async()=>hook.change({text:'Hello',reply:{id:'parent',content:'Parent',senderName:'Amelia'}}));await flush();
+  const clear=jest.fn();let preparing!:Promise<ChatDraftAttempt>;
+  act(()=>{preparing=hook.prepare({detachText:true,onDetach:clear});});
+  await act(async()=>hook.change({text:'Hello'}));
+  checking.resolve();await flush();const original=await preparing;
+  expect(clear).not.toHaveBeenCalled();
+  await act(async()=>hook.finish(original));expect(hook.draft.text).toBe('Hello');
+ }finally{verify.mockRestore();}
+});

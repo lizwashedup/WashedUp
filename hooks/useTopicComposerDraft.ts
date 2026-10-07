@@ -11,15 +11,22 @@ export function useTopicComposerDraft(topicId:TopicComposerRoom|undefined,owner:
  const persist=useCallback(async(draft:TopicComposerDraft)=>{if(!topicId||!owner?.isCurrent())throw Error('This conversation visit changed.');const version=++revision.current;publish({owner,draft,ready:true,error:false});// Bound only the UI waiter; the underlying per-room storage queue stays ordered.
  try{await requestWithDeadline(saveTopicComposer(topicId,owner,draft),12_000);}catch(error){if(owner.isCurrent()&&ref.current.owner===owner&&version===revision.current)publish({...ref.current,error:true});throw error;}},[topicId,owner,publish]);
  const change=useCallback((patch:Partial<Omit<TopicComposerDraft,'attempt'>>)=>{if(!owner?.isCurrent()||ref.current.owner!==owner||!ref.current.ready)return;void persist({...ref.current.draft,...patch}).catch(()=>undefined);},[owner,persist]);
- const prepare=useCallback(async()=>{
+ const prepare=useCallback(async(options?:{detachText?:boolean;onDetach?:()=>void})=>{
   if(!topicId||!owner?.isCurrent()||ref.current.owner!==owner||!ref.current.ready||ref.current.error)throw Error('Check your saved message first.');
   const existing=ref.current.draft.attempt;
+  const preparingRevision=revision.current;
   const attempt=prepareTopicComposer(ref.current.draft);
   // A refused new target has never reached transport. Keep its editable draft,
   // rather than recording it as an uncertain send that cannot be corrected.
-  if(!existing)await verifyTopicComposerTarget(topicId,attempt,owner);
+  if(!existing&&(!options?.detachText||attempt.edit||attempt.replyId||typeof topicId!=='string'&&topicId.kind==='reply'))await verifyTopicComposerTarget(topicId,attempt,owner);
   if(!owner.isCurrent()||ref.current.owner!==owner)throw Error('This conversation visit changed.');
-  try{await persist({...ref.current.draft,attempt});}
+  try{
+   const independentDraft=!existing&&attempt.kind==='send'&&options?.detachText;
+   const detach=independentDraft&&revision.current===preparingRevision;
+   const saving=persist({...ref.current.draft,...(detach?{text:'',mentions:null,reply:null}:{}),...(independentDraft?{attemptDetached:true}:{}),attempt});
+   if(detach){try{options?.onDetach?.();}catch{/* controlled value still clears */}}
+   await saving;
+  }
   catch(error){if(owner.isCurrent()&&ref.current.owner===owner&&ref.current.draft.attempt===attempt)publish({...ref.current,error:true});throw error;}
   if(!owner.isCurrent())throw Error('This conversation visit changed.');
   return attempt;
@@ -28,6 +35,10 @@ export function useTopicComposerDraft(topicId:TopicComposerRoom|undefined,owner:
  // turning an already-sent message back into an uncertain send.
  try{await persist(finishTopicComposer(ref.current.draft,attempt));}
  catch{if(owner.isCurrent()&&ref.current.owner===owner)publish({...ref.current,error:true});}},[owner,persist,publish]);
+ const restoreFailedText=useCallback((attempt:TopicDraftAttempt)=>{
+  if(!owner?.isCurrent()||ref.current.owner!==owner||ref.current.draft.attemptDetached||ref.current.draft.text||ref.current.draft.attempt?.id!==attempt.id)return;
+  void persist({...ref.current.draft,text:attempt.text,mentions:attempt.mentions??null}).catch(()=>undefined);
+ },[owner,persist]);
  const owned=state.owner===owner;
- return {draft:owned?state.draft:emptyTopicComposer(),ready:owned&&state.ready,error:owned&&state.error,change,prepare,finish,retry:load};
+ return {draft:owned?state.draft:emptyTopicComposer(),ready:owned&&state.ready,error:owned&&state.error,change,prepare,finish,restoreFailedText,retry:load};
 }

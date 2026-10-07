@@ -114,3 +114,27 @@ it('keeps real per-room storage writes ordered through timeout and explicit same
   expect((await actual.readTopicComposer(room,owner)).draft).toMatchObject({text:'Newer queued text',attempt:original});
  }finally{jest.useRealTimers();}
 });
+
+it.each([topic,{kind:'main',id:topic}])('detaches %j before storage finishes and keeps identical next text after confirmation',async room=>{
+ await act(async()=>{tree=create(<Harness room={room}/>);});await act(async()=>hook.change({text:'Hello'}));
+ let release!:()=>void;mockSave.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+ let preparing!:Promise<any>;const send=jest.fn();
+ act(()=>{preparing=hook.prepare({detachText:true}).then(value=>{send();return value;});});
+ await act(async()=>{for(let i=0;i<10;i++)await Promise.resolve();});
+ expect(hook.draft.text).toBe('');expect(hook.draft.attempt?.text).toBe('Hello');expect(send).not.toHaveBeenCalled();
+ await act(async()=>hook.change({text:'Hello'}));
+ let original:any;await act(async()=>{release();original=await preparing;});
+ mockRead.mockResolvedValueOnce({draft:JSON.parse(JSON.stringify(hook.draft)),unsaved:false});await act(async()=>hook.retry());
+ await act(async()=>hook.finish(original));expect(hook.draft.text).toBe('Hello');expect(hook.draft.attempt).toBeNull();
+});
+
+it('keeps identically retyped text while reply validation is pending without clearing native input',async()=>{
+ let release!:()=>void;mockVerify.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+ await act(async()=>{tree=create(<Harness/>);});await act(async()=>hook.change({text:'Hello',reply:{id:topic,body:'Parent',sender_name:'Amelia'}}));
+ const clear=jest.fn();let preparing!:Promise<any>;
+ act(()=>{preparing=hook.prepare({detachText:true,onDetach:clear});});
+ await act(async()=>hook.change({text:'Hello'}));
+ let original:any;await act(async()=>{release();original=await preparing;});
+ expect(clear).not.toHaveBeenCalled();
+ await act(async()=>hook.finish(original));expect(hook.draft.text).toBe('Hello');
+});

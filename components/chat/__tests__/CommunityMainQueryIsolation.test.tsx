@@ -288,3 +288,22 @@ it('does not refresh an offscreen or background community on reconnect', async (
   mockOnline = false; await update(); before = mockReadMessages.mock.calls.length;
   mockOnline = true; await update(); await flush(); expect(mockReadMessages.mock.calls.length).toBe(before);
 });
+
+it('shows privacy-checked text while details load, withholding actions until full history arrives',async()=>{
+ const delayed=deferred<any>();
+ mockReadMessages.mockImplementation((_id:any,_older:any,_scope:any,options:any)=>{
+  options.onBasicPage({...page('early'),messages:page('early').messages.map(row=>({...row,metadata_pending:true,reactions:[]}))});return delayed.promise;
+ });
+ await mount();expect(rows()).toHaveLength(1);expect(rows()[0]).toMatchObject({id:'early',metadata_pending:true});
+ expect(tree.root.findAllByType(TouchableOpacity).some(node=>node.props.accessibilityHint==='hold for message actions')).toBe(false);
+ await act(async()=>delayed.resolve(page('early')));await flush();
+ expect(rows()[0].metadata_pending).toBeUndefined();
+ expect(tree.root.findAllByType(TouchableOpacity).some(node=>node.props.accessibilityHint==='hold for message actions')).toBe(true);
+});
+it('does not accept a late early-paint callback from a departed account',async()=>{
+ const delayed=deferred<any>();let publish!:(page:any)=>void;
+ mockReadMessages.mockImplementationOnce((_id:any,_older:any,_scope:any,options:any)=>{publish=options.onBasicPage;return delayed.promise;});
+ await mount();mockViewerId='bob';mockEpoch++;await update();
+ await act(async()=>{publish(page('private-old'));delayed.resolve(page('private-old'));});await flush();
+ expect(rows().map((r:any)=>r.id)).toEqual(['bob-2']);
+});

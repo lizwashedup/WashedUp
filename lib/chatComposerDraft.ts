@@ -9,14 +9,14 @@ import type { ChatOperationScope, ConversationKey } from '../hooks/useChat';
 export type ChatDraftReply = { id: string; content: string; senderName: string };
 export type ChatDraftEdit = { mentions?: ChatMentionDocument | null; id: string; content: string };
 export type ChatDraftAttempt = { mentions?: ChatMentionDocument | null; id: string; text: string; replyId: string | null; edit: ChatDraftEdit | null };
-export type ChatComposerDraft = { mentions?: ChatMentionDocument | null; text: string; reply: ChatDraftReply | null; edit: ChatDraftEdit | null; attempt: ChatDraftAttempt | null };
+export type ChatComposerDraft = { attemptDetached?: boolean; mentions?: ChatMentionDocument | null; text: string; reply: ChatDraftReply | null; edit: ChatDraftEdit | null; attempt: ChatDraftAttempt | null };
 export const emptyChatComposer = (): ChatComposerDraft => ({ text: '', reply: null, edit: null, attempt: null });
 const identifier = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 100 && /^[\w-]+$/.test(v);
 const text = (v: unknown): v is string => typeof v === 'string' && v.length <= 10000;
 const validEdit = (v: any): boolean => v === null || !!v && identifier(v.id) && text(v.content) && validOptionalMentionDocument(v.content, v.mentions);
 function valid(d: any): d is ChatComposerDraft {
   const a = d?.attempt;
-  return !!d && text(d.text) && validOptionalMentionDocument(d.text, d.mentions) && validEdit(d.edit) && !(d.reply && d.edit)
+  return !!d && (d.attemptDetached === undefined || typeof d.attemptDetached === 'boolean' && (!d.attemptDetached || !!a)) && text(d.text) && validOptionalMentionDocument(d.text, d.mentions) && validEdit(d.edit) && !(d.reply && d.edit)
     && (d.reply === null || !!d.reply && identifier(d.reply.id) && text(d.reply.content) && text(d.reply.senderName))
     && (a === null || !!a && identifier(a.id) && text(a.text) && validOptionalMentionDocument(a.text, a.mentions) && !!a.text.trim() && validEdit(a.edit)
       && (a.replyId === null || identifier(a.replyId)) && (!a.edit || a.edit.id === a.id && a.replyId === null));
@@ -72,6 +72,7 @@ export function prepareChatComposer(draft: ChatComposerDraft): ChatDraftAttempt 
 }
 export function finishChatComposer(draft: ChatComposerDraft, attempt: ChatDraftAttempt): ChatComposerDraft {
   if (JSON.stringify(draft.attempt) !== JSON.stringify(attempt)) return draft;
+  if (draft.attemptDetached) return { ...draft, attempt: null, attemptDetached: false };
   const sameContext = attempt.edit ? draft.edit?.id === attempt.id : !draft.edit && (draft.reply?.id ?? null) === attempt.replyId;
   const sameMentions = sameChatMentionIdentity(attempt.text, draft.mentions ? trimChatMentionDocument(draft.text, draft.mentions) : null, attempt.mentions);
   if (sameContext && (!draft.text || draft.text.trim() === attempt.text && sameMentions)) return emptyChatComposer();

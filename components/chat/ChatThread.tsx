@@ -1,3 +1,4 @@
+import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { parseMemberReactionAnchor } from '../../lib/memberChatMessageAnchor';
 import { useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
 import { ChatMessageAnchorNotice } from './ChatMessageAnchorNotice';
@@ -1488,6 +1489,8 @@ function ChatThread(props: ChatThreadProps) {
   const handleSend = useCallback(async (retryOriginal = false) => {
     if (!canWrite() || !draftOwner || sendingRef.current || uploading || (composerDraft.draft.attempt && !retryOriginal)) return;
     if (!inputTextRef.current.trim() && !composerDraft.draft.attempt) return;
+    const finishTiming = beginChatTiming(props.kind, 'send-to-confirmation');
+    let timingOutcome: ChatTimingOutcome = 'retired';
     const token = {}; sendingRef.current = token; setSendingText(true);
     const revision = draftRevision.current;
     const contextRevision = draftContextRevision.current;
@@ -1497,11 +1500,11 @@ function ChatThread(props: ChatThreadProps) {
         const filtered = checkContent(inputTextRef.current.trim());
         if (!filtered.ok) throw Error(filtered.reason ?? 'Please revise your message.');
       }
-      original = await composerDraft.prepare();
+      original = await composerDraft.prepare({ detachText: true, onDetach: () => { textInputRef.current?.clear(); inputTextRef.current = ''; setMentionQuery(null); stopTyping(); } });
       if (!canWrite()) return;
-      // Only the original composer is cleared. Text typed during preflight stays.
-      if (!retryOriginal && draftRevision.current === revision) { setInputText(''); inputTextRef.current = ''; }
-      setMentionQuery(null); stopTyping();
+      // Fresh text detaches atomically before its storage wait in the draft hook.
+      // Edits retain the existing clear-after-preparation behavior.
+      if (original.edit && !retryOriginal && draftRevision.current === revision) { setInputText(''); inputTextRef.current = ''; setMentionQuery(null); stopTyping(); }
       if (!retryOriginal || !await checkChatComposerAttempt(draftRoom, original, draftOwner)) {
         if (retryOriginal) await verifyChatComposerTarget(draftRoom, original, draftOwner);
         const confirmed = original.edit
@@ -1513,21 +1516,21 @@ function ChatThread(props: ChatThreadProps) {
         if (!confirmed || (original.edit && !await checkChatComposerAttempt(draftRoom, original, draftOwner))) throw Error('Your original message has not been confirmed yet.');
       }
       if (!canWrite()) return;
+      timingOutcome = 'ok'; finishTiming();
       await composerDraft.finish(original);
       if (canWrite()) scrollToBottom();
     } catch (error) {
+      timingOutcome = 'error';
       if (!canWrite()) return;
       // An unresolved original is shown separately from newer typing/context.
       // Never merge it into a newer message that could later resend it as new.
-      if (original && draftContextRevision.current === contextRevision && !inputTextRef.current) {
-        const restored = restoreChatDraft(original.text, '');
-        changeDraft({ text: restored, mentions: original.mentions ?? null }); inputTextRef.current = restored;
-      }
+      if (original && draftContextRevision.current === contextRevision) composerDraft.restoreFailedText(original);
       // A definitive refusal of this new edit made no change. Older uncertain
       // attempts remain protected even if a later retry is refused.
       if (original && !retryOriginal && isChatEditRefused(error)) await composerDraft.refuseFresh(original).catch(() => undefined);
       if (canWrite()) setAlertInfo({ title: original && (!isChatEditRefused(error) || retryOriginal) ? 'Message not confirmed' : 'Message not sent', message: error instanceof Error ? error.message : 'Your message is kept. Check it before trying again.' });
     } finally {
+      finishTiming(isCurrentEntry() ? timingOutcome : 'retired');
       if (sendingRef.current === token) { sendingRef.current = null; setSendingText(false); }
     }
   }, [canWrite, draftOwner, uploading, composerDraft, draftRoom, editMessage, sendMessage, entryScope, scrollToBottom, setInputText, stopTyping, changeDraft]);

@@ -1,3 +1,5 @@
+import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
+import { useCommunityLocalDelivery, type CommunityDeliveryRow } from '../../hooks/useCommunityLocalDelivery';
 import { CHAT_SEND_ATTEMPT_DEADLINE_MS } from '../../lib/chatSendReceipt';
 import { getCommunityMessageAnchorWindow, CommunityMessageUnavailableError } from '../../lib/communityMessageAnchor';
 import { useChatMessageAnchor, useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
@@ -101,6 +103,7 @@ import {
   ObsoleteCommunityOperationError,
   isObsoleteCommunityOperation,
   type CommunityBroadcast,
+  type CommunityBroadcastPage,
 } from '../../lib/communityChat';
 import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
 import { formatEventDateLA } from '../../lib/laDate';
@@ -127,7 +130,7 @@ export default function CommunityThreadScreen() {
   const queryClient = useQueryClient();
   const { id, reactionMessageId, reactionMessageSource } = useLocalSearchParams<{ id: string; reactionMessageId?: string; reactionMessageSource?: string }>();
   const { anchor, anchorKey, clearAnchor } = useChatMessageAnchor(id, reactionMessageId, reactionMessageSource);
-  const listRef = useRef<FlatList<CommunityBroadcast>>(null);
+  const listRef = useRef<FlatList<CommunityDeliveryRow>>(null);
   const atBottomRef = useRef(true);
   const [followingLatest, setFollowingLatest] = useState(true);
   const [reactionDetails, setReactionDetails] = useState<ReactionDetailsRequest | null>(null);
@@ -324,21 +327,38 @@ export default function CommunityThreadScreen() {
   ), [members]);
   const mentionCandidates = useMemo(() => findMentionMembers(members, mentionQuery, myId), [members, mentionQuery, myId]);
 
+  const historyTiming = useRef<{ key: typeof messageQueryKey; ready: ReturnType<typeof beginChatTiming>; layout: ReturnType<typeof beginChatTiming> } | null>(null);
+  useEffect(() => () => { if (historyTiming.current?.key === messageQueryKey) { historyTiming.current.ready('retired'); historyTiming.current.layout('retired'); } }, [messageQueryKey]);
+  const [basicHistory, setBasicHistory] = useState<{ key: typeof messageQueryKey; page: CommunityBroadcastPage } | null>(null);
+  const activeHistoryKey = useRef(messageQueryKey); activeHistoryKey.current = messageQueryKey;
+  const basicPage = basicHistory?.key === messageQueryKey ? basicHistory.page : null;
   const { data: broadcastPages, isLoading: historyLoading, isError: historyError, error: historyFailure, refetch: refetchHistory,
     hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = useInfiniteQuery({
     queryKey: messageQueryKey,
-    queryFn: ({ pageParam, signal }) => readCurrent(async () => {
+    queryFn: async ({ pageParam, signal }) => {
+      let active = true;
+      if (!pageParam && historyTiming.current?.key !== messageQueryKey) {
+        historyTiming.current = { key: messageQueryKey, ready: beginChatTiming('community-main', 'history-text-ready'), layout: beginChatTiming('community-main', 'history-first-layout') };
+      }
+      const onBasicPage = (page: CommunityBroadcastPage) => {
+        if (active && !signal.aborted && entryIsCurrent() && activeHistoryKey.current === messageQueryKey && !anchor && !pageParam) {
+          historyTiming.current?.ready();
+          setBasicHistory({ key: messageQueryKey, page });
+        }
+      };
+      try { return await readCurrent(async () => {
       if (anchor && !pageParam) {
         const page = await getCommunityMessageAnchorWindow({ kind: 'main', communityId: id!, mapped: !!coreLayout }, anchor, readScope);
         return { ...page, messages: page.messages.flatMap(item => item.source === 'broadcast' ? [item.message] : []).reverse() };
       }
-      if (!coreLayout) return getCommunityBroadcasts(id!, pageParam ?? undefined, readScope);
-      const page = await getCommunityRoomHistory(id!, 'main', readScope, pageParam as CommunityRoomCursor | undefined);
+      if (!coreLayout) return getCommunityBroadcasts(id!, pageParam ?? undefined, readScope, { onBasicPage, strictEnrichment: true });
+      const page = await getCommunityRoomHistory(id!, 'main', readScope, pageParam as CommunityRoomCursor | undefined, { onBasicPage: page => onBasicPage({ ...page, messages: page.messages.flatMap(item => item.source === 'broadcast' ? [item.message] : []) }) });
       return { ...page, messages: page.messages.map(item => {
         if (item.source !== 'broadcast') throw Error('This message belongs to another chat.');
         return item.message;
       }) };
-    }, signal),
+      }, signal); } finally { active = false; }
+    },
     initialPageParam: undefined as { created_at: string; id: string } | CommunityRoomCursor | undefined,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.olderCursor ?? undefined : undefined,
     enabled: !!id && identityReady && roomReady,
@@ -347,12 +367,12 @@ export default function CommunityThreadScreen() {
     retry: (failures, error) => !anchor && !(error instanceof RequestDeadlineError) && failures < 2,
   });
   const anchorUnavailable = !!anchor && historyFailure instanceof CommunityMessageUnavailableError;
-  const isLoading = historyLoading || (needsRoomIdentity && !roomReady && !roomIdentity.isError);
+  const isLoading = (historyLoading && !basicPage) || (needsRoomIdentity && !roomReady && !roomIdentity.isError);
   const broadcastsError = historyError || (needsRoomIdentity && roomIdentity.isError);
   const refetchBroadcasts = () => needsRoomIdentity && !roomReady ? roomIdentity.refetch() : refetchHistory();
-  const broadcasts = useMemo(() => identityReady && roomReady && !anchorUnavailable ? broadcastPages?.pages.flatMap((page) => page.messages) ?? [] : [], [broadcastPages, identityReady, roomReady, anchorUnavailable]);
+  const broadcasts = useMemo(() => identityReady && roomReady && !anchorUnavailable ? broadcastPages?.pages.flatMap((page) => page.messages) ?? basicPage?.messages ?? [] : [], [broadcastPages, basicPage, identityReady, roomReady, anchorUnavailable]);
   const menuMessages = useRef(broadcasts); menuMessages.current = broadcasts;
-  const selectedMessageCurrent = (messageId: string) => admissionIsCurrent() && menuMessages.current.some(message => message.id === messageId);
+  const selectedMessageCurrent = (messageId: string) => admissionIsCurrent() && menuMessages.current.some(message => message.id === messageId && !message.metadata_pending);
   const openReactionDetails = (messageId: string) => {
     const isCurrent = () => selectedMessageCurrent(messageId);
     if (!isCurrent() || !myId) return;
@@ -363,7 +383,8 @@ export default function CommunityThreadScreen() {
   useEffect(() => { if (messageMenu && !messageMenu.isCurrent()) setMessageMenu(null); }, [messageMenu, broadcasts, admissionVisit]);
   // Start at the live edge without estimating every older variable-height row.
   // Inverted rendering keeps the visible chronology oldest above newest.
-  const thread = broadcasts;
+  const delivery = useCommunityLocalDelivery(operationScope, broadcasts, composerDraft.draft.attempt, sending);
+  const thread: CommunityDeliveryRow[] = admissionVisit.allowed && !anchor ? delivery.messages : broadcasts;
   const anchorScroll = useChatAnchorScroll(listRef, anchorKey, anchor ? thread.findIndex(message => message.id === anchor.id) : -1);
   const photos = useMemo(() => broadcasts.slice().reverse().flatMap(message =>
     message.kind === 'message' && message.image_url
@@ -474,19 +495,22 @@ export default function CommunityThreadScreen() {
     try {
       if (await checkTopicComposerAttempt(composerRoom, pending, readableScope)) {
         if (!admissionIsCurrent()) return;
-        await composerDraft.finish(pending); refreshMessages(true);
+        delivery.confirm(pending); await composerDraft.finish(pending); refreshMessages(true);
       } else if (admissionIsCurrent()) showError('Not confirmed yet', 'Your original message is kept. Check again or retry the original when you’re ready.');
     } catch (error) { if (admissionIsCurrent()) showError('Could not check your message', friendlyError(error, 'Your original message is kept.')); }
     finally { if (admissionIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); } }
   };
   const handleSend = async () => {
     if (!admissionIsCurrent() || !id || !composerRoom || !readableScope || (!draft.trim() && !composerDraft.draft.attempt) || sendAttemptRef.current) return;
+    const finishTiming = beginChatTiming('community-main', 'send-to-confirmation');
+    let timingOutcome: ChatTimingOutcome = 'retired';
     const token = {}; sendAttemptRef.current = token; setSending(true);
     const resumingOriginal = !!composerDraft.draft.attempt;
     let prepared = false;
     const sendScope = { userId: operationScope.userId, isCurrent: () => operationScope.isCurrent() && sendAttemptRef.current === token };
+    let original: Awaited<ReturnType<typeof composerDraft.prepare>> | null = null;
     try {
-      const original = await composerDraft.prepare(); prepared = true;
+      original = await composerDraft.prepare({ detachText: true, onDetach: () => { composerInputRef.current?.clear(); draftRef.current = ''; setMentionQuery(null); } }); prepared = true;
       if (!sendScope.isCurrent()) return;
       const confirmed = resumingOriginal && await checkTopicComposerAttempt(composerRoom, original, sendScope);
       if (!sendScope.isCurrent()) return;
@@ -500,14 +524,18 @@ export default function CommunityThreadScreen() {
         }
       }
       if (!sendScope.isCurrent()) return;
+      delivery.confirm(original);
+      timingOutcome = 'ok'; finishTiming();
       await composerDraft.finish(original);
       if (!sendScope.isCurrent()) return;
-      setMentionQuery(null); refreshMessages(true);
+      refreshMessages(true);
       if (anchor && original.kind === 'send') { atBottomRef.current = true; setFollowingLatest(true); clearAnchor(); }
       else if (!anchor) { atBottomRef.current = true; setFollowingLatest(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
     } catch (error) {
+      timingOutcome = 'error';
+      if (original) composerDraft.restoreFailedText(original);
       if (admissionIsCurrent() && !isObsoleteCommunityOperation(error)) showError(prepared || resumingOriginal ? 'Message not confirmed' : 'Message not sent', friendlyError(error, 'Your original message is kept. Check it before trying again.'));
-    } finally {
+    } finally { finishTiming(admissionIsCurrent() ? timingOutcome : 'retired');
       if (admissionIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); }
     }
   };
@@ -839,6 +867,7 @@ export default function CommunityThreadScreen() {
           keyExtractor={(b) => b.id}
           onLayout={() => {
             if (!entryIsCurrent()) return;
+            historyTiming.current?.ready(); historyTiming.current?.layout();
             if (anchor) anchorScroll.schedule();
             else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
           }}
@@ -880,6 +909,8 @@ export default function CommunityThreadScreen() {
               && isSameChatDay(previous.created_at, item.created_at) &&
               Math.abs(new Date(previous.created_at).getTime() - new Date(item.created_at).getTime()) <= 5 * 60 * 1000;
             const mine = item.sender_id === myId;
+            const localDelivery = item.localDelivery;
+            const detailsReady = !localDelivery && !item.metadata_pending;
             const firstUrl = extractFirstUrl(item.body);
             const sharedLocation = item.kind === 'message' ? parseCommunityLocation(item.body) : null;
             // A message carrying exactly one link makes the whole bubble a second
@@ -906,17 +937,17 @@ export default function CommunityThreadScreen() {
                         )}
                       </TouchableOpacity>
                     ) : <View style={styles.faceSpacer} />)}
-                    <View style={[styles.messageColumn, mine && styles.messageColumnMine]} {...messageActionWeb(() => { if (mine) openOwnMessageMenu(item); else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id); })}>
+                    <View style={[styles.messageColumn, mine && styles.messageColumnMine]} {...(detailsReady ? messageActionWeb(() => { if (mine) openOwnMessageMenu(item); else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id); }) : {})}>
                       <TouchableOpacity
                         activeOpacity={0.9}
                         onPress={COMMUNITY_CHAT_GROUPING_ENABLED && item.image_url ? () => photoSelection.onSelect(item.id) : sharedLocation ? () => openUrl(communityLocationMapUrl(sharedLocation)) : bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
-                        onLongPress={() => {
+                        onLongPress={!detailsReady ? undefined : () => {
                           if (mine) openOwnMessageMenu(item);
                           else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id);
                         }}
                         style={[styles.bubble, mine && styles.bubbleMine, messageAppearance?.bubble, mine && messageAppearance?.bubbleOwn, COMMUNITY_CHAT_GROUPING_ENABLED && { maxWidth: '100%' }]}
-                        {...messageActionAccess(() => { if (mine) openOwnMessageMenu(item); else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id); })}
-                        accessibilityHint="hold for message actions"
+                        {...(detailsReady ? messageActionAccess(() => { if (mine) openOwnMessageMenu(item); else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id); }) : {})}
+                        accessibilityHint={detailsReady ? "hold for message actions" : undefined}
                         accessibilityRole={sharedLocation ? 'button' : undefined}
                         accessibilityLabel={sharedLocation ? `Open map for ${chatLocationLabel(sharedLocation)}` : undefined}
                       >
@@ -947,12 +978,14 @@ export default function CommunityThreadScreen() {
                           />
                         )}
                         {!!firstUrl && <LinkPreviewCard url={firstUrl} isOwn={mine} />}
-                        <Text style={[styles.editedText, messageAppearance?.metadata, mine && messageAppearance?.metadataOwn, { alignSelf: 'flex-end', marginTop: 2 }]}>{formatChatTime(item.created_at)}</Text>
+                        <Text style={[styles.editedText, messageAppearance?.metadata, mine && messageAppearance?.metadataOwn, { alignSelf: 'flex-end', marginTop: 2 }]}>{localDelivery === 'sending' ? 'Sending…' : localDelivery === 'unconfirmed' ? 'Not confirmed · retry below' : localDelivery === 'sent' ? 'Sent' : formatChatTime(item.created_at)}</Text>
                       {!!item.edited_at && <Text style={[styles.editedText, mine && styles.messageTextMine, messageAppearance?.metadata, mine && messageAppearance?.metadataOwn]}>edited</Text>}
                       </TouchableOpacity>
-                      <CommunityMessageActions onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }} compactReplies replyRequest={replyRequest?.messageId === item.id ? replyRequest : undefined} onRepliesClose={currentAction(() => setReplyRequest(current => current?.messageId === item.id ? null : current))} onViewReactions={() => openReactionDetails(item.id)} appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined} message={item} scope={operationScope} onError={showError} onReact={emoji => handleSelectReaction(item.id, emoji)} onAddReaction={currentAction(() => setReactionPickerMsgId(item.id))} />
+                      {detailsReady && <CommunityMessageActions onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }} compactReplies replyRequest={replyRequest?.messageId === item.id ? replyRequest : undefined} onRepliesClose={currentAction(() => setReplyRequest(current => current?.messageId === item.id ? null : current))} onViewReactions={() => openReactionDetails(item.id)} appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined} message={item} scope={operationScope} onError={showError} onReact={emoji => handleSelectReaction(item.id, emoji)} onAddReaction={currentAction(() => setReactionPickerMsgId(item.id))} />}
                     </View>
                   </View>
+                ) : item.metadata_pending ? (
+                  <View style={styles.welcomeCard}><Text style={styles.welcomeBody}>{item.body}</Text></View>
                 ) : (
                   <BroadcastCard onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }}
                     appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined}
