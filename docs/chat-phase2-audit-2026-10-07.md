@@ -332,3 +332,60 @@ branch remains `feature/chat-loading-20261006`, with protected base
 changed: the changes are structurally OTA-compatible and require no future
 native build. No release, push, merge, deployment, production write or native
 build was performed. Final work remains isolated for review.
+
+## Follow-up: foreground network reachability recovery — October 7
+
+Continued from `32b903401812380a9fe7cef141501129a8d14a95`. A deferred-fetch
+regression reproduces six failures in the previous hook: older requests can
+overwrite a newer foreground result in either direction; a fetch that ignores
+abort can remain optimistic beyond its deadline; background screens still send
+probes; backgrounding and unmounting do not retire the pending request.
+
+`useNetworkStatus` now owns one current probe per mounted hook, ignores retired
+results, aborts and clears deadlines when retired, and explicitly settles a
+stalled probe offline at five seconds. Background instances skip network polls;
+returning to active starts a fresh probe. Repeated active events do not start
+additional requests. Its existing HEAD endpoint, optimistic initial state and
+20-second interval remain. No automatic message resend was added. This feeds
+the existing community-main reconnect history refresh and creator Today banner.
+Any HTTP response still means reachable, including 4xx/5xx: this does not prove
+service health, an authenticated session, or a working Realtime connection.
+Detection of a network loss can take the polling interval plus the timeout.
+
+Verification for this pass:
+
+- 98 tests passed across five independent suites: eight hook cases, nine resume
+  cases, 27 main-query isolation cases, 48 main-entry lifetime cases, and six
+  main-header cases. Six of the eight new hook cases fail on the previous hook;
+  all eight pass on the candidate. Fetch and lifecycle faults are synthetic,
+  with no requests to production.
+- Two additional creator-screen suites fail eight tests at the existing
+  ProfileButton query mock (`useQuery` returns undefined). Re-running both with
+  the unchanged previous hook reproduces all eight failures. These unrelated
+  tests and product code were left unchanged. The complete test suite is not
+  claimed green.
+- TypeScript, authentication invariants, offline iOS JavaScript/Hermes export
+  and diff whitespace checks passed. No standalone lint script is configured.
+  Checks used the available Node 24 runtime, not the repository's specified
+  Node 20.20.1. This pass does not repeat the local database transport lab.
+
+Files changed in this follow-up:
+
+- `hooks/useNetworkStatus.ts`
+- `hooks/__tests__/useNetworkStatus.test.tsx`
+- `docs/chat-phase2-audit-2026-10-07.md`
+
+Evidence lives in the external verification pack's `evidence/network-recovery-*`
+logs, `evidence/network-recovery-regression/` and `evidence/network-recovery-final/`.
+The final directory records the candidate, full changed-file list and comparison
+against protected release commit `9c2994b10e9f263e98a262e87a9bf7a94ee941c5`.
+Branch remains `feature/chat-loading-20261006`. No native dependency/configuration
+changed; this follow-up is structurally OTA-compatible and requires no new native
+build. No publish, deployment, merge, push, native build or production write
+was performed.
+
+The existing native preview was not updated by this pass. Physical keyboard
+and scrolling, rapid send-and-type behavior, actual cold-open timings, background
+push delivery and matching Build 51 device compatibility remain unverified.
+This change closes a reproducible recovery bug; it is not a certification of
+WhatsApp parity or of every possible chat failure.
