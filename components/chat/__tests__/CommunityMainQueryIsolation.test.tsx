@@ -1,17 +1,22 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { FlatList, AppState } from 'react-native';
+import { FlatList, AppState, TextInput, TouchableOpacity } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import CommunityThreadScreen from '../../../app/community-thread/[id]';
 import { ChatContextHeader } from '../ChatContextHeader';
 
 let mockBlur: (() => void) | undefined, mockFocus: (() => void) | undefined, mockRealtime: (() => void) | undefined;
+let mockFocused = true;
+const mockFocusEffects = new Set<{ callback: () => (() => void) | void; cleanup?: (() => void) | void }>();
 const mockSubscriptions: { event: string; filter: any; callback: (payload?: any) => void }[] = [];
 let mockViewerId: string | null, mockEpoch: number, mockRoomId: string;
+let mockOnline = true;
+const mockAppListeners = new Set<(state: string) => void>();
 const mockReadIdentity = jest.fn(), mockReadCore = jest.fn(), mockMarkCore = jest.fn();
 const mockReadCards = jest.fn(), mockReadMessages = jest.fn(), mockReadMembership = jest.fn(), mockReadMarker = jest.fn().mockResolvedValue(undefined);
-jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => { mockFocus = callback; const cleanup = callback(); mockBlur = cleanup; return cleanup; }, [callback]), useRouter: () => ({ push: jest.fn(), back: jest.fn() }), useLocalSearchParams: () => ({ id: mockRoomId }), Stack: { Screen: () => null } }));
-jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View }));
+jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => { const effect = { callback, cleanup: mockFocused ? callback() : undefined }; mockFocusEffects.add(effect); return () => { effect.cleanup?.(); mockFocusEffects.delete(effect); }; }, [callback]), useRouter: () => ({ push: jest.fn(), back: jest.fn() }), useLocalSearchParams: () => ({ id: mockRoomId }), Stack: { Screen: () => null } }));
+jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').AfterglowFallbackFonts }) }));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => {
@@ -20,7 +25,7 @@ jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => {
   return { viewerId: id, epoch, isCurrent, isLoading: false, error: null };
 } }));
 jest.mock('../../../hooks/useCommunityBroadcastMute', () => ({ useCommunityBroadcastMute: () => ({ muted: false, ready: true, isChecking: false, toggle: jest.fn() }) }));
-jest.mock('../../../hooks/useNetworkStatus', () => ({ useNetworkStatus: () => ({ online: true }) }));
+jest.mock('../../../hooks/useNetworkStatus', () => ({ useNetworkStatus: () => ({ online: mockOnline }) }));
 jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: jest.fn() }) }));
 jest.mock('../../../lib/communityChat', () => ({
   getCommunityBroadcasts: (...args: any[]) => mockReadMessages(...args),
@@ -61,13 +66,20 @@ async function flush() { await act(async () => { await new Promise(resolve => se
 async function mount() { await act(async () => { tree = create(screen()); }); await flush(); }
 async function update() { await act(async () => tree.update(screen())); await flush(); }
 beforeEach(() => {
-  jest.clearAllMocks(); mockSubscriptions.length = 0; jest.requireMock('../../../constants/FeatureFlags').CREATOR_PAGES_ENABLED = false; mockViewerId = 'alice'; mockEpoch = 1; mockRoomId = 'community-a';
+  jest.clearAllMocks(); mockOnline = true; mockAppListeners.clear(); mockFocusEffects.clear(); mockFocused = true;
+  mockBlur = () => { mockFocused = false; for (const effect of [...mockFocusEffects]) { effect.cleanup?.(); effect.cleanup = undefined; } };
+  mockFocus = () => { mockFocused = true; for (const effect of [...mockFocusEffects]) effect.cleanup = effect.callback(); };
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener: any) => {
+    mockAppListeners.add(listener); return { remove: () => { mockAppListeners.delete(listener); } };
+  });
+  mockSubscriptions.length = 0; jest.requireMock('../../../constants/FeatureFlags').CREATOR_PAGES_ENABLED = false; mockViewerId = 'alice'; mockEpoch = 1; mockRoomId = 'community-a';
   mockReadCards.mockImplementation((scope: any) => Promise.resolve({ cards: [{ community_id: mockRoomId, name: `${scope.userId} community`, main_chat_name: `${scope.userId} room` }] }));
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   mockReadMessages.mockImplementation((_id: string, _older: any, scope: any) => Promise.resolve(page(`${scope.userId}-${mockEpoch}`)));
   mockReadMembership.mockResolvedValue({ status: 'active' });
 });
-afterEach(async () => { await act(async () => tree?.unmount()); client.clear(); });
+afterEach(async () => { await act(async () => tree?.unmount()); client.clear(); jest.restoreAllMocks(); });
 
 it('does not display the previous account page or mine-reaction state while the next account loads', async () => {
   await mount(); expect(rows().map((row: any) => row.id)).toEqual(['alice-1']);
@@ -160,4 +172,119 @@ it.each([false, true])('updates remote reactions in the actual main query (mappe
   expect(reaction).toBeDefined();
   await act(async () => reaction!.callback({ eventType: 'INSERT', new: { broadcast_id: rows()[0].id } }));
   await flush(); expect(reader.mock.calls.length).toBeGreaterThan(before);
+});
+
+
+function changeAppState(state: string) {
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: state });
+  for (const listener of mockAppListeners) listener(state);
+}
+
+it.each([false, true])('catches up on returning to the main chat without replacing the draft (mapped=%s)', async mapped => {
+  mockViewerId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  mockRoomId = '11111111-1111-4111-8111-111111111111';
+  await AsyncStorage.clear();
+  if (mapped) enableCore();
+  await mount(); await flush();
+  const reader = mapped ? mockReadCore : mockReadMessages;
+  const input = tree.root.findByType(TextInput);
+  act(() => input.props.onChangeText('Meet you outside'));
+  act(() => mockBlur?.());
+  const pending = deferred<any>(); reader.mockReturnValueOnce(pending.promise);
+  const before = reader.mock.calls.length;
+  await act(async () => { mockFocus?.(); }); await flush();
+  expect(reader.mock.calls.length).toBe(before + 1);
+  expect(rows()).toHaveLength(1);
+  expect(tree.root.findByType(TextInput).props.value).toBe('Meet you outside');
+  const next = page('missed-while-away');
+  await act(async () => pending.resolve(mapped ? { ...next, messages: next.messages.map(message => ({ key: `broadcast:${message.id}`, source: 'broadcast', message })) } : next));
+  await flush(); expect(rows().map((row: any) => row.id)).toEqual(['missed-while-away']);
+  expect(tree.root.findByType(TextInput).props.value).toBe('Meet you outside');
+});
+
+it.each([false, true])('catches up after backgrounding only while the main chat is focused (mapped=%s)', async mapped => {
+  if (mapped) enableCore();
+  await mount(); await flush();
+  const reader = mapped ? mockReadCore : mockReadMessages;
+  let before = reader.mock.calls.length;
+  act(() => changeAppState('background'));
+  await act(async () => changeAppState('active')); await flush();
+  expect(reader.mock.calls.length).toBe(before + 1);
+  act(() => mockBlur?.()); before = reader.mock.calls.length;
+  act(() => changeAppState('background'));
+  await act(async () => changeAppState('active')); await flush();
+  expect(reader.mock.calls.length).toBe(before);
+});
+
+it.each([false, true])('catches up when connectivity returns without a new realtime event (mapped=%s)', async mapped => {
+  if (mapped) enableCore();
+  await mount(); await flush();
+  const reader = mapped ? mockReadCore : mockReadMessages;
+  mockOnline = false; await update();
+  const before = reader.mock.calls.length;
+  mockOnline = true; await update(); await flush();
+  expect(reader.mock.calls.length).toBe(before + 1);
+});
+
+it('does not refresh a removed community when connectivity returns', async () => {
+  mockReadMembership.mockResolvedValue({ status: 'removed' });
+  await mount(); await flush();
+  mockOnline = false; await update(); const before = mockReadMessages.mock.calls.length;
+  mockOnline = true; await update(); await flush();
+  expect(mockReadMessages.mock.calls.length).toBe(before);
+});
+
+
+it.each([false, true])('offers recovery after one history deadline instead of retrying behind the spinner (mapped=%s)', async mapped => {
+  jest.useFakeTimers();
+  try {
+    if (mapped) enableCore();
+    const reader = mapped ? mockReadCore : mockReadMessages;
+    reader.mockImplementation(() => new Promise(() => {}));
+    // Match the app's automatic retry behavior rather than the fixture's no-retry default.
+    client.setDefaultOptions({ queries: { retry: 3, gcTime: Infinity } });
+    await act(async () => { tree = create(screen()); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(5); });
+    const before = reader.mock.calls.length;
+    await act(async () => { await jest.advanceTimersByTimeAsync(12_100); });
+    const recovery = tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === 'Retry loading community chat');
+    expect(recovery).toBeDefined();
+    await act(async () => { await jest.advanceTimersByTimeAsync(30_000); });
+    expect(reader.mock.calls.length).toBe(before);
+    const next = page('recovered');
+    reader.mockResolvedValue(mapped ? { ...next, messages: next.messages.map(message => ({ key: `broadcast:${message.id}`, source: 'broadcast', message })) } : next);
+    await act(async () => recovery!.props.onPress());
+    await act(async () => { await jest.advanceTimersByTimeAsync(5); });
+    expect(rows().map((row: any) => row.id)).toEqual(['recovered']);
+  } finally { jest.useRealTimers(); }
+});
+
+
+it.each([false, true])('keeps an in-flight catch-up read during overlapping foreground and reconnect signals (mapped=%s)', async mapped => {
+  if (mapped) enableCore(); await mount(); await flush();
+  const reader = mapped ? mockReadCore : mockReadMessages;
+  mockOnline = false; await update();
+  const pending = deferred<any>(); reader.mockReturnValueOnce(pending.promise);
+  const before = reader.mock.calls.length;
+  act(() => changeAppState('background'));
+  await act(async () => changeAppState('active')); await flush();
+  expect(reader.mock.calls.length).toBe(before + 1);
+  mockOnline = true; await update();
+  await act(async () => changeAppState('active')); await flush();
+  expect(reader.mock.calls.length).toBe(before + 1);
+  expect(rows()).toHaveLength(1);
+  const next = page('caught-up-once');
+  await act(async () => pending.resolve(mapped ? { ...next, messages: next.messages.map(message => ({ key: `broadcast:${message.id}`, source: 'broadcast', message })) } : next));
+  await flush(); expect(rows().map((row: any) => row.id)).toEqual(['caught-up-once']);
+});
+
+it('does not refresh an offscreen or background community on reconnect', async () => {
+  await mount(); await flush();
+  act(() => mockBlur?.());
+  mockOnline = false; await update(); let before = mockReadMessages.mock.calls.length;
+  mockOnline = true; await update(); await flush(); expect(mockReadMessages.mock.calls.length).toBe(before);
+  await act(async () => { mockFocus?.(); }); await flush();
+  act(() => changeAppState('background'));
+  mockOnline = false; await update(); before = mockReadMessages.mock.calls.length;
+  mockOnline = true; await update(); await flush(); expect(mockReadMessages.mock.calls.length).toBe(before);
 });

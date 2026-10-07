@@ -11,7 +11,7 @@ import { ChatMentionPicker } from '../../components/chat/ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { ChatBubbleFill } from '../../components/chat/ChatBubbleFill';
 import ProfileButton from '../../components/ProfileButton';
-import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { requestWithDeadline, RequestDeadlineError } from '../../lib/requestWithDeadline';
 import { MessageActionsMenu, type MessageMenu } from '../../components/chat/MessageActionsMenu';
 import { messageActionAccess, messageActionWeb } from '../../components/chat/messageActionAccess';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
@@ -341,7 +341,9 @@ export default function CommunityThreadScreen() {
     initialPageParam: undefined as { created_at: string; id: string } | CommunityRoomCursor | undefined,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.olderCursor ?? undefined : undefined,
     enabled: !!id && identityReady && roomReady,
-    retry: anchor ? false : undefined,
+    // A deadline already consumed the full loading budget. Show recovery now,
+    // rather than repeating 12-second attempts behind the initial spinner.
+    retry: (failures, error) => !anchor && !(error instanceof RequestDeadlineError) && failures < 2,
   });
   const anchorUnavailable = !!anchor && historyFailure instanceof CommunityMessageUnavailableError;
   const isLoading = historyLoading || (needsRoomIdentity && !roomReady && !roomIdentity.isError);
@@ -369,16 +371,28 @@ export default function CommunityThreadScreen() {
   const coreFocused = useRef(false);
   useFocusEffect(useCallback(() => {
     coreFocused.current = true;
-    if (coreLayout && admissionIsCurrent()) void refetchHistory();
+    // Both legacy and mapped main rooms need to recover missed live updates.
+    // Reuse an in-flight read instead of cancelling it on overlapping returns.
+    if (admissionIsCurrent()) void refetchHistory({ cancelRefetch: false });
     return () => { coreFocused.current = false; };
-  }, [!!coreLayout, admissionIsCurrent, refetchHistory]));
+  }, [admissionIsCurrent, refetchHistory]));
   useEffect(() => {
-    if (!coreLayout) return;
+    let previousState = AppState.currentState;
     const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active' && coreFocused.current && admissionIsCurrent()) void refetchHistory();
+      const returning = state === 'active' && previousState !== 'active';
+      previousState = state;
+      if (returning && coreFocused.current && admissionIsCurrent()) void refetchHistory({ cancelRefetch: false });
     });
     return () => subscription.remove();
-  }, [!!coreLayout, admissionIsCurrent, refetchHistory]);
+  }, [admissionIsCurrent, refetchHistory]);
+  const previousOnline = useRef(online);
+  useEffect(() => {
+    const reconnected = online && !previousOnline.current;
+    previousOnline.current = online;
+    if (reconnected && coreFocused.current && AppState.currentState === 'active' && admissionIsCurrent()) {
+      void refetchHistory({ cancelRefetch: false });
+    }
+  }, [online, admissionIsCurrent, refetchHistory]);
   const readAcknowledgementScope = useMemo(() => ({ userId: operationScope.userId,
     isCurrent: () => coreFocused.current && AppState.currentState === 'active' && operationScope.isCurrent(),
   }), [operationScope]);
