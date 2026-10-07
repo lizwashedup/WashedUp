@@ -80,3 +80,26 @@ All changes in this pass are JavaScript/TypeScript and documentation and need no
 - `lib/topicComposerDraft.ts`
 - `docs/chat-phase2-audit-2026-10-07.md`
 - `docs/chat-reliability-2026-10-06.md`
+
+## Follow-up: draft recovery errors — October 7
+
+Continued from `8801f00f2f4f02a73cacc15f5f413d8d0f70b106` on the same isolated feature branch and exact protected release base.
+
+Two confirmed races are repaired in the shared and community draft hooks:
+
+- A delayed saved-draft read could replace typing entered after that read started, or restore an unresolved attempt after its send had already been confirmed. Reads and read failures now apply only if the draft revision has not advanced. Account/visit and read-generation guards still apply.
+- A failed older confirmation-cleanup write could set the composer to an error state after a newer draft write succeeded. The existing per-write revision guard now owns that error state; confirmation cleanup no longer overrides it. A failure of the latest write still exposes recovery, and transport still waits for durable attempt storage.
+
+Eight new regression cases were run against the previous committed hooks: all eight failed (27 existing tests passed). With the fixes, the focused surrounding inventory passed **501 tests in 15 independent suites**, including main/topic/shared screen lifetimes, draft storage/preparation, local delivery, topic mutation/refresh/Intros, composer accessibility and media. This is this follow-up's run count, not an additional full-repository result. TypeScript, auth invariants, `git diff --check`, and offline iOS JavaScript/Hermes export also passed. Export: `/tmp/washedup-chat-draft-races-export-20261007`. No standalone lint configuration is available. The requested `sh qa/guinea-verify-washedup.sh` was attempted before dependency linking: no-cloud-build and seven paid-flow static tests passed, then it stopped at `jest: command not found`; the aggregate private-database/web pipeline is not claimed complete. Focused tests subsequently used the existing dependency directory through a temporary symlink. The three unrelated baseline failures from the preceding audit remain unmodified.
+
+Native diagnosis used the same existing local development binary, fictional fixture and real native AsyncStorage. Revision r5 added a minimal controlled multiline input probe. One immediate send/type probe kept only the new text; the actual topic screen reproduced old/new text mixing. Another traced topic run cleared correctly; a following bulk-input attempt emitted no native change events. This evidence does **not** establish whether the remaining intermittent case is in React Native, application update timing, or Device Hub automation. No prefix-stripping, forced event-count override, input remount, native patch or dependency upgrade was added. Temporary message-content tracing was removed from application source. The reusable fixture retains the minimal probe; r6 imports the repaired hooks. Real rapid typing, scrolling and two-account delivery still need a matching-device check; these draft race fixes do not certify the unresolved native case.
+
+Files changed in this follow-up:
+
+- `hooks/useChatComposerDraft.ts`
+- `hooks/useTopicComposerDraft.ts`
+- `hooks/__tests__/useChatComposerDraft.test.tsx`
+- `hooks/__tests__/useTopicComposerDraft.test.tsx`
+- `docs/chat-phase2-audit-2026-10-07.md`
+
+External verification assets were updated under `/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007`: the fixture entry screen/probe, local Metro logs, before/after regression logs and per-suite JSON/logs in `evidence/draft-race-regression`. These are local test assets, not application release files. No production data or service state was changed. The code changes require no native build and are structurally OTA-compatible; no merge, deployment, publication or release is authorized or performed.

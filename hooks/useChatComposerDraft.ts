@@ -14,6 +14,8 @@ export function useChatComposerDraft(room: ConversationKey, owner: ChatOperation
   const load = useCallback(async () => {
     if (!owner || !current()) return;
     const stamp = ++epoch.current;
+    // A restore started before typing/confirmation must not overwrite it.
+    const readingRevision = revision.current;
     try {
       // Bound the UI wait, including a queued earlier write. The storage queue
       // keeps its original ordering; a timeout must never replace an unknown
@@ -22,8 +24,8 @@ export function useChatComposerDraft(room: ConversationKey, owner: ChatOperation
         if (ref.current.owner === owner && ref.current.ready && ref.current.error) await saveChatComposer(room, owner, ref.current.draft);
         return readChatComposer(room, owner);
       })(), 12_000);
-      if (current() && stamp === epoch.current) publish({ owner, draft: saved.draft, ready: true, error: saved.unsaved });
-    } catch { if (current() && stamp === epoch.current) publish({ ...ref.current, owner, error: true }); }
+      if (current() && stamp === epoch.current && readingRevision === revision.current) publish({ owner, draft: saved.draft, ready: true, error: saved.unsaved });
+    } catch { if (current() && stamp === epoch.current && readingRevision === revision.current) publish({ ...ref.current, owner, error: true }); }
   }, [room, owner, current, publish]);
   useEffect(() => {
     ++epoch.current; revision.current++;
@@ -89,9 +91,10 @@ export function useChatComposerDraft(room: ConversationKey, owner: ChatOperation
       // Delivery is already confirmed. Keep the cleared attempt and any newer
       // typing in memory, and recover storage without reporting a send failure
       // (which would restore the delivered text as a new, resendable message).
-      if (current() && ref.current.owner === owner) publish({ ...ref.current, error: true });
+      // persist marks failure only while this write is still current. A later
+      // successfully saved draft must not be disabled by this older failure.
     }
-  }, [owner, current, persist, publish]);
+  }, [owner, current, persist]);
   const refuseFresh = useCallback(async (attempt: ChatDraftAttempt) => {
     if (!current() || ref.current.owner !== owner || JSON.stringify(ref.current.draft.attempt) !== JSON.stringify(attempt)) return;
     await persist({ ...ref.current.draft, attempt: null });

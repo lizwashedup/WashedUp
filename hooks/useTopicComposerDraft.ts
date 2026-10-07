@@ -6,7 +6,21 @@ export function useTopicComposerDraft(topicId:TopicComposerRoom|undefined,owner:
  const ref=useRef<{owner:CommunityOperationScope|null;draft:TopicComposerDraft;ready:boolean;error:boolean}>({owner:null,draft:emptyTopicComposer(),ready:false,error:false});
  const [state,setState]=useState(ref.current);const epoch=useRef(0),revision=useRef(0);
  const publish=useCallback((value:typeof state)=>{ref.current=value;setState(value);},[]);
- const load=useCallback(async()=>{if(!topicId||!owner?.isCurrent())return;const stamp=++epoch.current;try{const r=await requestWithDeadline((async()=>{if(ref.current.owner===owner&&ref.current.ready&&ref.current.error)await saveTopicComposer(topicId,owner,ref.current.draft);return readTopicComposer(topicId,owner);})(),12_000);if(owner.isCurrent()&&stamp===epoch.current)publish({owner,draft:r.draft,ready:true,error:r.unsaved});}catch{if(owner.isCurrent()&&stamp===epoch.current)publish({...ref.current,owner,error:true});}},[topicId,owner,publish]);
+ const load=useCallback(async()=>{
+  if(!topicId||!owner?.isCurrent())return;
+  const stamp=++epoch.current,readingRevision=revision.current;
+  // Reopening/recovery must not overwrite typing or a confirmed send that
+  // happened while the saved draft was being read.
+  try{
+   const r=await requestWithDeadline((async()=>{
+    if(ref.current.owner===owner&&ref.current.ready&&ref.current.error)await saveTopicComposer(topicId,owner,ref.current.draft);
+    return readTopicComposer(topicId,owner);
+   })(),12_000);
+   if(owner.isCurrent()&&stamp===epoch.current&&readingRevision===revision.current)publish({owner,draft:r.draft,ready:true,error:r.unsaved});
+  }catch{
+   if(owner.isCurrent()&&stamp===epoch.current&&readingRevision===revision.current)publish({...ref.current,owner,error:true});
+  }
+ },[topicId,owner,publish]);
  useEffect(()=>{++epoch.current;revision.current++;publish({owner,draft:emptyTopicComposer(),ready:false,error:false});void Promise.resolve().then(load);return()=>{++epoch.current;};},[load,owner,publish]);
  const persist=useCallback(async(draft:TopicComposerDraft)=>{if(!topicId||!owner?.isCurrent())throw Error('This conversation visit changed.');const version=++revision.current;publish({owner,draft,ready:true,error:false});// Bound only the UI waiter; the underlying per-room storage queue stays ordered.
  try{await requestWithDeadline(saveTopicComposer(topicId,owner,draft),12_000);}catch(error){if(owner.isCurrent()&&ref.current.owner===owner&&version===revision.current)publish({...ref.current,error:true});throw error;}},[topicId,owner,publish]);
@@ -34,7 +48,7 @@ export function useTopicComposerDraft(topicId:TopicComposerRoom|undefined,owner:
  const finish=useCallback(async(attempt:TopicDraftAttempt)=>{if(!owner?.isCurrent()||ref.current.owner!==owner)return;// Storage cleanup follows a confirmed receipt. Keep recovery visible without
  // turning an already-sent message back into an uncertain send.
  try{await persist(finishTopicComposer(ref.current.draft,attempt));}
- catch{if(owner.isCurrent()&&ref.current.owner===owner)publish({...ref.current,error:true});}},[owner,persist,publish]);
+ catch{/* persist owns the revision guard; an older failure cannot disable a newer saved draft. */}},[owner,persist]);
  const restoreFailedText=useCallback((attempt:TopicDraftAttempt)=>{
   if(!owner?.isCurrent()||ref.current.owner!==owner||ref.current.draft.attemptDetached||ref.current.draft.text||ref.current.draft.attempt?.id!==attempt.id)return;
   void persist({...ref.current.draft,text:attempt.text,mentions:attempt.mentions??null}).catch(()=>undefined);

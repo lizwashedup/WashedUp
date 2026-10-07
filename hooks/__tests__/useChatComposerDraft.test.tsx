@@ -80,3 +80,47 @@ it('bounds recovery behind a stalled write while retaining the current unsaved t
   expect(mockRead).toHaveBeenCalledTimes(1);
  }finally{jest.useRealTimers();}
 });
+
+
+it.each(['resolve', 'reject'])('a delayed draft re-read cannot replace or disable newer typing (%s)', async outcome => {
+ await act(async () => { tree = create(<Harness/>); });
+ await act(async () => hook.change({text: 'Saved earlier'}));
+ let resolve!:(value:any)=>void, reject!:(error:Error)=>void;
+ mockRead.mockImplementationOnce(() => new Promise((yes,no) => {resolve=yes;reject=no;}));
+ let reading!:Promise<void>;
+ await act(async () => {reading=hook.retry(); await Promise.resolve();});
+ await act(async () => hook.change({text: 'New writing while storage reads'}));
+ await act(async () => {
+  if(outcome==='resolve') resolve({draft:{...emptyChatComposer(),text:'Saved earlier'},unsaved:false});
+  else reject(Error('Old read failed'));
+  await reading;
+ });
+ expect(hook.draft.text).toBe('New writing while storage reads');
+ expect(hook.error).toBe(false);
+ expect(hook.ready).toBe(true);
+});
+it('a delayed re-read cannot resurrect an attempt after confirmation', async () => {
+ await act(async () => {tree=create(<Harness/>);});
+ await act(async () => hook.change({text:'Original'}));
+ let original:any; await act(async () => {original=await hook.prepare({detachText:true});});
+ const oldDraft=hook.draft;
+ let resolve!:(value:any)=>void;
+ mockRead.mockImplementationOnce(() => new Promise(yes => {resolve=yes;}));
+ let reading!:Promise<void>; await act(async () => {reading=hook.retry();await Promise.resolve();});
+ await act(async () => hook.finish(original));
+ await act(async () => {resolve({draft:oldDraft,unsaved:false});await reading;});
+ expect(hook.draft.attempt).toBeNull();
+ expect(hook.draft.text).toBe('');
+});
+it('an older confirmation-cleanup failure cannot disable a newer successfully saved draft', async () => {
+ await act(async () => {tree=create(<Harness/>);});
+ await act(async () => hook.change({text:'Original'}));
+ let original:any;await act(async () => {original=await hook.prepare({detachText:true});});
+ let reject!:(error:Error)=>void;
+ mockSave.mockImplementationOnce(() => new Promise((_yes,no) => {reject=no;}));
+ let finishing!:Promise<void>;act(() => {finishing=hook.finish(original);});
+ await act(async () => hook.change({text:'Saved next message'}));
+ await act(async () => {reject(Error('Earlier cleanup failed'));await finishing;});
+ expect(hook.draft).toMatchObject({text:'Saved next message',attempt:null});
+ expect(hook.error).toBe(false);
+});
