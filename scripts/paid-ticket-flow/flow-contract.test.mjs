@@ -26,10 +26,13 @@ test('an existing event is saved before ticket setup can read it', () => {
 });
 
 test('a paid tier rechecks persisted end_time immediately before its write', () => {
-  const source = read('app/creator/tickets.tsx');
-  const paidGuard = source.indexOf('if (draft.price_cents > 0)');
-  const readiness = source.indexOf('await getPaidTicketEventReadiness(id!)', paidGuard);
-  const write = source.indexOf('await createTier(id!, draft, tiers.length)', readiness);
+  // Tier writes now run through the account/visit-owned editor helper rather
+  // than writing from the screen component. Keep the contract pinned at the
+  // actual write boundary so moving presentation code cannot stale this gate.
+  const source = read('lib/creatorTierEditor.ts');
+  const paidGuard = source.indexOf('if(draft.price_cents>0)');
+  const readiness = source.indexOf('await getPaidTicketEventReadiness(eventId,scope)', paidGuard);
+  const write = source.indexOf("let query=baseline?supabase.from('ticket_tiers').update", readiness);
   assert.ok(paidGuard >= 0, 'paid-tier guard is missing');
   assert.ok(readiness > paidGuard, 'paid-tier guard does not read persisted readiness');
   assert.ok(write > readiness, 'tier write can run before the persisted end-time check');
@@ -61,7 +64,7 @@ test('native paid checkout keeps an order pointer until the ticket screen reads 
   assert.match(pending, /export async function peekPendingCheckout/);
   assert.match(checkout, /export async function getOrder/);
   const checkoutSheet = read('components/events/TicketCheckoutSheet.tsx');
-  assert.match(checkoutSheet, /const pendingOrderId = await pendingCheckoutForEvent\(eventId, getOrder\)/);
+  assert.match(checkoutSheet, /const pendingOrderId = savedAttempt \? null : await pendingCheckoutForEvent\(eventId,[\s\S]*?getOrder\(id, \{buyerUserId:owner\.userId!, strict:true\}\), true\)/);
   assert.match(checkoutSheet, /onOrderReady\(pendingOrderId\)/);
   assert.ok(
     checkoutSheet.indexOf('onOrderReady(pendingOrderId)') < checkoutSheet.indexOf('startTicketCheckout(selected.id'),
@@ -71,13 +74,14 @@ test('native paid checkout keeps an order pointer until the ticket screen reads 
   assert.match(event, /pendingOrder\.status !== 'pending'/);
   assert.match(tabs, /peekPendingCheckout\(\)/);
   assert.match(tabs, /pendingOrder\.status !== 'pending'/);
-  assert.match(order, /pendingId === id\) clearPendingCheckout\(\)/);
+  assert.match(order, /pendingId === id\) clearPendingCheckout\(id, owner\.isCurrent\)/);
   assert.match(order, /view\.kind === 'ready'.*view\.kind === 'canceled'.*view\.kind === 'refunded'/s);
   const checkoutReturn = read('app/checkout-return.tsx');
   assert.match(checkoutReturn, /rawCheckout === 'cancelled'/);
-  assert.match(checkoutReturn, /cancelled[\s\S]*clearPendingCheckout\(\)/);
-  assert.match(checkoutReturn, /no worries, nothing was charged\./);
-  assert.match(checkoutReturn, /cancelEventId \? `\/event\/\$\{cancelEventId\}` : '\/\(tabs\)\/explore'/);
+  assert.match(checkoutReturn, /cancelled && saved\.status === 'pending'/);
+  assert.doesNotMatch(checkoutReturn, /clearPendingCheckout/);
+  assert.match(checkoutReturn, /Checkout is still pending/);
+  assert.match(checkoutReturn, /router\.replace\(`\/event\/\$\{value\.eventId\}`/);
 });
 
 test('the ticket wallet links back to its event and keeps door-scannable QR data', () => {
@@ -85,7 +89,7 @@ test('the ticket wallet links back to its event and keeps door-scannable QR data
   const order = read('app/tickets/order/[id].tsx');
   const checkin = read('lib/ticketDoor.ts');
 
-  assert.match(wallet, /onPress=\{\(\) => router\.push\(`\/event\/\$\{o\.event_id\}`/);
+  assert.match(wallet, /router\.push\(`\/event\/\$\{o\.event_id\}`/);
   assert.match(order, /onPress=\{\(\) => router\.push\(`\/event\/\$\{order\.event_id\}`/);
   assert.match(wallet, /https:\/\/washedup\.app\/e\/\$\{encodeURIComponent\(eventId\)\}\?ticket=/);
   assert.match(checkin, /url\.searchParams\.get\('ticket'\)/);
